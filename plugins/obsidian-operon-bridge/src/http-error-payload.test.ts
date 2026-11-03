@@ -288,6 +288,12 @@ test("a stale expectedRevision is reported as revision_conflict, not bridge_fail
   assert.equal(payload.error.reasonCode, "revision_mismatch");
   assert.match(payload.error.message, /Re-read the task/u);
   assert.equal(payload.currentRevision, "fnv1a32:8383d74c");
+  // The HTTP boundary filters the already-public receipt a second time.
+  const httpBoundary = await exported("publicOperonHttpFailurePayload");
+  assert.equal(
+    (httpBoundary(payload) as Record<string, any>).currentRevision,
+    "fnv1a32:8383d74c",
+  );
   assert.doesNotMatch(JSON.stringify(payload), /private|Client\.md|En cours/u);
 
   const hostileRevision = payloadFactory({

@@ -910,9 +910,14 @@ export function publicOperonMutationFailurePayload(
   // A revision conflict may hand back the live revision: it is an opaque
   // content hash, never task text, and saves the caller a re-read before it
   // plans again. Any other value shape is dropped.
+  // Public receipts are filtered again at the HTTP boundary (sendJson), where
+  // `before` is already gone: keep an already-public currentRevision.
   const liveRevision =
     requestedCode === "revision_conflict"
-      ? safeStringField(safeRecord(safeField(record, "before").value), "revision")
+      ? (safeStringField(
+          safeRecord(safeField(record, "before").value),
+          "revision",
+        ) ?? safeStringField(record, "currentRevision"))
       : undefined;
   const currentRevision =
     typeof liveRevision === "string" && PUBLIC_TASK_REVISION.test(liveRevision)
