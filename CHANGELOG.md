@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.18.0] - 2026-11-03
+
+Atomic Write Bridge 0.9.1 and Operon Bridge 0.9.7 ship with this release; Bases Bridge 1.2.2 is unchanged. Install the MCP and the Bridge bundle of the same release together, after draining pending operations. Operon 4.4.0 is supported as `compatible-provisional`. The first start after the upgrade rebuilds the semantic cache once (several seconds on a large vault). Upgrade every MCP client of the same vault at the same time: two versions sharing one cache rebuild it in turn. See the [English](docs/releases/3.18.0.md) and [French](docs/releases/3.18.0.fr.md) release notes.
+
 ### Fixed
 
 - Operon Bridge 0.9.4: a stale `expectedRevision` is now returned as `revision_conflict` (`reasonCode: revision_mismatch`, retryable) and a native Operon refusal as `operon_rejected`, instead of the generic `bridge_error` / `bridge_failure`. The Bridge task revision includes the Operon version, so every revision changes after an Operon update (seen with Operon 4.4.0): re-read the task, then plan again. `operon_get_diagnostics` adds `result.bridgeSession` (availability, authority, admission, grant state of the Bridge session used for mutations) because `result.health.admission` describes the diagnostics-only session and always reports `writes: false`. No contract or capability change; Operon 4.4.0 stays `compatible-provisional`.
@@ -14,7 +18,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Operon Bridge 0.9.7: Bridge calls no longer re-read every task on every request. A refresh reuses the task snapshot while Operon's context revision (RAM index generation, settings fingerprint and task-affecting generations) is unchanged, instead of one live `tasks.get` per task. A refresh also keeps the established sessions usable while it awaits Operon: the 1 s background probe used to clear them first, so a concurrent request could fail as `mutation_unavailable` (MCP `SERVICE_UNAVAILABLE`), typically right after a write. A dry-run waits up to 3 s for Operon to settle its index after a write; an apply never waits.
 - `operon_transition_task` accepts `intent` (`complete` | `cancel` | `reopen`) instead of `status` / `statusId`. The MCP resolves it from the live taxonomy to the first finished, cancelled, or open status of the task's own pipeline (the default pipeline when the task has none); the task's current state is not consulted, so a replay keeps its idempotency signature. Operon's guards still decide whether the transition is allowed.
 - `operon_query_tasks` accepts `fieldIncludes` for list membership (any order, case-insensitive), for example `fieldIncludes: { assignees: "Claude" }`. `fieldEquals` keeps matching a list only in full and in order, so it could not find a task carried by Mike and Claude from one name.
-- `obsidian_note_move_plan` now says why a move is refused. When the source or a note linking to it holds more than 200 links, unresolved links or backlinks, the Atomic Write Bridge reports `move_reference_limit` (`move_neighborhood_limit` stays for more than 16 notes linking to the source) instead of `metadata_snapshot_unavailable`, and the MCP returns that `reasonCode` with a fixed hint instead of a bare `VALIDATION_ERROR`. The bounds themselves are unchanged.
+- `obsidian_note_move_plan` now says why a move is refused. When the source or a note linking to it holds more than 200 links, unresolved links or backlinks, the Atomic Write Bridge reports `move_reference_limit` (`move_neighborhood_limit` stays for more than 16 notes linking to the source) instead of `metadata_snapshot_unavailable`, and the MCP returns that `reasonCode` with a fixed hint instead of a bare `VALIDATION_ERROR`. The bounds themselves are unchanged. This label needs Atomic Write Bridge 0.9.1; with 0.9.0 the same refusal is reported as `move_metadata_unavailable`. Every other native-move refusal now carries its `reasonCode` and hint with either Bridge.
+
+### Changed
+
+- Semantic search, Smart Env V3 reader: a vector is accepted when its `read_hash` equals the source's `last_read.hash`, with `last_import.hash` as fallback. A note re-embedded by Smart Connections without a new import stays searchable; a missing or stale hash is still refused.
+- Semantic cache: vectors are stored as exact Float64 (little-endian, base64) behind a versioned source signature. Historical JSON arrays stay readable; the derived cache rebuilds once after an upgrade or a rollback. Local measurement on one frozen corpus of 7,578 vectors (8 October 2026): persistence median 5.45 s to 2.50 s, vector payload 102 MB to 52 MB, identical vectors. See [semantic vector cache encoding](docs/semantic-vector-cache-encoding.md).
+- Semantic source reads: files are checked in batches of 32, an unchanged snapshot is reused, and a query and a readiness probe of the same generation share one read. Readiness probes coalesce and keep a successful observation for at most 60 s, without writing. A probe that exceeds its deadline reports `semantic_probe_timed_out` with `retry_capability_probe` instead of a generic unavailability.
+- Semantic cache: an unreadable row (corrupt or unknown encoding) no longer fails every query and `refresh_semantic_cache`; the cache is rebuilt from `.smart-env`. A note deleted in Smart Connections (`"smart_sources:<path>": null`) leaves the index.
+- Semantic search is no longer reported unavailable right after a restart. When the readiness probe outlasts its 2.5 s deadline while the cache is still loading (about 7.5 s for 7,459 vectors on a cold start), the capability reports `semantic_index_loading` with `wait_for_semantic_index`: `degraded` but usable when this cache already persisted a validated index and the query provider can be built, `unavailable` on a first load. It is `ready` once the load completes; a load older than two minutes still reports `semantic_probe_timed_out`. The probe joins the startup query's snapshot instead of decoding the cache a second time.
+
+### Security
+
+- Production dependencies `follow-redirects` and `@hono/node-server` updated to clear the production audit (#143).
 
 ## [3.17.0] - 2026-10-28
 

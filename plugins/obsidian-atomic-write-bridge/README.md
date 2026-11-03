@@ -109,6 +109,10 @@ Copy `build/main.js` and `build/manifest.json` to:
 
 Enable Local REST API first, then enable Optimike Atomic Write Bridge.
 
+## Version 0.9.1 — native-move refusal reasons
+
+A native move refused because the source or a note linking to it holds more than 200 links, unresolved links or backlinks now answers `move_reference_limit` instead of `metadata_snapshot_unavailable`; `move_neighborhood_limit` stays for more than 16 notes linking to the source. The bounds are unchanged. No setting or route changes.
+
 ## Version 0.9.0 — exclusive Base and Canvas creation
 
 Two independent settings, false by default: `allowBaseCreates` and `allowCanvasCreates`. POST `/extensions/obsidian-atomic-write-bridge/base-create/preflight`, `/apply`, `/inspect` and the same three routes under `canvas-create` are used by the MCP families `bases_create_*` and `obsidian_canvas_create_*`. They reuse the exclusive create of notes (`O_CREAT | O_EXCL`, data fsync, existing parent only, never overwrite or suffix) with the `.base` or `.canvas` extension, a binding fingerprint per kind, the effect fence and no date policy. Before the effect the Bridge parses the content again: YAML mapping (Obsidian `parseYaml`) for a Base, JSON object with `nodes` and `edges` arrays for a Canvas. A missing parent answers `404 file_create_parent_missing`. The status reports `baseCreate` and `canvasCreate`. See [governed Base and Canvas creation](../../docs/governed-file-create.md).

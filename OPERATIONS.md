@@ -161,7 +161,7 @@ The final server can expose different capabilities depending on which Obsidian p
 - Optimike Atomic Write Bridge (bundled)
 
   - required for governed note writes, note/Base/Canvas creation, native move, deletion, Frontmatter and Canvas
-  - MCP 3.16.x ships version 0.9.0, required for Base and Canvas creation; deploy and roll back both as one pair
+  - MCP 3.18.x ships version 0.9.1 (0.9.0 or later is required for Base and Canvas creation); deploy and roll back both as one pair
 
 - Optimike Operon Bridge (bundled)
 
@@ -207,8 +207,8 @@ the install receipt; rollback refuses any managed file changed after install.
 The full commands, failure states and release gate are in
 [Bridge Bundle, Upgrade and Rollback](docs/bridge-packaging.md).
 
-Upgrade the MCP and the Bridge bundle of the same release together. MCP 3.16.x
-ships Atomic Write Bridge 0.9.0, Operon Bridge 0.9.3 and Bases Bridge 1.2.2.
+Upgrade the MCP and the Bridge bundle of the same release together. MCP 3.18.x
+ships Atomic Write Bridge 0.9.1, Operon Bridge 0.9.7 and Bases Bridge 1.2.2.
 Before switching or rolling back the pair, drain pending operations and date
 preparation fences ([Closing uncertain operations](#closing-uncertain-operations)).
 
