@@ -210,6 +210,7 @@ export class SemanticCacheService {
   private refreshGeneration = 0;
   private pendingSource: {
     generation: number;
+    signature: string;
     promise: Promise<SmartVec[]>;
   } | null = null;
   private readiness: {
@@ -334,7 +335,7 @@ export class SemanticCacheService {
       smartEnvDir: this.smartEnvDir,
       sourceFileCount: sourceState.fileCount,
     });
-    const items = await this.loadSource(generation);
+    const items = await this.loadSource(generation, sourceState.signature);
     // A maintenance invalidation during a read must not publish its old result.
     if (generation !== this.refreshGeneration)
       return this.refreshSnapshot(context);
@@ -415,7 +416,9 @@ export class SemanticCacheService {
         : null;
     // An unreadable derived cache falls back to the authoritative source,
     // without writing: only an actual query republishes the cache.
-    const items = snapshot?.items ?? (await this.loadSource(generation));
+    const items =
+      snapshot?.items ??
+      (await this.loadSource(generation, sourceState.signature));
     if (generation !== this.refreshGeneration) return this.validateReadiness();
     const value = this.projectReadiness(
       items,
@@ -428,11 +431,23 @@ export class SemanticCacheService {
 
   // Share only an in-flight read of authoritative sources. A probe never starts
   // persistence or retains a query snapshot, and invalidated generations cannot
-  // reuse an older read. Both callers keep their existing publication fences.
-  private async loadSource(generation: number): Promise<SmartVec[]> {
-    if (this.pendingSource?.generation === generation)
+  // reuse an older read. Files can change without a new generation, so a read
+  // is shared only by callers that observed the same source signature: a query
+  // never persists an older read under a newer signature.
+  private async loadSource(
+    generation: number,
+    signature: string,
+  ): Promise<SmartVec[]> {
+    if (
+      this.pendingSource?.generation === generation &&
+      this.pendingSource.signature === signature
+    )
       return this.pendingSource.promise;
-    const pending = { generation, promise: loadSmartEnv(this.smartEnvDir) };
+    const pending = {
+      generation,
+      signature,
+      promise: loadSmartEnv(this.smartEnvDir),
+    };
     this.pendingSource = pending;
     try {
       return await pending.promise;
