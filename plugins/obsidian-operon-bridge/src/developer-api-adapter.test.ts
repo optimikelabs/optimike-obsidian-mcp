@@ -2843,3 +2843,46 @@ test("ordinary scheduling rechecks the caller revision after preview before nati
   assert.equal(gateCalls, 1);
   assert.equal(applyCalls, 0);
 });
+
+test("first-use capabilities list granted but not yet negotiated workflows only", () => {
+  const adapter = new OperonDeveloperApiRuntimeAdapter(consumer, {});
+  const granted = [
+    "tasks.adopt.preview",
+    "tasks.adopt.apply",
+    "tasks.update.periodic-note.preview",
+    "tasks.update.periodic-note.apply",
+    "tasks.filter-query",
+    // periodic-create is only half granted: never advertised as first-use.
+    "tasks.create.periodic-note.preview",
+  ];
+  (adapter as any).channelStatus = {
+    availability: "available",
+    grant: { state: "active", grantedCapabilities: granted },
+  };
+  assert.deepEqual(adapter.firstUseCapabilities(), [
+    "adopt",
+    "periodicUpdate",
+    "filterQuery",
+  ]);
+
+  // Once negotiated (warm), a workflow leaves the first-use list.
+  (adapter as any).taskWorkflowApis.set("periodic-update", {
+    contractVersion: 1,
+    runtimeApi: 1,
+    tasks: {
+      updatePeriodicNote: {
+        preview: async () => ({}),
+        apply: async () => ({}),
+        recover: async () => ({}),
+        pendingRecoveries: async () => ({}),
+      },
+    },
+  });
+  assert.deepEqual(adapter.firstUseCapabilities(), ["adopt", "filterQuery"]);
+
+  // A pending or revoked grant advertises nothing.
+  (adapter as any).channelStatus = {
+    grant: { state: "pending", grantedCapabilities: granted },
+  };
+  assert.deepEqual(adapter.firstUseCapabilities(), []);
+});

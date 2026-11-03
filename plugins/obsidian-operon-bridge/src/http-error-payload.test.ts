@@ -287,7 +287,35 @@ test("a stale expectedRevision is reported as revision_conflict, not bridge_fail
   assert.equal(payload.error.code, "revision_conflict");
   assert.equal(payload.error.reasonCode, "revision_mismatch");
   assert.match(payload.error.message, /Re-read the task/u);
-  assert.doesNotMatch(JSON.stringify(payload), /private|Client\.md|8383d74c/u);
+  assert.equal(payload.currentRevision, "fnv1a32:8383d74c");
+  assert.doesNotMatch(JSON.stringify(payload), /private|Client\.md|En cours/u);
+
+  const hostileRevision = payloadFactory({
+    ok: false,
+    contractVersion: "1",
+    operationId: "8b7e2b7d-4c63-4470-8c28-2af9ddb0de61",
+    idempotencyKey: "stale-revision-key-02",
+    status: "conflict",
+    before: { revision: secret },
+    requested: {},
+    error: { code: "revision_conflict", message: "x" },
+    retryable: true,
+  }) as Record<string, any>;
+  assert.equal("currentRevision" in hostileRevision, false);
+  assert.doesNotMatch(JSON.stringify(hostileRevision), /private|Client\.md/u);
+
+  const otherConflict = payloadFactory({
+    ok: false,
+    contractVersion: "1",
+    operationId: "8b7e2b7d-4c63-4470-8c28-2af9ddb0de61",
+    idempotencyKey: "native-conflict-key-01",
+    status: "conflict",
+    before: { revision: "fnv1a32:8383d74c" },
+    requested: {},
+    error: { code: "conflict", message: "x" },
+    retryable: false,
+  }) as Record<string, any>;
+  assert.equal("currentRevision" in otherConflict, false);
 });
 
 test("diagnostics expose the Bridge write session next to the diagnostics-only admission", async () => {

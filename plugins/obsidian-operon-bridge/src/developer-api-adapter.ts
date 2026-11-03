@@ -1737,6 +1737,47 @@ export class OperonDeveloperApiRuntimeAdapter {
     return Boolean(methods?.preview && methods.apply);
   }
 
+  /**
+   * Status capabilities that Operon has already granted to this consumer but
+   * that the Bridge negotiates only on first use (exact, operation-scoped
+   * sessions). They report `false` in the warm capability map until then;
+   * listing them separately prevents callers from reading "not negotiated yet"
+   * as "impossible". No session is opened here.
+   */
+  firstUseCapabilities(): Array<
+    "adopt" | "periodicCreate" | "periodicUpdate" | "filterQuery"
+  > {
+    const granted = new Set(this.channelStatus.grant?.grantedCapabilities ?? []);
+    if (this.channelStatus.grant?.state !== "active") return [];
+    const covers = (capabilities: readonly string[]) =>
+      capabilities.every((capability) => granted.has(capability));
+    const result: Array<
+      "adopt" | "periodicCreate" | "periodicUpdate" | "filterQuery"
+    > = [];
+    const workflows: Array<
+      [DeveloperApiTaskWorkflowKind, "adopt" | "periodicCreate" | "periodicUpdate"]
+    > = [
+      ["adopt", "adopt"],
+      ["periodic-create", "periodicCreate"],
+      ["periodic-update", "periodicUpdate"],
+    ];
+    for (const [kind, name] of workflows) {
+      if (
+        covers(TASK_WORKFLOW_CAPABILITIES[kind]) &&
+        !(
+          this.hasTaskWorkflowCapability(kind) &&
+          this.hasTaskWorkflowRecoverySupport(kind)
+        )
+      ) {
+        result.push(name);
+      }
+    }
+    if (covers(["tasks.filter-query"]) && !this.hasFilterQueryCapability()) {
+      result.push("filterQuery");
+    }
+    return result;
+  }
+
   hasTaskWorkflowRecoverySupport(kind: DeveloperApiTaskWorkflowKind): boolean {
     const methods = this.taskWorkflowMethods(
       this.taskWorkflowApis.get(kind),

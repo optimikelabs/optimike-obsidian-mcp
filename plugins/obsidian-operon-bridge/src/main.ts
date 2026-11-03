@@ -617,6 +617,7 @@ const PUBLIC_OPERATION_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const PUBLIC_RECOVERY_REF = /^dvr1_[0-9a-f]{48}$/u;
 const PUBLIC_PLAN_DIGEST = /^[a-f0-9]{64}$/u;
+const PUBLIC_TASK_REVISION = /^fnv1a32:[0-9a-f]{8}$/u;
 // Idempotency keys are caller-provided correlation tokens. Keep the public
 // receipt contract deliberately narrower than arbitrary request text so a
 // malformed direct Bridge caller cannot reflect paths or task content here.
@@ -890,6 +891,17 @@ export function publicOperonMutationFailurePayload(
   );
   const recoveryRequired = safeBooleanField(record, "recoveryRequired");
   const stale = safeBooleanField(record, "stale") === true;
+  // A revision conflict may hand back the live revision: it is an opaque
+  // content hash, never task text, and saves the caller a re-read before it
+  // plans again. Any other value shape is dropped.
+  const liveRevision =
+    requestedCode === "revision_conflict"
+      ? safeStringField(safeRecord(safeField(record, "before").value), "revision")
+      : undefined;
+  const currentRevision =
+    typeof liveRevision === "string" && PUBLIC_TASK_REVISION.test(liveRevision)
+      ? liveRevision
+      : undefined;
   return {
     ok: false,
     contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
@@ -906,6 +918,7 @@ export function publicOperonMutationFailurePayload(
     ...(typeof planDigest === "string" && PUBLIC_PLAN_DIGEST.test(planDigest)
       ? { planDigest }
       : {}),
+    ...(currentRevision ? { currentRevision } : {}),
     source: "operon-live",
     stale,
     error: publicError.error,
@@ -1830,6 +1843,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         : null,
       taxonomy: this.workflowTaxonomy(runtime),
       capabilities,
+      // Granted by Operon, negotiated by the Bridge on first use: a `false` in
+      // `capabilities` for these names means "cold", not "impossible".
+      firstUseCapabilities:
+        this.settings.mutationsEnabled && runtime?.developerApi
+          ? runtime.developerApi.firstUseCapabilities()
+          : [],
       source: "operon-runtime",
       stale: false,
       limitations: this.limitations(runtime, ready),

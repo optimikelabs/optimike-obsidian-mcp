@@ -584,6 +584,71 @@ const legacyBridgeStatus = OperonStatusSchema.parse({
 });
 assert.equal(legacyBridgeStatus.operon.compatibilityState, undefined);
 
+// Bridge 0.9.4: first-use capabilities and the write session admission are
+// projected; capability lists inside the grant are not reflected, and an
+// unknown session shape never makes the status unreadable.
+const sessionStatus = OperonStatusSchema.parse({
+  ...status,
+  firstUseCapabilities: ["periodicUpdate", "filterQuery"],
+  developerApi: {
+    availability: "available",
+    authority: "granted",
+    admission: { reads: true, writes: true },
+    grant: { state: "active", grantedCapabilities: ["tasks.update.apply"] },
+    lifecycle: "cache-ready",
+  },
+});
+assert.deepEqual(sessionStatus.firstUseCapabilities, [
+  "periodicUpdate",
+  "filterQuery",
+]);
+assert.equal(sessionStatus.developerApi?.admission?.writes, true);
+assert.equal(sessionStatus.developerApi?.grant?.state, "active");
+assert.equal(
+  JSON.stringify(sessionStatus.developerApi).includes("tasks.update.apply"),
+  false,
+);
+assert.equal(
+  OperonStatusSchema.parse({ ...status, developerApi: { admission: "open" } })
+    .developerApi,
+  null,
+);
+assert.equal(
+  OperonStatusSchema.safeParse({ ...status, firstUseCapabilities: ["delete"] })
+    .success,
+  false,
+);
+
+const revisionConflictReceipt = {
+  ok: false,
+  contractVersion: OPERON_CONTRACT_VERSION,
+  operationId: "8b7e2b7d-4c63-4470-8c28-2af9ddb0de61",
+  idempotencyKey: "stale-revision-key-01",
+  source: "operon-live",
+  stale: false,
+  status: "conflict",
+  requested: {},
+  retryable: true,
+  currentRevision: "fnv1a32:cfb06ce5",
+  error: {
+    code: "revision_conflict",
+    reasonCode: "revision_mismatch",
+    message: "expectedRevision does not match the live task revision.",
+  },
+};
+assert.equal(
+  OperonMutationResultSchema.parse(revisionConflictReceipt).currentRevision,
+  "fnv1a32:cfb06ce5",
+);
+assert.equal(
+  OperonMutationResultSchema.safeParse({
+    ...revisionConflictReceipt,
+    currentRevision: "C:\\Users\\private\\Client.md",
+  }).success,
+  false,
+  "currentRevision accepts only the opaque Bridge revision shape",
+);
+
 const bridgePage = OperonBridgePageSchema.parse({
   ok: true,
   contractVersion: OPERON_CONTRACT_VERSION,

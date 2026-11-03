@@ -2503,6 +2503,51 @@ test("task revision is invariant across the unmanaged-properties projection", ()
   assert.equal(redacted.revision, projected.revision);
 });
 
+test("task revision ignores runtime versions and note position but tracks the task", () => {
+  const options = {
+    task,
+    pipelines,
+    keyMappings: [],
+    sourceMtime: 1234,
+    operonVersion: "4.2.0",
+    bridgeVersion: "0.9.3",
+    includeProperties: false,
+  };
+  const base = normalizeTask(options);
+  // An engine or Bridge upgrade does not change what the caller read.
+  assert.equal(
+    normalizeTask({ ...options, operonVersion: "4.4.0", bridgeVersion: "0.9.4" })
+      .revision,
+    base.revision,
+  );
+  // An edit to a sibling task moves this line and touches the note mtime.
+  const shifted = normalizeTask({
+    ...options,
+    sourceMtime: 9999,
+    task: {
+      ...task,
+      primary: { ...task.primary, lineNumber: task.primary.lineNumber + 3 },
+    },
+  });
+  assert.equal(shifted.revision, base.revision);
+  assert.notEqual(shifted.line, base.line);
+  // A real change to this task still invalidates the revision.
+  assert.notEqual(
+    normalizeTask({
+      ...options,
+      task: { ...task, description: `${task.description} (edited)` },
+    }).revision,
+    base.revision,
+  );
+  assert.notEqual(
+    normalizeTask({
+      ...options,
+      task: { ...task, primary: { ...task.primary, filePath: "Other.md" } },
+    }).revision,
+    base.revision,
+  );
+});
+
 test("legacy version compatibility remains an explicit tested-version allowlist", () => {
   assert.equal(isVersionCompatible("operon", "2.4.0"), true);
   assert.equal(isVersionCompatible("operon", "2.5.0"), true);
