@@ -191,6 +191,7 @@ const state = {
   workflowGrantPending: false,
   preDispatchUpdatePending: false,
   preDispatchReceiptOverride: null,
+  taxonomy: semanticConfiguration.workflow,
 };
 
 function statusPayload() {
@@ -251,6 +252,7 @@ function statusPayload() {
       duplicateConflictCount: state.mode === "duplicate" ? 1 : 0,
     },
     settingsSignature: "fnv1a32:settings",
+    taxonomy: state.taxonomy,
     capabilities:
       state.mode === "missing-read-capability"
         ? { ...capabilities, list: false }
@@ -2262,6 +2264,59 @@ try {
     transitioned.after.status,
     "Project.Done",
     "a short status label must be proven against the canonical workflow value",
+  );
+
+  // A semantic transition replays its journaled receipt before any live
+  // resolution: neither an unavailable Bridge nor a pipeline whose finished
+  // status changed may turn an identical, completed request into an error.
+  const intentInput = {
+    idempotencyKey: "test-transition-intent-replay",
+    dryRun: false,
+    operonId: "abc1234",
+    expectedRevision: tasks[0].revision,
+    intent: "complete",
+  };
+  const intentApplied = await service.transitionTask(intentInput);
+  assert.equal(intentApplied.status, "applied");
+  assert.equal(intentApplied.requested.statusId, "st_project_done");
+  const mutationCallsBeforeIntentReplay = state.mutationCalls;
+  state.mode = "offline";
+  const intentReplayedOffline = await new OperonService().transitionTask(
+    intentInput,
+  );
+  state.mode = "normal";
+  assert.equal(intentReplayedOffline.replayed, true);
+  assert.equal(intentReplayedOffline.operationId, intentApplied.operationId);
+  state.taxonomy = {
+    ...semanticConfiguration.workflow,
+    pipelines: semanticConfiguration.workflow.pipelines.map((pipeline) => ({
+      ...pipeline,
+      statuses: pipeline.statuses.map((status) =>
+        status.isFinished ? { ...status, id: "st_project_shipped" } : status,
+      ),
+    })),
+  };
+  try {
+    const intentReplayedAfterPipelineChange =
+      await new OperonService().transitionTask(intentInput);
+    assert.equal(intentReplayedAfterPipelineChange.replayed, true);
+    assert.equal(
+      intentReplayedAfterPipelineChange.operationId,
+      intentApplied.operationId,
+      "a replay must keep the statusId the intent was first resolved to",
+    );
+    await assert.rejects(
+      new OperonService().transitionTask({ ...intentInput, intent: "cancel" }),
+      (error) => error?.code === "CONFLICT",
+      "a different intent under the same key must still be refused",
+    );
+  } finally {
+    state.taxonomy = semanticConfiguration.workflow;
+  }
+  assert.equal(
+    state.mutationCalls,
+    mutationCallsBeforeIntentReplay,
+    "an intent replay must not reach the Bridge",
   );
 
   const recoveryInput = {

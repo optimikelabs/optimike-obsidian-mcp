@@ -2590,7 +2590,8 @@ export class OperonService {
     }
     const params: OperonTransitionTask = parsed.data;
     const payload = params.intent
-      ? await this.resolveTransitionIntent(params)
+      ? (this.journaledTransitionTarget(params) ??
+        (await this.resolveTransitionIntent(params)))
       : params;
     return this.executeMutation(
       "transition",
@@ -2600,6 +2601,45 @@ export class OperonService {
       `${BRIDGE_PREFIX}/tasks/${encodeURIComponent(params.operonId)}/transition`,
       payload,
     );
+  }
+
+  /**
+   * A semantic transition whose idempotency key is already journaled keeps
+   * the statusId it was first resolved to, without consulting the Bridge:
+   * executeMutation then replays the durable receipt for the identical
+   * request, or refuses a different one. Returns null when the key is new.
+   */
+  private journaledTransitionTarget(
+    params: OperonTransitionTask,
+  ): OperonTransitionTask | null {
+    const requestedJson = this.readMutationJournalRequest(params.idempotencyKey);
+    if (requestedJson === null) return null;
+    let statusId: unknown;
+    try {
+      const requested: unknown = JSON.parse(requestedJson);
+      statusId =
+        requested && typeof requested === "object" && !Array.isArray(requested)
+          ? (requested as Record<string, unknown>).statusId
+          : undefined;
+    } catch {
+      statusId = undefined;
+    }
+    return typeof statusId === "string" ? { ...params, statusId } : params;
+  }
+
+  private readMutationJournalRequest(idempotencyKey: string): string | null {
+    const db = this.openDb();
+    try {
+      const row = db
+        .prepare(
+          `SELECT requested_json as requestedJson
+         FROM operon_mutation_journal WHERE idempotency_key = ?`,
+        )
+        .get(idempotencyKey) as { requestedJson?: string } | undefined;
+      return typeof row?.requestedJson === "string" ? row.requestedJson : null;
+    } finally {
+      db.close();
+    }
   }
 
   /**
