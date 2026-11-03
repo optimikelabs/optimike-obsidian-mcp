@@ -118,7 +118,7 @@ for (const name of requiredDocs) {
 const qualifiedBridgeVersions = {
   "obsidian-atomic-write-bridge": "0.9.0",
   "obsidian-bases-bridge": "1.2.2",
-  "obsidian-operon-bridge": "0.9.5",
+  "obsidian-operon-bridge": "0.9.6",
 };
 for (const bridge of Object.keys(qualifiedBridgeVersions)) {
   const dir = `plugins/${bridge}`;
