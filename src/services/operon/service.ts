@@ -46,6 +46,7 @@ import {
   isCanonicalOperonVaultRelativePath,
   resolveOperonPriorityStableId,
   resolveOperonWorkflowStatus,
+  resolveOperonTransitionIntent,
   type OperonBridgePage,
   type OperonConfiguration,
   type OperonQuery,
@@ -2580,14 +2581,60 @@ export class OperonService {
   async transitionTask(input: unknown): Promise<OperonMutationResult> {
     const params: OperonTransitionTask =
       OperonTransitionTaskSchema.parse(input);
+    const payload = params.intent
+      ? await this.resolveTransitionIntent(params)
+      : params;
     return this.executeMutation(
       "transition",
       params.operonId,
       params.idempotencyKey,
       params.dryRun,
       `${BRIDGE_PREFIX}/tasks/${encodeURIComponent(params.operonId)}/transition`,
-      params,
+      payload,
     );
+  }
+
+  /**
+   * Turns complete / cancel / reopen into the exact statusId of the task's
+   * own pipeline, read from the live taxonomy. The resolved statusId is what
+   * the Bridge receives and what the postflight verifies.
+   */
+  private async resolveTransitionIntent(
+    params: OperonTransitionTask,
+  ): Promise<OperonTransitionTask> {
+    if (!liveModeConfigured()) {
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        "A semantic Operon transition requires the live Obsidian Desktop Bridge.",
+        this.requestContext("operon_transition"),
+      );
+    }
+    const status = await this.fetchLiveStatus();
+    const live = await this.getTaskLive(params.operonId);
+    if (!live) {
+      throw new McpError(
+        BaseErrorCode.NOT_FOUND,
+        `Operon task not found: ${params.operonId}`,
+        this.requestContext("operon_transition", { operonId: params.operonId }),
+      );
+    }
+    const task = live.task as { pipelineId?: string | null; pipeline?: string | null };
+    const resolved = resolveOperonTransitionIntent(
+      status.taxonomy,
+      task,
+      params.intent!,
+    );
+    if ("error" in resolved) {
+      throw new McpError(
+        BaseErrorCode.VALIDATION_ERROR,
+        resolved.error,
+        this.requestContext("operon_transition", {
+          operonId: params.operonId,
+          intent: params.intent,
+        }),
+      );
+    }
+    return { ...params, statusId: resolved.statusId };
   }
 
   async convertTask(input: unknown): Promise<OperonMutationResult> {

@@ -340,7 +340,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_transition_task",
     {
       description:
-        "Transition an Operon task through Operon's dependency, recurrence, aggregate, and workflow guards. Prefer stable statusId from operon_get_configuration; exact configured status remains supported. expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
+        "Transition an Operon task through Operon's dependency, recurrence, aggregate, and workflow guards. Prefer stable statusId from operon_get_configuration; exact configured status remains supported. To complete, cancel or reopen without naming a status, pass intent (complete | cancel | reopen): it resolves to the matching status of the task's own pipeline. expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
       inputSchema: mcpSchema(OperonTransitionTaskInputSchema.shape),
       annotations: MUTATION_ANNOTATIONS,
     },

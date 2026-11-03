@@ -33,6 +33,7 @@ import {
   queryOperonSnapshot,
   resolveOperonPriorityStableId,
   resolveOperonWorkflowStatus,
+  resolveOperonTransitionIntent,
 } from "../dist/services/operon/contract.js";
 import { mcpSchema } from "../dist/mcp-server/mcpSchema.js";
 
@@ -720,6 +721,53 @@ const stripped = queryOperonSnapshot(
 assert.equal(stripped.source, "operon-cache");
 assert.equal(stripped.stale, true);
 assert.equal("properties" in stripped.tasks[0], false);
+
+// Semantic transitions resolve from the task's own pipeline, never from its
+// current state, so a replay keeps the same resolved statusId.
+{
+  const taxonomy = {
+    language: "fr",
+    defaultPipelineName: "CN",
+    pipelines: [
+      {
+        id: "pl_project",
+        name: "CN",
+        description: null,
+        statuses: [
+          { id: "st_todo", label: "À clarifier", value: "CN.À clarifier", isFinished: false, isCancelled: false, isScheduledTarget: false, isTrackingTarget: false },
+          { id: "st_done", label: "Terminé", value: "CN.Terminé", isFinished: true, isCancelled: false, isScheduledTarget: false, isTrackingTarget: false },
+          { id: "st_drop", label: "Abandonné", value: "CN.Abandonné", isFinished: false, isCancelled: true, isScheduledTarget: false, isTrackingTarget: false },
+        ],
+      },
+      {
+        id: "pl_pub",
+        name: "Publication",
+        description: null,
+        statuses: [
+          { id: "st_pub_draft", label: "Brouillon", value: "Publication.Brouillon", isFinished: false, isCancelled: false, isScheduledTarget: false, isTrackingTarget: false },
+          { id: "st_pub_live", label: "Publié", value: "Publication.Publié", isFinished: true, isCancelled: false, isScheduledTarget: false, isTrackingTarget: false },
+        ],
+      },
+    ],
+  };
+  const r = (task, intent) => resolveOperonTransitionIntent(taxonomy, task, intent);
+  assert.deepEqual(r({ pipelineId: "pl_project" }, "complete"), { statusId: "st_done", pipelineId: "pl_project" });
+  assert.deepEqual(r({ pipelineId: "pl_project" }, "cancel"), { statusId: "st_drop", pipelineId: "pl_project" });
+  assert.deepEqual(r({ pipelineId: "pl_project" }, "reopen"), { statusId: "st_todo", pipelineId: "pl_project" });
+  assert.deepEqual(r({ pipelineId: "pl_pub" }, "complete"), { statusId: "st_pub_live", pipelineId: "pl_pub" });
+  // A task without status or pipeline uses the configured default pipeline.
+  assert.deepEqual(r({ pipelineId: null, pipeline: null }, "cancel"), { statusId: "st_drop", pipelineId: "pl_project" });
+  assert.ok("error" in r({ pipelineId: "pl_pub" }, "cancel"));
+  assert.ok("error" in r({ pipelineId: "pl_missing" }, "complete"));
+  assert.ok("error" in r({ pipelineId: "pl_project" }, "complete") === false);
+  assert.ok("error" in resolveOperonTransitionIntent(null, { pipelineId: "pl_project" }, "complete"));
+
+  const base = { operonId: "abc1234", expectedRevision: "fnv1a32:00000000", idempotencyKey: "intent-key-0001" };
+  assert.equal(OperonTransitionTaskSchema.safeParse({ ...base, intent: "complete" }).success, true);
+  assert.equal(OperonTransitionTaskSchema.safeParse({ ...base, intent: "complete", statusId: "st_done" }).success, false);
+  assert.equal(OperonTransitionTaskSchema.safeParse({ ...base, intent: "archive" }).success, false);
+  assert.equal(OperonTransitionTaskSchema.safeParse({ ...base }).success, false);
+}
 
 // fieldIncludes: list membership (any order, case-insensitive), the shape the
 // morning triage needs for `assignees`; fieldEquals stays an exact list match.
