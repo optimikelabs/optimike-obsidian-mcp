@@ -1843,8 +1843,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         : null,
       taxonomy: this.workflowTaxonomy(runtime),
       capabilities,
-      // Granted by Operon, negotiated by the Bridge on first use: a `false` in
-      // `capabilities` for these names means "cold", not "impossible".
+      // Negotiated by the Bridge on first use and not negotiated yet: a `false`
+      // in `capabilities` for these names means "cold", not "impossible".
       firstUseCapabilities:
         this.settings.mutationsEnabled && runtime?.developerApi
           ? runtime.developerApi.firstUseCapabilities()

@@ -312,8 +312,9 @@ export const OperonStatusSchema = z.object({
   settingsSignature: z.string().nullable(),
   taxonomy: OperonWorkflowTaxonomySchema.nullable().optional(),
   capabilities: OperonCapabilitiesSchema,
-  // Granted by Operon but negotiated by the Bridge only on first use: a
+  // Negotiated by the Bridge only on first use and not negotiated yet: a
   // `false` in `capabilities` for these names means "cold", not "impossible".
+  // The first call opens the session, or leaves one consent request in Obsidian.
   firstUseCapabilities: z
     .array(z.enum(["adopt", "periodicCreate", "periodicUpdate", "filterQuery"]))
     .optional(),

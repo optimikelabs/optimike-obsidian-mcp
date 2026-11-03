@@ -2844,23 +2844,22 @@ test("ordinary scheduling rechecks the caller revision after preview before nati
   assert.equal(applyCalls, 0);
 });
 
-test("first-use capabilities list granted but not yet negotiated workflows only", () => {
-  const adapter = new OperonDeveloperApiRuntimeAdapter(consumer, {});
-  const granted = [
-    "tasks.adopt.preview",
-    "tasks.adopt.apply",
-    "tasks.update.periodic-note.preview",
-    "tasks.update.periodic-note.apply",
-    "tasks.filter-query",
-    // periodic-create is only half granted: never advertised as first-use.
-    "tasks.create.periodic-note.preview",
-  ];
+test("first-use capabilities list task workflows not negotiated yet, opening nothing", () => {
+  let accessorCalls = 0;
+  const operon = {
+    getTaskWorkflowDeveloperApiV1: () => {
+      accessorCalls++;
+      return {};
+    },
+  };
+  const adapter = new OperonDeveloperApiRuntimeAdapter(consumer, operon as any);
   (adapter as any).channelStatus = {
     availability: "available",
-    grant: { state: "active", grantedCapabilities: granted },
+    grant: { state: "active", grantedCapabilities: ["tasks.update.apply"] },
   };
   assert.deepEqual(adapter.firstUseCapabilities(), [
     "adopt",
+    "periodicCreate",
     "periodicUpdate",
     "filterQuery",
   ]);
@@ -2878,11 +2877,19 @@ test("first-use capabilities list granted but not yet negotiated workflows only"
       },
     },
   });
-  assert.deepEqual(adapter.firstUseCapabilities(), ["adopt", "filterQuery"]);
+  assert.deepEqual(adapter.firstUseCapabilities(), [
+    "adopt",
+    "periodicCreate",
+    "filterQuery",
+  ]);
+  // Reporting never negotiates a session nor leaves a consent request.
+  assert.equal(accessorCalls, 0);
 
-  // A pending or revoked grant advertises nothing.
-  (adapter as any).channelStatus = {
-    grant: { state: "pending", grantedCapabilities: granted },
-  };
+  // A pending grant, or an Operon without the task-workflow accessor,
+  // advertises nothing.
+  (adapter as any).channelStatus = { grant: { state: "pending" } };
   assert.deepEqual(adapter.firstUseCapabilities(), []);
+  const legacy = new OperonDeveloperApiRuntimeAdapter(consumer, {});
+  (legacy as any).channelStatus = { grant: { state: "active" } };
+  assert.deepEqual(legacy.firstUseCapabilities(), []);
 });

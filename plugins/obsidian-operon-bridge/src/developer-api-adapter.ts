@@ -1738,19 +1738,20 @@ export class OperonDeveloperApiRuntimeAdapter {
   }
 
   /**
-   * Status capabilities that Operon has already granted to this consumer but
-   * that the Bridge negotiates only on first use (exact, operation-scoped
-   * sessions). They report `false` in the warm capability map until then;
-   * listing them separately prevents callers from reading "not negotiated yet"
-   * as "impossible". No session is opened here.
+   * Task-workflow capabilities that the Bridge negotiates only on first use
+   * (exact, operation-scoped sessions) and has not negotiated yet. They report
+   * `false` in the warm capability map; listing them separately prevents a
+   * caller from reading "not negotiated yet" as "impossible". Their grants live
+   * on Operon's separate task-workflow accessor, which the V1 channel status
+   * does not describe, so whether Operon already granted them is unknown here:
+   * the first call either opens the session or leaves one exact consent request
+   * in Obsidian. No session or request is opened by this method.
    */
   firstUseCapabilities(): Array<
     "adopt" | "periodicCreate" | "periodicUpdate" | "filterQuery"
   > {
-    const granted = new Set(this.channelStatus.grant?.grantedCapabilities ?? []);
     if (this.channelStatus.grant?.state !== "active") return [];
-    const covers = (capabilities: readonly string[]) =>
-      capabilities.every((capability) => granted.has(capability));
+    if (!this.taskWorkflowAccessor) return [];
     const result: Array<
       "adopt" | "periodicCreate" | "periodicUpdate" | "filterQuery"
     > = [];
@@ -1763,7 +1764,6 @@ export class OperonDeveloperApiRuntimeAdapter {
     ];
     for (const [kind, name] of workflows) {
       if (
-        covers(TASK_WORKFLOW_CAPABILITIES[kind]) &&
         !(
           this.hasTaskWorkflowCapability(kind) &&
           this.hasTaskWorkflowRecoverySupport(kind)
@@ -1772,9 +1772,7 @@ export class OperonDeveloperApiRuntimeAdapter {
         result.push(name);
       }
     }
-    if (covers(["tasks.filter-query"]) && !this.hasFilterQueryCapability()) {
-      result.push("filterQuery");
-    }
+    if (!this.hasFilterQueryCapability()) result.push("filterQuery");
     return result;
   }
 
