@@ -46,6 +46,7 @@ import {
   isCanonicalOperonVaultRelativePath,
   resolveOperonPriorityStableId,
   resolveOperonWorkflowStatus,
+  resolveOperonTransitionIntent,
   type OperonBridgePage,
   type OperonConfiguration,
   type OperonQuery,
@@ -2578,16 +2579,106 @@ export class OperonService {
   }
 
   async transitionTask(input: unknown): Promise<OperonMutationResult> {
-    const params: OperonTransitionTask =
-      OperonTransitionTaskSchema.parse(input);
+    const parsed = OperonTransitionTaskSchema.safeParse(input);
+    if (!parsed.success) {
+      throw new McpError(
+        BaseErrorCode.VALIDATION_ERROR,
+        parsed.error.issues[0]?.message ??
+          "Provide exactly one of status, statusId or intent.",
+        this.requestContext("operon_transition"),
+      );
+    }
+    const params: OperonTransitionTask = parsed.data;
+    const payload = params.intent
+      ? (this.journaledTransitionTarget(params) ??
+        (await this.resolveTransitionIntent(params)))
+      : params;
     return this.executeMutation(
       "transition",
       params.operonId,
       params.idempotencyKey,
       params.dryRun,
       `${BRIDGE_PREFIX}/tasks/${encodeURIComponent(params.operonId)}/transition`,
-      params,
+      payload,
     );
+  }
+
+  /**
+   * A semantic transition whose idempotency key is already journaled keeps
+   * the statusId it was first resolved to, without consulting the Bridge:
+   * executeMutation then replays the durable receipt for the identical
+   * request, or refuses a different one. Returns null when the key is new.
+   */
+  private journaledTransitionTarget(
+    params: OperonTransitionTask,
+  ): OperonTransitionTask | null {
+    const requestedJson = this.readMutationJournalRequest(params.idempotencyKey);
+    if (requestedJson === null) return null;
+    let statusId: unknown;
+    try {
+      const requested: unknown = JSON.parse(requestedJson);
+      statusId =
+        requested && typeof requested === "object" && !Array.isArray(requested)
+          ? (requested as Record<string, unknown>).statusId
+          : undefined;
+    } catch {
+      statusId = undefined;
+    }
+    return typeof statusId === "string" ? { ...params, statusId } : params;
+  }
+
+  private readMutationJournalRequest(idempotencyKey: string): string | null {
+    const db = this.openDb();
+    try {
+      const row = db
+        .prepare(
+          `SELECT requested_json as requestedJson
+         FROM operon_mutation_journal WHERE idempotency_key = ?`,
+        )
+        .get(idempotencyKey) as { requestedJson?: string } | undefined;
+      return typeof row?.requestedJson === "string" ? row.requestedJson : null;
+    } finally {
+      db.close();
+    }
+  }
+
+  /**
+   * Turns complete / cancel / reopen into the exact statusId of the task's
+   * own pipeline, read from the live taxonomy. The resolved statusId is what
+   * the Bridge receives and what the postflight verifies.
+   */
+  private async resolveTransitionIntent(
+    params: OperonTransitionTask,
+  ): Promise<OperonTransitionTask> {
+    if (!liveModeConfigured()) {
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        "A semantic Operon transition requires the live Obsidian Desktop Bridge.",
+        this.requestContext("operon_transition"),
+      );
+    }
+    const status = await this.fetchLiveStatus();
+    // getTask, not getTaskLive: a fast-path miss (index moved, failed or
+    // unreadable answer) falls back to the snapshot read instead of being
+    // taken for an absent task. Only that read reports NOT_FOUND.
+    const live = await this.getTask({ operonId: params.operonId });
+    const task = live.task as { pipelineId?: string | null; pipeline?: string | null };
+    const resolved = resolveOperonTransitionIntent(
+      status.taxonomy,
+      task,
+      params.intent!,
+    );
+    if ("error" in resolved) {
+      throw new McpError(
+        BaseErrorCode.VALIDATION_ERROR,
+        resolved.error,
+        this.requestContext("operon_transition", {
+          operonId: params.operonId,
+          intent: params.intent,
+        }),
+      );
+    }
+    return { ...params, statusId: resolved.statusId };
   }
 
   async convertTask(input: unknown): Promise<OperonMutationResult> {

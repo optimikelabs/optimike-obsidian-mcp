@@ -260,6 +260,138 @@ test("Operon mutation failures preserve recovery evidence without echoing task p
   );
 });
 
+test("a stale expectedRevision is reported as revision_conflict, not bridge_failure", async () => {
+  const payloadFactory = await exported("publicOperonMutationFailurePayload");
+  const secret = "C:\\Users\\private\\Vault\\Tasks\\Client.md";
+  const payload = payloadFactory({
+    ok: false,
+    contractVersion: "1",
+    operationId: "8b7e2b7d-4c63-4470-8c28-2af9ddb0de61",
+    idempotencyKey: "stale-revision-key-01",
+    status: "conflict",
+    before: { path: secret, revision: "fnv1a32:8383d74c" },
+    requested: { status: "En cours" },
+    after: { path: secret },
+    error: {
+      code: "revision_conflict",
+      message: "expectedRevision does not match the live task revision.",
+    },
+    retryable: true,
+    source: "operon-live",
+    stale: false,
+  }) as Record<string, any>;
+
+  assert.equal(payload.status, "conflict");
+  assert.equal(payload.retryable, true);
+  assert.deepEqual(payload.requested, {});
+  assert.equal(payload.error.code, "revision_conflict");
+  assert.equal(payload.error.reasonCode, "revision_mismatch");
+  assert.match(payload.error.message, /Re-read the task/u);
+  assert.equal(payload.currentRevision, "fnv1a32:8383d74c");
+  // The HTTP boundary filters the already-public receipt a second time.
+  const httpBoundary = await exported("publicOperonHttpFailurePayload");
+  assert.equal(
+    (httpBoundary(payload) as Record<string, any>).currentRevision,
+    "fnv1a32:8383d74c",
+  );
+  assert.doesNotMatch(JSON.stringify(payload), /private|Client\.md|En cours/u);
+
+  const hostileRevision = payloadFactory({
+    ok: false,
+    contractVersion: "1",
+    operationId: "8b7e2b7d-4c63-4470-8c28-2af9ddb0de61",
+    idempotencyKey: "stale-revision-key-02",
+    status: "conflict",
+    before: { revision: secret },
+    requested: {},
+    error: { code: "revision_conflict", message: "x" },
+    retryable: true,
+  }) as Record<string, any>;
+  assert.equal("currentRevision" in hostileRevision, false);
+  assert.doesNotMatch(JSON.stringify(hostileRevision), /private|Client\.md/u);
+
+  const otherConflict = payloadFactory({
+    ok: false,
+    contractVersion: "1",
+    operationId: "8b7e2b7d-4c63-4470-8c28-2af9ddb0de61",
+    idempotencyKey: "native-conflict-key-01",
+    status: "conflict",
+    before: { revision: "fnv1a32:8383d74c" },
+    requested: {},
+    error: { code: "conflict", message: "x" },
+    retryable: false,
+  }) as Record<string, any>;
+  assert.equal("currentRevision" in otherConflict, false);
+});
+
+test("diagnostics expose the Bridge write session next to the diagnostics-only admission", async () => {
+  const Bridge = (await bridgeModule()).default as { prototype: any };
+  const decorate = Bridge.prototype.withBridgeSessionDiagnostics as (
+    payload: Record<string, unknown>,
+  ) => Record<string, any>;
+  const host = {
+    getOperonRuntime: () => ({
+      developerApi: {
+        status: {
+          availability: "available",
+          authority: "granted",
+          admission: { reads: true, writes: true },
+          grant: {
+            state: "active",
+            grantedCapabilities: ["tasks.transition.apply"],
+          },
+        },
+      },
+    }),
+  };
+  const native = {
+    kind: "runtime-diagnostics",
+    health: { admission: { reads: true, writes: false } },
+  };
+  const decorated = decorate.call(host, {
+    ok: true,
+    operation: "diagnostics",
+    result: native,
+  });
+  assert.deepEqual(decorated.result.health, native.health);
+  assert.equal(decorated.result.bridgeSession.admission.writes, true);
+  assert.equal(decorated.result.bridgeSession.grantState, "active");
+  assert.equal(
+    JSON.stringify(decorated).includes("tasks.transition.apply"),
+    false,
+  );
+
+  const failed = { ok: false, error: { code: "x" } };
+  assert.equal(decorate.call(host, failed), failed);
+  const noRuntime = { ok: true, result: native };
+  assert.equal(
+    decorate.call({ getOperonRuntime: () => null }, noRuntime),
+    noRuntime,
+  );
+});
+
+test("a native Operon rejection keeps a specific public code", async () => {
+  const payloadFactory = await exported("publicOperonMutationFailurePayload");
+  const payload = payloadFactory({
+    ok: false,
+    contractVersion: "1",
+    operationId: "8b7e2b7d-4c63-4470-8c28-2af9ddb0de61",
+    idempotencyKey: "native-rejected-key-01",
+    status: "rejected",
+    requested: {},
+    error: { code: "rejected", message: "workflow guard: private detail" },
+    retryable: false,
+    mutationMayHaveApplied: false,
+    source: "operon-live",
+    stale: false,
+  }) as Record<string, any>;
+
+  assert.equal(payload.status, "rejected");
+  assert.equal(payload.error.code, "operon_rejected");
+  assert.equal(payload.error.reasonCode, "native_rejected");
+  assert.doesNotMatch(JSON.stringify(payload), /private detail/u);
+});
+
 test("Operon mutation receipts fail closed for a revoked Proxy or throwing getters", async () => {
   const payloadFactory = await exported("publicOperonMutationFailurePayload");
   const httpFactory = await exported("publicOperonHttpFailurePayload");
@@ -1268,4 +1400,70 @@ test("partial route registration retains background lease until rollback succeed
     bridge.restLifecycle.probeNow();
     assert.equal(backgroundPolicy, true, "completed rollback restores prior policy");
   } finally { for (const cleanup of cleanups) cleanup(); }
+});
+
+test("an elevated plan without visible consent is reported as consent_required", async () => {
+  const payloadFactory = await exported("publicOperonMutationFailurePayload");
+  const base = {
+    ok: false,
+    contractVersion: "1",
+    operationId: "8b7e2b7d-4c63-4470-8c28-2af9ddb0de61",
+    idempotencyKey: "consent-key-0001",
+    status: "rejected",
+    requested: { statusId: "st_project_finished" },
+    mutationMayHaveApplied: false,
+    source: "operon-live",
+    stale: false,
+  };
+  const required = payloadFactory({
+    ...base,
+    retryable: true,
+    error: {
+      code: "consent_required",
+      message: "Operon could not present consent for this sealed plan.",
+    },
+  }) as Record<string, any>;
+  assert.equal(required.status, "rejected");
+  assert.equal(required.retryable, true);
+  assert.equal(required.error.code, "consent_required");
+  assert.match(required.error.message, /45 seconds/u);
+  const denied = payloadFactory({
+    ...base,
+    retryable: false,
+    error: { code: "consent_denied", message: "denied" },
+  }) as Record<string, any>;
+  assert.equal(denied.error.code, "consent_denied");
+  assert.equal(denied.retryable, false);
+});
+test("only a dry-run waits, bounded, for Operon to settle its index", async () => {
+  const Bridge = (await bridgeModule()).default as { prototype: any };
+  const settle = Bridge.prototype.requireSettledMutationIndex as (
+    runtime: unknown,
+    waitMs?: number,
+  ) => Promise<void>;
+  const host = (settledAfter: number) => {
+    let calls = 0;
+    return {
+      calls: () => calls,
+      indexState: async () => {
+        calls++;
+        return { ready: calls > settledAfter, diagnostics: null };
+      },
+      isSettledRuntimeIndex: (_r: unknown, state: { ready: boolean }) =>
+        state.ready,
+    };
+  };
+  // Apply path (no wait): fails closed on the first unsettled read.
+  const apply = host(1);
+  await assert.rejects(settle.call(apply, {}, 0), /not settled/u);
+  assert.equal(apply.calls(), 1);
+  // Dry-run path: retries until settled within the bound.
+  const dry = host(2);
+  await settle.call(dry, {}, 3_000);
+  assert.equal(dry.calls(), 3);
+  // Dry-run path: still fails closed when the bound is exhausted.
+  const never = host(1_000);
+  const started = Date.now();
+  await assert.rejects(settle.call(never, {}, 600), /not settled/u);
+  assert.ok(Date.now() - started < 2_000);
 });

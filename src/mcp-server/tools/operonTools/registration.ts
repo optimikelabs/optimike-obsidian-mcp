@@ -154,7 +154,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_query_tasks",
     {
       description:
-        "Query Operon tasks by identity, text, source, checkbox, stable workflow/status IDs, visible workflow labels, priority, tier, path, tags, parent, dates, canonical/custom fields, or unmanaged file-task properties. Prefer pipelineIds/statusIds from operon_get_configuration so UI language changes do not break automations. Responses always declare source and freshness.",
+        "Query Operon tasks by identity, text, source, checkbox, stable workflow/status IDs, visible workflow labels, priority, tier, path, tags, parent, dates, canonical/custom fields, or unmanaged file-task properties. Prefer pipelineIds/statusIds from operon_get_configuration so UI language changes do not break automations. fieldEquals matches a whole value (a list only in full and in order); use fieldIncludes for list membership, e.g. fieldIncludes: { assignees: \"Claude\" }. Responses always declare source and freshness.",
       inputSchema: mcpSchema(OperonQuerySchema.shape),
       annotations: READ_ONLY_ANNOTATIONS,
     },
@@ -213,7 +213,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_get_diagnostics",
     {
       description:
-        "Read Operon 3.2 native runtime diagnostics through Developer API V1. Use this for lifecycle, persistence, capability/grant, catalog, and transport diagnosis; it never modifies the vault.",
+        "Read the loaded Operon's native runtime diagnostics through Developer API V1. Use this for lifecycle, persistence, capability/grant, catalog, and transport diagnosis; it never modifies the vault. result.health.admission describes the diagnostics-only session (writes is always false there); result.bridgeSession.admission, when present, describes the Bridge session used for mutations.",
       inputSchema: mcpSchema(z.object({})),
       annotations: READ_ONLY_ANNOTATIONS,
     },
@@ -340,7 +340,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_transition_task",
     {
       description:
-        "Transition an Operon task through Operon's dependency, recurrence, aggregate, and workflow guards. Prefer stable statusId from operon_get_configuration; exact configured status remains supported. expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
+        "Transition an Operon task through Operon's dependency, recurrence, aggregate, and workflow guards. Prefer stable statusId from operon_get_configuration; exact configured status remains supported. To complete, cancel or reopen without naming a status, pass intent (complete | cancel | reopen): it resolves to the matching status of the task's own pipeline. expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
       inputSchema: mcpSchema(OperonTransitionTaskInputSchema.shape),
       annotations: MUTATION_ANNOTATIONS,
     },

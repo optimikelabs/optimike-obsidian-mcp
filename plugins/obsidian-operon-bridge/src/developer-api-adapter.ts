@@ -787,6 +787,26 @@ export interface DeveloperApiMutationResult {
   readonly retryable: boolean;
   readonly mutationMayHaveApplied?: boolean;
   readonly nativeProof?: DeveloperApiTaskWorkflowNativeProof;
+  /** Stable public error code when the native refusal is actionable. */
+  readonly publicErrorCode?: "consent_required" | "consent_denied";
+}
+
+/**
+ * Elevated plans need a fresh confirmation in the vault window. Operon refuses
+ * with `confirmation-required` (window not able to show the prompt, or the 45 s
+ * window lapsed) or `consent-denied`. Both are actionable by the operator and
+ * must not read as a generic rejection.
+ */
+export function consentRefusalCode(
+  error: DeveloperApiError | undefined,
+): "consent_required" | "consent_denied" | undefined {
+  const code = String(error?.code ?? "").toLocaleLowerCase();
+  const reason = String(error?.reason ?? "").toLocaleLowerCase();
+  if (code === "consent-denied" || reason === "consent-denied")
+    return "consent_denied";
+  if (code === "confirmation-required" || reason === "consent-unavailable")
+    return "consent_required";
+  return undefined;
 }
 
 export interface DeveloperApiPendingRecoveryResult {
@@ -830,6 +850,39 @@ const OPTIONAL_READ_CAPABILITIES = [
 ] as const;
 
 const MAX_TASK_QUERY_PAGES = 10_000;
+
+/**
+ * Stable key of Operon's context revision, or null when the runtime did not
+ * report enough of it to prove that nothing task-affecting moved.
+ */
+export function developerContextKey(revision: unknown): string | null {
+  if (!revision || typeof revision !== "object") return null;
+  const record = revision as Record<string, unknown>;
+  const index = (record.index ?? null) as Record<string, unknown> | null;
+  const sessionId = index?.sessionId;
+  const ramGeneration = index?.ramGeneration;
+  const settingsFingerprint = record.settingsFingerprint;
+  if (
+    typeof sessionId !== "string" ||
+    !sessionId ||
+    typeof ramGeneration !== "number" ||
+    !Number.isInteger(ramGeneration) ||
+    typeof settingsFingerprint !== "string" ||
+    !settingsFingerprint
+  ) {
+    return null;
+  }
+  return JSON.stringify([
+    sessionId,
+    ramGeneration,
+    settingsFingerprint,
+    record.pinnedGeneration ?? null,
+    record.activeTrackerGeneration ?? null,
+    record.repeatSeriesRevision ?? null,
+    record.projectSerialGeneration ?? null,
+    record.projectSerialSignature ?? null,
+  ]);
+}
 
 export type DeveloperApiReadCapability =
   | "system.diagnostics"
@@ -1450,6 +1503,7 @@ export class OperonDeveloperApiRuntimeAdapter {
   >();
   private recoveryApi: DeveloperApiV1 | null = null;
   private filterQueryApi: TaskWorkflowDeveloperApiV1 | null = null;
+  private lastContextKey: string | null = null;
   private readonly taskWorkflowApis = new Map<
     DeveloperApiTaskWorkflowKind,
     TaskWorkflowDeveloperApiV1
@@ -1541,15 +1595,27 @@ export class OperonDeveloperApiRuntimeAdapter {
     );
   }
 
+  /** Fail closed: no read, optional or mutation session survives a failed refresh. */
+  private dropSessions(): void {
+    this.readApi = null;
+    this.optionalReadApis.clear();
+    this.mutationApis.clear();
+    this.filterQueryApi = null;
+    this.lastContextKey = null;
+  }
+
   private async refreshInternal(
     includeMutationCapabilities: boolean,
     includeTaskWorkflowCapabilities: boolean,
     includeFilterQueryCapability: boolean,
   ): Promise<boolean> {
-    this.readApi = null;
-    this.optionalReadApis.clear();
-    this.mutationApis.clear();
-    if (includeFilterQueryCapability) this.filterQueryApi = null;
+    // Keep the established sessions usable while this refresh awaits Operon.
+    // The Bridge re-probes its runtime every second; clearing them up front
+    // opened a window in which a concurrent request found no read or mutation
+    // session and failed as mutation_unavailable (SERVICE_UNAVAILABLE in MCP),
+    // typically right after a write. Every failure path below still fails
+    // closed through dropSessions(), and the success path replaces the maps
+    // synchronously.
     if (!includeMutationCapabilities) {
       this.recoveryApi = null;
       this.taskWorkflowApis.clear();
@@ -1561,7 +1627,7 @@ export class OperonDeveloperApiRuntimeAdapter {
     // access to capabilities that were already approved.
     const baselineApi = this.connect(BASELINE_CAPABILITIES);
     if (!baselineApi) {
-      this.readApi = null;
+      this.dropSessions();
       this.setUnavailableDiagnostics();
       return false;
     }
@@ -1588,48 +1654,66 @@ export class OperonDeveloperApiRuntimeAdapter {
           !candidate || !candidate.hasCapability(capability),
       )
     ) {
-      this.readApi = null;
+      this.dropSessions();
       this.setUnavailableDiagnostics();
       return false;
     }
     const api = this.connectApproved(CORE_READ_CAPABILITIES);
     if (!api) {
-      this.readApi = null;
+      this.dropSessions();
       this.setUnavailableDiagnostics();
       return false;
     }
     try {
       const health = await api.system.health();
       if (!health.ok) {
+        this.dropSessions();
         this.setUnavailableDiagnostics();
         return false;
       }
-      const catalog = await api.catalog.snapshot({
-        contractVersion: 1,
-        requestId: requestId(),
-        kind: "catalog",
-        consistency: "live-verified",
-      });
-      if (!catalog.ok) throw new Error(developerErrorMessage(catalog.error));
-      const snapshot = catalogConfiguration(catalog);
-      const tasks = await this.readAllTasks(api);
-      this.tasks = tasks.tasks;
-      this.rawTasks = tasks.rawTasks;
-      this.indexer.taskCount = this.tasks.length;
-      this.generation =
-        tasks.generation ??
-        health.contextRevision?.index?.ramGeneration ??
-        this.generation + 1;
-      this.pipelines.splice(0, this.pipelines.length, ...snapshot.pipelines);
-      this.keyMappings.splice(
-        0,
-        this.keyMappings.length,
-        ...snapshot.keyMappings,
-      );
-      this.priorities.splice(0, this.priorities.length, ...snapshot.priorities);
-      this.configuration = snapshot.configuration;
-      this.defaultPipelineName =
-        snapshot.configuration.workflow.defaultPipelineName;
+      // Operon's context revision moves whenever its RAM index, settings or
+      // task-affecting generations move. While it is unchanged, the catalog
+      // and every task already read are still exact: skip the O(n) re-read
+      // (one live tasks.get per task) that made every Bridge call scale with
+      // the vault size.
+      const contextKey = developerContextKey(health.contextRevision);
+      const reuseSnapshot =
+        contextKey !== null &&
+        contextKey === this.lastContextKey &&
+        this.readApi !== null;
+      if (!reuseSnapshot) {
+        const catalog = await api.catalog.snapshot({
+          contractVersion: 1,
+          requestId: requestId(),
+          kind: "catalog",
+          consistency: "live-verified",
+        });
+        if (!catalog.ok) throw new Error(developerErrorMessage(catalog.error));
+        const snapshot = catalogConfiguration(catalog);
+        const tasks = await this.readAllTasks(api);
+        this.tasks = tasks.tasks;
+        this.rawTasks = tasks.rawTasks;
+        this.indexer.taskCount = this.tasks.length;
+        this.generation =
+          tasks.generation ??
+          health.contextRevision?.index?.ramGeneration ??
+          this.generation + 1;
+        this.pipelines.splice(0, this.pipelines.length, ...snapshot.pipelines);
+        this.keyMappings.splice(
+          0,
+          this.keyMappings.length,
+          ...snapshot.keyMappings,
+        );
+        this.priorities.splice(
+          0,
+          this.priorities.length,
+          ...snapshot.priorities,
+        );
+        this.configuration = snapshot.configuration;
+        this.defaultPipelineName =
+          snapshot.configuration.workflow.defaultPipelineName;
+      }
+      this.lastContextKey = contextKey;
       this.diagnostics = {
         health: "healthy",
         runtimePhase: "idle",
@@ -1637,8 +1721,12 @@ export class OperonDeveloperApiRuntimeAdapter {
         taskCount: this.tasks.length,
         dirtySourceCount: 0,
       };
+      // From here to the end of the success path everything is synchronous:
+      // the session maps are replaced without an await in between.
       this.readApi = api;
       this.recoveryApi = baselineApi;
+      this.optionalReadApis.clear();
+      this.mutationApis.clear();
       for (const capability of OPTIONAL_READ_CAPABILITIES) {
         const optionalApi = this.connectApproved(
           [...BASELINE_CAPABILITIES, capability],
@@ -1684,7 +1772,7 @@ export class OperonDeveloperApiRuntimeAdapter {
       }
       return true;
     } catch (error) {
-      this.readApi = null;
+      this.dropSessions();
       this.diagnostics = {
         health: "degraded",
         runtimePhase: "developer-api-error",
@@ -1735,6 +1823,45 @@ export class OperonDeveloperApiRuntimeAdapter {
     const api = this.taskWorkflowApis.get(kind);
     const methods = this.taskWorkflowMethods(api, kind);
     return Boolean(methods?.preview && methods.apply);
+  }
+
+  /**
+   * Task-workflow capabilities that the Bridge negotiates only on first use
+   * (exact, operation-scoped sessions) and has not negotiated yet. They report
+   * `false` in the warm capability map; listing them separately prevents a
+   * caller from reading "not negotiated yet" as "impossible". Their grants live
+   * on Operon's separate task-workflow accessor, which the V1 channel status
+   * does not describe, so whether Operon already granted them is unknown here:
+   * the first call either opens the session or leaves one exact consent request
+   * in Obsidian. No session or request is opened by this method.
+   */
+  firstUseCapabilities(): Array<
+    "adopt" | "periodicCreate" | "periodicUpdate" | "filterQuery"
+  > {
+    if (this.channelStatus.grant?.state !== "active") return [];
+    if (!this.taskWorkflowAccessor) return [];
+    const result: Array<
+      "adopt" | "periodicCreate" | "periodicUpdate" | "filterQuery"
+    > = [];
+    const workflows: Array<
+      [DeveloperApiTaskWorkflowKind, "adopt" | "periodicCreate" | "periodicUpdate"]
+    > = [
+      ["adopt", "adopt"],
+      ["periodic-create", "periodicCreate"],
+      ["periodic-update", "periodicUpdate"],
+    ];
+    for (const [kind, name] of workflows) {
+      if (
+        !(
+          this.hasTaskWorkflowCapability(kind) &&
+          this.hasTaskWorkflowRecoverySupport(kind)
+        )
+      ) {
+        result.push(name);
+      }
+    }
+    if (!this.hasFilterQueryCapability()) result.push("filterQuery");
+    return result;
   }
 
   hasTaskWorkflowRecoverySupport(kind: DeveloperApiTaskWorkflowKind): boolean {
@@ -2437,13 +2564,18 @@ export class OperonDeveloperApiRuntimeAdapter {
       );
     }
     if (status === "failed") {
+      const consent = consentRefusalCode(execution.error);
       return this.mutationFailure(
         this.mapNativeErrorCode(execution.error),
         developerErrorMessage(execution.error) ||
           "Operon rejected the mutation.",
         operonId,
-        false,
-        { nativeStatus: status, nativeProof: proof },
+        consent === "consent_required",
+        {
+          nativeStatus: status,
+          nativeProof: proof,
+          ...(consent ? { publicErrorCode: consent } : {}),
+        },
       );
     }
 

@@ -312,6 +312,28 @@ export const OperonStatusSchema = z.object({
   settingsSignature: z.string().nullable(),
   taxonomy: OperonWorkflowTaxonomySchema.nullable().optional(),
   capabilities: OperonCapabilitiesSchema,
+  // Negotiated by the Bridge only on first use and not negotiated yet: a
+  // `false` in `capabilities` for these names means "cold", not "impossible".
+  // The first call opens the session, or leaves one consent request in Obsidian.
+  firstUseCapabilities: z
+    .array(z.enum(["adopt", "periodicCreate", "periodicUpdate", "filterQuery"]))
+    .optional(),
+  // The Bridge's negotiated Developer API session. Only the admission and
+  // grant state cross this boundary; capability lists are not reflected.
+  // Values stay open strings: an unknown Operon state must never make the whole
+  // status unreadable.
+  developerApi: z
+    .object({
+      availability: z.string().max(64).optional(),
+      authority: z.string().max(64).optional(),
+      admission: z
+        .object({ reads: z.boolean().optional(), writes: z.boolean().optional() })
+        .optional(),
+      grant: z.object({ state: z.string().max(64).optional() }).optional(),
+    })
+    .nullable()
+    .optional()
+    .catch(null),
   source: z.literal("operon-runtime"),
   stale: z.literal(false),
   limitations: z.array(z.string()),
@@ -444,6 +466,17 @@ export const OperonQuerySchema = z.object({
   parentTask: z.string().nullable().optional(),
   dates: z.array(OperonDateFilterSchema).optional(),
   fieldEquals: z.record(OperonFieldValueSchema).optional(),
+  // Membership test for list fields (assignees, contexts, tags-like custom
+  // lists): every given value must be present, in any order, case-insensitive.
+  // A scalar field matches when it equals the single given value.
+  fieldIncludes: z
+    .record(
+      z.union([
+        z.string().trim().min(1),
+        z.array(z.string().trim().min(1)).min(1).max(50),
+      ]),
+    )
+    .optional(),
   propertyEquals: z.record(z.unknown()).optional(),
   sort: z.array(OperonSortSchema).optional(),
   includeProperties: z.boolean().optional().default(false),
@@ -1055,22 +1088,84 @@ export const OperonUpdateTaskSchema = MutationControlSchema.extend({
   patch: OperonUpdatePatchSchema,
 });
 
+export const OperonTransitionIntentSchema = z.enum([
+  "complete",
+  "cancel",
+  "reopen",
+]);
+export type OperonTransitionIntent = z.infer<
+  typeof OperonTransitionIntentSchema
+>;
+
 export const OperonTransitionTaskInputSchema = MutationControlSchema.extend({
   operonId: z.string().min(1),
   expectedRevision: z.string().min(1),
   status: z.string().trim().min(1).optional(),
   statusId: z.string().trim().min(1).optional(),
+  intent: OperonTransitionIntentSchema.optional().describe(
+    "Semantic transition resolved from the task's own pipeline (or the default pipeline when the task has none): complete = its first finished status, cancel = its first cancelled status, reopen = its first status that is neither finished nor cancelled.",
+  ),
 });
 
 export const OperonTransitionTaskSchema =
   OperonTransitionTaskInputSchema.superRefine((value, ctx) => {
-    if (Boolean(value.status) === Boolean(value.statusId)) {
+    const targets = [value.status, value.statusId, value.intent].filter(
+      Boolean,
+    ).length;
+    if (targets !== 1) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Provide exactly one of status or statusId.",
+        message: "Provide exactly one of status, statusId or intent.",
       });
     }
   });
+
+/**
+ * Resolves a semantic transition to one stable status id of the task's own
+ * pipeline, from the live workflow taxonomy only. The task's current state is
+ * not consulted, so the same request always resolves to the same status (a
+ * replay keeps its idempotency signature); Operon's own guards decide whether
+ * the transition is allowed.
+ */
+export function resolveOperonTransitionIntent(
+  taxonomy: z.infer<typeof OperonWorkflowTaxonomySchema> | null | undefined,
+  task: { pipelineId?: string | null; pipeline?: string | null },
+  intent: OperonTransitionIntent,
+): { statusId: string; pipelineId: string | null } | { error: string } {
+  if (!taxonomy) return { error: "The live workflow taxonomy is unavailable." };
+  const pipeline =
+    (task.pipelineId
+      ? taxonomy.pipelines.find((item) => item.id === task.pipelineId)
+      : undefined) ??
+    (!task.pipelineId && task.pipeline
+      ? taxonomy.pipelines.find((item) => item.name === task.pipeline)
+      : undefined) ??
+    (!task.pipelineId && !task.pipeline && taxonomy.defaultPipelineName
+      ? taxonomy.pipelines.find(
+          (item) => item.name === taxonomy.defaultPipelineName,
+        )
+      : undefined);
+  if (!pipeline) {
+    return {
+      error: "The task's pipeline could not be resolved from the live configuration.",
+    };
+  }
+  const status = pipeline.statuses.find((item) =>
+    !item.id
+      ? false
+      : intent === "complete"
+      ? item.isFinished
+      : intent === "cancel"
+        ? item.isCancelled
+        : !item.isFinished && !item.isCancelled,
+  );
+  if (!status) {
+    return {
+      error: `Pipeline ${pipeline.id} has no status for intent '${intent}'.`,
+    };
+  }
+  return { statusId: status.id as string, pipelineId: pipeline.id };
+}
 
 export const OperonConvertTaskInputSchema = MutationControlSchema.extend({
   operonId: z.string().min(1),
@@ -1426,6 +1521,12 @@ export const OperonMutationFailureReceiptSchema =
     retryable: z.boolean(),
     planDigest: OperonPlanDigestSchema.optional(),
     recoveryRef: z.string().min(1).max(256).optional(),
+    // Only on revision_conflict: the live task revision (opaque hash), so the
+    // caller can plan again without guessing. Never task content.
+    currentRevision: z
+      .string()
+      .regex(/^fnv1a32:[0-9a-f]{8}$/u)
+      .optional(),
     mutationMayHaveApplied: z.boolean().optional(),
     recoveryRequired: z.boolean().optional(),
     replayed: z.boolean().optional(),
@@ -1504,6 +1605,21 @@ function normalizeNeedle(value: unknown): string {
   return String(value ?? "")
     .trim()
     .toLocaleLowerCase();
+}
+
+function fieldValueIncludes(
+  actual: OperonFieldValue | undefined,
+  expected: string | string[],
+): boolean {
+  if (actual === undefined || actual === null) return false;
+  const present = new Set(
+    (Array.isArray(actual) ? actual : [actual]).map((value) =>
+      normalizeNeedle(value),
+    ),
+  );
+  return (Array.isArray(expected) ? expected : [expected]).every((value) =>
+    present.has(normalizeNeedle(value)),
+  );
 }
 
 function fieldValueEquals(
@@ -1643,6 +1759,9 @@ export function filterOperonTasks(
       return false;
     for (const [key, expected] of Object.entries(query.fieldEquals ?? {})) {
       if (!fieldValueEquals(task.fields[key], expected)) return false;
+    }
+    for (const [key, expected] of Object.entries(query.fieldIncludes ?? {})) {
+      if (!fieldValueIncludes(task.fields[key], expected)) return false;
     }
     for (const [key, expected] of Object.entries(query.propertyEquals ?? {})) {
       if (stableStringify(task.properties?.[key]) !== stableStringify(expected))

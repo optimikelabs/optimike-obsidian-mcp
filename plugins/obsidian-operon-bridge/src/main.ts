@@ -42,6 +42,7 @@ import { resolveTaskEnginePlugin } from "./task-engine-runtime";
 import {
   genericMutationSnapshot,
   OperonDeveloperApiRuntimeAdapter,
+  type DeveloperApiChannelStatus,
   type DeveloperApiReadCapability,
   type DeveloperApiMutationCapability,
   type DeveloperApiMutationResult,
@@ -57,6 +58,9 @@ const EXTENSION_ID = "optimike-operon-bridge";
 const REST_PREFIX = `/extensions/${EXTENSION_ID}/v1`;
 const LOCAL_REST_PLUGIN_ID = "obsidian-local-rest-api";
 const MUTATION_JOURNAL_VERSION = 2;
+// Bounded settle wait for dry-runs only (never for an apply).
+const DRY_RUN_SETTLE_WAIT_MS = 3_000;
+const DRY_RUN_SETTLE_POLL_MS = 250;
 const MUTATION_JOURNAL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const MUTATION_JOURNAL_LIMIT = 500;
 const MUTATION_JOURNAL_MAX_SERIALIZED_CHARS = 16 * 1024 * 1024;
@@ -377,6 +381,42 @@ const OPERON_PUBLIC_ERRORS: Record<string, OperonPublicErrorDescriptor> = {
     retryable: false,
     message: "The request conflicts with the current Operon state.",
   },
+  // A stale expectedRevision is the most common, fully recoverable mutation
+  // refusal (any Operon upgrade, or an edit to a sibling task in the same note,
+  // changes the projected revision). Report it as such instead of collapsing it
+  // into the generic bridge_failure, which reads like a broken Bridge.
+  revision_conflict: {
+    code: "revision_conflict",
+    reasonCode: "revision_mismatch",
+    status: "rejected",
+    retryable: true,
+    message:
+      "expectedRevision does not match the live task revision. Re-read the task, then plan again with its current revision.",
+  },
+  consent_required: {
+    code: "consent_required",
+    reasonCode: "consent_unavailable",
+    status: "rejected",
+    retryable: true,
+    message:
+      "Operon needs a fresh confirmation in the vault window for this elevated plan. Bring the Obsidian window to the front, then apply again and confirm within 45 seconds.",
+  },
+  consent_denied: {
+    code: "consent_denied",
+    reasonCode: "consent_denied",
+    status: "rejected",
+    retryable: false,
+    message:
+      "The operator declined this plan in Obsidian. Do not retry it without a new decision.",
+  },
+  operon_rejected: {
+    code: "operon_rejected",
+    reasonCode: "native_rejected",
+    status: "rejected",
+    retryable: false,
+    message:
+      "Operon rejected the mutation. Re-read the task and the live configuration before planning again.",
+  },
   outcome_unknown: {
     code: "outcome_unknown",
     reasonCode: "outcome_unverified",
@@ -542,6 +582,7 @@ const OPERON_PUBLIC_ERROR_ALIASES: Record<string, string> = {
   "not-found": "not_found",
   "not-ready": "operon_unavailable",
   "outcome-unknown": "outcome_unknown",
+  rejected: "operon_rejected",
 };
 
 export function publicOperonErrorPayload(
@@ -595,6 +636,7 @@ const PUBLIC_OPERATION_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const PUBLIC_RECOVERY_REF = /^dvr1_[0-9a-f]{48}$/u;
 const PUBLIC_PLAN_DIGEST = /^[a-f0-9]{64}$/u;
+const PUBLIC_TASK_REVISION = /^fnv1a32:[0-9a-f]{8}$/u;
 // Idempotency keys are caller-provided correlation tokens. Keep the public
 // receipt contract deliberately narrower than arbitrary request text so a
 // malformed direct Bridge caller cannot reflect paths or task content here.
@@ -868,6 +910,22 @@ export function publicOperonMutationFailurePayload(
   );
   const recoveryRequired = safeBooleanField(record, "recoveryRequired");
   const stale = safeBooleanField(record, "stale") === true;
+  // A revision conflict may hand back the live revision: it is an opaque
+  // content hash, never task text, and saves the caller a re-read before it
+  // plans again. Any other value shape is dropped.
+  // Public receipts are filtered again at the HTTP boundary (sendJson), where
+  // `before` is already gone: keep an already-public currentRevision.
+  const liveRevision =
+    requestedCode === "revision_conflict"
+      ? (safeStringField(
+          safeRecord(safeField(record, "before").value),
+          "revision",
+        ) ?? safeStringField(record, "currentRevision"))
+      : undefined;
+  const currentRevision =
+    typeof liveRevision === "string" && PUBLIC_TASK_REVISION.test(liveRevision)
+      ? liveRevision
+      : undefined;
   return {
     ok: false,
     contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
@@ -884,6 +942,7 @@ export function publicOperonMutationFailurePayload(
     ...(typeof planDigest === "string" && PUBLIC_PLAN_DIGEST.test(planDigest)
       ? { planDigest }
       : {}),
+    ...(currentRevision ? { currentRevision } : {}),
     source: "operon-live",
     stale,
     error: publicError.error,
@@ -1678,10 +1737,18 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
 
   private async requireSettledMutationIndex(
     runtime: OperonRuntime,
+    settleWaitMs = 0,
   ): Promise<void> {
-    const state = await this.indexState(runtime);
-    if (!this.isSettledRuntimeIndex(runtime, state)) {
-      throw new OperonIndexNotSettledError();
+    // A dry-run may wait a bounded moment for Operon to settle its index after
+    // a write (it never dispatches anything). An apply never waits here.
+    const deadline = Date.now() + Math.max(0, settleWaitMs);
+    for (;;) {
+      const state = await this.indexState(runtime);
+      if (this.isSettledRuntimeIndex(runtime, state)) return;
+      if (Date.now() >= deadline) throw new OperonIndexNotSettledError();
+      await new Promise<void>((resolve) => {
+        globalThis.setTimeout(resolve, DRY_RUN_SETTLE_POLL_MS);
+      });
     }
   }
 
@@ -1808,6 +1875,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         : null,
       taxonomy: this.workflowTaxonomy(runtime),
       capabilities,
+      // Negotiated by the Bridge on first use and not negotiated yet: a `false`
+      // in `capabilities` for these names means "cold", not "impossible".
+      firstUseCapabilities:
+        this.settings.mutationsEnabled && runtime?.developerApi
+          ? runtime.developerApi.firstUseCapabilities()
+          : [],
       source: "operon-runtime",
       stale: false,
       limitations: this.limitations(runtime, ready),
@@ -2983,6 +3056,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
 
   private async requireMutationRuntime(
     capability: "adopt" | DeveloperApiMutationCapability,
+    settleWaitMs = 0,
   ): Promise<OperonRuntime> {
     if (!this.settings.mutationsEnabled) {
       throw new Error(
@@ -2991,7 +3065,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     }
     const runtime = this.requireRuntime();
     if (runtime.developerApi) {
-      await this.requireSettledMutationIndex(runtime);
+      await this.requireSettledMutationIndex(runtime, settleWaitMs);
       if (
         capability === "adopt" &&
         (!runtime.developerApi.hasTaskWorkflowCapability("adopt") ||
@@ -3162,6 +3236,44 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     };
   }
 
+  /**
+   * Operon reports `health.admission` for the session that served the read.
+   * Diagnostics are read through a diagnostics-only session, so that admission
+   * always shows `writes: false` even when the Bridge holds an active write
+   * grant. Expose the Bridge's strongest negotiated session next to it so an
+   * operator can tell "writes closed" from "diagnostics session is read-only".
+   */
+  private withBridgeSessionDiagnostics(
+    payload: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const result = safeRecord(payload.result);
+    if (payload.ok !== true || !result) return payload;
+    let channel: DeveloperApiChannelStatus | undefined;
+    try {
+      channel = this.getOperonRuntime()?.developerApi?.status;
+    } catch {
+      return payload;
+    }
+    if (!channel) return payload;
+    return {
+      ...payload,
+      result: {
+        ...result,
+        bridgeSession: {
+          scope: "bridge-negotiated-session",
+          availability: channel.availability ?? null,
+          authority: channel.authority ?? null,
+          admission: {
+            reads: channel.admission?.reads === true,
+            writes: channel.admission?.writes === true,
+          },
+          grantState: channel.grant?.state ?? null,
+          note: "health.admission describes the diagnostics-only Developer API session; bridgeSession.admission describes the Bridge's negotiated task session used for mutations.",
+        },
+      },
+    };
+  }
+
   private async executeRecoveryMutation(
     body: Record<string, unknown>,
     failureScope?: MutationFailureScope,
@@ -3218,7 +3330,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       ...(native.planDigest ? { planDigest: native.planDigest } : {}),
       ...(native.recoveryRef ? { recoveryRef: native.recoveryRef } : {}),
       ...(native.message
-        ? { error: { code: native.code, message: native.message } }
+        ? { error: { code: native.publicErrorCode ?? native.code, message: native.message } }
         : {}),
       retryable: native.retryable,
       ...(native.mutationMayHaveApplied !== undefined
@@ -3328,7 +3440,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       ...(native.planDigest ? { planDigest: native.planDigest } : {}),
       ...(native.recoveryRef ? { recoveryRef: native.recoveryRef } : {}),
       ...(native.message
-        ? { error: { code: native.code, message: native.message } }
+        ? { error: { code: native.publicErrorCode ?? native.code, message: native.message } }
         : {}),
       retryable: native.retryable,
       ...(native.mutationMayHaveApplied !== undefined
@@ -3472,7 +3584,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           ...(!native.ok
             ? {
                 error: {
-                  code: native.code,
+                  code: native.publicErrorCode ?? native.code,
                   message: native.message ?? "Operon rejected task adoption.",
                 },
                 retryable: native.retryable,
@@ -3821,7 +3933,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       requested,
       failureScope,
       prepare: async () => {
-        const runtime = await this.requireMutationRuntime("update");
+        const settleWaitMs = body.dryRun !== false ? DRY_RUN_SETTLE_WAIT_MS : 0;
+        const runtime = await this.requireMutationRuntime("update", settleWaitMs);
         if (!runtime.developerApi) {
           throw new OperonMutationCapabilityUnavailableError("update");
         }
@@ -3929,7 +4042,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         ...(!native.ok
           ? {
               error: {
-                code: native.code,
+                code: native.publicErrorCode ?? native.code,
                 message: native.message ?? `Operon rejected ${kind}.`,
               },
               retryable: native.retryable,
@@ -4321,7 +4434,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       requested,
       failureScope,
       prepare: async () => {
-        const runtime = await this.requireMutationRuntime(capability);
+        const settleWaitMs = body.dryRun !== false ? DRY_RUN_SETTLE_WAIT_MS : 0;
+        const runtime = await this.requireMutationRuntime(capability, settleWaitMs);
         const before = (await this.oneTask(operonId, true)).task;
         return before
           ? { kind: "ready", value: { runtime, before } }
@@ -4383,7 +4497,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           ...(!native.ok
             ? {
                 error: {
-                  code: native.code,
+                  code: native.publicErrorCode ?? native.code,
                   message:
                     native.message ?? "Operon rejected the mutation preview.",
                 },
@@ -4427,7 +4541,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           ...(native.planDigest ? { planDigest: native.planDigest } : {}),
           ...(native.nativeProof ? { nativeProof: native.nativeProof } : {}),
           error: {
-            code: native.code,
+            code: native.publicErrorCode ?? native.code,
             message: native.message ?? "Operon rejected the mutation.",
           },
           retryable: native.retryable,
@@ -4696,7 +4810,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           ...(!native.ok
             ? {
                 error: {
-                  code: native.code,
+                  code: native.publicErrorCode ?? native.code,
                   message:
                     native.message ??
                     "Operon rejected the task creation preview.",
@@ -4740,7 +4854,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           ...(native.recoveryRef ? { recoveryRef: native.recoveryRef } : {}),
           ...(native.planDigest ? { planDigest: native.planDigest } : {}),
           error: {
-            code: native.code,
+            code: native.publicErrorCode ?? native.code,
             message: native.message ?? "Operon rejected task creation.",
           },
           retryable: native.retryable,
@@ -4978,7 +5092,11 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
             "system.diagnostics",
             (adapter) => adapter.readDiagnostics(),
           );
-          sendJson(res, result.httpStatus, result.payload);
+          sendJson(
+            res,
+            result.httpStatus,
+            this.withBridgeSessionDiagnostics(result.payload),
+          );
         } catch (error) {
           sendJson(
             res,

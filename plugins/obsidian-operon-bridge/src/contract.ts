@@ -1008,8 +1008,22 @@ export function normalizeTask(options: {
 		operonVersion: options.operonVersion,
 		bridgeVersion: options.bridgeVersion,
 	};
+	// The revision fences the task the caller read, not the runtime that served
+	// it. Engine/Bridge versions, the 1-based line and the note mtime change
+	// without any change to this task (an upgrade, or an edit to a sibling task
+	// in the same note), which made every expectedRevision stale for reasons the
+	// caller cannot act on. Operon's own sealed plan still re-checks the live
+	// source and locator before any apply.
+	const {
+		operonVersion: _operonVersion,
+		bridgeVersion: _bridgeVersion,
+		sourceMtime: _sourceMtime,
+		line: _line,
+		sourceKind: _sourceKind,
+		...taskSemantics
+	} = normalized;
 	const revisionPayload = {
-		...normalized,
+		...taskSemantics,
 		properties: canonicalProperties ?? null,
 	};
 	return {
