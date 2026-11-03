@@ -58,6 +58,9 @@ const EXTENSION_ID = "optimike-operon-bridge";
 const REST_PREFIX = `/extensions/${EXTENSION_ID}/v1`;
 const LOCAL_REST_PLUGIN_ID = "obsidian-local-rest-api";
 const MUTATION_JOURNAL_VERSION = 2;
+// Bounded settle wait for dry-runs only (never for an apply).
+const DRY_RUN_SETTLE_WAIT_MS = 3_000;
+const DRY_RUN_SETTLE_POLL_MS = 250;
 const MUTATION_JOURNAL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const MUTATION_JOURNAL_LIMIT = 500;
 const MUTATION_JOURNAL_MAX_SERIALIZED_CHARS = 16 * 1024 * 1024;
@@ -1734,10 +1737,18 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
 
   private async requireSettledMutationIndex(
     runtime: OperonRuntime,
+    settleWaitMs = 0,
   ): Promise<void> {
-    const state = await this.indexState(runtime);
-    if (!this.isSettledRuntimeIndex(runtime, state)) {
-      throw new OperonIndexNotSettledError();
+    // A dry-run may wait a bounded moment for Operon to settle its index after
+    // a write (it never dispatches anything). An apply never waits here.
+    const deadline = Date.now() + Math.max(0, settleWaitMs);
+    for (;;) {
+      const state = await this.indexState(runtime);
+      if (this.isSettledRuntimeIndex(runtime, state)) return;
+      if (Date.now() >= deadline) throw new OperonIndexNotSettledError();
+      await new Promise<void>((resolve) => {
+        globalThis.setTimeout(resolve, DRY_RUN_SETTLE_POLL_MS);
+      });
     }
   }
 
@@ -3045,6 +3056,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
 
   private async requireMutationRuntime(
     capability: "adopt" | DeveloperApiMutationCapability,
+    settleWaitMs = 0,
   ): Promise<OperonRuntime> {
     if (!this.settings.mutationsEnabled) {
       throw new Error(
@@ -3053,7 +3065,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     }
     const runtime = this.requireRuntime();
     if (runtime.developerApi) {
-      await this.requireSettledMutationIndex(runtime);
+      await this.requireSettledMutationIndex(runtime, settleWaitMs);
       if (
         capability === "adopt" &&
         (!runtime.developerApi.hasTaskWorkflowCapability("adopt") ||
@@ -3921,7 +3933,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       requested,
       failureScope,
       prepare: async () => {
-        const runtime = await this.requireMutationRuntime("update");
+        const settleWaitMs = body.dryRun !== false ? DRY_RUN_SETTLE_WAIT_MS : 0;
+        const runtime = await this.requireMutationRuntime("update", settleWaitMs);
         if (!runtime.developerApi) {
           throw new OperonMutationCapabilityUnavailableError("update");
         }
@@ -4421,7 +4434,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       requested,
       failureScope,
       prepare: async () => {
-        const runtime = await this.requireMutationRuntime(capability);
+        const settleWaitMs = body.dryRun !== false ? DRY_RUN_SETTLE_WAIT_MS : 0;
+        const runtime = await this.requireMutationRuntime(capability, settleWaitMs);
         const before = (await this.oneTask(operonId, true)).task;
         return before
           ? { kind: "ready", value: { runtime, before } }

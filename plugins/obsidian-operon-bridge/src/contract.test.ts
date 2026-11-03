@@ -868,12 +868,12 @@ test("every replayable native mutation route coordinates before asynchronous rea
     [
       "executePeriodicUpdateMutation",
       "private async taskWorkflowMutationPayload(",
-      'requireMutationRuntime("update")',
+      'requireMutationRuntime("update", settleWaitMs)',
     ],
     [
       "executeExistingMutation",
       "private async executeCreateMutation(",
-      "requireMutationRuntime(capability)",
+      "requireMutationRuntime(capability, settleWaitMs)",
     ],
     [
       "executeCreateMutation",

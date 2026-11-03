@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   genericDateScheduledBoundaryError,
   consentRefusalCode,
+  developerContextKey,
   genericMutationSnapshot,
   OperonDeveloperApiRuntimeAdapter,
 } from "./developer-api-adapter";
@@ -2909,4 +2910,122 @@ test("Operon consent refusals map to actionable public codes", () => {
   );
   assert.equal(consentRefusalCode({ code: "stale-source" }), undefined);
   assert.equal(consentRefusalCode(undefined), undefined);
+});
+test("an unchanged Operon context revision reuses the task snapshot; a moved one re-reads", async () => {
+  let generation = 40;
+  let queryCalls = 0;
+  let catalogCalls = 0;
+  let releaseHealth: (() => void) | null = null;
+  let holdHealth = false;
+  const revision = () => ({
+    index: { sessionId: "runtime-a", ramGeneration: generation },
+    settingsFingerprint: "settings-a",
+    pinnedGeneration: 0,
+  });
+  const api = {
+    hasCapability: (name: string) =>
+      [
+        "system.health",
+        "system.capabilities",
+        "catalog.read",
+        "tasks.read",
+        "tasks.query",
+      ].includes(name),
+    channel: { status: readyStatus },
+    system: {
+      health: async () => {
+        if (holdHealth) await new Promise<void>((done) => (releaseHealth = done));
+        return { ok: true, lifecyclePhase: "ready", contextRevision: revision() };
+      },
+      capabilities: () => [],
+      diagnostics: async () => ({}),
+    },
+    catalog: {
+      snapshot: async () => {
+        catalogCalls++;
+        return {
+          ok: true,
+          settingsFingerprint: "settings-a",
+          taxonomy: {
+            defaultPipeline: { id: "pipeline-project", configuredValue: "Project" },
+            pipelines: [
+              { id: "pipeline-project", name: "Project", statuses: [{ id: "status-planned", label: "Planned" }] },
+            ],
+            priorities: [{ id: "priority-a", label: "A", isDefault: true }],
+          },
+          fields: [],
+          policies: { creation: { inlineTaskSaveMode: "active-file", defaultToFileTask: false } },
+        };
+      },
+    },
+    tasks: {
+      query: async () => {
+        queryCalls++;
+        return {
+          ok: true,
+          tasks: [
+            {
+              identity: { operonId: "abc1234" },
+              description: `Ship bridge ${generation}`,
+              representation: "inline",
+              locator: { representation: "inline", filePath: "Projects/Bridge.md", lineNumber: 4 },
+              checkbox: "open",
+              workflow: {
+                pipeline: { id: "pipeline-project", label: "Project" },
+                status: { id: "status-planned", label: "Planned" },
+              },
+            },
+          ],
+          page: { nextCursor: undefined },
+          contextRevision: revision(),
+        };
+      },
+    },
+  };
+  const operon = { getDeveloperApiV1: () => ({ ok: true, status: readyStatus(), api }) };
+  const adapter = new OperonDeveloperApiRuntimeAdapter(consumer, operon);
+
+  assert.equal(await adapter.refresh(), true);
+  assert.equal(queryCalls, 1);
+  assert.equal(catalogCalls, 1);
+  // Same context revision: no catalog or task re-read.
+  assert.equal(await adapter.refresh(), true);
+  assert.equal(queryCalls, 1);
+  assert.equal(catalogCalls, 1);
+  assert.equal(adapter.hasReadCapability("tasks.finder"), false);
+
+  // While a refresh is awaiting Operon, the established read session stays
+  // usable (no fail-open window for concurrent requests).
+  holdHealth = true;
+  const inFlight = adapter.refresh();
+  await new Promise((done) => setTimeout(done, 0));
+  assert.notEqual((adapter as any).readApi, null);
+  holdHealth = false;
+  generation = 41;
+  (releaseHealth as (() => void) | null)?.();
+  assert.equal(await inFlight, true);
+  // The generation moved: the snapshot is re-read.
+  assert.equal(queryCalls, 2);
+  assert.equal(catalogCalls, 2);
+  assert.equal(adapter.indexer.getTask("abc1234")?.description, "Ship bridge 41");
+});
+
+test("developerContextKey refuses to vouch for an incomplete context revision", () => {
+  assert.equal(developerContextKey(undefined), null);
+  assert.equal(developerContextKey({ index: { ramGeneration: 3 } }), null);
+  assert.equal(
+    developerContextKey({ index: { sessionId: "s", ramGeneration: 3 } }),
+    null,
+  );
+  const a = developerContextKey({
+    index: { sessionId: "s", ramGeneration: 3 },
+    settingsFingerprint: "f",
+  });
+  const b = developerContextKey({
+    index: { sessionId: "s", ramGeneration: 3 },
+    settingsFingerprint: "f",
+    activeTrackerGeneration: 1,
+  });
+  assert.equal(typeof a, "string");
+  assert.notEqual(a, b);
 });

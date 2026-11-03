@@ -1435,3 +1435,35 @@ test("an elevated plan without visible consent is reported as consent_required",
   assert.equal(denied.error.code, "consent_denied");
   assert.equal(denied.retryable, false);
 });
+test("only a dry-run waits, bounded, for Operon to settle its index", async () => {
+  const Bridge = (await bridgeModule()).default as { prototype: any };
+  const settle = Bridge.prototype.requireSettledMutationIndex as (
+    runtime: unknown,
+    waitMs?: number,
+  ) => Promise<void>;
+  const host = (settledAfter: number) => {
+    let calls = 0;
+    return {
+      calls: () => calls,
+      indexState: async () => {
+        calls++;
+        return { ready: calls > settledAfter, diagnostics: null };
+      },
+      isSettledRuntimeIndex: (_r: unknown, state: { ready: boolean }) =>
+        state.ready,
+    };
+  };
+  // Apply path (no wait): fails closed on the first unsettled read.
+  const apply = host(1);
+  await assert.rejects(settle.call(apply, {}, 0), /not settled/u);
+  assert.equal(apply.calls(), 1);
+  // Dry-run path: retries until settled within the bound.
+  const dry = host(2);
+  await settle.call(dry, {}, 3_000);
+  assert.equal(dry.calls(), 3);
+  // Dry-run path: still fails closed when the bound is exhausted.
+  const never = host(1_000);
+  const started = Date.now();
+  await assert.rejects(settle.call(never, {}, 600), /not settled/u);
+  assert.ok(Date.now() - started < 2_000);
+});
