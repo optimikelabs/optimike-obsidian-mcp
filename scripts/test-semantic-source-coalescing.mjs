@@ -19,12 +19,12 @@ try{
   service.db.prepare('DELETE FROM semantic_manifest').run();service.db.prepare('DELETE FROM semantic_vectors').run();service.forceRefresh();let calls=0,starts=0;
   const load=service.loadSource.bind(service);service.loadSource=(...args)=>{calls++;const before=service.pendingSource;const result=load(...args);if(service.pendingSource!==before)starts++;return result;};
   const query=()=>service.getSnapshot(),probe=()=>service.probeReadiness();await Promise.all(order==='query-first'?[query(),probe()]:[probe(),query()]);
-  assert.equal(calls,2);assert.equal(starts,1,'probe and query share one read in '+order);assert.equal(service.getStats().manifest.vectorCount,1);service.loadSource=load;
+  assert.equal(calls,order==='query-first'?1:2,'a probe joins an in-flight query snapshot; a query joins an in-flight probe read');assert.equal(starts,1,'probe and query share one read in '+order);assert.equal(service.getStats().manifest.vectorCount,1);service.loadSource=load;
  }
  service.db.prepare('DELETE FROM semantic_manifest').run();service.forceRefresh();
  const oldGeneration=service.refreshGeneration,actualLoad=service.loadSource.bind(service);let releaseOld,entered=0,enteredBoth;
  const gate=new Promise(r=>releaseOld=r),both=new Promise(r=>enteredBoth=r);
- service.loadSource=async (generation,...rest)=>{if(generation===oldGeneration){if(++entered===2)enteredBoth();await gate;return [{notePath:'Stale.md',vec:[1]}];}return actualLoad(generation,...rest);};
+ service.loadSource=async (generation,...rest)=>{if(generation===oldGeneration){if(++entered===1)enteredBoth();await gate;return [{notePath:'Stale.md',vec:[1]}];}return actualLoad(generation,...rest);};
  const inFlight=[service.getSnapshot(),service.probeReadiness()];await both;
  await writeFile(path.join(source,'vectors.json'),JSON.stringify([{path:'Fresh.md',embedding:[0.9,0.1]}]),'utf8');service.forceRefresh();releaseOld();
  const [refreshed,observed]=await Promise.all(inFlight);assert.equal(refreshed.items[0].notePath,'Fresh.md');assert.deepEqual(refreshed.items[0].vec,[0.9,0.1]);assert.equal(observed.dominantDimension,2);assert.equal(service.getStats().manifest.vectorCount,1);service.loadSource=actualLoad;

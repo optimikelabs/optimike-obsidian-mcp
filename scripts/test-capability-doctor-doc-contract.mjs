@@ -50,6 +50,8 @@ for (const [label, document] of [
     "write_policy_blocked",
     "semantic_query_embedding_disabled",
     "semantic_index_unavailable",
+    "semantic_index_loading",
+    "wait_for_semantic_index",
     "semantic_probe_timed_out",
     "retry_capability_probe",
     "refresh_semantic_index",

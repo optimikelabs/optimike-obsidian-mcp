@@ -27,6 +27,8 @@ import { detectSmartEnvQueryProvider } from "./smartEnvV3.js";
 
 export const CAPABILITY_MANIFEST_CONTRACT_VERSION = 1 as const;
 export const CAPABILITY_PROBE_TIMEOUT_MS = 2_500;
+/** A semantic cache load older than this is reported as a probe timeout. */
+export const SEMANTIC_INITIAL_LOAD_GRACE_MS = 120_000;
 
 export type CapabilityId =
   | "local-rest"
@@ -68,6 +70,7 @@ export type CapabilityReasonCode =
   | "semantic_query_embedding_disabled"
   | "semantic_index_unavailable"
   | "semantic_probe_timed_out"
+  | "semantic_index_loading"
   | "semantic_embedder_unavailable"
   | "semantic_query_unverified"
   | "bridge_unavailable"
@@ -105,6 +108,7 @@ export type CapabilityNextAction =
   | "enable_query_embedding"
   | "refresh_semantic_index"
   | "retry_capability_probe"
+  | "wait_for_semantic_index"
   | "configure_query_embedder"
   | "run_semantic_search"
   | "install_or_enable_bridge"
@@ -191,6 +195,12 @@ export interface CapabilityManifestProjectionInput {
     embedderReady: boolean;
     queryUnverified?: boolean;
   }>;
+  /** Set only when the semantic probe timed out while the cache was still loading. */
+  semanticIndexLoading?: {
+    persistedVectorCount: number;
+    /** Query provider checked independently of the load; "unknown" if that check did not finish. */
+    queryProvider: "verified" | "unverified" | "unusable" | "unknown";
+  };
   operonMutationsEnabled: boolean;
   writeMode: "readonly" | "guarded" | "full";
   operonAllowedPathPrefixesConfigured: boolean;
@@ -217,6 +227,16 @@ export interface CapabilityProbeDependencies {
     embedderReady: boolean;
     queryUnverified?: boolean;
   }>;
+  semanticLoading?: () => {
+    startedAt: number;
+    persistedVectorCount: number;
+    dominantModel?: string;
+    dominantDimension?: number;
+  } | null;
+  semanticQueryProvider?: (
+    dominantModel: string | undefined,
+    dominantDimension: number | undefined,
+  ) => Promise<"verified" | "unverified" | "unusable">;
   atomicWrite?: () => Promise<AtomicWriteStatusResponse>;
   baseAtomicWrite?: () => Promise<BaseAtomicStatusResponse>;
   operon?: () => Promise<Record<string, unknown>>;
@@ -522,6 +542,34 @@ function semanticCapability(
       false,
       "semantic_query_embedding_disabled",
       "enable_query_embedding",
+    );
+  }
+  if (input.semanticIndex.state === "timed_out" && input.semanticIndexLoading) {
+    // The cache is still loading and a query waits for that load. Usable
+    // (degraded) only with two pieces of evidence: an index this cache already
+    // validated and persisted, and a query provider that can be built now.
+    const { persistedVectorCount, queryProvider } = input.semanticIndexLoading;
+    if (persistedVectorCount > 0 && queryProvider === "unusable") {
+      return entry(
+        input,
+        "semantic-search",
+        false,
+        false,
+        "semantic_embedder_unavailable",
+        "configure_query_embedder",
+      );
+    }
+    const usable =
+      persistedVectorCount > 0 &&
+      (queryProvider === "verified" || queryProvider === "unverified");
+    return entry(
+      input,
+      "semantic-search",
+      usable,
+      usable,
+      "semantic_index_loading",
+      "wait_for_semantic_index",
+      usable,
     );
   }
   if (input.semanticIndex.state === "timed_out") {
@@ -1258,6 +1306,51 @@ export function resolveToolRegistrationMode(
   return config.obsidianRuntimeMode;
 }
 
+/**
+ * Whether a query embedder can be built from the current non-secret
+ * configuration for the vault's model; never sends an embedding request.
+ */
+async function queryProviderHealth(
+  dominantModel: string | undefined,
+  dominantDimension: number | undefined,
+): Promise<"verified" | "unverified" | "unusable"> {
+  try {
+    const selection = await getQueryEmbedder({
+      provider: config.queryEmbedder,
+      modelHint: config.queryEmbedderModelHint,
+      model: config.queryEmbedderModel,
+      vaultModel: dominantModel,
+      vaultProvider: config.smartEnvDir
+        ? await detectSmartEnvQueryProvider(config.smartEnvDir, dominantModel)
+        : undefined,
+      dimension: dominantDimension,
+      ollamaBaseUrl:
+        config.ollamaBaseUrl?.trim() ||
+        (config.smartEnvDir
+          ? await detectOllamaBaseUrlFromSmartEnv(
+              config.smartEnvDir,
+              dominantModel,
+            )
+          : undefined),
+      openaiApiKey: config.openaiApiKey,
+      openaiBaseUrl: config.openaiBaseUrl,
+      openaiDimensions: Number.isFinite(
+        Number(config.openaiEmbeddingDimensions),
+      )
+        ? Number(config.openaiEmbeddingDimensions)
+        : undefined,
+    });
+    const health = semanticSearchHealth(selection.embed, dominantDimension ?? 0);
+    return health === "verified"
+      ? "verified"
+      : health === "unverified"
+        ? "unverified"
+        : "unusable";
+  } catch {
+    return "unusable";
+  }
+}
+
 export async function collectCapabilityManifest(options: {
   profile: ToolProfileId;
   registrationMode: ToolRegistrationMode;
@@ -1326,47 +1419,15 @@ export async function collectCapabilityManifest(options: {
       ? (options.probes?.semanticIndex ??
         (async () => {
           const readiness = await getSemanticCacheService().probeReadiness();
-          try {
-            const selection = await getQueryEmbedder({
-              provider: config.queryEmbedder,
-              modelHint: config.queryEmbedderModelHint,
-              model: config.queryEmbedderModel,
-              vaultModel: readiness.dominantModel,
-              vaultProvider: config.smartEnvDir
-                ? await detectSmartEnvQueryProvider(
-                    config.smartEnvDir,
-                    readiness.dominantModel,
-                  )
-                : undefined,
-              dimension: readiness.dominantDimension,
-              ollamaBaseUrl:
-                config.ollamaBaseUrl?.trim() ||
-                (config.smartEnvDir
-                  ? await detectOllamaBaseUrlFromSmartEnv(
-                      config.smartEnvDir,
-                      readiness.dominantModel,
-                    )
-                  : undefined),
-              openaiApiKey: config.openaiApiKey,
-              openaiBaseUrl: config.openaiBaseUrl,
-              openaiDimensions: Number.isFinite(
-                Number(config.openaiEmbeddingDimensions),
-              )
-                ? Number(config.openaiEmbeddingDimensions)
-                : undefined,
-            });
-            const health = semanticSearchHealth(
-              selection.embed,
-              readiness.dominantDimension ?? 0,
-            );
-            return {
-              ...readiness,
-              embedderReady: health === "verified",
-              queryUnverified: health === "unverified",
-            };
-          } catch {
-            return { ...readiness, embedderReady: false };
-          }
+          const provider = await queryProviderHealth(
+            readiness.dominantModel,
+            readiness.dominantDimension,
+          );
+          return {
+            ...readiness,
+            embedderReady: provider === "verified",
+            queryUnverified: provider === "unverified",
+          };
         }))
       : undefined;
   const unavailable = Promise.resolve<NormalizedProbe<never>>({
@@ -1380,6 +1441,40 @@ export async function collectCapabilityManifest(options: {
       baseAtomicWriteProbe ? probe(baseAtomicWriteProbe) : unavailable,
       probe(operonProbe),
     ]);
+  // A probe that lost the race against a cold cache load is not a failure:
+  // report the load while it is recent, and a timeout once it is stale.
+  let semanticIndexLoading:
+    | CapabilityManifestProjectionInput["semanticIndexLoading"]
+    | undefined;
+  if (semanticIndexProbe && semanticIndex.state === "timed_out") {
+    let loading: ReturnType<
+      NonNullable<CapabilityProbeDependencies["semanticLoading"]>
+    > | undefined;
+    try {
+      loading = options.probes?.semanticIndex
+        ? options.probes.semanticLoading?.()
+        : getSemanticCacheService().loadInProgress();
+    } catch {
+      loading = undefined;
+    }
+    if (
+      loading &&
+      Date.now() - loading.startedAt < SEMANTIC_INITIAL_LOAD_GRACE_MS
+    ) {
+      const checkProvider = options.probes?.semanticIndex
+        ? options.probes.semanticQueryProvider
+        : queryProviderHealth;
+      const provider = checkProvider
+        ? await probe(() =>
+            checkProvider(loading.dominantModel, loading.dominantDimension),
+          )
+        : undefined;
+      semanticIndexLoading = {
+        persistedVectorCount: loading.persistedVectorCount,
+        queryProvider: provider?.state === "ready" ? provider.value : "unknown",
+      };
+    }
+  }
   const unavailableGovernedNames = new Set<string>([
     ...(!options.governedRuntimes.note
       ? [
@@ -1418,6 +1513,7 @@ export async function collectCapabilityManifest(options: {
     semanticEnabled,
     queryEmbeddingEnabled: config.enableQueryEmbedding,
     semanticIndex,
+    semanticIndexLoading,
     operonMutationsEnabled: config.operonMutationsEnabled,
     writeMode: config.mcpWriteMode,
     operonAllowedPathPrefixesConfigured:

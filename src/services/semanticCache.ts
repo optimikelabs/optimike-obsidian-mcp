@@ -226,6 +226,9 @@ export class SemanticCacheService {
     dominantModel?: string;
     dominantDimension?: number;
   }> | null = null;
+  // Start of the oldest snapshot refresh or readiness validation still in
+  // flight; null when none is running.
+  private loadStartedAt: number | null = null;
 
   constructor(
     private readonly smartEnvDir: string,
@@ -259,13 +262,43 @@ export class SemanticCacheService {
 
     // All concurrent callers share one refresh, including its failure.
     if (this.pendingSnapshot) return this.pendingSnapshot;
+    this.loadStartedAt ??= now;
     const pending = this.refreshSnapshot(context);
     this.pendingSnapshot = pending;
     try {
       return await pending;
     } finally {
       if (this.pendingSnapshot === pending) this.pendingSnapshot = null;
+      this.releaseLoadMarker();
     }
+  }
+
+  private releaseLoadMarker(): void {
+    if (!this.pendingSnapshot && !this.pendingReadiness)
+      this.loadStartedAt = null;
+  }
+
+  /**
+   * Observational view of a load still in flight, for capability inspection.
+   * It never starts a load. persistedVectorCount comes from the manifest of
+   * the last snapshot this cache persisted for the same Smart Env directory:
+   * evidence that an index was already validated, not a new validation.
+   */
+  public loadInProgress(): {
+    startedAt: number;
+    persistedVectorCount: number;
+    dominantModel?: string;
+    dominantDimension?: number;
+  } | null {
+    if (this.loadStartedAt === null) return null;
+    const manifest = this.readManifest();
+    const own = manifest && manifest.smart_env_dir === this.smartEnvDir;
+    return {
+      startedAt: this.loadStartedAt,
+      persistedVectorCount: own ? Number(manifest.vector_count) || 0 : 0,
+      dominantModel: own ? (manifest.dominant_model ?? undefined) : undefined,
+      dominantDimension: own ? (manifest.dominant_dim ?? undefined) : undefined,
+    };
   }
 
   private async refreshSnapshot(
@@ -348,13 +381,26 @@ export class SemanticCacheService {
       now - this.readiness.observedAt < Math.min(this.ttlMs || 60_000, 60_000)
     )
       return { ...this.readiness.value };
+    // A query already loading the snapshot (the startup prewarm, typically)
+    // answers the probe too: one cache decode or source read instead of two.
+    // The probe itself still writes nothing.
+    if (this.pendingSnapshot) {
+      const snapshot = await this.pendingSnapshot;
+      return this.projectReadiness(
+        snapshot.items,
+        snapshot.dominantModel,
+        snapshot.dominantDim,
+      );
+    }
     if (this.pendingReadiness) return { ...(await this.pendingReadiness) };
+    this.loadStartedAt ??= now;
     const pending = this.validateReadiness();
     this.pendingReadiness = pending;
     try {
       return { ...(await pending) };
     } finally {
       if (this.pendingReadiness === pending) this.pendingReadiness = null;
+      this.releaseLoadMarker();
     }
   }
 
