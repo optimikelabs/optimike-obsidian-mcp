@@ -142,6 +142,24 @@ try {
     assert.equal(observed.vectorCount, 1);
     assert.equal(service.loadInProgress(), null, "the load marker is released");
     service.loadSource = actualLoad;
+
+    // Warm database, cold memory (a restart): the startup query and a probe
+    // share one cache decode instead of two.
+    await service.getSnapshot();
+    service.forceRefresh();
+    let decodes = 0;
+    const decode = service.loadSnapshotFromDb.bind(service);
+    service.loadSnapshotFromDb = (manifest) => {
+      decodes += 1;
+      return decode(manifest);
+    };
+    const [snapshot, joined] = await Promise.all([
+      service.getSnapshot(),
+      service.probeReadiness(),
+    ]);
+    assert.equal(decodes, 1, "the probe joins the in-flight query snapshot");
+    assert.equal(joined.vectorCount, snapshot.items.length);
+    service.loadSnapshotFromDb = decode;
   } finally {
     service.db.close();
   }

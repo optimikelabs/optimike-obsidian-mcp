@@ -376,6 +376,17 @@ export class SemanticCacheService {
       now - this.readiness.observedAt < Math.min(this.ttlMs || 60_000, 60_000)
     )
       return { ...this.readiness.value };
+    // A query already loading the snapshot (the startup prewarm, typically)
+    // answers the probe too: one cache decode or source read instead of two.
+    // The probe itself still writes nothing.
+    if (this.pendingSnapshot) {
+      const snapshot = await this.pendingSnapshot;
+      return this.projectReadiness(
+        snapshot.items,
+        snapshot.dominantModel,
+        snapshot.dominantDim,
+      );
+    }
     if (this.pendingReadiness) return { ...(await this.pendingReadiness) };
     this.loadStartedAt ??= now;
     const pending = this.validateReadiness();
