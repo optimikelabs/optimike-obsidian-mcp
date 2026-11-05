@@ -1,0 +1,153 @@
+#!/usr/bin/env node
+
+// End to end through the real server process (dist/index.js, stdio,
+// headless-filesystem) on temporary vaults: server instructions, a refused
+// direct write, read proofs through obsidian_read_note, a rule edited on disk
+// during the session, and the off / no-AGENTS.md cases.
+
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+
+const tempRoot = mkdtempSync(path.join(tmpdir(), "optimike-vault-instructions-e2e-"));
+
+function vault(files) {
+  const root = mkdtempSync(path.join(tempRoot, "vault-"));
+  for (const [relative, content] of Object.entries(files)) writeVault(root, relative, content);
+  return root;
+}
+function writeVault(root, relative, content) {
+  const absolute = path.join(root, ...relative.split("/"));
+  mkdirSync(path.dirname(absolute), { recursive: true });
+  writeFileSync(absolute, content, "utf8");
+}
+
+async function start(root, mode) {
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: ["dist/index.js"],
+    cwd: process.cwd(),
+    stderr: "pipe",
+    env: {
+      ...process.env,
+      OBSIDIAN_RUNTIME_MODE: "headless-filesystem",
+      OBSIDIAN_VAULT: root,
+      OBSIDIAN_CACHE_SOURCE: "filesystem",
+      OBSIDIAN_SHARED_CACHE_DB_PATH: path.join(root, "..", `${path.basename(root)}-cache.sqlite`),
+      OBSIDIAN_ENABLE_CACHE: "true",
+      OBSIDIAN_API_KEY: "",
+      OBSIDIAN_BASE_URL: "http://127.0.0.1:9",
+      MCP_WRITE_MODE: "guarded",
+      MCP_VAULT_INSTRUCTIONS: mode,
+      MCP_VAULT_INSTRUCTIONS_JOURNAL_PATH: path.join(root, "..", `${path.basename(root)}-seals.sqlite`),
+      SEMANTIC_SEARCH_PREWARM: "false",
+      MCP_TRANSPORT_TYPE: "stdio",
+      MCP_TOOL_PROFILE: "full",
+      MCP_LOG_LEVEL: "error",
+    },
+  });
+  const client = new Client({ name: "vault-instructions-e2e", version: "0" });
+  await client.connect(transport);
+  await new Promise((resolve) => setTimeout(resolve, 750));
+  return {
+    client,
+    async append(text) {
+      const result = await client.callTool({
+        name: "obsidian_update_note",
+        arguments: {
+          targetType: "filePath",
+          targetIdentifier: "Projects/Note.md",
+          modificationType: "wholeFile",
+          wholeFileMode: "append",
+          content: text,
+        },
+      });
+      let json;
+      try {
+        json = JSON.parse(result.content?.[0]?.text);
+      } catch {
+        json = undefined;
+      }
+      return { result, json };
+    },
+    read(filePath) {
+      return client.callTool({ name: "obsidian_read_note", arguments: { filePath } });
+    },
+    close: () => client.close(),
+  };
+}
+
+const RULES = "# Vault\nRead me first.\n";
+const LOCAL = "# Projects\nKeep project notes short.\n";
+
+try {
+  // enforce, with a cascade
+  const root = vault({ "AGENTS.md": RULES, "Projects/AGENTS.md": LOCAL, "Projects/Note.md": "start\n" });
+  const note = path.join(root, "Projects", "Note.md");
+  const server = await start(root, "enforce");
+  const instructions = server.client.getInstructions();
+  assert.match(instructions ?? "", /AGENTS\.md/u, "server instructions announce the vault rules");
+  assert.match(instructions, /vault_instructions_unread/u);
+  assert.doesNotMatch(instructions, /Read me first/u);
+
+  const refused = await server.append("\nfirst");
+  assert.equal(refused.result.isError, true);
+  assert.equal(refused.json.error.details.reasonCode, "vault_instructions_unread");
+  assert.deepEqual(refused.json.vaultInstructions.files.map((entry) => [entry.path, entry.state]), [
+    ["AGENTS.md", "unread"],
+    ["Projects/AGENTS.md", "unread"],
+  ]);
+  assert.equal(readFileSync(note, "utf8"), "start\n", "nothing was written");
+
+  await server.read("AGENTS.md");
+  const stillRefused = await server.append("\nfirst");
+  assert.deepEqual(stillRefused.json.vaultInstructions.nextActions, [
+    { tool: "obsidian_read_note", arguments: { filePath: "Projects/AGENTS.md" } },
+  ]);
+  await server.read("Projects/AGENTS.md");
+  const written = await server.append("\nfirst");
+  assert.equal(written.result.isError, false, JSON.stringify(written.result));
+  assert.match(readFileSync(note, "utf8"), /first/u);
+
+  writeVault(root, "Projects/AGENTS.md", `${LOCAL}New rule.\n`);
+  const changed = await server.append("\nsecond");
+  assert.equal(changed.json.error.details.reasonCode, "vault_instructions_unread");
+  assert.deepEqual(
+    changed.json.vaultInstructions.files.filter((entry) => entry.state !== "read").map((entry) => [entry.path, entry.state]),
+    [["Projects/AGENTS.md", "changed"]],
+  );
+  const reread = await server.read("Projects/AGENTS.md");
+  assert.match(reread.content[0].text, /New rule/u, "the read serves the edited file, not a stale cache");
+  const second = await server.append("\nsecond");
+  assert.equal(second.result.isError, false);
+  await server.close();
+
+  // off: unchanged behaviour, no instructions
+  const offRoot = vault({ "AGENTS.md": RULES, "Projects/AGENTS.md": LOCAL, "Projects/Note.md": "start\n" });
+  const off = await start(offRoot, "off");
+  assert.equal(off.client.getInstructions(), undefined);
+  const offWrite = await off.append("\nfree");
+  assert.equal(offWrite.result.isError, false);
+  assert.equal(offWrite.json?.vaultInstructions, undefined);
+  await off.close();
+
+  // enforce on a vault without any AGENTS.md: unchanged behaviour
+  const plainRoot = vault({ "Projects/Note.md": "start\n" });
+  const plain = await start(plainRoot, "enforce");
+  assert.equal(plain.client.getInstructions(), undefined);
+  const plainWrite = await plain.append("\nfree");
+  assert.equal(plainWrite.result.isError, false);
+  assert.equal(plainWrite.json?.vaultInstructions, undefined);
+  await plain.close();
+
+  console.log("vault instructions end-to-end test passed");
+} finally {
+  try {
+    rmSync(tempRoot, { recursive: true, force: true });
+  } catch {
+    // A temporary folder left behind is harmless.
+  }
+}
