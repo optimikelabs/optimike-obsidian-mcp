@@ -4,6 +4,7 @@ on:
     paths:
       - 'src/**'
       - 'scripts/test-vault-instructions*.mjs'
+      - 'docs/vault-instructions*.md'
       - 'package*.json'
       - '.github/workflows/vault-instructions.yml'
 permissions:
