@@ -57,7 +57,33 @@ export type HttpRequestState = {
   correlationId?: string;
   incidentId?: string;
   admission?: HttpAdmissionState;
+  /** Client choice of vault-instructions mode (validated closed value). */
+  vaultInstructionsMode?: "off" | "advise" | "enforce";
+  /** Opaque client reader context (validated shape), never an identity. */
+  readerContext?: string;
 };
+
+export const VAULT_INSTRUCTIONS_MODE_HEADER = "x-optimike-vault-instructions";
+export const READER_CONTEXT_HEADER = "x-optimike-reader-context";
+
+function clientHints(
+  request: Request,
+): Pick<HttpRequestState, "vaultInstructionsMode" | "readerContext"> {
+  const hints: Pick<HttpRequestState, "vaultInstructionsMode" | "readerContext"> = {};
+  try {
+    const mode = request.headers?.get(VAULT_INSTRUCTIONS_MODE_HEADER)?.trim();
+    if (mode === "off" || mode === "advise" || mode === "enforce") {
+      hints.vaultInstructionsMode = mode;
+    }
+    const reader = request.headers?.get(READER_CONTEXT_HEADER)?.trim();
+    if (reader && /^[A-Za-z0-9_-]{16,128}$/u.test(reader)) {
+      hints.readerContext = reader;
+    }
+  } catch {
+    // Invalid or unreadable hints are ignored: the server default applies.
+  }
+  return hints;
+}
 
 const requestStates = new WeakMap<Request, HttpRequestState>();
 const activeHttpRequestState = new AsyncLocalStorage<HttpRequestState>();
@@ -71,6 +97,7 @@ export function getHttpRequestState(request: Request): HttpRequestState {
     startedAt: Date.now(),
     trustedProxyHeaders: false,
     quotas: [],
+    ...clientHints(request),
   };
   requestStates.set(request, created);
   return created;
@@ -100,4 +127,25 @@ export function withActiveHttpRequestState<T>(
  */
 export function activeHttpRequestId(): string | undefined {
   return activeHttpRequestState.getStore()?.requestId;
+}
+
+/**
+ * Vault-instructions hints of the Streamable HTTP request being dispatched:
+ * the verified identity key (never a raw token), the client's mode choice and
+ * reader context. `undefined` outside HTTP (stdio, in-memory).
+ */
+export function activeHttpVaultInstructionsHints():
+  | {
+      identityKey?: string;
+      vaultInstructionsMode?: "off" | "advise" | "enforce";
+      readerContext?: string;
+    }
+  | undefined {
+  const state = activeHttpRequestState.getStore();
+  if (!state) return undefined;
+  return {
+    identityKey: state.identity?.key,
+    vaultInstructionsMode: state.vaultInstructionsMode,
+    readerContext: state.readerContext,
+  };
 }

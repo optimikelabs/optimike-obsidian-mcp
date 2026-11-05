@@ -7,6 +7,7 @@ import path, { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { z } from "zod/v3";
 import { parseVaultExcludePatterns } from "../services/vaultExclusions.js";
+import { parseVaultInstructionFileNames } from "../services/vaultInstructionsNames.js";
 
 dotenv.config();
 
@@ -173,6 +174,24 @@ const EnvSchema = z
       // unavailable/degraded state until Local REST becomes reachable.
       .default("false"),
     MCP_EXTERNAL_ROOTS_FILE: z.string().optional(),
+    // Vault agent instructions (AGENTS.md cascade). The mode is this server's
+    // default; a client may choose another one per request (stdio proxy
+    // header), never below the administrative minimum.
+    MCP_VAULT_INSTRUCTIONS: z.enum(["off", "advise", "enforce"]).default("advise"),
+    MCP_VAULT_INSTRUCTIONS_MIN: z.enum(["off", "advise", "enforce"]).default("off"),
+    MCP_VAULT_INSTRUCTIONS_FILES: z
+      .string()
+      .default("AGENTS.md")
+      .superRefine((raw, ctx) => {
+        if (parseVaultInstructionFileNames(raw) === undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message:
+              "MCP_VAULT_INSTRUCTIONS_FILES must list 1 to 8 plain file names separated by commas.",
+          });
+        }
+      }),
+    MCP_VAULT_INSTRUCTIONS_JOURNAL_PATH: z.string().optional(),
     MCP_ASSET_FOLDER: z.string().min(1).max(800).optional(),
     MCP_ASSET_IMPORT_ENABLED: z.enum(["true", "false"]).default("false").transform(v => v === "true"),
     MCP_ASSET_CHATGPT_FILE_INGRESS_ENABLED: z
@@ -552,6 +571,21 @@ export const config = {
   obsidianStartupRetryDelayMs: env.OBSIDIAN_STARTUP_RETRY_DELAY_MS,
   obsidianStartupBlocking: env.OBSIDIAN_STARTUP_BLOCKING,
   externalRootsFile: env.MCP_EXTERNAL_ROOTS_FILE,
+  vaultInstructionsMode: env.MCP_VAULT_INSTRUCTIONS,
+  vaultInstructionsMinimumMode: env.MCP_VAULT_INSTRUCTIONS_MIN,
+  vaultInstructionsFiles: parseVaultInstructionFileNames(
+    env.MCP_VAULT_INSTRUCTIONS_FILES,
+  )!,
+  vaultInstructionsJournalPath:
+    env.MCP_VAULT_INSTRUCTIONS_JOURNAL_PATH ||
+    path.join(
+      process.env.LOCALAPPDATA ||
+        process.env.XDG_STATE_HOME ||
+        path.join(os.homedir(), ".local", "state"),
+      "optimike-obsidian-mcp",
+      `vault-instructions-${noteReplaceProfileId}.sqlite`,
+    ),
+  vaultInstructionsVaultId: noteReplaceProfileId,
   assetFolder: env.MCP_ASSET_FOLDER,
   assetImportEnabled: env.MCP_ASSET_IMPORT_ENABLED,
   assetChatgptFileIngressEnabled: env.MCP_ASSET_CHATGPT_FILE_INGRESS_ENABLED,

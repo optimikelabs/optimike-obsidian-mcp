@@ -994,8 +994,10 @@ export async function startHttpTransport(
       };
 
       try {
-        const server = await withToolProfileContext(toolProfile, () =>
-          createServerInstanceFn(),
+        // The request state carries the client's vault-instructions choice,
+        // which shapes the server instructions returned by this initialize.
+        const server = await withActiveHttpRequestState(c.req.raw, () =>
+          withToolProfileContext(toolProfile, () => createServerInstanceFn()),
         );
         await server.connect(newTransport);
         transport = newTransport;

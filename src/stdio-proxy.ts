@@ -28,6 +28,10 @@ import {
   type StdioServerHandle,
 } from "@modelcontextprotocol/server/stdio";
 import { mcpProtocolMode } from "./mcp-server/protocolMode.js";
+import {
+  READER_CONTEXT_HEADER,
+  VAULT_INSTRUCTIONS_MODE_HEADER,
+} from "./mcp-server/transports/httpRequestState.js";
 import { Server, SdkHttpError } from "@modelcontextprotocol/server";
 import {
   Client,
@@ -192,6 +196,13 @@ const port = Number(process.env.MCP_HTTP_PORT || "3010");
 const backendUrl = new URL(`http://${host}:${port}/mcp/full`);
 const healthUrl = new URL(`http://${host}:${port}/healthz`);
 const backendBearerToken = process.env.MCP_BACKEND_BEARER_TOKEN?.trim();
+// This client's vault-instructions choice travels to the shared backend as a
+// per-request header; it is never inherited by a backend this proxy starts.
+// The configuration module has already validated the value.
+const clientVaultInstructionsMode = process.env.MCP_VAULT_INSTRUCTIONS?.trim() || undefined;
+// Opaque per-process reader context so two agents sharing one credential do
+// not share their instruction reads on a session-less (modern) backend.
+const proxyReaderContext = randomUUID().replace(/-/gu, "");
 const toolProfile: ToolProfileId = resolveToolProfile();
 const FAIL_CLOSED_EXTERNAL_MOVE_MUTATION_TOOLS = new Set([
   "external_move_apply",
@@ -896,6 +907,14 @@ function retireBackend(connection: BackendConnection): void {
   closeRetiredBackend(connection);
 }
 
+function withoutClientVaultInstructionsMode(
+  env: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const copy = { ...env };
+  delete copy.MCP_VAULT_INSTRUCTIONS;
+  return copy;
+}
+
 async function createBackendConnection(): Promise<BackendConnection> {
   await ensureLocalBackendRunning({
     serviceName: packageName,
@@ -904,7 +923,7 @@ async function createBackendConnection(): Promise<BackendConnection> {
     args: [path.join(projectRoot, "dist/index.js")],
     cwd: projectRoot,
     env: {
-      ...process.env,
+      ...withoutClientVaultInstructionsMode(process.env),
       MCP_TRANSPORT_TYPE: "http",
       // One shared backend must never inherit a per-agent stdio profile.
       // Per-client exposure is enforced by this proxy; the backend stays full.
@@ -921,18 +940,19 @@ async function createBackendConnection(): Promise<BackendConnection> {
     );
   }
 
-  const transport = new StreamableHTTPClientTransport(
-    backendUrl,
-    backendBearerToken
-      ? {
-          requestInit: {
-            headers: {
-              Authorization: `Bearer ${backendBearerToken}`,
-            },
-          },
-        }
-      : undefined,
-  );
+  const transport = new StreamableHTTPClientTransport(backendUrl, {
+    requestInit: {
+      headers: {
+        ...(backendBearerToken
+          ? { Authorization: `Bearer ${backendBearerToken}` }
+          : {}),
+        ...(clientVaultInstructionsMode
+          ? { [VAULT_INSTRUCTIONS_MODE_HEADER]: clientVaultInstructionsMode }
+          : {}),
+        [READER_CONTEXT_HEADER]: proxyReaderContext,
+      },
+    },
+  });
   const client = new Client(
     { name: `${packageName}-stdio-proxy`, version: packageVersion },
     {
@@ -1339,9 +1359,15 @@ async function start() {
   }
 
   const createProxyServer = async (servingContext?: McpRequestContext) => {
+    // Relay the backend's server instructions (vault agent instructions
+    // pointers, computed for this client's mode) to the stdio client.
+    const instructions = backend?.client.getInstructions();
     const proxyServer = new Server(
       { name: `${packageName}-stdio-proxy`, version: packageVersion },
-      { capabilities: { tools: { listChanged: true } } },
+      {
+        capabilities: { tools: { listChanged: true } },
+        ...(instructions ? { instructions } : {}),
+      },
     );
     installLegacyToolCatalog(proxyServer);
     const skills = await configuredSkillRegistry(externalRootsService, toolProfile, servingContext);
