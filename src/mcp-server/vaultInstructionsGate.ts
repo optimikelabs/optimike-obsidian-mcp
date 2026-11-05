@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import type { McpServer } from "@modelcontextprotocol/server";
 import {
   currentInstructionRules,
@@ -196,14 +197,23 @@ function directTargets(
       return p.operation === "validate" ? { kind: "read" } : explicit(file(p.filePath), 1);
     case "obsidian_admin_filesystem": {
       const items = Array.isArray(p.items) ? p.items : [];
-      const targets = items.flatMap((item: Params) => [
-        ...file(item?.sourcePath),
-        ...(item?.targetPath !== undefined ? file(item.targetPath) : []),
-      ]);
-      if (p.operation === "archive") {
-        targets.push(...folder(p.archiveDir ?? "Archive"));
-      }
-      return explicit(targets, items.length);
+      // Each source and each destination, derived as the handler derives it,
+      // must resolve: a source never stands in for an unresolved destination.
+      let expected = items.length;
+      const targets = items.flatMap((item: Params) => {
+        const destination =
+          p.operation === "archive"
+            ? typeof item?.sourcePath === "string"
+              ? path.posix.join(
+                  p.archiveDir ?? "Archive",
+                  path.posix.basename(item.sourcePath.replace(/\\/g, "/")),
+                )
+              : ""
+            : item?.targetPath;
+        if (destination !== undefined) expected += 1;
+        return [...file(item?.sourcePath), ...(destination !== undefined ? file(destination) : [])];
+      });
+      return explicit(targets, expected);
     }
     case "bases_create":
       return p.validateOnly === true ? { kind: "read" } : explicit(file(p.path), 1);

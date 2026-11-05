@@ -247,6 +247,14 @@ function registerFakeTools(server) {
     },
   );
   server.registerTool(
+    "obsidian_admin_filesystem",
+    { inputSchema: mcpSchema({ operation: z.enum(["archive", "move", "batch_delete"]), items: z.array(z.object({ sourcePath: text, targetPath: text.optional() })), archiveDir: text.optional(), dryRun: z.boolean().optional() }) },
+    async () => {
+      bump("obsidian_admin_filesystem");
+      return receipt({ ok: true });
+    },
+  );
+  server.registerTool(
     "obsidian_manage_tags",
     { inputSchema: mcpSchema({ operation: z.enum(["add", "remove", "list", "index", "audit", "rename"]), filePath: text.optional(), tags: z.array(text).optional(), fromTag: text.optional(), toTag: text.optional(), dryRun: z.boolean().optional() }) },
     async () => {
@@ -691,6 +699,22 @@ await check("R1-S1 parent routing without a configured folder still enforces the
   } finally {
     bridge.fileTasksFolder = "Secret";
   }
+});
+
+await check("R1-S2 an archive whose archiveDir is not canonical is checked at the destination the handler writes", async () => {
+  const s = await session({ "AGENTS.md": RULES, "Public/AGENTS.md": PUBLIC, "Secret/AGENTS.md": SECRET, "Public/A.md": "a\n" });
+  await s.connection.read("AGENTS.md", "Public/AGENTS.md");
+  const before = count("obsidian_admin_filesystem");
+  const archive = { operation: "archive", items: [{ sourcePath: "Public/A.md" }], archiveDir: "Public/../Secret", dryRun: true };
+  const refused = await s.connection.call("obsidian_admin_filesystem", archive);
+  assert.equal(reason(refused.json), "vault_instructions_unread", JSON.stringify(refused.json));
+  assert.ok(states(refused.json).some(([file, state]) => file === "Secret/AGENTS.md" && state === "unread"));
+  const outside = await s.connection.call("obsidian_admin_filesystem", { ...archive, archiveDir: "../Outside" });
+  assert.equal(reason(outside.json), "vault_instructions_target_unresolved");
+  assert.equal(count("obsidian_admin_filesystem"), before, "refused before the tool runs");
+  await s.connection.read("Secret/AGENTS.md");
+  assert.equal((await s.connection.call("obsidian_admin_filesystem", archive)).result.isError, false);
+  await s.close();
 });
 
 // ---------------------------------------------------------------------------
