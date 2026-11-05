@@ -20,7 +20,7 @@ assert.match(pkg.scripts["test:vault-instructions"], /test-vault-instructions-do
 const en = read("docs/vault-instructions.md");
 const fr = read("docs/vault-instructions.fr.md");
 const changelog = read("CHANGELOG.md");
-const unreleased = changelog.slice(changelog.indexOf("## [Unreleased]"), changelog.indexOf("## [3.18.0]"));
+const unreleased = changelog.slice(changelog.indexOf("## [3.19.0]"), changelog.indexOf("## [3.18.0]"));
 
 // No absolute promise for vaults without instruction files.
 assert.doesNotMatch(en, /sees no difference/u);
