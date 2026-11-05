@@ -109,6 +109,25 @@ Copy `build/main.js` and `build/manifest.json` to:
 
 Enable Local REST API first, then enable Optimike Atomic Write Bridge.
 
+## Version 0.9.2 — file-stat provenance of date preparation
+
+`POST /extensions/obsidian-atomic-write-bridge/notes/prepare-date` keeps its strict request (no new key). When the note was undated and Frontmatter Date Manager (FDM) dated it, the response `datePreparation` now also carries:
+
+```json
+"fileStat": {
+  "contractVersion": 1,
+  "ctimeMs": 1793836054000,
+  "mtimeMs": 1793836054000,
+  "ctimeUtcOffsetMinutes": 60,
+  "mtimeUtcOffsetMinutes": 60,
+  "observedAtMs": 1793836414000
+}
+```
+
+These are primitive copies of `TFile.stat` observed just before the FDM command, after the hash recheck: the stat observed just before the command, not the value FDM itself read a few milliseconds later. Each offset is the local UTC offset of its own timestamp (`-new Date(ms).getTimezoneOffset()`), so a creation on the other side of a daylight-saving change keeps its own offset. `observedAtMs` is the Bridge clock at that capture. The Bridge also captures `ctime` after reading the source and once the dated content is stable; if the three values differ, or the stat is missing or not finite, the preparation is refused (`422 atomic_write_creation_property_missing`). An already dated note and a note outside date management return no `fileStat`.
+
+`GET …/status` advertises the capability as `datePreparation: { contractVersion: 1, supported: true, fileStatProvenance: { contractVersion: 1 } }`. The MCP compares the added creation date exactly with `ctimeMs` and the added or changed modification date with `mtimeMs` or its observation window; it refuses to start a preparation when this capability is absent. See [governed text patch, date preparation](../../docs/governed-text-patch-p4.md).
+
 ## Version 0.9.1 — native-move refusal reasons
 
 A native move refused because the source or a note linking to it holds more than 200 links, unresolved links or backlinks now answers `move_reference_limit` instead of `metadata_snapshot_unavailable`; `move_neighborhood_limit` stays for more than 16 notes linking to the source. The bounds are unchanged. No setting or route changes.
