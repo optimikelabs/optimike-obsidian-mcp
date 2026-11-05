@@ -1,0 +1,28 @@
+name: Vault agent instructions
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'scripts/test-vault-instructions*.mjs'
+      - 'docs/vault-instructions*.md'
+      - 'package*.json'
+      - '.github/workflows/vault-instructions.yml'
+permissions:
+  contents: read
+jobs:
+  contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run test:vault-instructions

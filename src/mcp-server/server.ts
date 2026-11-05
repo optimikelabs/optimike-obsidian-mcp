@@ -93,6 +93,11 @@ import { startHttpTransport } from "./transports/httpTransport.js";
 import { activeHttpRequestId } from "./transports/httpRequestState.js";
 import { connectStdioTransport } from "./transports/stdioTransport.js";
 import { registerToolRoutingResource } from "./resources/toolRoutingResource.js";
+import {
+  installVaultInstructionsGate,
+  vaultInstructionsServerText,
+} from "./vaultInstructionsGate.js";
+import { defaultVaultInstructionsRuntime } from "./vaultInstructionsRuntime.js";
 import { mcpSchema } from "./mcpSchema.js";
 
 /**
@@ -1837,6 +1842,14 @@ async function createMcpServerInstance(
     },
   });
   const skillsActive = servingContext?.era === "modern" && Boolean(process.env.MCP_SKILLS_CONFIG_FILE?.trim());
+  // Vault agent instructions (AGENTS.md cascade): pointers in the server
+  // instructions and a gate around read/write tools. Invisible when the mode
+  // is off or the vault root has no instruction file.
+  const vaultInstructions = defaultVaultInstructionsRuntime(
+    obsidianService,
+    vaultCacheService,
+  );
+  const instructions = await vaultInstructionsServerText(vaultInstructions);
   const server = new McpServer(
     { name: config.mcpServerName, version: config.mcpServerVersion },
     {
@@ -1846,11 +1859,13 @@ async function createMcpServerInstance(
         ...(!skillsActive ? { resources: { listChanged: true } } : {}),
         // Tools are registered after installing the public privacy boundary.
       },
+      ...(instructions ? { instructions } : {}),
     },
   );
   installLegacyToolCatalog(server.server);
   installMcpSdkToolErrorPrivacyBoundary(server);
   installMcpToolPublicErrorBoundary(server);
+  installVaultInstructionsGate(server, vaultInstructions);
 
   try {
     logger.debug(

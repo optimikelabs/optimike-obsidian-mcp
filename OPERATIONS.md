@@ -76,6 +76,7 @@ Useful tuning:
 - `MCP_WRITE_MODE=readonly|guarded|full`
 - `MCP_GUARDED_MAX_WRITE_CHARS`
 - `MCP_GUARDED_MAX_BATCH_OPERATIONS`
+- `MCP_VAULT_INSTRUCTIONS=off|advise|enforce`, `MCP_VAULT_INSTRUCTIONS_MIN`, `MCP_VAULT_INSTRUCTIONS_FILES` ([vault agent instructions](docs/vault-instructions.md))
 - `OBSIDIAN_STARTUP_BLOCKING=false` for faster non-blocking startup
 
 Default write behavior is `MCP_WRITE_MODE=full`. Hosts that want a stricter public/runtime posture can explicitly set `MCP_WRITE_MODE=guarded` or `MCP_WRITE_MODE=readonly`; agents do not need to choose a mode per write.
@@ -662,6 +663,7 @@ Important environment variables:
 - `OBSIDIAN_BASE_URL`
 - `OBSIDIAN_API_KEY`
 - `MCP_EXTERNAL_ROOTS_FILE`
+- `MCP_VAULT_INSTRUCTIONS`: this client's mode for the vault `AGENTS.md` files. `advise` (default) or `off` for an agent started at the vault root, which reads the root file itself; `enforce` for an agent that sees the vault only through MCP. The proxy sends it per request and never passes it to the backend it starts. See [vault agent instructions](docs/vault-instructions.md).
 
 Recommended startup behavior:
 

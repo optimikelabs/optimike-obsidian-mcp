@@ -36,6 +36,7 @@ French operator guides are linked alongside their English equivalents.
 | Which tool should an agent choose inside its profile?                | [MCP Routing Guide](mcp-routing-guide.md)                                             |
 | How are routing quality and profile decisions measured?              | [Tool Routing Evaluation P6](tool-routing-evaluation-p6.md)                           |
 | How do I run without Obsidian Desktop?                               | [Headless Server Profile](headless-server-profile.md)                                 |
+| How do agents that only see the vault through MCP get its AGENTS.md? | [Vault agent instructions](vault-instructions.md)                                     |
 | How do external reads, handoff, move and link repair work?           | [External Roots Setup](external-roots-setup.md)                                       |
 | What is the supported HTTP security boundary?                        | [Security](../SECURITY.md) and [HTTP ADR](adr/ADR-HTTP-External-Artifact-Delivery.md) |
 | Which OSS gateway profile has been proven end to end?                | [OSS Gateway Compatibility](gateway-compatibility.md)                                 |

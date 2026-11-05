@@ -76,6 +76,7 @@ Variables de réglage utiles :
 - `MCP_WRITE_MODE=readonly|guarded|full`
 - `MCP_GUARDED_MAX_WRITE_CHARS`
 - `MCP_GUARDED_MAX_BATCH_OPERATIONS`
+- `MCP_VAULT_INSTRUCTIONS=off|advise|enforce`, `MCP_VAULT_INSTRUCTIONS_MIN`, `MCP_VAULT_INSTRUCTIONS_FILES` ([instructions d’agent du coffre](docs/vault-instructions.fr.md))
 - `OBSIDIAN_STARTUP_BLOCKING=false` pour un démarrage non bloquant plus confortable
 
 Le comportement d’écriture par défaut est `MCP_WRITE_MODE=full`. Les hôtes qui veulent une posture publique plus stricte peuvent définir explicitement `MCP_WRITE_MODE=guarded` ou `MCP_WRITE_MODE=readonly` ; l’agent n’a pas à choisir un mode à chaque écriture.
@@ -681,6 +682,7 @@ Variables importantes :
 - `OBSIDIAN_BASE_URL`
 - `OBSIDIAN_API_KEY`
 - `MCP_EXTERNAL_ROOTS_FILE`
+- `MCP_VAULT_INSTRUCTIONS` : mode de ce client pour les fichiers `AGENTS.md` du coffre. `advise` (défaut) ou `off` pour un agent lancé à la racine du coffre, qui lit lui-même le fichier racine ; `enforce` pour un agent qui ne voit le coffre que par MCP. Le proxy l’envoie à chaque requête et ne le transmet jamais au backend qu’il démarre. Voir [instructions d’agent du coffre](docs/vault-instructions.fr.md).
 
 Comportement de démarrage recommandé :
 

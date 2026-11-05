@@ -36,6 +36,7 @@ question.
 | Quel outil un agent doit-il choisir dans son profil ?                               | [Guide de routage](mcp-routing-guide.fr.md)                                             |
 | Comment mesurer la qualité du routage et décider des profils ?                      | [Évaluation du routage P6](tool-routing-evaluation-p6.fr.md)                            |
 | Comment fonctionner sans Obsidian Desktop ?                                         | [Profil serveur headless](headless-server-profile.fr.md)                                |
+| Comment un agent qui ne voit le coffre que par MCP reçoit-il ses AGENTS.md ?        | [Instructions d’agent du coffre](vault-instructions.fr.md)                              |
 | Comment fonctionnent lecture, handoff, move et réparation de liens externes ?       | [Configuration des racines](external-roots-setup.fr.md)                                 |
 | Quelle frontière de sécurité HTTP est supportée ?                                   | [Sécurité](../SECURITY.fr.md) et [ADR HTTP](adr/ADR-HTTP-External-Artifact-Delivery.md) |
 | Quel profil de gateway OSS a été prouvé de bout en bout ?                           | [Compatibilité gateways OSS](gateway-compatibility.fr.md)                               |

@@ -2282,6 +2282,17 @@ export class OperonService {
     };
   }
 
+  /**
+   * Read-only preflight of a file-task creation or inline-to-file conversion:
+   * the folder the live Operon configuration routes new file tasks to
+   * (`creation.fileTasksFolder`, trimmed; `""` when none is configured).
+   * Writes nothing; throws when the live configuration cannot be read.
+   */
+  async configuredFileTaskFolder(): Promise<string> {
+    const configuration = await this.fetchLiveConfiguration();
+    return configuration.configuration.creation.fileTasksFolder.trim();
+  }
+
   async configuration(forceRefresh = false): Promise<Record<string, unknown>> {
     if (forceRefresh) {
       await this.ensureSnapshot(true);

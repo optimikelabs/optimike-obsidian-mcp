@@ -35,6 +35,7 @@ import * as patchMethods from "./methods/patchMethods.js";
 import * as searchMethods from "./methods/searchMethods.js";
 import * as vaultMethods from "./methods/vaultMethods.js";
 import { requestLogMetadata } from "./requestLogMetadata.js";
+import { encodeVaultPath } from "../../utils/obsidian/obsidianApiUtils.js";
 import {
   ApiStatusResponse, // Import PatchOptions type
   AtomicWriteCasRequest,
@@ -634,6 +635,45 @@ export class ObsidianRestApiService {
   }
 
   // --- Vault Methods ---
+
+  /**
+   * Reads one small file as raw text for the vault instructions check: no
+   * JSON parsing whatever the Content-Type, at most `maxBytes` of body, and
+   * cancelled by `signal`. Returns `not_found` for a 404 and `too_large`
+   * when the body exceeds the bound; throws on any other failure. Logs
+   * nothing about the path or the content.
+   */
+  async readVaultTextBounded(
+    filePath: string,
+    options: { maxBytes: number; signal?: AbortSignal; timeoutMs?: number },
+  ): Promise<{ status: "ok"; body: unknown } | { status: "not_found" } | { status: "too_large" }> {
+    try {
+      const response = await this.axiosInstance.request<unknown>({
+        method: "GET",
+        url: `/vault${encodeVaultPath(filePath)}`,
+        headers: { Accept: "text/markdown" },
+        responseType: "text",
+        responseEncoding: "utf8",
+        transformResponse: [(data: unknown) => data],
+        maxContentLength: options.maxBytes,
+        maxRedirects: 0,
+        signal: options.signal,
+        timeout: options.timeoutMs ?? 2_500,
+      });
+      return { status: "ok", body: response.data };
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      if (axiosError?.response?.status === 404) return { status: "not_found" };
+      if (/maxContentLength/u.test(String(axiosError?.message ?? ""))) {
+        return { status: "too_large" };
+      }
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        "The file could not be read from the Obsidian API.",
+        {},
+      );
+    }
+  }
 
   /**
    * Gets the content of a specific file in the vault.
