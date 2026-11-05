@@ -4,8 +4,11 @@ import type { VaultCacheService } from "../services/obsidianRestAPI/vaultCache/i
 import { OperonService } from "../services/operon/service.js";
 import {
   filesystemInstructionsSource,
+  InstructionProbeLimiter,
   restInstructionsSource,
+  VAULT_INSTRUCTIONS_LIMITS,
   VaultInstructionsReadLedger,
+  VaultInstructionsUnavailableError,
   type VaultInstructionsSource,
 } from "../services/vaultInstructions.js";
 import { VaultInstructionsSealJournal } from "../services/vaultInstructionsSeal.js";
@@ -32,8 +35,23 @@ export function defaultVaultInstructionsRuntime(
   let source: VaultInstructionsSource | undefined;
   let refresh: ((vaultPath: string) => Promise<void>) | undefined;
   if (obsidianService) {
+    // Raw text, bounded and cancellable: a body that looks like JSON is never
+    // parsed, and a body larger than the bound is never buffered whole.
     source = restInstructionsSource(
-      (vaultPath) => obsidianService.getFileContent(vaultPath, "markdown", context),
+      async (vaultPath, options) => {
+        const result = await obsidianService.readVaultTextBounded(vaultPath, {
+          maxBytes: options.maxBytes,
+          signal: options.signal,
+          timeoutMs: VAULT_INSTRUCTIONS_LIMITS.probeTimeoutMs,
+        });
+        if (result.status === "not_found") {
+          throw new McpError(BaseErrorCode.NOT_FOUND, "Instruction file not found.", {});
+        }
+        if (result.status === "too_large") {
+          throw new VaultInstructionsUnavailableError("too_large");
+        }
+        return result.body;
+      },
       (error) => error instanceof McpError && error.code === BaseErrorCode.NOT_FOUND,
     );
   } else if (config.obsidianVaultPath) {
@@ -60,6 +78,7 @@ export function defaultVaultInstructionsRuntime(
     },
     source,
     ledger: new VaultInstructionsReadLedger(),
+    probeLimiter: new InstructionProbeLimiter(VAULT_INSTRUCTIONS_LIMITS.globalConcurrency),
     seals: () => {
       if (seals || sealsFailed) return seals;
       try {
@@ -77,6 +96,10 @@ export function defaultVaultInstructionsRuntime(
         task?: { path?: unknown };
       };
       return typeof result?.task?.path === "string" ? result.task.path : undefined;
+    },
+    resolveOperonFileTaskFolder: async () => {
+      operon ??= new OperonService();
+      return operon.configuredFileTaskFolder();
     },
     refreshCachedInstructionFile: refresh,
   };

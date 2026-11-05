@@ -4,15 +4,21 @@ import {
   currentInstructionRules,
   evaluateReader,
   instructionContentSha256,
+  InstructionProbeLimiter,
   normalizeVaultPath,
+  probeInstructionFiles,
   VAULT_INSTRUCTIONS_CONTRACT_VERSION,
+  VAULT_INSTRUCTIONS_LIMITS,
   VaultInstructionsReadLedger,
   vaultInstructionsRulesDigest,
   VaultInstructionsUnavailableError,
+  withDeadline,
   type EvaluatedInstructionFile,
+  type InstructionProbeOptions,
   type VaultInstructionsReader,
   type VaultInstructionsSource,
   type VaultInstructionsTarget,
+  type VaultInstructionsUnavailableReason,
 } from "../services/vaultInstructions.js";
 import {
   parseVaultInstructionsMode,
@@ -35,8 +41,13 @@ import {
  *   unread or changed since it was read.
  * - A governed plan is sealed with its rules; its apply or recover re-checks
  *   the seal (`enforce` refuses, before the tool runs, if the rules changed).
- * - `off`, or a vault without instruction files on the target chains, leaves
- *   every call and result unchanged.
+ * - Targets are the paths the backend really writes: exact spellings (every
+ *   Unicode form checked), Operon destinations resolved by read-only
+ *   preflights, and the notes a native move rewrites (from its sealed plan).
+ * - `off` leaves every call and result unchanged. A vault without instruction
+ *   files on the target chains keeps its results unchanged, except the
+ *   documented cautious refusals of `enforce` (unknown target, seal journal
+ *   unavailable, plan not sealed).
  */
 
 export interface VaultInstructionsSettings {
@@ -54,9 +65,18 @@ export interface VaultInstructionsRuntime {
   seals: () => VaultInstructionsSealJournal | undefined;
   assetFolder?: string;
   resolveOperonTaskPath?: (operonId: string) => Promise<string | undefined>;
+  /**
+   * Read-only preflight: the folder Operon routes new file tasks to (`""`
+   * when none is configured). Throws when it cannot be read.
+   */
+  resolveOperonFileTaskFolder?: () => Promise<string | undefined>;
   /** Headless: refresh the cached copy of an instruction file before a read. */
   refreshCachedInstructionFile?: (vaultPath: string) => Promise<void>;
-  probeOptions?: { concurrency?: number; probeTimeoutMs?: number };
+  probeOptions?: Omit<InstructionProbeOptions, "limiter">;
+  /** Process-wide probe budget; one is created per runtime when absent. */
+  probeLimiter?: InstructionProbeLimiter;
+  /** Deadline of the Operon resolutions made before the probes. */
+  resolutionTimeoutMs?: number;
   now?: () => number;
 }
 
@@ -85,14 +105,22 @@ type TargetSpec =
   | { kind: "unresolved"; hint: string }
   | {
       kind: "operon";
+      /** Tasks whose note is written. */
       operonIds: string[];
       targets: VaultInstructionsTarget[];
+      /** Tasks whose note folder may receive a new file task (parent task). */
+      parentFolderOf?: string[];
+      /** The configured Operon file-task folder receives the new file. */
+      configuredFileTaskFolder?: boolean;
     };
 
 type Params = Record<string, any>;
 
 const ACTIVE_FILE_HINT =
   "Call it again with targetType \"filePath\" and the vault path in targetIdentifier.";
+
+const TAG_RENAME_HINT =
+  "A vault-wide tag rename writes notes that are only known when it runs. Run it with dryRun true to list them, then change each note with operation add or remove and its filePath.";
 
 function file(value: unknown): VaultInstructionsTarget[] {
   const normalized = normalizeVaultPath(value);
@@ -148,9 +176,14 @@ function directTargets(
     case "obsidian_manage_frontmatter":
       return p.operation === "get" ? { kind: "read" } : explicit(file(p.filePath), 1);
     case "obsidian_manage_tags":
-      return p.operation === "list" || p.operation === "index"
-        ? { kind: "read" }
-        : explicit(file(p.filePath), 1);
+      // list, index and audit only read; a rename preview writes nothing.
+      if (["list", "index", "audit"].includes(p.operation)) return { kind: "read" };
+      if (p.operation === "rename") {
+        return p.dryRun === false
+          ? { kind: "unresolved", hint: TAG_RENAME_HINT }
+          : { kind: "read" };
+      }
+      return explicit(file(p.filePath), 1);
     case "obsidian_delete_note":
       return explicit(file(p.filePath), 1);
     case "obsidian_move_note":
@@ -189,11 +222,32 @@ function directTargets(
       };
     case "operon_create_task": {
       const task = p.task ?? {};
+      if (task.source === "file") {
+        // Legacy engine: an explicit targetFolder. Official API V1: its
+        // configured file-task folder (read by a preflight). A parent task may
+        // also route the new file next to its parent note.
+        const parent =
+          typeof task.fields?.parentTask === "string" && task.fields.parentTask.trim()
+            ? [task.fields.parentTask.trim()]
+            : [];
+        if (task.targetFolder !== undefined) {
+          const targets = folder(task.targetFolder);
+          return targets.length === 0
+            ? { kind: "unresolved", hint: "task.targetFolder is not a vault folder path." }
+            : { kind: "operon", operonIds: [], targets, parentFolderOf: parent };
+        }
+        return {
+          kind: "operon",
+          operonIds: [],
+          targets: [],
+          parentFolderOf: parent,
+          configuredFileTaskFolder: true,
+        };
+      }
       if (task.targetPath !== undefined) return explicit(file(task.targetPath), 1);
-      if (task.targetFolder !== undefined) return explicit(folder(task.targetFolder), 1);
       return {
         kind: "unresolved",
-        hint: "Give task.targetPath (inline task) so the note that receives the task is known.",
+        hint: "Give task.targetPath, the note that receives this inline task: the default inline destination of Operon is not known before creation.",
       };
     }
     case "operon_update_task":
@@ -204,15 +258,42 @@ function directTargets(
       return typeof p.operonId === "string"
         ? { kind: "operon", operonIds: [p.operonId], targets: [] }
         : { kind: "unresolved", hint: "Give the task operonId." };
-    case "operon_convert_task":
-    case "operon_relocate_task":
-      return typeof p.operonId === "string"
-        ? {
-            kind: "operon",
-            operonIds: [p.operonId],
-            targets: p.targetPath !== undefined ? file(p.targetPath) : [],
-          }
-        : { kind: "unresolved", hint: "Give the task operonId." };
+    case "operon_convert_task": {
+      if (typeof p.operonId !== "string") {
+        return { kind: "unresolved", hint: "Give the task operonId." };
+      }
+      if (p.target === "file") {
+        // The task note (source) and the folder that receives the new file.
+        if (p.targetFolder !== undefined) {
+          const targets = folder(p.targetFolder);
+          return targets.length === 0
+            ? { kind: "unresolved", hint: "targetFolder is not a vault folder path." }
+            : { kind: "operon", operonIds: [p.operonId], targets };
+        }
+        return {
+          kind: "operon",
+          operonIds: [p.operonId],
+          targets: [],
+          configuredFileTaskFolder: true,
+        };
+      }
+      const destination = p.targetPath !== undefined ? file(p.targetPath) : [];
+      return destination.length > 0
+        ? { kind: "operon", operonIds: [p.operonId], targets: destination }
+        : {
+            kind: "unresolved",
+            hint: "Give targetPath, the note that receives the inline task.",
+          };
+    }
+    case "operon_relocate_task": {
+      if (typeof p.operonId !== "string") {
+        return { kind: "unresolved", hint: "Give the task operonId." };
+      }
+      const destination = p.targetPath !== undefined ? file(p.targetPath) : [];
+      return destination.length > 0
+        ? { kind: "operon", operonIds: [p.operonId], targets: destination }
+        : { kind: "unresolved", hint: "Give targetPath, the note that receives the task." };
+    }
     default:
       return undefined;
   }
@@ -298,19 +379,41 @@ function statusTail(family: string): string {
   return `If it reports applying or an unknown outcome, reconcile it with ${family}_status and do not plan it again.`;
 }
 
+function kib(bytes: number): string {
+  return `${Math.round(bytes / 1024)} KiB`;
+}
+
 const MESSAGES = {
   unread: (tool: string) =>
     `This vault has agent instructions that apply to this write. Nothing was planned or written. Read each file listed with state unread or changed using ${READ_TOOL}, then call ${tool} again with the same arguments.`,
   applyUnread: (tool: string) =>
     `This vault has agent instructions that apply to this plan. Nothing was applied by this call. Read each file listed with state unread or changed using ${READ_TOOL}, then call ${tool} again with the same arguments.`,
+  planNeighborhoodUnread: (family: string) =>
+    `This move would also rewrite links in notes covered by agent instructions you have not read in their current version. The plan was recorded but not sealed, so it cannot be applied; nothing was moved. Read each file listed with state unread or changed using ${READ_TOOL}, then call ${family}_plan again with the same arguments (the same idempotencyKey returns the same plan, which is then sealed).`,
+  planNeighborhoodUnknown: (family: string) =>
+    `The notes this move would rewrite could not be determined from its plan, so their agent instructions cannot be checked. The plan was not sealed and cannot be applied while instructions are enforced; nothing was moved. Check it with ${family}_status.`,
   changedSincePlan: (family: string) =>
     `The instructions that apply to this plan changed after it was made. Nothing was applied by this call. ${statusSentence(family)} read each file listed with state changed or added using ${READ_TOOL}, then plan again with ${family}_plan, reusing your previous arguments only if the new instructions do not change your intent. ${statusTail(family)}`,
   planUnsealed: (family: string) =>
-    `This plan has no instruction seal (it was made before instructions were enforced for this client, with instructions off, or its seal expired). Nothing was applied by this call. ${statusSentence(family)} read the applicable instruction files with ${READ_TOOL}, then plan again with ${family}_plan. ${statusTail(family)}`,
+    `This plan has no instruction seal (it was made with instructions off for this client, its seal could not be written, or its seal expired). Nothing was applied by this call. ${statusSentence(family)} read the applicable instruction files with ${READ_TOOL}, then plan again with ${family}_plan. ${statusTail(family)}`,
+  sealJournalUnavailable: () =>
+    "The journal that seals plans with their agent instructions cannot be opened on this server, so a plan made now could never be applied while instructions are enforced. Nothing was planned. Ask the vault owner to check MCP_VAULT_INSTRUCTIONS_JOURNAL_PATH (an absolute, writable path outside the vault).",
+  sealJournalUnavailableApply: (family: string) =>
+    `The journal that seals plans with their agent instructions cannot be opened on this server, so this plan cannot be checked. Nothing was applied by this call. Ask the vault owner to check MCP_VAULT_INSTRUCTIONS_JOURNAL_PATH, then call ${family}_status before planning again.`,
+  sealNotWritten: (family: string) =>
+    `This plan was recorded but its instruction seal could not be written, so its apply will be refused while instructions are enforced. Call ${family}_plan again with the same arguments to seal it.`,
   targetUnresolved: (hint: string) =>
     `The vault path this call would write cannot be determined, so the agent instructions that apply to it cannot be checked. Nothing was planned or written. ${hint}`,
-  unavailable: () =>
-    "The agent instruction files that apply to this write could not be checked right now. Nothing was planned or written. Retry the same call later.",
+  unavailable: (
+    reason: VaultInstructionsUnavailableReason,
+    limits: { maxFileBytes: number; maxEvaluationBytes: number },
+    nothing = "Nothing was planned or written.",
+  ) =>
+    reason === "too_large"
+      ? `An agent instruction file that applies to this write is larger than this server reads (${kib(limits.maxFileBytes)} per file, ${kib(limits.maxEvaluationBytes)} per check), so it cannot be checked. ${nothing} Ask the vault owner to shorten it or to split it between folders.`
+      : reason === "invalid_response"
+        ? `The vault backend returned an agent instruction file in an unexpected form, so it cannot be checked. ${nothing} Retry later; if it persists, ask the vault owner to check the Local REST API.`
+        : `The agent instruction files that apply to this write could not be checked right now. ${nothing} Retry the same call later.`,
   adviseIncomplete: () =>
     `This vault has agent instructions for this path. Read each file listed with state unread or changed using ${READ_TOOL} before applying or writing; more local files refine the root rules.`,
   adviseChangedSincePlan: (family: string) =>
@@ -319,6 +422,8 @@ const MESSAGES = {
     "The agent instruction files that apply to this write could not be checked; read AGENTS.md and the instruction files of the parent folders of the target before writing.",
   adviseUnresolved: (hint: string) =>
     `The vault path of this write is not known, so only the root instructions are listed. ${hint}`,
+  adviseNeighborhoodUnknown: () =>
+    "The notes this move would rewrite could not be determined, so only the instructions of its source and destination are listed. Read the instruction files of the folders of the notes that link to it before applying.",
 };
 
 type RefusalCode =
@@ -358,6 +463,7 @@ function report(
     complete?: boolean;
     targetResolved?: boolean;
     verified?: boolean;
+    unavailableReason?: VaultInstructionsUnavailableReason | "seal_journal";
     changedSincePlan?: boolean;
     sealed?: boolean;
     message?: string;
@@ -371,6 +477,7 @@ function report(
     readerScope: reader.scope,
     ...(fields.targetResolved === false ? { targetResolved: false } : {}),
     ...(fields.verified === false ? { verified: false } : {}),
+    ...(fields.unavailableReason ? { unavailableReason: fields.unavailableReason } : {}),
     ...(fields.rulesDigest ? { rulesDigest: fields.rulesDigest } : {}),
     ...(fields.complete !== undefined ? { complete: fields.complete } : {}),
     ...(fields.changedSincePlan ? { changedSincePlan: true } : {}),
@@ -386,6 +493,7 @@ function refusal(
   code: RefusalCode,
   message: string,
   vaultInstructions: Record<string, unknown>,
+  retryable = code !== "vault_instructions_target_unresolved",
 ) {
   const errorCode =
     code === "vault_instructions_unavailable" ? "SERVICE_UNAVAILABLE" : "FORBIDDEN";
@@ -401,7 +509,7 @@ function refusal(
             message,
             details: {
               reasonCode: code,
-              retryable: code !== "vault_instructions_target_unresolved",
+              retryable,
             },
           },
           vaultInstructions,
@@ -472,29 +580,153 @@ function parsedResult(result: any): Record<string, any> | undefined {
 // ---------------------------------------------------------------------------
 // Gate
 
+const limiters = new WeakMap<VaultInstructionsRuntime, InstructionProbeLimiter>();
+
+function probeOptions(runtime: VaultInstructionsRuntime): InstructionProbeOptions {
+  let limiter = runtime.probeLimiter ?? limiters.get(runtime);
+  if (!limiter) {
+    limiter = new InstructionProbeLimiter(VAULT_INSTRUCTIONS_LIMITS.globalConcurrency);
+    limiters.set(runtime, limiter);
+  }
+  return { ...runtime.probeOptions, limiter };
+}
+
+function limitsOf(runtime: VaultInstructionsRuntime) {
+  return {
+    maxFileBytes: runtime.probeOptions?.maxFileBytes ?? VAULT_INSTRUCTIONS_LIMITS.maxFileBytes,
+    maxEvaluationBytes:
+      runtime.probeOptions?.maxEvaluationBytes ?? VAULT_INSTRUCTIONS_LIMITS.maxEvaluationBytes,
+  };
+}
+
+function rulesFor(runtime: VaultInstructionsRuntime, targets: readonly VaultInstructionsTarget[]) {
+  return currentInstructionRules(
+    runtime.source!,
+    runtime.settings.names,
+    targets,
+    probeOptions(runtime),
+  );
+}
+
+/** The seal journal, or `undefined` when it cannot be opened. */
+function sealJournal(runtime: VaultInstructionsRuntime): VaultInstructionsSealJournal | undefined {
+  try {
+    return runtime.seals();
+  } catch {
+    return undefined;
+  }
+}
+
+/** True only when the seal was written to the journal. */
+function persistSeal(
+  runtime: VaultInstructionsRuntime,
+  record: Parameters<VaultInstructionsSealJournal["seal"]>[0],
+): boolean {
+  const journal = sealJournal(runtime);
+  if (!journal) return false;
+  try {
+    journal.seal(record);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function uniqueTargets(targets: readonly VaultInstructionsTarget[]): VaultInstructionsTarget[] {
+  const seen = new Set<string>();
+  return targets.filter((target) => {
+    const key = `${target.folder ? "d" : "f"}:${target.path}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function parentFolder(vaultPath: string): VaultInstructionsTarget {
+  const slash = vaultPath.lastIndexOf("/");
+  return { path: slash < 0 ? "" : vaultPath.slice(0, slash), folder: true };
+}
+
+type Resolution =
+  | { targets: VaultInstructionsTarget[] }
+  | { hint: string }
+  | { unavailable: VaultInstructionsUnavailableReason };
+
+const FILE_TASK_FOLDER_HINT =
+  "Operon has no configured file-task folder (operon_get_configuration: creation.fileTasksFolder), so the folder that would receive this file task is not known. Configure one in Operon, or ask the vault owner to lower MCP_VAULT_INSTRUCTIONS for this client to create file tasks.";
+
 async function resolveTargets(
   runtime: VaultInstructionsRuntime,
   spec: Exclude<TargetSpec, { kind: "read" }>,
-): Promise<{ targets: VaultInstructionsTarget[] } | { hint: string }> {
+): Promise<Resolution> {
   if (spec.kind === "unresolved") return { hint: spec.hint };
   if (spec.kind === "targets") return { targets: spec.targets };
+  const timeout = runtime.resolutionTimeoutMs ?? VAULT_INSTRUCTIONS_LIMITS.evaluationTimeoutMs;
   const targets = [...spec.targets];
-  for (const operonId of spec.operonIds) {
+  const taskNote = async (operonId: string): Promise<string | Resolution> => {
     let resolved: string | undefined;
     try {
-      resolved = await runtime.resolveOperonTaskPath?.(operonId);
-    } catch {
+      resolved = runtime.resolveOperonTaskPath
+        ? await withDeadline(runtime.resolveOperonTaskPath(operonId), timeout)
+        : undefined;
+    } catch (error) {
+      if (error instanceof VaultInstructionsUnavailableError) return { unavailable: error.reason };
       resolved = undefined;
     }
     const normalized = normalizeVaultPath(resolved);
-    if (!normalized) {
+    return normalized
+      ? normalized
+      : {
+          hint: "The note that holds this Operon task could not be resolved; check the operonId with operon_get_task, then retry.",
+        };
+  };
+  for (const operonId of spec.operonIds) {
+    const note = await taskNote(operonId);
+    if (typeof note !== "string") return note;
+    targets.push({ path: note });
+  }
+  for (const operonId of spec.parentFolderOf ?? []) {
+    const note = await taskNote(operonId);
+    if (typeof note !== "string") return note;
+    targets.push(parentFolder(note));
+  }
+  if (spec.configuredFileTaskFolder) {
+    if (!runtime.resolveOperonFileTaskFolder) return { hint: FILE_TASK_FOLDER_HINT };
+    let configured: string | undefined;
+    try {
+      configured = await withDeadline(runtime.resolveOperonFileTaskFolder(), timeout);
+    } catch (error) {
       return {
-        hint: "The note that holds this Operon task could not be resolved; check the operonId with operon_get_task, then retry.",
+        unavailable:
+          error instanceof VaultInstructionsUnavailableError ? error.reason : "source_error",
       };
     }
+    const normalized = normalizeVaultPath(configured?.trim());
+    if (!normalized) return { hint: FILE_TASK_FOLDER_HINT };
+    targets.push({ path: normalized, folder: true });
+  }
+  return { targets: uniqueTargets(targets) };
+}
+
+/**
+ * Extra targets a plan reveals once made: the notes a native move rewrites
+ * (`affectedPaths` of its sealed neighbourhood). `"indeterminate"` when the
+ * plan does not state them in a usable form.
+ */
+function planRevealedTargets(
+  family: string,
+  receipt: Record<string, any> | undefined,
+): VaultInstructionsTarget[] | "indeterminate" {
+  if (family !== "obsidian_note_move") return [];
+  const affected = receipt?.affectedPaths;
+  if (!Array.isArray(affected)) return "indeterminate";
+  const targets: VaultInstructionsTarget[] = [];
+  for (const entry of affected) {
+    const normalized = normalizeVaultPath(entry);
+    if (!normalized) return "indeterminate";
     targets.push({ path: normalized });
   }
-  return { targets };
+  return targets;
 }
 
 async function gateWrite(
@@ -512,8 +744,30 @@ async function gateWrite(
       ? planTargets(role.family, params, runtime)
       : directTargets(name, params, runtime);
   if (!spec || spec.kind === "read") return callback(...args);
+  const limits = limitsOf(runtime);
+
+  const unavailable = async (reason: VaultInstructionsUnavailableReason) => {
+    if (mode === "enforce") {
+      return refusal(
+        "vault_instructions_unavailable",
+        MESSAGES.unavailable(reason, limits),
+        report(mode, reader, { unavailableReason: reason }),
+        reason !== "too_large",
+      );
+    }
+    const result = await callback(...args);
+    return decorateToolResult(
+      result,
+      report(mode, reader, {
+        verified: false,
+        unavailableReason: reason,
+        message: MESSAGES.adviseUnverifiable(),
+      }),
+    );
+  };
 
   const resolution = await resolveTargets(runtime, spec);
+  if ("unavailable" in resolution) return unavailable(resolution.unavailable);
   let targets: VaultInstructionsTarget[];
   let targetResolved = true;
   let unresolvedHint = "";
@@ -532,83 +786,151 @@ async function gateWrite(
     targets = resolution.targets;
   }
 
-  let rules;
-  try {
-    rules = await currentInstructionRules(
-      runtime.source,
-      runtime.settings.names,
-      targets,
-      runtime.probeOptions,
-    );
-  } catch (error) {
-    if (!(error instanceof VaultInstructionsUnavailableError)) throw error;
-    if (mode === "enforce") {
-      return refusal(
-        "vault_instructions_unavailable",
-        MESSAGES.unavailable(),
-        report(mode, reader, {}),
-      );
-    }
-    const result = await callback(...args);
-    return decorateToolResult(
-      result,
-      report(mode, reader, { verified: false, message: MESSAGES.adviseUnverifiable() }),
+  // Enforce: a plan that cannot be sealed could never be applied.
+  if (role.kind === "plan" && mode === "enforce" && !sealJournal(runtime)) {
+    return refusal(
+      "vault_instructions_unavailable",
+      MESSAGES.sealJournalUnavailable(),
+      report(mode, reader, { sealed: false, unavailableReason: "seal_journal" }),
+      false,
     );
   }
 
-  const files = evaluateReader(runtime.ledger, reader, rules.files);
-  const complete = files.every((entry) => entry.state === "read");
-  const rulesDigest = vaultInstructionsRulesDigest(
-    runtime.settings.vaultId,
-    runtime.settings.names,
-    rules.files,
-  );
-  const fields = {
-    files: files as ReportFile[],
-    targets: targetResolved ? rules.targets : undefined,
-    rulesDigest,
-    complete,
-    targetResolved,
+  const evaluate = async (current: VaultInstructionsTarget[]) => {
+    const rules = await rulesFor(runtime, current);
+    const files = evaluateReader(runtime.ledger, reader, rules.files);
+    const complete = files.every((entry) => entry.state === "read");
+    const rulesDigest = vaultInstructionsRulesDigest(
+      runtime.settings.vaultId,
+      runtime.settings.names,
+      rules.files,
+    );
+    return {
+      rules,
+      complete,
+      fields: {
+        files: files as ReportFile[],
+        targets: targetResolved ? rules.targets : undefined,
+        rulesDigest,
+        complete,
+        targetResolved,
+      },
+    };
   };
 
-  if (mode === "enforce" && !complete) {
-    return refusal("vault_instructions_unread", MESSAGES.unread(name), report(mode, reader, fields));
+  let evaluation;
+  try {
+    evaluation = await evaluate(targets);
+  } catch (error) {
+    if (!(error instanceof VaultInstructionsUnavailableError)) throw error;
+    return unavailable(error.reason);
+  }
+
+  if (mode === "enforce" && !evaluation.complete) {
+    return refusal(
+      "vault_instructions_unread",
+      MESSAGES.unread(name),
+      report(mode, reader, evaluation.fields),
+    );
   }
 
   const result = await callback(...args);
 
   let sealed: boolean | undefined;
   if (role.kind === "plan" && result?.isError !== true && targetResolved) {
-    const planRef = parsedResult(result)?.planRef;
-    if (typeof planRef === "string" && (mode === "enforce" || rules.files.length > 0)) {
-      try {
-        runtime.seals()?.seal({
-          planRef,
-          planTool: `${role.family}_plan`,
-          mode,
-          targets,
-          files: rules.files,
-          rulesDigest,
-        });
-        sealed = true;
-      } catch {
-        sealed = false;
+    const receipt = parsedResult(result);
+    // A plan may reveal more notes it will write (a move rewrites links).
+    const revealed = planRevealedTargets(role.family, receipt);
+    if (revealed === "indeterminate") {
+      if (mode === "enforce") {
+        return refusal(
+          "vault_instructions_target_unresolved",
+          MESSAGES.planNeighborhoodUnknown(role.family),
+          report(mode, reader, { ...evaluation.fields, targetResolved: false, sealed: false }),
+        );
       }
+      return decorateToolResult(
+        result,
+        report(mode, reader, {
+          ...evaluation.fields,
+          sealed: false,
+          message: MESSAGES.adviseNeighborhoodUnknown(),
+        }),
+      );
+    }
+    const known = new Set(targets.map((target) => target.path));
+    const extra = revealed.filter((target) => !known.has(target.path));
+    if (extra.length > 0) {
+      targets = uniqueTargets([...targets, ...extra]);
+      try {
+        evaluation = await evaluate(targets);
+      } catch (error) {
+        if (!(error instanceof VaultInstructionsUnavailableError)) throw error;
+        const unavailableReport = report(mode, reader, {
+          sealed: false,
+          unavailableReason: error.reason,
+        });
+        if (mode === "enforce") {
+          return refusal(
+            "vault_instructions_unavailable",
+            MESSAGES.unavailable(
+              error.reason,
+              limits,
+              "The plan was recorded but not sealed, so it cannot be applied; nothing was written.",
+            ),
+            unavailableReport,
+            error.reason !== "too_large",
+          );
+        }
+        return decorateToolResult(
+          result,
+          report(mode, reader, {
+            sealed: false,
+            verified: false,
+            unavailableReason: error.reason,
+            message: MESSAGES.adviseUnverifiable(),
+          }),
+        );
+      }
+      if (mode === "enforce" && !evaluation.complete) {
+        return refusal(
+          "vault_instructions_unread",
+          MESSAGES.planNeighborhoodUnread(role.family),
+          report(mode, reader, { ...evaluation.fields, sealed: false }),
+        );
+      }
+    }
+    const planRef = receipt?.planRef;
+    if (typeof planRef === "string") {
+      // Sealed in advise too, so the plan stays applicable if this client
+      // later moves to enforce.
+      sealed = persistSeal(runtime, {
+        planRef,
+        planTool: `${role.family}_plan`,
+        mode,
+        targets,
+        files: evaluation.rules.files,
+        rulesDigest: evaluation.fields.rulesDigest,
+      });
     }
   }
 
-  // No instruction file on any chain: the result stays exactly as it was.
-  if (rules.files.length === 0) return result;
+  const sealMissingUnderEnforce = mode === "enforce" && sealed === false;
+  // No instruction file on any chain: the result stays exactly as it was,
+  // unless an enforced plan could not be sealed (its apply would be refused).
+  if (evaluation.rules.files.length === 0 && !sealMissingUnderEnforce) return result;
   return decorateToolResult(
     result,
     report(mode, reader, {
-      ...fields,
+      ...evaluation.fields,
       sealed,
-      message: !targetResolved
-        ? MESSAGES.adviseUnresolved(unresolvedHint)
-        : complete
-          ? undefined
-          : MESSAGES.adviseIncomplete(),
+      message: sealMissingUnderEnforce
+        ? MESSAGES.sealNotWritten((role as { family: string }).family)
+        : !targetResolved
+          ? MESSAGES.adviseUnresolved(unresolvedHint)
+          : evaluation.complete
+            ? undefined
+            : MESSAGES.adviseIncomplete(),
     }),
   );
 }
@@ -642,9 +964,22 @@ async function gateApply(
   const { mode, reader } = currentVaultInstructionsCall(runtime.settings, args[1]);
   if (mode === "off" || !runtime.source) return callback(...args);
   const planRef = typeof params.planRef === "string" ? params.planRef : undefined;
+  const journal = sealJournal(runtime);
+  if (!journal && mode === "enforce") {
+    return refusal(
+      "vault_instructions_unavailable",
+      MESSAGES.sealJournalUnavailableApply(family),
+      report(mode, reader, {
+        sealed: false,
+        unavailableReason: "seal_journal",
+        nextActions: [{ tool: `${family}_status`, arguments: { planRef } }],
+      }),
+      false,
+    );
+  }
   let seal;
   try {
-    seal = planRef ? runtime.seals()?.get(planRef) : undefined;
+    seal = planRef ? journal?.get(planRef) : undefined;
   } catch {
     seal = undefined;
   }
@@ -659,18 +994,19 @@ async function gateApply(
     return callback(...args);
   }
 
+  const limits = limitsOf(runtime);
   let rules;
   try {
-    rules = await currentInstructionRules(
-      runtime.source,
-      runtime.settings.names,
-      seal.targets,
-      runtime.probeOptions,
-    );
+    rules = await rulesFor(runtime, seal.targets);
   } catch (error) {
     if (!(error instanceof VaultInstructionsUnavailableError)) throw error;
     if (mode === "enforce") {
-      return refusal("vault_instructions_unavailable", MESSAGES.unavailable(), report(mode, reader, {}));
+      return refusal(
+        "vault_instructions_unavailable",
+        MESSAGES.unavailable(error.reason, limits, "Nothing was applied by this call."),
+        report(mode, reader, { unavailableReason: error.reason }),
+        error.reason !== "too_large",
+      );
     }
     return callback(...args);
   }
@@ -738,7 +1074,7 @@ async function recordReadProof(
   const params: Params = args[0] && typeof args[0] === "object" ? args[0] : {};
   const { mode, reader } = currentVaultInstructionsCall(runtime.settings, args[1]);
   const requested = normalizeVaultPath(params.filePath);
-  const baseName = requested?.split("/").at(-1);
+  const baseName = requested?.split("/").at(-1)?.normalize("NFC");
   if (
     mode === "off" ||
     !runtime.source ||
@@ -766,12 +1102,21 @@ async function recordReadProof(
       ? normalizeVaultPath(parsed.content.path) ?? requested
       : requested;
   try {
-    // The proof binds what the reader was served to the authoritative copy:
-    // a stale or differently cased copy records nothing.
-    const authoritative = await runtime.source.read(servedPath);
+    // The proof binds what the reader was served to the authoritative copy,
+    // under the path requested and the path the backend reports serving: a
+    // stale or differently cased copy records nothing.
+    const candidates = [...new Set([requested, servedPath])];
+    const authoritative = await probeInstructionFiles(
+      runtime.source,
+      candidates,
+      probeOptions(runtime),
+    );
     const sha = instructionContentSha256(served);
-    if (authoritative !== null && instructionContentSha256(authoritative) === sha) {
-      runtime.ledger.record(reader.key, servedPath, sha);
+    for (const candidate of candidates) {
+      const content = authoritative.get(candidate);
+      if (typeof content === "string" && instructionContentSha256(content) === sha) {
+        runtime.ledger.record(reader.key, candidate, sha);
+      }
     }
   } catch {
     /* no proof when the authoritative copy cannot be read */
@@ -829,7 +1174,7 @@ async function rootInstructionFiles(runtime: VaultInstructionsRuntime): Promise<
         runtime.source,
         runtime.settings.names,
         [{ path: "", folder: true }],
-        runtime.probeOptions,
+        probeOptions(runtime),
       );
       return rules.files.map((entry) => entry.path);
     } catch {

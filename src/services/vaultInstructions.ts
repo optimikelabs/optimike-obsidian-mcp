@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstat, readFile, realpath } from "node:fs/promises";
+import { lstat, open, realpath } from "node:fs/promises";
 import path from "node:path";
 import type { VaultInstructionsMode } from "./vaultInstructionsNames.js";
 
@@ -12,8 +12,12 @@ import type { VaultInstructionsMode } from "./vaultInstructionsNames.js";
  * served it; the proof is bound to the exact content served (SHA-256 after
  * line-ending normalisation), so an edited file needs a new read.
  *
+ * Paths are kept exactly as the caller wrote them (the backend writes that
+ * exact name). A path whose Unicode forms differ (NFC/NFD) is checked under
+ * every form, because a backend or a file system may resolve either one.
+ *
  * Nothing here scans the vault: one evaluation probes only the folders on the
- * chains of its targets.
+ * chains of its targets, with bounded bytes, time and concurrency.
  */
 
 export const VAULT_INSTRUCTIONS_CONTRACT_VERSION = 1;
@@ -31,17 +35,59 @@ export interface VaultInstructionsReader {
   scope: VaultInstructionsReaderScope;
 }
 
+export interface InstructionReadOptions {
+  /** Aborted when the probe or the evaluation runs out of time. */
+  signal?: AbortSignal;
+  /** Largest accepted file, in UTF-8 bytes. */
+  maxBytes: number;
+}
+
 /** Where the authoritative content of instruction files comes from. */
 export interface VaultInstructionsSource {
   readonly kind: "rest" | "filesystem";
-  /** Resolves the content, `null` when the file does not exist; throws when unknown. */
-  read(vaultPath: string): Promise<string | null>;
+  /**
+   * Resolves the text content, `null` only when the file does not exist;
+   * throws `VaultInstructionsUnavailableError` when it cannot be known.
+   */
+  read(vaultPath: string, options?: InstructionReadOptions): Promise<string | null>;
 }
 
+export type VaultInstructionsUnavailableReason =
+  | "timeout"
+  | "source_error"
+  | "too_large"
+  | "invalid_response";
+
 export class VaultInstructionsUnavailableError extends Error {
-  constructor(readonly reason: "timeout" | "source_error") {
+  constructor(readonly reason: VaultInstructionsUnavailableReason) {
     super("Vault instruction files could not be read.");
   }
+}
+
+/** Default bounds of one evaluation (documented in docs/vault-instructions.md). */
+export const VAULT_INSTRUCTIONS_LIMITS = {
+  /** One instruction file. */
+  maxFileBytes: 256 * 1024,
+  /** All instruction files read by one evaluation. */
+  maxEvaluationBytes: 1024 * 1024,
+  /** One probe (one file). */
+  probeTimeoutMs: 2_500,
+  /** One evaluation, queueing included. */
+  evaluationTimeoutMs: 5_000,
+  /** Probes in flight for one evaluation. */
+  concurrency: 4,
+  /** Probes in flight for the whole backend process. */
+  globalConcurrency: 8,
+} as const;
+
+export interface InstructionProbeOptions {
+  concurrency?: number;
+  probeTimeoutMs?: number;
+  evaluationTimeoutMs?: number;
+  maxFileBytes?: number;
+  maxEvaluationBytes?: number;
+  /** Process-wide budget shared by every evaluation of a runtime. */
+  limiter?: InstructionProbeLimiter;
 }
 
 /** Normalised content digest shared by proofs and evaluations. */
@@ -51,15 +97,15 @@ export function instructionContentSha256(content: string): string {
 }
 
 /**
- * Canonical vault-relative path: NFC, `/` separators, no leading `./` or `/`,
- * no empty, `.` or `..` segment. `""` is the vault root. `undefined` means the
- * value cannot be a vault path.
+ * Canonical vault-relative path: `/` separators, no leading `./` or `/`, no
+ * empty, `.` or `..` segment. The characters are kept as written: no Unicode
+ * normalisation, so the path is the one the backend writes. `""` is the vault
+ * root. `undefined` means the value cannot be a vault path.
  */
 export function normalizeVaultPath(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   if (value.length > 4096 || /[\u0000]/u.test(value)) return undefined;
   const segments = value
-    .normalize("NFC")
     .replace(/\\/gu, "/")
     .split("/")
     .filter((segment, index, all) => {
@@ -74,6 +120,16 @@ export function normalizeVaultPath(value: unknown): string | undefined {
   if (segments.length > 64) return undefined;
   if (segments.length > 0 && /^[a-z]:$/iu.test(segments[0])) return undefined;
   return segments.join("/");
+}
+
+/**
+ * Every spelling a backend may resolve for this path: the exact one first,
+ * then its NFC and NFD forms when they differ. Each one is checked.
+ */
+export function vaultPathAliases(vaultPath: string): string[] {
+  return [
+    ...new Set([vaultPath, vaultPath.normalize("NFC"), vaultPath.normalize("NFD")]),
+  ];
 }
 
 /** Folders whose instruction files apply to a target, root first. */
@@ -175,7 +231,68 @@ export class VaultInstructionsReadLedger {
   }
 }
 
-async function withDeadline<T>(work: Promise<T>, ms: number): Promise<T> {
+/**
+ * Process-wide budget of probes in flight. A slot is released only when the
+ * underlying read settles, so a read that ignores its abort signal keeps
+ * counting against the budget instead of piling up behind it.
+ */
+export class InstructionProbeLimiter {
+  private active = 0;
+  private readonly waiting: Array<{ grant: () => void }> = [];
+
+  constructor(readonly max: number = VAULT_INSTRUCTIONS_LIMITS.globalConcurrency) {}
+
+  get inFlight(): number {
+    return this.active;
+  }
+
+  acquire(signal: AbortSignal): Promise<() => void> {
+    const release = () => {
+      this.active -= 1;
+      const next = this.waiting.shift();
+      if (next) next.grant();
+    };
+    if (signal.aborted) return Promise.reject(abortReason(signal));
+    if (this.active < this.max) {
+      this.active += 1;
+      return Promise.resolve(once(release));
+    }
+    return new Promise((resolve, reject) => {
+      const waiter = {
+        grant: () => {
+          signal.removeEventListener("abort", onAbort);
+          this.active += 1;
+          resolve(once(release));
+        },
+      };
+      const onAbort = () => {
+        const index = this.waiting.indexOf(waiter);
+        if (index >= 0) this.waiting.splice(index, 1);
+        reject(abortReason(signal));
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      this.waiting.push(waiter);
+    });
+  }
+}
+
+function once(fn: () => void): () => void {
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    fn();
+  };
+}
+
+function abortReason(signal: AbortSignal): VaultInstructionsUnavailableError {
+  return signal.reason instanceof VaultInstructionsUnavailableError
+    ? signal.reason
+    : new VaultInstructionsUnavailableError("timeout");
+}
+
+/** Rejects with `timeout` after `ms`; the work itself is not cancelled. */
+export async function withDeadline<T>(work: Promise<T>, ms: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   try {
     return await Promise.race([
@@ -193,35 +310,132 @@ async function withDeadline<T>(work: Promise<T>, ms: number): Promise<T> {
   }
 }
 
+function abortableTimer(
+  controller: AbortController,
+  ms: number,
+): NodeJS.Timeout {
+  const timer = setTimeout(
+    () => controller.abort(new VaultInstructionsUnavailableError("timeout")),
+    ms,
+  );
+  timer.unref?.();
+  return timer;
+}
+
+/** Rejects as soon as the signal aborts, whether or not `work` honours it. */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortReason(signal));
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
+function asUnavailable(error: unknown): VaultInstructionsUnavailableError {
+  return error instanceof VaultInstructionsUnavailableError
+    ? error
+    : new VaultInstructionsUnavailableError("source_error");
+}
+
 /**
  * Reads instruction files once per call: deduplicated, at most `concurrency`
- * probes in flight, each bounded by `probeTimeoutMs`.
+ * probes of this call and `limiter.max` probes of the process in flight, each
+ * bounded in time and bytes, the whole call bounded too. The first failure or
+ * the deadline aborts every probe still running.
  */
 export async function probeInstructionFiles(
   source: VaultInstructionsSource,
   paths: readonly string[],
-  options: { concurrency?: number; probeTimeoutMs?: number } = {},
+  options: InstructionProbeOptions = {},
 ): Promise<Map<string, string | null>> {
   const unique = [...new Set(paths)];
   const results = new Map<string, string | null>();
-  const concurrency = Math.max(1, options.concurrency ?? 4);
-  const timeout = options.probeTimeoutMs ?? 2_500;
+  if (unique.length === 0) return results;
+  const concurrency = Math.max(1, options.concurrency ?? VAULT_INSTRUCTIONS_LIMITS.concurrency);
+  const probeTimeout = options.probeTimeoutMs ?? VAULT_INSTRUCTIONS_LIMITS.probeTimeoutMs;
+  const maxFileBytes = options.maxFileBytes ?? VAULT_INSTRUCTIONS_LIMITS.maxFileBytes;
+  const maxEvaluationBytes =
+    options.maxEvaluationBytes ?? VAULT_INSTRUCTIONS_LIMITS.maxEvaluationBytes;
+  const evaluation = new AbortController();
+  const evaluationTimer = abortableTimer(
+    evaluation,
+    options.evaluationTimeoutMs ??
+      Math.max(VAULT_INSTRUCTIONS_LIMITS.evaluationTimeoutMs, probeTimeout),
+  );
+  let totalBytes = 0;
   let next = 0;
+  const probe = async (current: string) => {
+    const release = options.limiter
+      ? await options.limiter.acquire(evaluation.signal)
+      : () => undefined;
+    const controller = new AbortController();
+    const onEvaluationAbort = () => controller.abort(evaluation.signal.reason);
+    evaluation.signal.addEventListener("abort", onEvaluationAbort, { once: true });
+    const timer = abortableTimer(controller, probeTimeout);
+    let work: Promise<string | null>;
+    try {
+      work = Promise.resolve(
+        source.read(current, { signal: controller.signal, maxBytes: maxFileBytes }),
+      );
+    } catch (error) {
+      work = Promise.reject(error);
+    }
+    work.then(release, release);
+    try {
+      const content = await untilAborted(work, controller.signal);
+      if (content !== null) {
+        if (typeof content !== "string") {
+          throw new VaultInstructionsUnavailableError("invalid_response");
+        }
+        const bytes = Buffer.byteLength(content, "utf8");
+        if (bytes > maxFileBytes) throw new VaultInstructionsUnavailableError("too_large");
+        totalBytes += bytes;
+        if (totalBytes > maxEvaluationBytes) {
+          throw new VaultInstructionsUnavailableError("too_large");
+        }
+      }
+      results.set(current, content);
+    } finally {
+      clearTimeout(timer);
+      evaluation.signal.removeEventListener("abort", onEvaluationAbort);
+    }
+  };
   const worker = async () => {
-    while (next < unique.length) {
+    while (next < unique.length && !evaluation.signal.aborted) {
       const current = unique[next++];
       try {
-        results.set(current, await withDeadline(source.read(current), timeout));
+        await probe(current);
       } catch (error) {
-        if (error instanceof VaultInstructionsUnavailableError) throw error;
-        throw new VaultInstructionsUnavailableError("source_error");
+        const failure = asUnavailable(error);
+        // Stop every other probe of this evaluation, including queued ones.
+        if (!evaluation.signal.aborted) evaluation.abort(failure);
+        throw failure;
       }
     }
   };
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, unique.length) }, worker),
-  );
-  return results;
+  try {
+    const outcomes = await Promise.allSettled(
+      Array.from({ length: Math.min(concurrency, unique.length) }, worker),
+    );
+    const failed = outcomes.find(
+      (outcome): outcome is PromiseRejectedResult => outcome.status === "rejected",
+    );
+    if (failed) throw asUnavailable(failed.reason);
+    if (evaluation.signal.aborted) throw abortReason(evaluation.signal);
+    return results;
+  } finally {
+    clearTimeout(evaluationTimer);
+  }
 }
 
 export function vaultInstructionsRulesDigest(
@@ -249,19 +463,24 @@ export interface CurrentInstructionRules {
 
 /**
  * Current applicable instruction files for the targets, in a deterministic
- * order: folder depth, then the configured name order.
+ * order: folder depth, then the configured name order. Each target is checked
+ * under every Unicode spelling of its path (see `vaultPathAliases`).
  */
 export async function currentInstructionRules(
   source: VaultInstructionsSource,
   names: readonly string[],
   targets: readonly VaultInstructionsTarget[],
-  options: { concurrency?: number; probeTimeoutMs?: number } = {},
+  options: InstructionProbeOptions = {},
 ): Promise<CurrentInstructionRules> {
-  const chains = targets.map((target) =>
-    instructionFolders(target.path, target.folder).flatMap((folder) =>
-      names.map((name) => instructionFilePath(folder, name)),
+  const chains = targets.map((target) => [
+    ...new Set(
+      vaultPathAliases(target.path).flatMap((alias) =>
+        instructionFolders(alias, target.folder).flatMap((folder) =>
+          names.map((name) => instructionFilePath(folder, name)),
+        ),
+      ),
     ),
-  );
+  ]);
   const contents = await probeInstructionFiles(source, chains.flat(), options);
   const digests = new Map<string, string>();
   for (const [filePath, content] of contents) {
@@ -281,7 +500,9 @@ export async function currentInstructionRules(
   return {
     targets: targets.map((target, index) => ({
       path: target.path,
-      rules: chains[index].filter((filePath) => digests.has(filePath)),
+      rules: files
+        .map((entry) => entry.path)
+        .filter((filePath) => chains[index].includes(filePath)),
     })),
     files,
   };
@@ -303,28 +524,43 @@ export function evaluateReader(
   });
 }
 
-/** REST source: a GET of the exact path; a 404 means the file does not exist. */
+/**
+ * REST source: a GET of the exact path, read as raw text. A 404 means the
+ * file does not exist; any other answer that is not text (a body parsed as
+ * JSON, for instance) is an invalid response, never an absent file.
+ */
 export function restInstructionsSource(
-  getFileContent: (vaultPath: string) => Promise<unknown>,
+  getFileText: (vaultPath: string, options: InstructionReadOptions) => Promise<unknown>,
   isNotFound: (error: unknown) => boolean,
 ): VaultInstructionsSource {
   return {
     kind: "rest",
-    async read(vaultPath) {
+    async read(vaultPath, options) {
+      const bounded = options ?? { maxBytes: VAULT_INSTRUCTIONS_LIMITS.maxFileBytes };
+      let content: unknown;
       try {
-        const content = await getFileContent(vaultPath);
-        return typeof content === "string" ? content : null;
+        content = await getFileText(vaultPath, bounded);
       } catch (error) {
+        if (error instanceof VaultInstructionsUnavailableError) throw error;
         if (isNotFound(error)) return null;
+        if (bounded.signal?.aborted) throw abortReason(bounded.signal);
         throw new VaultInstructionsUnavailableError("source_error");
       }
+      if (typeof content !== "string") {
+        throw new VaultInstructionsUnavailableError("invalid_response");
+      }
+      if (Buffer.byteLength(content, "utf8") > bounded.maxBytes) {
+        throw new VaultInstructionsUnavailableError("too_large");
+      }
+      return content;
     },
   };
 }
 
 /**
  * Filesystem source confined to the vault root. A symbolic link, a folder or
- * a path resolving outside the root counts as absent.
+ * a path resolving outside the root counts as absent. At most `maxBytes + 1`
+ * bytes are ever read.
  */
 export function filesystemInstructionsSource(
   vaultRoot: string,
@@ -332,7 +568,9 @@ export function filesystemInstructionsSource(
   const root = path.resolve(vaultRoot);
   return {
     kind: "filesystem",
-    async read(vaultPath) {
+    async read(vaultPath, options) {
+      const maxBytes = options?.maxBytes ?? VAULT_INSTRUCTIONS_LIMITS.maxFileBytes;
+      const signal = options?.signal;
       const absolute = path.resolve(root, ...vaultPath.split("/"));
       const relative = path.relative(root, absolute);
       if (relative.startsWith("..") || path.isAbsolute(relative)) return null;
@@ -345,8 +583,25 @@ export function filesystemInstructionsSource(
         if (realRelative.startsWith("..") || path.isAbsolute(realRelative)) {
           return null;
         }
-        return await readFile(absolute, "utf8");
+        if (stat.size > maxBytes) throw new VaultInstructionsUnavailableError("too_large");
+        if (signal?.aborted) throw abortReason(signal);
+        const handle = await open(absolute, "r");
+        try {
+          const buffer = Buffer.alloc(maxBytes + 1);
+          let total = 0;
+          while (total < buffer.length) {
+            if (signal?.aborted) throw abortReason(signal);
+            const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+            if (bytesRead === 0) break;
+            total += bytesRead;
+          }
+          if (total > maxBytes) throw new VaultInstructionsUnavailableError("too_large");
+          return buffer.toString("utf8", 0, total);
+        } finally {
+          await handle.close();
+        }
       } catch (error) {
+        if (error instanceof VaultInstructionsUnavailableError) throw error;
         const code = (error as NodeJS.ErrnoException | undefined)?.code;
         if (code === "ENOENT" || code === "ENOTDIR") return null;
         throw new VaultInstructionsUnavailableError("source_error");
