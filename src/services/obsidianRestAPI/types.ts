@@ -81,7 +81,7 @@ export type EffectFenceResolveResponse = {
 
 export type AtomicWriteStatusResponse = {
   frontmatterFormat?: { contractVersion: 1; supported: boolean };
-  datePreparation?: { contractVersion: 1; supported: true };
+  datePreparation?: { contractVersion: 1; supported: true; fileStatProvenance?: { contractVersion: 1 } };
   effectFence?: { contractVersion: 1; supported: true; epoch: string; requireFence: boolean; legacyQuiescent: boolean };
   noteCreate?: { supported: boolean; enabled: boolean; bindingFingerprint?: string };
   nativeMove?: { supported: boolean; enabled: boolean; bindingFingerprint?: string };
@@ -144,7 +144,9 @@ export type AtomicWriteReadResponse = {
   sha256: string;
   size: number;
   bindingFingerprint: string;
-  datePreparation?: { kind: "date-manager-before-plan" | "outside-date-management"; message: string; lineEndingsNormalized?: true };
+  datePreparation?: { kind: "date-manager-before-plan" | "outside-date-management"; message: string; lineEndingsNormalized?: true;
+    /** Bridge 0.9.2+: file stat observed just before the FDM command. Untrusted until validated by the MCP. */
+    fileStat?: unknown };
   completion?: { contractVersion: 1; kind: 'fdm-completion-v1'; token: string;
     epoch: string; generation: number; state: 'complete' | 'pending' };
 };

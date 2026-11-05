@@ -12,6 +12,7 @@ import {
   NOTE_NAME_REASON_CODES, checkNoteName, isNoteNameHint, isNoteNameReasonCode,
 } from "../../services/noteNameRules.js";
 import { NATIVE_MOVE_PUBLIC_REASON_CODES, isNativeMoveHint } from "../../services/nativeNoteMoveRefusals.js";
+import { isDatePreparationCheck } from "../../services/datePreparationProvenance.js";
 import {
   activeRequestCorrelationId,
   RequestContext,
@@ -221,6 +222,8 @@ const SAFE_ERROR_DETAIL_FIELDS = new Set([
   "recoveryAllowed",
   "applyAllowed",
   "mutationMayHaveApplied",
+  // Closed, content-free sub-cause of date_preparation_unverified.
+  "preparationCheck",
   "httpStatus",
   "planDigest",
   "phase",
@@ -453,6 +456,7 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "semantic_query_vector_invalid",
   "atomic_write_creation_property_missing",
   "date_preparation_unverified",
+  "date_preparation_bridge_upgrade_required",
   "date_preparation_fdm_pending",
   "date_preparation_not_started",
   "effect_attempt_limit_reached",
@@ -596,6 +600,7 @@ function isSafeDiagnosticString(field: string, value: string): boolean {
     return SAFE_PROFILES.has(value);
   }
   if (field === "planDigest") return /^[a-f0-9]{64}$/u.test(value);
+  if (field === "preparationCheck") return isDatePreparationCheck(value);
   if (field === "reasonCode") return SAFE_PUBLIC_REASON_CODES.has(value);
   if (field === "hint") return isNoteNameHint(value) || isNativeMoveHint(value);
   // A suggestion is only released if it satisfies the shared name rule itself.
@@ -677,6 +682,8 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
     return "Le frontmatter doit être une table YAML valide sans clés dupliquées.";
   if (reasonCode === "date_preparation_unverified")
     return "La préparation des dates a pu modifier ou normaliser la note. Utilisez obsidian_operation_close avec datePreparationPaths pour une revue administrative avant reprise.";
+  if (reasonCode === "date_preparation_bridge_upgrade_required")
+    return "La note n'a pas encore de date de création et le Bridge installé ne peut pas prouver celle que le gestionnaire de dates écrirait. Rien n'a été modifié et la note n'est pas verrouillée. Demandez au propriétaire du coffre de mettre à jour l'Atomic Write Bridge (0.9.2 ou plus), puis relancez le plan. Ne réessayez pas avant.";
   if (reasonCode === "date_preparation_fdm_pending")
     return "Le gestionnaire de dates ou une autre préparation occupe encore la file ; rien n'a été modifié par cette préparation. Relancez le plan dans une trentaine de secondes.";
   if (reasonCode === "date_preparation_not_started")

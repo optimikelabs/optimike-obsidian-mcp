@@ -623,10 +623,19 @@ for (const [code, field, reason, message] of [
   [BaseErrorCode.FORBIDDEN, "reason", "effect_attempt_limit_reached", /limite.*tentatives/iu],
   [BaseErrorCode.CONFLICT, "reasonCode", "date_preparation_unverified", /obsidian_operation_close.*datePreparationPaths/u],
   [BaseErrorCode.SERVICE_UNAVAILABLE, "reasonCode", "atomic_bridge_version_unsupported", /versions.*Bridge.*MCP/iu],
+  [BaseErrorCode.SERVICE_UNAVAILABLE, "reasonCode", "date_preparation_bridge_upgrade_required", /pas verrouillée.*Atomic Write Bridge \(0\.9\.2 ou plus\)/iu],
 ]) {
   const wire = publicMcpToolErrorPayload(new McpError(code, marker, { [field]: reason, privateContent: marker }), { operation: "test", params: {} });
   assert.equal(wire.error.details.reasonCode, reason);
   assert.match(wire.error.message, message);
+  assert.doesNotMatch(JSON.stringify(wire), new RegExp(marker, "u"));
+}
+
+// date_preparation_unverified publishes only its closed, content-free sub-cause.
+for (const [check, published] of [["created_provenance_mismatch", true], ["fresh_read_mismatch", true], ["unclassified", true],
+  [marker, false], ["Notes/Privé.md", false], ["2020-01-02T03:04", false]]) {
+  const wire = publicMcpToolErrorPayload(new McpError(BaseErrorCode.CONFLICT, marker, { reasonCode: "date_preparation_unverified", mutationMayHaveApplied: true, preparationCheck: check }), { operation: "test", params: {} });
+  assert.equal(wire.error.details.preparationCheck, published ? check : undefined);
   assert.doesNotMatch(JSON.stringify(wire), new RegExp(marker, "u"));
 }
 

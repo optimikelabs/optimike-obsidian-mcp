@@ -63,7 +63,7 @@ const fake = {
     return {
       ok: true,
       contractVersion: 1,
-      datePreparation: { contractVersion: 1, supported: true },
+      datePreparation: { contractVersion: 1, supported: true, fileStatProvenance: { contractVersion: 1 } },
       frontmatterFormat: { contractVersion: 1, supported: formatAvailable },
       plugin: { id: "atomic", version: "0.8.4" },
       backend: {
@@ -115,7 +115,9 @@ const fake = {
     if (preparationGate) { preparationGate.enter(); await preparationGate.wait; preparationGate = undefined; }
     assert.equal(request.expectedSha256, hash(content));
     const lineEndingsNormalized = content.includes("\r\n");
-    preparedDate = overridePreparedDate ?? new Date().toISOString().slice(0, 16);
+    // Synthetic FDM: the file was created and last modified now (UTC fixture offset).
+    const statMs = Date.now();
+    preparedDate = overridePreparedDate ?? new Date(statMs).toISOString().slice(0, 16);
     content = content
       .replace(/\r\n/g, "\n")
       .replace(
@@ -129,6 +131,7 @@ const fake = {
         kind: "date-manager-before-plan",
         ...(lineEndingsNormalized ? { lineEndingsNormalized: true } : {}),
         message: "Note datée par le gestionnaire de dates avant le plan.",
+        fileStat: { contractVersion: 1, ctimeMs: statMs, mtimeMs: statMs, ctimeUtcOffsetMinutes: 0, mtimeUtcOffsetMinutes: 0, observedAtMs: statMs },
       },
     };
   },

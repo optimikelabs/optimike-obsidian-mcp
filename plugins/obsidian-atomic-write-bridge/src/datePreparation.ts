@@ -27,6 +27,31 @@ export function fdmHasPendingWork(plugin: any, path: string): boolean {
 const STABLE_MS = 1_000;
 const COMMAND_SETTLEMENT_BUDGET_MS = STABLE_MS + 2 * POLL_MS;
 const COMMAND = "frontmatter-date-manager:update-timestamps-current-file";
+/** Contract version of `datePreparation.fileStat` and of the status capability `fileStatProvenance`. */
+export const FILE_STAT_PROVENANCE_CONTRACT_VERSION = 1;
+
+/** Local UTC offset of one instant, as formatted by FDM (local time of the Obsidian process). */
+export function utcOffsetMinutesAt(ms: number): number {
+  return -new Date(ms).getTimezoneOffset() || 0;
+}
+
+/** Primitive copy of the note's file stat: never keep the mutable `TFile.stat` object. */
+function statSnapshot(file: any): { ctime: number; mtime: number } | undefined {
+  const stat = file?.stat;
+  const ctime = stat?.ctime, mtime = stat?.mtime;
+  return typeof ctime === "number" && typeof mtime === "number" && Number.isFinite(ctime) && Number.isFinite(mtime)
+    ? { ctime, mtime }
+    : undefined;
+}
+
+export type DatePreparationFileStat = {
+  contractVersion: 1;
+  ctimeMs: number;
+  mtimeMs: number;
+  ctimeUtcOffsetMinutes: number;
+  mtimeUtcOffsetMinutes: number;
+  observedAtMs: number;
+};
 
 // All current-file commands share one queue: two requests must never date each other's note.
 export function createDatePreparation(
@@ -37,6 +62,8 @@ export function createDatePreparation(
     /** Effect fence admission; throws when the attempt must produce no effect. */
     enterEffect?: (fence: EffectFenceToken | undefined) => () => void;
     now?: () => number;
+    /** Bridge wall clock for `fileStat.observedAtMs` (the deadline clock may be synthetic). */
+    wallClock?: () => number;
     sleep?: (ms: number) => Promise<void>;
     timeoutMs?: number;
   },
@@ -44,6 +71,7 @@ export function createDatePreparation(
   let tail: Promise<unknown> = Promise.resolve();
   let disposed = false;
   const now = options.now ?? Date.now;
+  const wallClock = options.wallClock ?? Date.now;
   const sleep =
     options.sleep ??
     ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
@@ -113,6 +141,8 @@ export function createDatePreparation(
       const file = app.vault.getAbstractFileByPath(request.path);
       if (!file || file.extension !== "md") return fail();
       const original = await app.vault.read(file);
+      // (a) File stat after the source read, before any effect.
+      const statSource = statSnapshot(file);
       if (now() >= deadline) throw new DatePreparationDeferred();
       if (sha256(original) !== request.expectedSha256)
         throw new HashConflictError(sha256(original));
@@ -129,6 +159,7 @@ export function createDatePreparation(
         );
       };
       if (hasCreated(before.properties)) return { content: original };
+      if (!statSource) return fail();
       const dateKeys = new Set(
         [fdm.createdPropertyName, fdm.modifiedPropertyName]
           .filter(Boolean)
@@ -190,6 +221,21 @@ export function createDatePreparation(
           app.workspace.getActiveFile() !== file
         )
           return fail();
+        // (b) File stat observed just before the command, after the hash recheck.
+        // FDM reads the stat itself a few milliseconds later; an identical-content
+        // write in between can still move mtime, so this is the stat observed just
+        // before the command, not a copy of the value FDM used.
+        const statAtCommand = statSnapshot(file);
+        const observedAtMs = wallClock();
+        if (!statAtCommand || statAtCommand.ctime !== statSource.ctime) return fail();
+        const fileStat: DatePreparationFileStat = {
+          contractVersion: FILE_STAT_PROVENANCE_CONTRACT_VERSION,
+          ctimeMs: statAtCommand.ctime,
+          mtimeMs: statAtCommand.mtime,
+          ctimeUtcOffsetMinutes: utcOffsetMinutesAt(statAtCommand.ctime),
+          mtimeUtcOffsetMinutes: utcOffsetMinutesAt(statAtCommand.mtime),
+          observedAtMs,
+        };
         if (!app.commands.executeCommandById(COMMAND)) return fail();
         let last = "",
           stableSince = now();
@@ -229,7 +275,10 @@ export function createDatePreparation(
           if (
             hasCreated(observed.properties) &&
             now() - stableSince >= STABLE_MS
-          )
+          ) {
+            // (c) The creation time must not move during the whole preparation.
+            const statObserved = statSnapshot(file);
+            if (!statObserved || statObserved.ctime !== statSource.ctime) return fail();
             return {
               content,
               datePreparation: {
@@ -242,8 +291,10 @@ export function createDatePreparation(
                 ...(observed.body !== before.body
                   ? { lineEndingsNormalized: true as const }
                   : {}),
+                fileStat,
               },
             };
+          }
           await sleep(POLL_MS);
         }
         return fail();

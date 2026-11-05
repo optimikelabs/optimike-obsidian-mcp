@@ -113,7 +113,7 @@ export async function registerGovernedNoteReplaceTools(
     "obsidian_note_replace_plan",
     {
       description:
-        "Plan one complete atomic replacement of an existing Markdown note. Caller-supplied frontmatter must already use Obsidian's canonical form; a refusal returns expectedFrontmatter for the caller to resend. Type issues are warnings. The live Bridge validates and seals before/after proofs without applying the requested replacement. Missing creation dates may first be prepared by the active vault date manager; any preparation normalization is announced. planRef is opaque.",
+        "Plan one complete atomic replacement of an existing Markdown note. Caller-supplied frontmatter must already use Obsidian's canonical form; a refusal returns expectedFrontmatter for the caller to resend. Type issues are warnings. The live Bridge validates and seals before/after proofs without applying the requested replacement. Missing creation dates may first be prepared by the active vault date manager; any preparation normalization is announced. planRef is opaque. A Bridge that cannot prove the added creation date refuses with date_preparation_bridge_upgrade_required before any change (ask the vault owner to update the Atomic Write Bridge); date_preparation_unverified names the failed check in preparationCheck.",
       inputSchema: mcpSchema(PlanSchema.shape),
       annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,
     },
