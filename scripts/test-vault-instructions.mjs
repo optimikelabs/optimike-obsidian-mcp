@@ -257,7 +257,9 @@ const CLIENT_RULES = "# Client\nClient notes are read-only on Fridays.\n";
 await check("mode and file name parsing", () => {
   assert.deepEqual(names.parseVaultInstructionFileNames("AGENTS.md"), ["AGENTS.md"]);
   assert.deepEqual(names.parseVaultInstructionFileNames(" AGENTS.md , CLAUDE.md,AGENTS.md "), ["AGENTS.md", "CLAUDE.md"]);
-  for (const invalid of ["", " , ", "a/AGENTS.md", "..", "x\\y", "a:b", "1,2,3,4,5,6,7,8,9"]) {
+  // Instruction files are served by obsidian_read_note, which reads notes only.
+  assert.deepEqual(names.parseVaultInstructionFileNames("Rules.MD"), ["Rules.MD"]);
+  for (const invalid of ["", " , ", "a/AGENTS.md", "..", "x\\y", "a:b", "1,2,3,4,5,6,7,8,9", "RULES.txt", "AGENTS.md,RULES.txt", "AGENTS", ".md"]) {
     assert.equal(names.parseVaultInstructionFileNames(invalid), undefined, invalid);
   }
   assert.equal(names.stricterVaultInstructionsMode("off", "enforce"), "enforce");

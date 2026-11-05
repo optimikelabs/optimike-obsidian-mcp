@@ -33,8 +33,10 @@ export function stricterVaultInstructionsMode(
 }
 
 /**
- * Parses `MCP_VAULT_INSTRUCTIONS_FILES`: 1 to 8 plain file names (no folder,
- * no `.`/`..`, no characters that are invalid in a vault file name), separated
+ * Parses `MCP_VAULT_INSTRUCTIONS_FILES`: 1 to 8 plain Markdown file names (no
+ * folder, no `.`/`..`, no characters that are invalid in a vault file name,
+ * ending in `.md` because the agent reads them with `obsidian_read_note`, which
+ * serves notes only in every backend), separated
  * by commas or new lines. Duplicates are dropped, order is kept. Returns
  * `undefined` for an invalid value, never the rejected text.
  */
@@ -50,6 +52,9 @@ export function parseVaultInstructionFileNames(
       name.length > 128 ||
       name === "." ||
       name === ".." ||
+      // A name the read tool cannot serve would block writes for good (enforce).
+      name.length <= 3 ||
+      !name.toLowerCase().endsWith(".md") ||
       // Folder separators and characters Obsidian or Windows reject in names.
       /[\\/:*?"<>|\u0000-\u001f\u007f]/u.test(name)
     ) {

@@ -187,7 +187,7 @@ const EnvSchema = z
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             message:
-              "MCP_VAULT_INSTRUCTIONS_FILES must list 1 to 8 plain file names separated by commas.",
+              "MCP_VAULT_INSTRUCTIONS_FILES must list 1 to 8 plain Markdown file names (ending in .md) separated by commas.",
           });
         }
       }),

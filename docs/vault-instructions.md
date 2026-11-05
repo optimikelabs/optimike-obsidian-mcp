@@ -18,7 +18,7 @@ What the server proves is that the agent received the applicable instructions, i
 | --- | --- | --- | --- |
 | `MCP_VAULT_INSTRUCTIONS` | `off`, `advise`, `enforce` | `advise` | Mode of this server, or of this client when set on a stdio proxy. |
 | `MCP_VAULT_INSTRUCTIONS_MIN` | `off`, `advise`, `enforce` | `off` | Administrative minimum. No client can choose a lower mode. |
-| `MCP_VAULT_INSTRUCTIONS_FILES` | 1 to 8 file names, comma-separated | `AGENTS.md` | Instruction file names, for example `AGENTS.md,CLAUDE.md`. Plain names only, no folder; kept exactly as written, and both Unicode spellings (NFC, NFD) are looked up. |
+| `MCP_VAULT_INSTRUCTIONS_FILES` | 1 to 8 file names, comma-separated | `AGENTS.md` | Instruction file names, for example `AGENTS.md,CLAUDE.md`. Plain Markdown names only (ending in `.md`, the agent reads them with `obsidian_read_note`), no folder; kept exactly as written, and both Unicode spellings (NFC, NFD) are looked up. |
 | `MCP_VAULT_INSTRUCTIONS_JOURNAL_PATH` | absolute path | machine-local state folder | SQLite journal of plan seals. Give an absolute path outside any synchronized vault: the server does not check this for you. |
 
 An invalid value stops the server at startup without echoing the value.
