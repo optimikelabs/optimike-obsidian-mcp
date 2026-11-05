@@ -732,6 +732,89 @@ await check("R1-S3 a decomposed configured file name is kept exact: the existing
 });
 
 // ---------------------------------------------------------------------------
+// E1-D1: a folder stored in NFD that Obsidian indexes in NFC (live Local REST
+// API on Windows). The raw-text probe answers under both spellings, the JSON
+// read only under the NFC one.
+
+function unicodeLive(stored, { serveBothToReader = false } = {}) {
+  const key = (vaultPath) => vaultPath.normalize("NFC");
+  const byKey = new Map(Object.entries(stored).map(([vaultPath, content]) => [key(vaultPath), content]));
+  const source = { kind: "rest", read: async (vaultPath) => byKey.get(key(vaultPath)) ?? null };
+  const obsidian = {
+    getFileContent: async (vaultPath, format = "markdown") => {
+      const indexed = key(vaultPath);
+      if ((!serveBothToReader && vaultPath !== indexed) || !byKey.has(indexed)) {
+        throw new McpError(BaseErrorCode.NOT_FOUND, "missing");
+      }
+      const content = byKey.get(indexed);
+      if (format === "json") {
+        return { content, path: serveBothToReader ? vaultPath : indexed, frontmatter: {}, tags: [], stat: { ctime: 1, mtime: 1, size: content.length } };
+      }
+      return content;
+    },
+    listFiles: async () => [],
+  };
+  return { source, obsidian };
+}
+
+await check("E1-D1 an AGENTS.md under an NFD folder indexed in NFC is listed once, readable, and its read admits the plan", async () => {
+  const nfd = "Café";
+  const nfc = "Café";
+  const { source, obsidian } = unicodeLive({ [`${nfd}/AGENTS.md`]: "# Café\n" });
+  const root = makeVault({});
+  const runtime = makeRuntime(root, { source });
+  const connection = await connect(runtime, obsidian);
+  try {
+    for (const target of [`${nfd}/N.md`, `${nfc}/N.md`]) {
+      const refused = await connection.call("obsidian_text_patch_plan", { path: target, idempotencyKey: `d1-${target}` });
+      assert.equal(reason(refused.json), "vault_instructions_unread", JSON.stringify(refused.json));
+      assert.deepEqual(states(refused.json), [[`${nfc}/AGENTS.md`, "unread"]], "one file, under the spelling obsidian_read_note serves");
+    }
+    const listed = (await connection.call("obsidian_text_patch_plan", { path: `${nfd}/N.md`, idempotencyKey: "d1" })).json.vaultInstructions.files[0].path;
+    await connection.read(listed);
+    for (const target of [`${nfd}/N.md`, `${nfc}/N.md`]) {
+      const planned = await connection.call("obsidian_text_patch_plan", { path: target, idempotencyKey: `d1-ok-${target}` });
+      assert.equal(planned.result.isError, false, JSON.stringify(planned.json));
+      assert.equal(planned.json.vaultInstructions.complete, true);
+    }
+    const applied = await connection.call("obsidian_text_patch_apply", { planRef: `plan:d1-ok-${nfd}/N.md`, idempotencyKey: "d1-apply" });
+    assert.equal(applied.result.isError, false, JSON.stringify(applied.json));
+  } finally {
+    await connection.close();
+    runtime.closeSeals();
+  }
+
+  // A read served under the other spelling of the same path counts too.
+  const other = unicodeLive({ [`${nfd}/AGENTS.md`]: "# Café\n" }, { serveBothToReader: true });
+  const otherRuntime = makeRuntime(makeVault({}), { source: other.source });
+  const otherConnection = await connect(otherRuntime, other.obsidian);
+  try {
+    await otherConnection.read(`${nfd}/AGENTS.md`);
+    const planned = await otherConnection.call("obsidian_text_patch_plan", { path: `${nfd}/N.md`, idempotencyKey: "d1-nfd" });
+    assert.equal(planned.result.isError, false, JSON.stringify(planned.json));
+  } finally {
+    await otherConnection.close();
+    otherRuntime.closeSeals();
+  }
+});
+
+await check("E1-D1 distinct NFC and NFD twin folders still need one read each", async () => {
+  const nfd = "Café";
+  const nfc = "Café";
+  const s = await session({ [`${nfd}/AGENTS.md`]: "# NFD\n", [`${nfc}/AGENTS.md`]: "# NFC\n", [`${nfd}/N.md`]: "before\n" });
+  await s.connection.read(`${nfc}/AGENTS.md`);
+  const refused = await s.connection.call("obsidian_text_patch_plan", { path: `${nfd}/N.md`, idempotencyKey: "twins" });
+  assert.equal(reason(refused.json), "vault_instructions_unread", JSON.stringify(refused.json));
+  assert.deepEqual(
+    states(refused.json).sort((a, b) => (a[0] < b[0] ? -1 : 1)),
+    [[`${nfd}/AGENTS.md`, "unread"], [`${nfc}/AGENTS.md`, "read"]].sort((a, b) => (a[0] < b[0] ? -1 : 1)),
+  );
+  await s.connection.read(`${nfd}/AGENTS.md`);
+  assert.equal((await s.connection.call("obsidian_text_patch_plan", { path: `${nfd}/N.md`, idempotencyKey: "twins" })).result.isError, false);
+  await s.close();
+});
+
+// ---------------------------------------------------------------------------
 
 server.close();
 try {

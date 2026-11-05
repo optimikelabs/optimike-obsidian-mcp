@@ -493,7 +493,21 @@ export async function currentInstructionRules(
     const base = segments.at(-1)!.normalize("NFC");
     return [segments.length, names.findIndex((name) => name.normalize("NFC") === base)] as const;
   };
-  const files = [...digests.keys()]
+  // Spellings of one path that answer with the same content are one file (a
+  // folder stored in NFD that Obsidian indexes in NFC answers under both),
+  // listed under its NFC spelling when it answers: the one obsidian_read_note
+  // serves. Different contents remain distinct files.
+  const listedAs = new Map<string, string>();
+  const kept = new Map<string, string>();
+  const notComposed = (filePath: string) => Number(filePath !== filePath.normalize("NFC"));
+  for (const filePath of [...digests.keys()].sort(
+    (a, b) => notComposed(a) - notComposed(b) || (a < b ? -1 : a > b ? 1 : 0),
+  )) {
+    const key = `${filePath.normalize("NFC")}|${digests.get(filePath)}`;
+    if (!kept.has(key)) kept.set(key, filePath);
+    listedAs.set(filePath, kept.get(key)!);
+  }
+  const files = [...kept.values()]
     .sort((a, b) => {
       const [depthA, nameA] = rank(a);
       const [depthB, nameB] = rank(b);
@@ -501,12 +515,13 @@ export async function currentInstructionRules(
     })
     .map((filePath) => ({ path: filePath, sha256: digests.get(filePath)! }));
   return {
-    targets: targets.map((target, index) => ({
-      path: target.path,
-      rules: files
-        .map((entry) => entry.path)
-        .filter((filePath) => chains[index].includes(filePath)),
-    })),
+    targets: targets.map((target, index) => {
+      const listed = new Set(chains[index].map((filePath) => listedAs.get(filePath)));
+      return {
+        path: target.path,
+        rules: files.map((entry) => entry.path).filter((filePath) => listed.has(filePath)),
+      };
+    }),
     files,
   };
 }
@@ -518,11 +533,17 @@ export function evaluateReader(
 ): EvaluatedInstructionFile[] {
   return files.map((file) => {
     const proof = ledger.proof(reader.key, file.path);
+    // A read under another spelling of the same path counts when what it
+    // served is the current authoritative content of this one.
+    const read =
+      proof === file.sha256 ||
+      vaultPathAliases(file.path).some(
+        (alias) => ledger.proof(reader.key, alias) === file.sha256,
+      );
     return {
       path: file.path,
       sha256: file.sha256,
-      state:
-        proof === undefined ? "unread" : proof === file.sha256 ? "read" : "changed",
+      state: read ? "read" : proof === undefined ? "unread" : "changed",
     };
   });
 }

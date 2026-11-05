@@ -56,7 +56,7 @@ For a target `Projects/Client/Note.md`, the server looks for each configured nam
 
 The targets are the paths the backend really writes:
 
-- A path is kept exactly as written; no Unicode normalisation. When its composed (NFC) and decomposed (NFD) spellings differ, the chains of every spelling are checked, because a backend or a file system may resolve either one. On a file system that keeps both as distinct folders, both sets of files apply.
+- A path is kept exactly as written; no Unicode normalisation. When its composed (NFC) and decomposed (NFD) spellings differ, the chains of every spelling are checked, because a backend or a file system may resolve either one. On a file system that keeps both as distinct folders, both sets of files apply. When two spellings of one path answer with the same content (a folder stored in NFD that Obsidian indexes in NFC), they are one file: it is listed once, under its NFC spelling when that one answers, and a read under any of its spellings counts when the content served matches the current one.
 - A move applies the chains of the source and of the destination. An archive (`obsidian_admin_filesystem`) checks each destination as the tool writes it (`archiveDir` joined to the file name); a destination that cannot be resolved is an unknown target. A native move plan (`obsidian_note_move_plan`) also applies the chains of every note whose links it rewrites (`affectedPaths` of its sealed neighbourhood); they are part of the plan seal. If those notes cannot be determined, `enforce` refuses the plan.
 - Batch tools apply the union of the chains of all their target notes.
 - `asset_import_plan` uses the configured asset folder (`MCP_ASSET_FOLDER`).
