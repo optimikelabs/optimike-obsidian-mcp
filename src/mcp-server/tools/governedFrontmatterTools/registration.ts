@@ -147,7 +147,7 @@ export async function registerGovernedFrontmatterTools(
     "obsidian_frontmatter_patch_plan",
     {
       description:
-        "Plan a patch of top-level frontmatter keys in one existing Markdown note. Values use Obsidian's native format. Existing noncanonical frontmatter is normalized in the sealed plan and announced in frontmatterFormat.normalization; type issues are warnings. After that normalization only authorized ranges change. It returns an opaque planRef without applying the requested patch. Missing creation dates may first be prepared by the active vault date manager, with normalization reported in datePreparation.",
+        "Plan a patch of top-level frontmatter keys in one existing Markdown note. Values use Obsidian's native format. Existing noncanonical frontmatter is normalized in the sealed plan and announced in frontmatterFormat.normalization; type issues are warnings. After that normalization only authorized ranges change. It returns an opaque planRef without applying the requested patch. Missing creation dates may first be prepared by the active vault date manager, with normalization reported in datePreparation. A Bridge that cannot prove the added creation date refuses with date_preparation_bridge_upgrade_required before any change (ask the vault owner to update the Atomic Write Bridge); date_preparation_unverified names the failed check in preparationCheck.",
       inputSchema: mcpSchema(PlanSchema.shape),
       annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,
     },

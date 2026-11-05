@@ -1,4 +1,5 @@
 import { z } from "zod/v3";
+import { DatePreparationStatusSchema } from "../datePreparationProvenance.js";
 import { createHash } from "node:crypto";
 import type {
   AtomicWriteCasRequest,
@@ -82,6 +83,8 @@ const StatusSchema = z
       writeEnabled: z.boolean(),
     }),
     limits: z.object({ markdownOnly: z.literal(true) }),
+    // Unknown shapes are dropped, never fatal: they only withdraw the capability.
+    datePreparation: DatePreparationStatusSchema.optional().catch(undefined),
     effectFence: z
       .object({
         contractVersion: z.literal(1),
@@ -181,6 +184,18 @@ const CasSchema = z
     completionToken: z.string().uuid().optional(),
   })
   .passthrough();
+
+/**
+ * True only when the Bridge advertises the file-stat provenance of date
+ * preparation (Atomic Write Bridge 0.9.2, contract version 1). Without it an
+ * added creation date cannot be qualified and no preparation is started.
+ */
+export function atomicWriteFileStatProvenance(status: unknown): boolean {
+  const parsed = StatusSchema.safeParse(status);
+  const datePreparation = parsed.success ? parsed.data.datePreparation : undefined;
+  return datePreparation?.contractVersion === 1 && datePreparation.supported === true &&
+    datePreparation.fileStatProvenance?.contractVersion === 1;
+}
 
 /** The Bridge effect-fence epoch, when the Bridge can check tokens at the effect point. */
 export function effectFenceEpoch(status: unknown): string | undefined {

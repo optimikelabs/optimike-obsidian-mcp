@@ -35,6 +35,7 @@ import { load } from "js-yaml";
 import { operationDigest } from "../../../services/operations/contract.js";
 import { compileFrontmatterPatch, nativeFrontmatterPatchKeys, type FrontmatterPatchOperation } from "../../../services/frontmatterPatchCompiler.js";
 import { DatePreparationPlanFailure, frontmatterEnvelope, inspectNativeFrontmatter, rejectNonCanonical } from "../../../services/obsidianFrontmatterFormat.js";
+import { DatePreparationFileStatSchema, dateMatchesFileTime, type DatePreparationCheck } from "../../../services/datePreparationProvenance.js";
 import { z } from "zod/v3";
 import { config } from "../../../config/index.js";
 import { validateObsidianMarkdown } from "../../../services/obsidianFormatService.js";
@@ -42,6 +43,7 @@ import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/i
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import {
   type AtomicWriteBackend,
+  atomicWriteFileStatProvenance,
   effectFenceEpoch,
   markAtomicWritePreDispatchError,
   effectiveAtomicWriteDateProtection,
@@ -188,6 +190,11 @@ function preparationDateInWindow(value: string, start: number, end: number, offs
   const local = (ms: number) => new Date(ms + offsetMinutes * 60_000).toISOString().slice(0, 19);
   const length = value.length === 16 ? 16 : 19;
   return value.length === length && value >= local(start).slice(0, length) && value <= local(end).slice(0, length);
+}
+
+/** A failed verification of an executed date preparation, by closed sub-cause. */
+class PreparationCheckFailure extends Error {
+  constructor(readonly check: DatePreparationCheck) { super(check); }
 }
 
 function entriesForKey(
@@ -428,9 +435,9 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
         source.size !== Buffer.byteLength(source.content, "utf8"))
       throw new McpError(BaseErrorCode.CONFLICT, "The planning read could not be verified.", { reason: "note_source_proof_invalid" });
     const fenceKey = operationDigest({ domain: "obsidian-date-preparation-v1", path, bindingFingerprint: source.bindingFingerprint });
-    const unverified = () => new McpError(BaseErrorCode.CONFLICT,
+    const unverified = (check?: DatePreparationCheck) => new McpError(BaseErrorCode.CONFLICT,
       "La préparation des dates a pu modifier ou normaliser la note. Une revue administrative est nécessaire avant reprise : obsidian_operation_close avec datePreparationPaths.",
-      { reasonCode: "date_preparation_unverified", mutationMayHaveApplied: true });
+      { reasonCode: "date_preparation_unverified", mutationMayHaveApplied: true, ...(check ? { preparationCheck: check } : {}) });
     // A lock whose attempt provably never reached its effect point is released
     // (and that attempt revoked forever); any other lock needs owner review.
     if (this.journal.hasDatePreparationFence(fenceKey) &&
@@ -454,6 +461,17 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
     const offset = status.settlement?.modifiedTimeFrontmatter.utcOffsetMinutes;
     if (!status.backend.writeEnabled || !this.delegate.prepareDate || protection.unsupportedIntegrations.length || !protection.createdPropertyNames.length ||
         !Number.isInteger(offset) || Math.abs(offset!) > 840) throw fail();
+    // An added creation date is accepted only as the exact file creation time
+    // observed by the Bridge. Without that proof the result could never be
+    // qualified: refuse before any lock, dispatch or effect.
+    if (!atomicWriteFileStatProvenance(status))
+      throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE,
+        "La note n'a pas encore de date de création et ce Bridge ne fournit pas la preuve nécessaire pour la vérifier. Mettez à jour Atomic Write Bridge (0.9.2 ou plus récent) ; rien n'a été modifié.",
+        { reasonCode: "date_preparation_bridge_upgrade_required", mutationMayHaveApplied: false });
+    // The proof is the same for every caller. Native inspection, when the
+    // caller requires it or the Bridge offers it, only sets the comparison
+    // baseline; without it the raw source bytes are the (stricter) baseline.
+    const baselineFormat = originalFormat ?? await inspectNativeFrontmatter(this.delegate, source.content, source.bindingFingerprint).catch(() => undefined);
     let prepared;
     // The lock attempt id is also the Bridge effect-fence token (durable before dispatch).
     const fenceEpoch = effectFenceEpoch(status);
@@ -469,38 +487,34 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
     if (prepared.datePreparation?.kind !== "date-manager-before-plan") {
       throw await this.preparationFailure(undefined, fenceKey, source.bindingFingerprint, fenceEpoch, attempt, unverified, fail);
     }
+    // From here the preparation has acted: every refusal keeps the lock, never replays and names its check.
+    const refuse = (check: DatePreparationCheck) => {
+      logger.warning("Date preparation could not be verified; the note stays locked until administrative review.",
+        requestContextService.createRequestContext({ operation: "governedDatePreparationCheck", preparationCheck: check }));
+      return unverified(check);
+    };
     // Seal only a fresh read, never the preparation response or the old projection.
     let current;
-    try { current = await this.delegate.read({ contractVersion: 1, path }); } catch { throw unverified(); }
+    try { current = await this.delegate.read({ contractVersion: 1, path }); } catch { throw refuse("fresh_read_mismatch"); }
     if (current.path !== path || current.bindingFingerprint !== source.bindingFingerprint || current.sha256 !== prepared.sha256 ||
         current.sha256 !== createHash("sha256").update(current.content, "utf8").digest("hex") || current.size !== Buffer.byteLength(current.content, "utf8"))
-      throw unverified();
+      throw refuse("fresh_read_mismatch");
     try {
-      if (originalFormat) {
-      const preparedFormat = await inspectNativeFrontmatter(this.delegate, current.content, current.bindingFingerprint);
-      const dateKeys = (status.protection?.frontmatterDateProperties.integrations ?? []).flatMap(item => [item.createdPropertyName, item.modifiedPropertyName].filter((key): key is string => !!key));
-      const lineEndingsNormalized = prepared.datePreparation?.lineEndingsNormalized === true;
-      const observedAt = Date.now();
-      const beforeDates = parseFrontmatter(originalFormat.content);
-      const afterDates = parseFrontmatter(current.content);
-      for (const key of created) {
-        const beforeEntries = entriesForKey(beforeDates, normalizeKey(key));
-        if (beforeEntries.length > 0 && !isDeepStrictEqual(beforeEntries, entriesForKey(afterDates, normalizeKey(key))))
-          throw new McpError(BaseErrorCode.CONFLICT, "An existing creation date changed during preparation.", { reason: "date_preparation_created_drift" });
-      }
-      const originalDelimiters = preparationDelimiters(originalFormat.content, lineEndingsNormalized);
-      if (preparedFormat.normalized || (originalDelimiters !== undefined && originalDelimiters !== preparationDelimiters(current.content, lineEndingsNormalized)) ||
-          preparationNonDateBytes(originalFormat.content, dateKeys, lineEndingsNormalized) !== preparationNonDateBytes(current.content, dateKeys, lineEndingsNormalized))
-        throw new McpError(BaseErrorCode.CONFLICT, "The note changed outside the qualified date preparation.", { reason: "date_preparation_non_date_drift" });
-      for (const key of dateKeys) {
-        const beforeDate = preparationDateValue(originalFormat.content, key);
-        const afterDate = preparationDateValue(current.content, key);
-        if (beforeDate !== afterDate && (!afterDate || !preparationDateInWindow(afterDate, dispatchedAt, observedAt, offset!)))
-          throw new McpError(BaseErrorCode.CONFLICT, "The date preparation is outside its observation window.", { reason: "date_preparation_unqualified" });
-      }
-      }
-      if (created.some(key => entriesForKey(parseFrontmatter(current.content), normalizeKey(key)).length !== 1)) throw fail();
-    } catch { throw unverified(); }
+      this.verifyPreparation({
+        baseline: baselineFormat?.content ?? source.content,
+        preparedNormalized: baselineFormat ? (await inspectNativeFrontmatter(this.delegate, current.content, current.bindingFingerprint)).normalized : false,
+        current: current.content,
+        created,
+        dateKeys: (status.protection?.frontmatterDateProperties.integrations ?? []).flatMap(item => [item.createdPropertyName, item.modifiedPropertyName].filter((key): key is string => !!key)),
+        lineEndingsNormalized: prepared.datePreparation?.lineEndingsNormalized === true,
+        fileStat: prepared.datePreparation?.fileStat,
+        window: { dispatchedAt, observedAt: Date.now(), offset: offset! },
+      });
+    } catch (error) {
+      throw refuse(error instanceof PreparationCheckFailure ? error.check
+        : error instanceof McpError && (error.details as { reason?: unknown } | undefined)?.reason === "date_preparation_unqualified" ? "format_unqualified"
+          : "unclassified");
+    }
     const result = { ...current, ...(prepared.datePreparation?.kind === "date-manager-before-plan" ? { datePreparation: {
       kind: "date-manager-before-plan" as const, message: "Note datée par le gestionnaire de dates avant le plan." + (prepared.datePreparation.lineEndingsNormalized === true
         ? " fins de ligne normalisées par Obsidian pendant la datation." : ""),
@@ -513,6 +527,56 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
       catch { throw unverified(); }
     }
     return result;
+  }
+
+  /**
+   * Role-based proof of an executed FDM preparation, common to every caller.
+   * Only date lines of the active integrations may change. A creation that was
+   * present stays byte-identical; an added creation is exactly the file
+   * creation time observed by the Bridge just before the command (no window
+   * alternative); an added or changed modification is exactly the observed
+   * mtime or falls in the request window, which qualifies its timing only.
+   */
+  private verifyPreparation(input: {
+    baseline: string; preparedNormalized: boolean; current: string; created: readonly string[]; dateKeys: readonly string[];
+    lineEndingsNormalized: boolean; fileStat: unknown; window: { dispatchedAt: number; observedAt: number; offset: number };
+  }): void {
+    const check = (ok: boolean, name: DatePreparationCheck) => { if (!ok) throw new PreparationCheckFailure(name); };
+    const createdNames = new Set(input.created.map(normalizeKey));
+    const beforeDates = parseFrontmatter(input.baseline);
+    const afterDates = parseFrontmatter(input.current);
+    for (const key of input.created) {
+      const beforeEntries = entriesForKey(beforeDates, normalizeKey(key));
+      check(beforeEntries.length === 0 || isDeepStrictEqual(beforeEntries, entriesForKey(afterDates, normalizeKey(key))), "created_drift");
+    }
+    const dateKeys = [...new Set([...input.dateKeys, ...input.created])];
+    const originalDelimiters = preparationDelimiters(input.baseline, input.lineEndingsNormalized);
+    check(!input.preparedNormalized && (originalDelimiters === undefined || originalDelimiters === preparationDelimiters(input.current, input.lineEndingsNormalized)) &&
+      preparationNonDateBytes(input.baseline, dateKeys, input.lineEndingsNormalized) === preparationNonDateBytes(input.current, dateKeys, input.lineEndingsNormalized),
+    "non_date_drift");
+    check(input.created.every(key => entriesForKey(afterDates, normalizeKey(key)).length === 1), "created_missing_or_duplicate");
+    const proof = DatePreparationFileStatSchema.safeParse(input.fileStat);
+    // The Bridge clock bounds the creation time: no dependency on the MCP clock.
+    check(proof.success && proof.data.ctimeMs <= proof.data.observedAtMs, "provenance_missing_or_invalid");
+    const stat = proof.data!;
+    for (const key of dateKeys) {
+      const isCreated = createdNames.has(normalizeKey(key));
+      let beforeDate: string | undefined, afterDate: string | undefined;
+      try {
+        beforeDate = preparationDateValue(input.baseline, key);
+        afterDate = preparationDateValue(input.current, key);
+      } catch { throw new PreparationCheckFailure(isCreated ? "created_missing_or_duplicate" : "format_unqualified"); }
+      if (beforeDate === afterDate) continue;
+      if (isCreated) {
+        check(beforeDate === undefined, "created_drift");
+        check(afterDate !== undefined && dateMatchesFileTime(afterDate, stat.ctimeMs, stat.ctimeUtcOffsetMinutes), "created_provenance_mismatch");
+      } else {
+        // The exact-mtime branch needs an mtime the Bridge had already observed.
+        check(afterDate !== undefined && (
+          (stat.mtimeMs <= stat.observedAtMs && dateMatchesFileTime(afterDate, stat.mtimeMs, stat.mtimeUtcOffsetMinutes)) ||
+          preparationDateInWindow(afterDate, input.window.dispatchedAt, input.window.observedAt, input.window.offset)), "modified_provenance_mismatch");
+      }
+    }
   }
 
   /**
