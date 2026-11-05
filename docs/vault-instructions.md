@@ -60,10 +60,10 @@ The targets are the paths the backend really writes:
 - A move applies the chains of the source and of the destination. A native move plan (`obsidian_note_move_plan`) also applies the chains of every note whose links it rewrites (`affectedPaths` of its sealed neighbourhood); they are part of the plan seal. If those notes cannot be determined, `enforce` refuses the plan.
 - Batch tools apply the union of the chains of all their target notes.
 - `asset_import_plan` uses the configured asset folder (`MCP_ASSET_FOLDER`).
-- Operon mutations use the note that holds the task (resolved from `operonId`) and their destination: `targetPath` for inline tasks, conversions to inline and relocations; for a file-task creation or an inline-to-file conversion, `targetFolder` on a legacy engine, otherwise the file-task folder of the live Operon configuration (`creation.fileTasksFolder`, read by a preflight that writes nothing), plus the folder of the parent task note when a `parentTask` is given.
+- Operon mutations use the note that holds the task (resolved from `operonId`) and their destination: `targetPath` for inline tasks, conversions to inline and relocations; for a file-task creation or an inline-to-file conversion, `targetFolder` on a legacy engine, otherwise the file-task folder of the live Operon configuration (`creation.fileTasksFolder`, read by a preflight that writes nothing), plus the folder of the parent task note when a `parentTask` is given. Without a configured folder, Operon routes the file by its parent: the parent's folder alone is checked.
 - Read-only operations of mixed tools are never checked: `get`, `list`, `index`, `audit`, `validate`, `validateOnly`, and a tag `rename` preview (`dryRun` true, the default). A real tag `rename` writes notes known only when it runs, so `enforce` refuses it as unresolved.
 
-When the target path cannot be known (`targetType: "activeFile"`, periodic Operon task creation, an inline Operon task without `targetPath`, a file task when Operon has no configured file-task folder, an unknown `operonId`, a vault-wide tag rename), `advise` lists the root files with `targetResolved: false`, and `enforce` refuses with `vault_instructions_target_unresolved` and a message that says what to do instead.
+When the target path cannot be known (`targetType: "activeFile"`, periodic Operon task creation, an inline Operon task without `targetPath`, a file task when Operon has neither a configured file-task folder nor a parent task, an unknown `operonId`, a vault-wide tag rename), `advise` lists the root files with `targetResolved: false`, and `enforce` refuses with `vault_instructions_target_unresolved` and a message that says what to do instead.
 
 ### Bounds
 
@@ -161,7 +161,7 @@ When the mode is not `off` and the vault root has an instruction file, the MCP `
 - The check runs just before the tool. A rule edited between the check and the write is caught by the next write, not by this one.
 - `operon_recover_mutation` is not checked: it resumes a mutation that was already admitted, and its paths are not exposed.
 - Notes that Operon writes on its own after a mutation (automatic archiving, cascades to parent or child tasks, recurrence copies) are not checked.
-- For a file task with a parent, the configured folder and the parent's folder are checked; a deeper layout Operon may choose for child tasks is not known to the server.
+- For a file task with a parent, the configured folder (when there is one) and the parent's folder are checked; a deeper layout Operon may choose for child tasks is not known to the server.
 - Under `enforce`, periodic Operon task creation is refused: Operon does not expose the periodic note path before creating the task. Lower the mode for that client to create periodic tasks.
 - `obsidian_runtime_maintenance` and `obsidian_operation_close` do not write vault content and are not checked.
 - A file read under another case (`agents.md`) is not the listed file: read the exact path given.

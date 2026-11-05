@@ -652,6 +652,48 @@ await check("P2-5 (pin, documented) off then enforce: the unsealed apply and an 
 });
 
 // ---------------------------------------------------------------------------
+// R1 review (S1-S3).
+
+await check("R1-S1 a file task with a parent and no configured folder is created next to its parent (no AGENTS.md)", async () => {
+  const operon = new OperonService();
+  bridge.fileTasksFolder = "";
+  try {
+    const s = await session({ "Projects/Client/Parent.md": "p\n" }, { resolveOperonFileTaskFolder: () => operon.configuredFileTaskFolder() });
+    const child = { ...CREATE, task: { ...CREATE.task, fields: { parentTask: "par0001" } } };
+    const created = await s.connection.call("operon_create_task", child);
+    assert.equal(created.result.isError, false, JSON.stringify(created.json));
+    assert.equal(created.json.vaultInstructions, undefined, "no rules, no change");
+    await s.close();
+  } finally {
+    bridge.fileTasksFolder = "Secret";
+  }
+});
+
+await check("R1-S1 parent routing without a configured folder still enforces the parent folder rules", async () => {
+  const operon = new OperonService();
+  bridge.fileTasksFolder = "";
+  try {
+    const s = await session(
+      { "Projects/Client/AGENTS.md": "# Client\n", "Projects/Client/Parent.md": "p\n" },
+      { resolveOperonFileTaskFolder: () => operon.configuredFileTaskFolder() },
+    );
+    const before = count("operon_create_task");
+    const child = { ...CREATE, task: { ...CREATE.task, fields: { parentTask: "par0001" } } };
+    const refused = await s.connection.call("operon_create_task", child);
+    assert.equal(reason(refused.json), "vault_instructions_unread", JSON.stringify(refused.json));
+    assert.deepEqual(states(refused.json), [["Projects/Client/AGENTS.md", "unread"]]);
+    assert.equal(count("operon_create_task"), before, "refused before the tool runs");
+    const unknownParent = { ...CREATE, task: { ...CREATE.task, fields: { parentTask: "zzz0001" } } };
+    assert.equal(reason((await s.connection.call("operon_create_task", unknownParent)).json), "vault_instructions_target_unresolved");
+    await s.connection.read("Projects/Client/AGENTS.md");
+    assert.equal((await s.connection.call("operon_create_task", child)).result.isError, false);
+    await s.close();
+  } finally {
+    bridge.fileTasksFolder = "Secret";
+  }
+});
+
+// ---------------------------------------------------------------------------
 
 server.close();
 try {

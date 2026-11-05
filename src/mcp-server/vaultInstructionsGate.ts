@@ -685,7 +685,8 @@ async function resolveTargets(
     if (typeof note !== "string") return note;
     targets.push({ path: note });
   }
-  for (const operonId of spec.parentFolderOf ?? []) {
+  const parentFolders = spec.parentFolderOf ?? [];
+  for (const operonId of parentFolders) {
     const note = await taskNote(operonId);
     if (typeof note !== "string") return note;
     targets.push(parentFolder(note));
@@ -702,8 +703,12 @@ async function resolveTargets(
       };
     }
     const normalized = normalizeVaultPath(configured?.trim());
-    if (!normalized) return { hint: FILE_TASK_FOLDER_HINT };
-    targets.push({ path: normalized, folder: true });
+    if (normalized) targets.push({ path: normalized, folder: true });
+    // No configured folder: Operon routes the file by its parent task, whose
+    // folder is already a target; without a parent the destination is unknown.
+    else if (configured?.trim() || parentFolders.length === 0) {
+      return { hint: FILE_TASK_FOLDER_HINT };
+    }
   }
   return { targets: uniqueTargets(targets) };
 }
