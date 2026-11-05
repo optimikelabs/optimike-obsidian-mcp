@@ -12,7 +12,7 @@ function fixture(windowMs = 20_000, timeoutMs = 55_000) {
   let clock = 0;
   let commands = 0;
   const timers: Array<{ at: number; run: () => void }> = [];
-  const file = { path: "Nouvelle.md", extension: "md" };
+  const file = { path: "Nouvelle.md", extension: "md", stat: { ctime: Date.parse("2026-10-27T10:00:00Z"), mtime: Date.parse("2026-10-27T10:00:00Z") } };
   let content = "---\nstatut: actif\n---\ncorps\n";
   const stamp = () => `2026-10-27T10:${String(Math.floor(clock / 60_000)).padStart(2, "0")}:${String(Math.floor(clock / 1000) % 60).padStart(2, "0")}`;
   const fdm: any = {
@@ -22,6 +22,7 @@ function fixture(windowMs = 20_000, timeoutMs = 55_000) {
   };
   const write = (next: string) => {
     content = next;
+    file.stat.mtime = Date.parse("2026-10-27T10:00:00Z") + clock;
     // FDM's modify handler: inside the new-file window the pass is remembered for later.
     if (fdm.recentlyCreated.has(file.path)) fdm.newFileModified.add(file.path);
   };

@@ -3,8 +3,16 @@ import assert from "node:assert/strict";
 import {
   createDatePreparation,
   MISSING_CREATION_MESSAGE,
+  utcOffsetMinutesAt,
 } from "./datePreparation.js";
 import { sha256, parseDatePreparationRequest } from "./contract.js";
+
+const CTIME = Date.parse("2026-10-23T09:53:12.250Z");
+const MTIME = Date.parse("2026-10-23T09:58:40.000Z");
+const FDM_WRITE_MTIME = Date.parse("2026-10-23T10:00:01.000Z");
+const WALL_CLOCK = Date.parse("2026-10-23T10:00:00.500Z");
+const fileStatOf = (result: { datePreparation?: object }) =>
+  (result.datePreparation as { fileStat?: Record<string, unknown> } | undefined)?.fileStat;
 
 function fixture() {
   let clock = 0,
@@ -12,7 +20,12 @@ function fixture() {
     opens = 0,
     detaches = 0,
     enabled = true;
-  const file = { path: "Test.md", extension: "md" };
+  // Obsidian exposes one mutable `stat` object per TFile.
+  const file: any = {
+    path: "Test.md",
+    extension: "md",
+    stat: { ctime: CTIME, mtime: MTIME, size: 0 },
+  };
   let content = "---\nstatut: actif\n---\nbody\n";
   const plugin = {
     settings: {
@@ -55,6 +68,8 @@ function fixture() {
           "statut: actif",
           "statut: actif\ncréation: 2026-10-23T10:00\nmodification: 2026-10-23T10:00",
         );
+        // FDM's own write moves mtime, never ctime.
+        file.stat.mtime = FDM_WRITE_MTIME;
         return true;
       },
     },
@@ -69,6 +84,7 @@ function fixture() {
   const prepare = createDatePreparation(app, parse, {
     enabled: () => enabled,
     now: () => clock,
+    wallClock: () => WALL_CLOCK,
     sleep: async (ms) => {
       clock += ms;
     },
@@ -78,6 +94,7 @@ function fixture() {
     app,
     plugin,
     prepare,
+    file,
     request: () => ({ path: file.path, expectedSha256: sha256(content) }),
     content: () => content,
     setContent: (v: string) => {
@@ -396,4 +413,118 @@ test("CRLF conversion cannot conceal a non-date property change", async () => {
     return true;
   };
   await assert.rejects(f.prepare(f.request()), /changed after/);
+});
+
+test("file-stat provenance: the stat observed just before the command is returned as primitives", async () => {
+  const f = fixture();
+  const result = await f.prepare(f.request());
+  assert.deepEqual(fileStatOf(result), {
+    contractVersion: 1,
+    ctimeMs: CTIME,
+    mtimeMs: MTIME,
+    ctimeUtcOffsetMinutes: utcOffsetMinutesAt(CTIME),
+    mtimeUtcOffsetMinutes: utcOffsetMinutesAt(MTIME),
+    observedAtMs: WALL_CLOCK,
+  });
+  // FDM moved mtime after the capture; the proof keeps the value observed before the command.
+  assert.equal(f.file.stat.mtime, FDM_WRITE_MTIME);
+});
+
+test("file-stat provenance: an already dated note needs no stat and returns no provenance", async () => {
+  const f = fixture();
+  f.setContent("---\nstatut: actif\ncréation: 2020-01-02T03:04\n---\nbody\n");
+  delete f.file.stat;
+  const result = await f.prepare(f.request());
+  assert.equal(result.datePreparation, undefined);
+  assert.deepEqual(f.counts(), { commands: 0, opens: 0 });
+});
+
+test("file-stat provenance: a missing or non-finite stat is refused before any effect", async () => {
+  for (const stat of [undefined, { ctime: Number.NaN, mtime: MTIME }, { ctime: CTIME, mtime: "x" }]) {
+    const f = fixture();
+    f.file.stat = stat;
+    await assert.rejects(f.prepare(f.request()), { message: MISSING_CREATION_MESSAGE });
+    assert.deepEqual(f.counts(), { commands: 0, opens: 0 });
+  }
+});
+
+test("file-stat provenance: ctime moving between the source read and the command is refused without command", async () => {
+  const f = fixture();
+  f.app.workspace.getLeaf().openFile = async () => {
+    f.file.stat.ctime = CTIME + 1;
+  };
+  await assert.rejects(f.prepare(f.request()), { message: MISSING_CREATION_MESSAGE });
+  assert.equal(f.counts().commands, 0);
+  assert.equal(f.detached(), 1);
+});
+
+test("file-stat provenance: a replaced stat object with another ctime is refused without command", async () => {
+  const f = fixture();
+  f.app.workspace.getLeaf().openFile = async () => {
+    f.file.stat = { ctime: CTIME - 60_000, mtime: MTIME, size: 0 };
+  };
+  await assert.rejects(f.prepare(f.request()), { message: MISSING_CREATION_MESSAGE });
+  assert.equal(f.counts().commands, 0);
+});
+
+test("file-stat provenance: ctime moving after the command is refused at the end of the observation", async () => {
+  const f = fixture();
+  const command = f.app.commands.executeCommandById;
+  f.app.commands.executeCommandById = () => {
+    command();
+    f.file.stat.ctime = FDM_WRITE_MTIME;
+    return true;
+  };
+  await assert.rejects(f.prepare(f.request()), { message: MISSING_CREATION_MESSAGE });
+  assert.equal(f.counts().commands, 1);
+  assert.equal(f.detached(), 1);
+});
+
+test("file-stat provenance: an identical-content save that moves mtime before the command is what is reported", async () => {
+  const f = fixture();
+  const saved = MTIME + 30_000;
+  // Opening the temporary leaf saves the same bytes: the hash recheck passes, mtime moves.
+  f.app.workspace.getLeaf().openFile = async () => {
+    f.file.stat.mtime = saved;
+  };
+  const result = await f.prepare(f.request());
+  assert.equal(fileStatOf(result)?.mtimeMs, saved);
+  assert.equal(fileStatOf(result)?.ctimeMs, CTIME);
+});
+
+test("file-stat provenance: later in-place mutations of the stat object never change the returned proof", async () => {
+  const f = fixture();
+  const command = f.app.commands.executeCommandById;
+  f.app.commands.executeCommandById = () => {
+    command();
+    // Same object, mutated in place after the capture.
+    f.file.stat.mtime = FDM_WRITE_MTIME + 5_000;
+    f.file.stat.size = 999;
+    return true;
+  };
+  const result = await f.prepare(f.request());
+  assert.equal(fileStatOf(result)?.mtimeMs, MTIME);
+  assert.equal(fileStatOf(result)?.ctimeMs, CTIME);
+  assert.notEqual(fileStatOf(result), f.file.stat);
+});
+
+test("file-stat provenance: UTC offsets are computed per timestamp, not from the current offset", async () => {
+  const previous = process.env.TZ;
+  process.env.TZ = "Europe/Paris";
+  try {
+    const winter = Date.parse("2020-01-15T12:00:00Z");
+    const summer = Date.parse("2026-07-01T12:00:00Z");
+    assert.equal(utcOffsetMinutesAt(winter), 60);
+    assert.equal(utcOffsetMinutesAt(summer), 120);
+    const f = fixture();
+    f.file.stat = { ctime: winter, mtime: summer, size: 0 };
+    const result = await f.prepare(f.request());
+    assert.equal(fileStatOf(result)?.ctimeUtcOffsetMinutes, 60);
+    assert.equal(fileStatOf(result)?.mtimeUtcOffsetMinutes, 120);
+    process.env.TZ = "UTC";
+    assert.ok(Object.is(utcOffsetMinutesAt(summer), 0), "never -0 on the wire");
+  } finally {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  }
 });

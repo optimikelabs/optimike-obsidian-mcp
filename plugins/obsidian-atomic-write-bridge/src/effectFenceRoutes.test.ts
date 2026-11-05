@@ -24,7 +24,7 @@ function fence() {
 test("date preparation: a revoked attempt opens no leaf and runs no command; a live one settles", async () => {
   const f = fence();
   let opens = 0, commands = 0, clock = 0;
-  const file = { path: "Test.md", extension: "md" };
+  const file = { path: "Test.md", extension: "md", stat: { ctime: Date.parse("2026-10-27T09:00:00Z"), mtime: Date.parse("2026-10-27T09:30:00Z") } };
   let content = "---\nstatut: actif\n---\nbody\n";
   // Same instance on every lookup: the preparation rejects a replaced plugin.
   const fdm = { settings: { enableAutoUpdate: true, enableCreateTime: true, headerCreated: "création",
@@ -133,6 +133,8 @@ test("notes/cas admits the token inside vault.process; revocation before the cal
   };
   const status = (await invoke("GET", "/status")).payload;
   assert.equal(status.effectFence.supported, true);
+  // Date preparation advertises the file-stat provenance of its response (0.9.2).
+  assert.deepEqual(status.datePreparation, { contractVersion: 1, supported: true, fileStatProvenance: { contractVersion: 1 } });
   const token = (attemptId = randomUUID()) => ({ contractVersion: 1, epoch: status.effectFence.epoch, attemptId });
   const cas = (fenceToken: unknown, next = "après\n") => invoke("POST", "/notes/cas", { contractVersion: 1, path: "Note.md",
     bindingFingerprint: "b".repeat(64), expectedSha256: sha256(content), nextContent: next, ...(fenceToken ? { fence: fenceToken } : {}) });
