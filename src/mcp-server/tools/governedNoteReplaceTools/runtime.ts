@@ -1019,8 +1019,11 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
       const fm = parseFrontmatter(source.content);
       const dateKeys = effectiveAtomicWriteDateProtection(status).createdPropertyNames.concat(
         (status.protection?.frontmatterDateProperties.integrations ?? []).flatMap(i => i.modifiedPropertyName ? [i.modifiedPropertyName] : []));
-      const operations = dateKeys.flatMap(key => entriesForKey(fm, normalizeKey(key)).map(({key, value}) => {
-        if (typeof value !== "string") throw new McpError(BaseErrorCode.CONFLICT, "The date manager returned an unsupported date value.");
+      // Carry the verified literal forward: YAML would read a seconds-precision
+      // value as a timestamp, and the MCP never converts or recalculates dates.
+      const operations = dateKeys.flatMap(key => entriesForKey(fm, normalizeKey(key)).map(({key}) => {
+        const value = preparationDateValue(source.content, key);
+        if (!value) throw new McpError(BaseErrorCode.CONFLICT, "The date manager returned an unsupported date value.");
         return {op: "set" as const, key, value};
       }));
       if (operations.length) nextContent = compileFrontmatterPatch(nextContent, operations).nextContent;

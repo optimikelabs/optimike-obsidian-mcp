@@ -252,7 +252,11 @@ try {
     const edge = Date.parse("2024-03-04T05:06:59.999Z");
     expectPlanned(await run("minute_edge", { scenario: { stat: { ctimeMs: edge } } }), "last millisecond of a minute");
     await expectLocked(await run("minute_edge_next", { scenario: { stat: { ctimeMs: edge }, created: "2024-03-04T05:07" } }), "created_provenance_mismatch", "next minute");
-    expectPlanned(await run("seconds_format", { scenario: { length: 19, stat: { ctimeMs: Date.parse("2020-01-02T03:04:05.900Z") } } }), "19-character format");
+    for (const caller of Object.keys(callers)) {
+      const seconds = await run(`seconds_format_${caller}`, { caller, scenario: { length: 19, stat: { ctimeMs: Date.parse("2020-01-02T03:04:05.900Z") } } });
+      expectPlanned(seconds, `19-character format, ${caller}`);
+      assert.equal(seconds.preparations, 1, `19-character format, ${caller}`);
+    }
     await expectLocked(await run("seconds_format_wrong", { scenario: { length: 19, stat: { ctimeMs: Date.parse("2020-01-02T03:04:05Z") }, created: "2020-01-02T03:04:06" } }),
       "created_provenance_mismatch", "19-character format, wrong second");
     // Current offset is summer time (+120); the creation was in winter (+60).
