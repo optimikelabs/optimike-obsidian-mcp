@@ -29,7 +29,7 @@ import {
 } from "./contract.js";
 import { getFrontmatterDateIntegrationContract } from "./modifiedTimeIntegrations.js";
 import { dateManagementScope, createTemplateDateGuard } from "./dateManagementScope.js";
-import { createDatePreparation, DatePreparationDeferred, DatePreparationError } from "./datePreparation.js";
+import { createDatePreparation, DatePreparationDeferred, DatePreparationError, FILE_STAT_PROVENANCE_CONTRACT_VERSION } from "./datePreparation.js";
 import { createFdmCompletion } from './fdmCompletion.js';
 import { projectNoteLinks } from "./noteLinks.js";
 import { createNoteCreateRoutes } from "./noteCreateRoutes.js";
@@ -494,7 +494,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               canvasAtomicCas: true,
               canvasWriteEnabled: this.allowCanvasWrites,
             },
-            datePreparation: { contractVersion: 1, supported: true },
+            datePreparation: { contractVersion: 1, supported: true, fileStatProvenance: { contractVersion: FILE_STAT_PROVENANCE_CONTRACT_VERSION } },
             effectFence: this.effectFence.capability(),
             frontmatterFormat: { contractVersion: 1, supported: typeof (this.app as any).metadataTypeManager?.getAssignedWidget === "function" },
             nativeMove: this.nativeMove?.capabilities() ?? { supported: false, enabled: false },
