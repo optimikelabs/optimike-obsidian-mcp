@@ -3,7 +3,8 @@
 // End to end through the real server process (dist/index.js, stdio,
 // headless-filesystem) on temporary vaults: server instructions, a refused
 // direct write, read proofs through obsidian_read_note, a rule edited on disk
-// during the session, and the off / no-AGENTS.md cases.
+// during the session, the off / no-AGENTS.md cases, a decomposed (NFD) folder
+// name next to its NFC twin, and a read-only tag audit under enforce.
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -76,6 +77,25 @@ async function start(root, mode) {
     read(filePath) {
       return client.callTool({ name: "obsidian_read_note", arguments: { filePath } });
     },
+    async call(name, args) {
+      const result = await client.callTool({ name, arguments: args });
+      let json;
+      try {
+        json = JSON.parse(result.content?.[0]?.text);
+      } catch {
+        json = undefined;
+      }
+      return { result, json };
+    },
+    appendTo(filePath, text) {
+      return this.call("obsidian_update_note", {
+        targetType: "filePath",
+        targetIdentifier: filePath,
+        modificationType: "wholeFile",
+        wholeFileMode: "append",
+        content: text,
+      });
+    },
     close: () => client.close(),
   };
 }
@@ -142,6 +162,48 @@ try {
   assert.equal(plainWrite.result.isError, false);
   assert.equal(plainWrite.json?.vaultInstructions, undefined);
   await plain.close();
+
+  // enforce, a decomposed (NFD) folder name: the write is checked against the
+  // folder the backend really writes, and against its NFC twin when it exists.
+  const nfd = "Cafe\u0301";
+  const nfc = "Caf\u00e9";
+  const unicodeRoot = vault({ [`${nfd}/AGENTS.md`]: "# NFD rules\n", [`${nfd}/N.md`]: "before\n" });
+  const unicodeNote = path.join(unicodeRoot, nfd, "N.md");
+  const unicode = await start(unicodeRoot, "enforce");
+  const nfdRefused = await unicode.appendTo(`${nfd}/N.md`, "after");
+  assert.equal(nfdRefused.result.isError, true, "an unread local rule in an NFD folder refuses the write");
+  assert.equal(nfdRefused.json.error.details.reasonCode, "vault_instructions_unread");
+  assert.deepEqual(nfdRefused.json.vaultInstructions.files.map((entry) => entry.path), [`${nfd}/AGENTS.md`]);
+  assert.equal(readFileSync(unicodeNote, "utf8"), "before\n", "nothing was written");
+  await unicode.read(`${nfd}/AGENTS.md`);
+  const nfdWritten = await unicode.appendTo(`${nfd}/N.md`, "after");
+  assert.equal(nfdWritten.result.isError, false, JSON.stringify(nfdWritten.json));
+  assert.match(readFileSync(unicodeNote, "utf8"), /after/u);
+  await unicode.close();
+
+  const twinsRoot = vault({ [`${nfd}/AGENTS.md`]: "# NFD rules\n", [`${nfc}/AGENTS.md`]: "# NFC rules\n", [`${nfd}/N.md`]: "before\n" });
+  const twins = await start(twinsRoot, "enforce");
+  const twinsRefused = await twins.appendTo(`${nfd}/N.md`, "after");
+  assert.equal(twinsRefused.json.error.details.reasonCode, "vault_instructions_unread");
+  assert.deepEqual(
+    twinsRefused.json.vaultInstructions.files.map((entry) => entry.path).sort(),
+    [`${nfd}/AGENTS.md`, `${nfc}/AGENTS.md`].sort(),
+    "both spellings are checked when two folders exist",
+  );
+  await twins.read(`${nfd}/AGENTS.md`);
+  await twins.read(`${nfc}/AGENTS.md`);
+  const twinsWritten = await twins.appendTo(`${nfd}/N.md`, "after");
+  assert.equal(twinsWritten.result.isError, false, JSON.stringify(twinsWritten.json));
+  assert.match(readFileSync(path.join(twinsRoot, nfd, "N.md"), "utf8"), /after/u);
+  await twins.close();
+
+  // enforce: a read-only tag audit is never gated.
+  const tagsRoot = vault({ "AGENTS.md": RULES, "Projects/AGENTS.md": LOCAL, "Projects/Note.md": "#alpha\n" });
+  const tags = await start(tagsRoot, "enforce");
+  const audit = await tags.call("obsidian_manage_tags", { operation: "audit" });
+  assert.equal(audit.result.isError, false, JSON.stringify(audit.json));
+  assert.equal(audit.json.vaultInstructions, undefined);
+  await tags.close();
 
   console.log("vault instructions end-to-end test passed");
 } finally {

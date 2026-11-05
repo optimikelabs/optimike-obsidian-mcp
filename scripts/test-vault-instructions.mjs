@@ -270,7 +270,10 @@ await check("vault paths and the folder chain", () => {
   assert.equal(core.normalizeVaultPath("/Projects/Note.md"), "Projects/Note.md");
   assert.equal(core.normalizeVaultPath("Projects/../Secret.md"), undefined);
   assert.equal(core.normalizeVaultPath("C:/Vault/Note.md"), undefined);
-  assert.equal(core.normalizeVaultPath("Proje\u0301ts/Note.md"), "Projéts/Note.md");
+  // The exact spelling is kept (the backend writes it); every form is checked.
+  assert.equal(core.normalizeVaultPath("Proje\u0301ts/Note.md"), "Proje\u0301ts/Note.md");
+  assert.deepEqual(core.vaultPathAliases("Proje\u0301ts/Note.md"), ["Proje\u0301ts/Note.md", "Proj\u00e9ts/Note.md"]);
+  assert.deepEqual(core.vaultPathAliases("Plain/Note.md"), ["Plain/Note.md"]);
   assert.deepEqual(core.instructionFolders("Projects/Client/Note.md"), ["", "Projects", "Projects/Client"]);
   assert.deepEqual(core.instructionFolders("Note.md"), [""]);
   assert.deepEqual(core.instructionFolders("Assets/Imported", true), ["", "Assets", "Assets/Imported"]);
