@@ -162,6 +162,7 @@ Le serveur final peut exposer des capacités différentes selon les plugins Obsi
 
   - requis pour les écritures gouvernées de note, la création de notes, de Bases et de Canvas, le déplacement natif, la suppression, le Frontmatter et le Canvas
   - le MCP 3.18.x livre la version 0.9.1 (0.9.0 ou plus récente est exigée pour créer des Bases et des Canvas) ; les déployer et les restaurer ensemble
+  - la version 0.9.2 ou plus récente est exigée pour dater une note sans date avant un plan : un Bridge plus ancien ne peut pas prouver la date de création écrite par FDM, le plan est donc refusé avant toute modification avec `date_preparation_bridge_upgrade_required` (la note n'est pas verrouillée ; mettre à jour le Bridge, puis relancer le plan)
 
 - Optimike Operon Bridge (inclus)
 
@@ -561,6 +562,12 @@ Rien ne surveille le backend après son démarrage, et un backend lancé par un 
    `obsidian_operation_close` et `datePreparationPaths` ; repli hors ligne :
    `scripts/release-date-preparation-lock.mjs`, Obsidian et backend arrêtés.
    Voir [Clôture administrative](docs/administrative-closure.fr.md).
+6. `date_preparation_unverified` nomme le contrôle en échec dans
+   `preparationCheck` (liste fermée, sans chemin ni valeur), aussi journalisé
+   en avertissement. Les notes verrouillées avant le Bridge 0.9.2 parce que FDM
+   y avait écrit leur vraie date de création, antérieure, restent verrouillées
+   après la mise à jour : suivre
+   [Notes verrouillées par une préparation des dates](docs/administrative-closure.fr.md#notes-verrouillées-par-une-préparation-des-dates).
 
 ### Tools MCP runtime
 

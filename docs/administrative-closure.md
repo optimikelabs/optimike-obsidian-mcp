@@ -127,6 +127,16 @@ unreachable for good):
    review before deleting the lock, in one transaction.
 4. Restart Obsidian, then the backend; plan again.
 
+## Notes locked by a date preparation
+
+Up to MCP 3.18.0 and Atomic Write Bridge 0.9.1, an FDM preparation that dated a note with its real file creation time (earlier than the plan) was refused and left the note locked with `date_preparation_unverified` (issue #147). Updating the MCP and the Bridge does not release any existing lock. For each such note:
+
+1. Compare the note with its previous state when you know it (journal, version history, backup, sync copy). Accept only added date lines (`création`/`modification` or the configured names): every other byte must be unchanged, an existing creation must not have changed, and the added creation must be plausible with the file creation time (for example the date shown by the file system or the sync history).
+2. Without a reliable previous state, say so explicitly and get an explicit review of the note by its owner before closing; do not infer that the dates are right.
+3. Run `obsidian_operation_close` with `datePreparationPaths` and `dryRun: true`, read the verdict, then the same call with `dryRun: false` and `reasonCode: operator_review`.
+
+The closure only proves that the preparation can have no further effect. It does not certify the dates. The next plan on the note is again subject to every check (fresh read, non-date bytes, existing creation, fence); since the creation date is now present, it normally needs no new preparation.
+
 ## Batch closure of historical operations
 
 `scripts/close-pending-operations.mjs` pages

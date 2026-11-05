@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Date preparation before a plan (#147): a creation date that Frontmatter Date Manager wrote from the file creation time, earlier than the plan, was rejected by the request time window and left the note locked with `date_preparation_unverified`. Atomic Write Bridge 0.9.2 now returns `datePreparation.fileStat`, the file stat observed just before the FDM command (`ctimeMs`, `mtimeMs`, the UTC offset of each timestamp, `observedAtMs` on the Bridge clock), refuses the preparation if `ctime` moves, and advertises `datePreparation.fileStatProvenance` in `/status`; the request contract is unchanged. The MCP validates dates by role for every plan tool, Base rows included (which previously skipped this check): an added creation must equal exactly the local rendering of `ctimeMs`, no window alternative; an added or changed modification must equal the observed `mtimeMs` or fall in the request window; non-date bytes, an existing creation, the fresh read, the fence and the lock stay as strict as before. An advertised capability with a missing or invalid proof is refused after dispatch, lock kept, never replayed. FDM still produces every date; the MCP never writes one.
+- `date_preparation_unverified` now carries `preparationCheck`, a closed sub-cause without path or value (`fresh_read_mismatch`, `non_date_drift`, `created_drift`, `created_missing_or_duplicate`, `created_provenance_mismatch`, `modified_provenance_mismatch`, `provenance_missing_or_invalid`, `format_unqualified`, `unclassified`), also logged as a warning. `mutationMayHaveApplied: true` is unchanged.
+
+### Changed
+
+- With an Atomic Write Bridge that does not advertise `fileStatProvenance` (0.9.1 or earlier), a note that needs a date preparation is refused before any lock or dispatch with `date_preparation_bridge_upgrade_required` and `mutationMayHaveApplied: false`: nothing changes and the note is not locked; update the Bridge to 0.9.2, then plan again. Dated notes and notes outside date management keep working with an older Bridge. Existing locks are not released by the update: see [notes locked by a date preparation](docs/administrative-closure.md#notes-locked-by-a-date-preparation).
+
 ## [3.18.0] - 2026-11-03
 
 Atomic Write Bridge 0.9.1 and Operon Bridge 0.9.7 ship with this release; Bases Bridge 1.2.2 is unchanged. Install the MCP and the Bridge bundle of the same release together, after draining pending operations. Operon 4.4.0 is supported as `compatible-provisional`. The first start after the upgrade rebuilds the semantic cache once (several seconds on a large vault). Upgrade every MCP client of the same vault at the same time: two versions sharing one cache rebuild it in turn. See the [English](docs/releases/3.18.0.md) and [French](docs/releases/3.18.0.fr.md) release notes.

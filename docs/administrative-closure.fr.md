@@ -133,6 +133,16 @@ durablement injoignable) :
    revue manuelle avant de supprimer le verrou, dans une seule transaction.
 4. Relancer Obsidian, puis le backend ; replanifier.
 
+## Notes verrouillées par une préparation des dates
+
+Jusqu’au MCP 3.18.0 et à l’Atomic Write Bridge 0.9.1, une préparation FDM qui datait une note avec la vraie date de création du fichier (antérieure au plan) était refusée et laissait la note verrouillée avec `date_preparation_unverified` (issue #147). La mise à jour du MCP et du Bridge ne lève aucun verrou existant. Pour chaque note concernée :
+
+1. Comparer la note à son état antérieur quand il est connu (journal, historique de versions, sauvegarde, copie de synchronisation). N'accepter que des lignes de dates ajoutées (`création`/`modification` ou les noms configurés) : tous les autres octets restent inchangés, une création existante n'a pas changé et la création ajoutée est plausible avec la date de création du fichier (par exemple celle du système de fichiers ou de l'historique de synchronisation).
+2. Sans état antérieur fiable, le dire explicitement et obtenir une revue explicite de la note par son propriétaire avant la clôture ; ne pas en déduire que les dates sont justes.
+3. Lancer `obsidian_operation_close` avec `datePreparationPaths` et `dryRun: true`, lire le verdict, puis le même appel avec `dryRun: false` et `reasonCode: operator_review`.
+
+La clôture prouve seulement que la préparation ne peut plus avoir d'effet. Elle ne certifie pas les dates. Le plan suivant sur la note reste soumis à tous ses contrôles (relecture fraîche, octets hors dates, création existante, fence) ; la date de création étant désormais présente, il n'a normalement pas besoin d'une nouvelle préparation.
+
 ## Clôture en lot des opérations historiques
 
 `scripts/close-pending-operations.mjs` parcourt
