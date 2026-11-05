@@ -18,7 +18,7 @@ Ce que le serveur prouve, c’est que l’agent a reçu les consignes applicable
 | --- | --- | --- | --- |
 | `MCP_VAULT_INSTRUCTIONS` | `off`, `advise`, `enforce` | `advise` | Mode de ce serveur, ou de ce client quand il est défini sur un proxy stdio. |
 | `MCP_VAULT_INSTRUCTIONS_MIN` | `off`, `advise`, `enforce` | `off` | Minimum administratif. Aucun client ne peut choisir un mode plus bas. |
-| `MCP_VAULT_INSTRUCTIONS_FILES` | 1 à 8 noms de fichiers, séparés par des virgules | `AGENTS.md` | Noms des fichiers d’instructions, par exemple `AGENTS.md,CLAUDE.md`. Noms simples, sans dossier. |
+| `MCP_VAULT_INSTRUCTIONS_FILES` | 1 à 8 noms de fichiers, séparés par des virgules | `AGENTS.md` | Noms des fichiers d’instructions, par exemple `AGENTS.md,CLAUDE.md`. Noms simples, sans dossier ; gardés tels qu’ils sont écrits, et leurs deux formes Unicode (NFC, NFD) sont cherchées. |
 | `MCP_VAULT_INSTRUCTIONS_JOURNAL_PATH` | chemin absolu | dossier d’état local de la machine | Journal SQLite des scellés de plans. Donner un chemin absolu hors de tout coffre synchronisé : le serveur ne le vérifie pas à votre place. |
 
 Une valeur invalide arrête le serveur au démarrage, sans recopier la valeur.

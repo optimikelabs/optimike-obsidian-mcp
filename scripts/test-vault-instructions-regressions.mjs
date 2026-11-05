@@ -118,6 +118,7 @@ const { VaultInstructionsSealJournal } = await import("../dist/services/vaultIns
 const { ObsidianRestApiService } = await import("../dist/services/obsidianRestAPI/service.js");
 const { OperonService } = await import("../dist/services/operon/service.js");
 const { defaultVaultInstructionsRuntime } = await import("../dist/mcp-server/vaultInstructionsRuntime.js");
+const namesModule = await import("../dist/services/vaultInstructionsNames.js");
 
 const tempRoot = mkdtempSync(path.join(tmpdir(), "optimike-vault-instructions-regressions-"));
 const failures = [];
@@ -714,6 +715,19 @@ await check("R1-S2 an archive whose archiveDir is not canonical is checked at th
   assert.equal(count("obsidian_admin_filesystem"), before, "refused before the tool runs");
   await s.connection.read("Secret/AGENTS.md");
   assert.equal((await s.connection.call("obsidian_admin_filesystem", archive)).result.isError, false);
+  await s.close();
+});
+
+await check("R1-S3 a decomposed configured file name is kept exact: the existing file is found and its read counts", async () => {
+  const nfdName = "Règles.md";
+  const configured = namesModule.parseVaultInstructionFileNames(nfdName);
+  assert.deepEqual(configured, [nfdName]);
+  const s = await session({ [nfdName]: "# Règles\n", "N.md": "x\n" }, { settings: { names: configured } });
+  const refused = await s.connection.call("obsidian_text_patch_plan", { path: "N.md", idempotencyKey: "s3" });
+  assert.equal(reason(refused.json), "vault_instructions_unread", JSON.stringify(refused.json));
+  assert.deepEqual(states(refused.json), [[nfdName, "unread"]]);
+  await s.connection.read(nfdName);
+  assert.equal((await s.connection.call("obsidian_text_patch_plan", { path: "N.md", idempotencyKey: "s3" })).result.isError, false);
   await s.close();
 });
 

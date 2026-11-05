@@ -1095,7 +1095,7 @@ async function recordReadProof(
     !runtime.source ||
     !requested ||
     !baseName ||
-    !runtime.settings.names.includes(baseName)
+    !runtime.settings.names.some((name) => name.normalize("NFC") === baseName)
   ) {
     return callback(...args);
   }

@@ -476,7 +476,9 @@ export async function currentInstructionRules(
     ...new Set(
       vaultPathAliases(target.path).flatMap((alias) =>
         instructionFolders(alias, target.folder).flatMap((folder) =>
-          names.map((name) => instructionFilePath(folder, name)),
+          names.flatMap((name) =>
+            vaultPathAliases(name).map((spelling) => instructionFilePath(folder, spelling)),
+          ),
         ),
       ),
     ),
@@ -488,7 +490,8 @@ export async function currentInstructionRules(
   }
   const rank = (filePath: string) => {
     const segments = filePath.split("/");
-    return [segments.length, names.indexOf(segments.at(-1)!)] as const;
+    const base = segments.at(-1)!.normalize("NFC");
+    return [segments.length, names.findIndex((name) => name.normalize("NFC") === base)] as const;
   };
   const files = [...digests.keys()]
     .sort((a, b) => {

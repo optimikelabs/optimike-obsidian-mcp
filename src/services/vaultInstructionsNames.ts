@@ -43,7 +43,8 @@ export function parseVaultInstructionFileNames(
 ): string[] | undefined {
   const names: string[] = [];
   for (const part of raw.split(/[\r\n,]+/u)) {
-    const name = part.trim().normalize("NFC");
+    // Kept exactly as configured; its Unicode forms are probed (P1-1).
+    const name = part.trim();
     if (!name) continue;
     if (
       name.length > 128 ||
