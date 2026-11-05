@@ -36,7 +36,7 @@ const fake = {
   async getAtomicWriteStatus() {
     return {
       ok: true, contractVersion: 1, plugin: { id: "obsidian-atomic-write-bridge", version: "0.8.4" },
-      datePreparation: { contractVersion: 1, supported: true }, frontmatterFormat: { contractVersion: 1, supported: true },
+      datePreparation: { contractVersion: 1, supported: true, fileStatProvenance: { contractVersion: 1 } }, frontmatterFormat: { contractVersion: 1, supported: true },
       ...(fenceSupported ? { effectFence: fence.capability() } : {}),
       backend: { kind: "obsidian-vault-process", bindingFingerprint: binding, atomicCas: true, writeEnabled: true },
       limits: { markdownOnly: true },
@@ -67,13 +67,15 @@ const fake = {
       refuse(BaseErrorCode.FORBIDDEN, "effect_fence_refused");
     }
     const settle = fence.enter(payload.fence);
+    const statMs = Date.now();
     try {
-      const stamp = new Date().toISOString().slice(0, 16);
+      const stamp = new Date(statMs).toISOString().slice(0, 16);
       content = content.replace("statut: actif", `statut: actif\ncréation: ${stamp}\nmodification: ${stamp}`);
     } finally { settle(); }
     if (scenario === "lost_after_effect") throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "response lost");
     return { ok: true, contractVersion: 1, path: NOTE, content, sha256: hash(content), size: Buffer.byteLength(content), bindingFingerprint: binding,
-      datePreparation: { kind: "date-manager-before-plan", message: "Note datée par le gestionnaire de dates avant le plan." } };
+      datePreparation: { kind: "date-manager-before-plan", message: "Note datée par le gestionnaire de dates avant le plan.",
+        fileStat: { contractVersion: 1, ctimeMs: statMs, mtimeMs: statMs, ctimeUtcOffsetMinutes: 0, mtimeUtcOffsetMinutes: 0, observedAtMs: statMs } } };
   },
 };
 
