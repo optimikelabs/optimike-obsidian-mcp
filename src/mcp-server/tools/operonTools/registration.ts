@@ -281,7 +281,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_adopt_task",
     {
       description:
-        "Adopt one existing plain Markdown or Obsidian Tasks checkbox in place through Operon's official sealed task-workflow preview/apply contract. Requires an exact one-based line and expectedLine precondition, plus idempotencyKey; dryRun defaults to true. No raw Markdown or CLI fallback exists.",
+        "Adopt one existing plain Markdown or Obsidian Tasks checkbox in place through Operon's official sealed task-workflow preview/apply contract. Requires an exact one-based line and expectedLine precondition, plus idempotencyKey; dryRun defaults to true. Use one idempotencyKey for the dry-run and a new one for the apply; reusing the dry-run key returns idempotency_key_reused. No raw Markdown or CLI fallback exists.",
       inputSchema: mcpSchema(OperonAdoptTaskSchema.shape),
       annotations: MUTATION_ANNOTATIONS,
     },
@@ -292,7 +292,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_create_periodic_task",
     {
       description:
-        "Create exactly one inline Operon task in the configured Daily or Weekly Note through Operon's sealed periodic-note workflow. Operon owns routing, templates, container identity and receipts; routeDate is optional and distinct from an initial fields.dateScheduled value. Later dateScheduled changes must use operon_update_periodic_scheduling. dryRun defaults to true. Apply requires the live Bridge, idempotency and the periodicCreate capability.",
+        "Create exactly one inline Operon task in the configured Daily or Weekly Note through Operon's sealed periodic-note workflow. Operon owns routing, templates, container identity and receipts; routeDate is optional and distinct from an initial fields.dateScheduled value. Later dateScheduled changes must use operon_update_periodic_scheduling. dryRun defaults to true. Use one idempotencyKey for the dry-run and a new one for the apply; reusing the dry-run key returns idempotency_key_reused. Apply requires the live Bridge, idempotency and the periodicCreate capability.",
       inputSchema: mcpSchema(OperonCreatePeriodicTaskSchema.shape),
       annotations: MUTATION_ANNOTATIONS,
     },
@@ -305,7 +305,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_update_periodic_scheduling",
     {
       description:
-        "Set or clear dateScheduled for one exact Operon task. The Bridge first uses Operon's ordinary typed update path and escalates to the sealed periodic-update workflow only when Operon proves Daily/Weekly parent realignment is required. Use this tool, not operon_update_task, for every dateScheduled change. expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
+        "Set or clear dateScheduled for one exact Operon task. The Bridge first uses Operon's ordinary typed update path and escalates to the sealed periodic-update workflow only when Operon proves Daily/Weekly parent realignment is required. Use this tool, not operon_update_task, for every dateScheduled change. expectedRevision and idempotencyKey are mandatory; dryRun defaults to true. Use one idempotencyKey for the dry-run and a new one for the apply; reusing the dry-run key returns idempotency_key_reused.",
       inputSchema: mcpSchema(OperonUpdatePeriodicSchedulingSchema.shape),
       annotations: MUTATION_ANNOTATIONS,
     },
@@ -318,7 +318,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_create_task",
     {
       description:
-        "Create an Operon inline or file task through the loaded engine's supported official API. targetFolder is legacy-only and rejected by official Developer API V1; file tasks use the configured destination or a genuine fields.parentTask relationship. taskFolder is not a supported argument. dateScheduled is reserved for operon_update_periodic_scheduling. dryRun defaults to true. Apply requires the live Bridge and an idempotencyKey; no raw Markdown fallback exists.",
+        "Create an Operon inline or file task through the loaded engine's supported official API. targetFolder is legacy-only and rejected by official Developer API V1; file tasks use the configured destination or a genuine fields.parentTask relationship. taskFolder is not a supported argument. dateScheduled is reserved for operon_update_periodic_scheduling. dryRun defaults to true. Use one idempotencyKey for the dry-run and a new one for the apply; reusing the dry-run key returns idempotency_key_reused. Apply requires the live Bridge and an idempotencyKey; no raw Markdown fallback exists.",
       inputSchema: mcpSchema(OperonCreateTaskSchema.shape),
       annotations: MUTATION_ANNOTATIONS,
     },
@@ -329,7 +329,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_update_task",
     {
       description:
-        "Update exactly one ordinary Operon mutation group: description, managed fields/tags, or one unmanaged file property. Do not use this tool for dateScheduled (use operon_update_periodic_scheduling), relationships (use operon_set_relationships), or recurrence fields (use operon_update_recurrence). expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
+        "Update exactly one ordinary Operon mutation group: description, managed fields/tags, or one unmanaged file property. Do not use this tool for dateScheduled (use operon_update_periodic_scheduling), relationships (use operon_set_relationships), or recurrence fields (use operon_update_recurrence). expectedRevision and idempotencyKey are mandatory; dryRun defaults to true. Use one idempotencyKey for the dry-run and a new one for the apply; reusing the dry-run key returns idempotency_key_reused.",
       inputSchema: mcpSchema(OperonUpdateTaskSchema.shape),
       annotations: MUTATION_ANNOTATIONS,
     },
@@ -340,7 +340,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_transition_task",
     {
       description:
-        "Transition an Operon task through Operon's dependency, recurrence, aggregate, and workflow guards. Prefer stable statusId from operon_get_configuration; exact configured status remains supported. To complete, cancel or reopen without naming a status, pass intent (complete | cancel | reopen): it resolves to the matching status of the task's own pipeline. expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
+        "Transition an Operon task through Operon's dependency, recurrence, aggregate, and workflow guards. Prefer stable statusId from operon_get_configuration; exact configured status remains supported. To complete, cancel or reopen without naming a status, pass intent (complete | cancel | reopen): it resolves to the matching status of the task's own pipeline. expectedRevision and idempotencyKey are mandatory; dryRun defaults to true. Use one idempotencyKey for the dry-run and a new one for the apply; reusing the dry-run key returns idempotency_key_reused.",
       inputSchema: mcpSchema(OperonTransitionTaskInputSchema.shape),
       annotations: MUTATION_ANNOTATIONS,
     },
@@ -353,7 +353,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_convert_task",
     {
       description:
-        "Convert an Operon task between inline and file forms through Operon's transition-safe conversion path. Apply is destructive and requires MCP_WRITE_MODE=full; dryRun defaults to true.",
+        "Convert an Operon task between inline and file forms through Operon's transition-safe conversion path. Apply is destructive and requires MCP_WRITE_MODE=full; dryRun defaults to true. Use one idempotencyKey for the dry-run and a new one for the apply; reusing the dry-run key returns idempotency_key_reused.",
       inputSchema: mcpSchema(OperonConvertTaskInputSchema.shape),
       annotations: DESTRUCTIVE_MUTATION_ANNOTATIONS,
     },
@@ -364,7 +364,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_relocate_task",
     {
       description:
-        "Move one inline Operon task to another Markdown note while preserving operonId. expectedRevision and idempotencyKey are mandatory; dryRun defaults to true. Both Bridge and MCP mutation opt-ins must be enabled for apply.",
+        "Move one inline Operon task to another Markdown note while preserving operonId. expectedRevision and idempotencyKey are mandatory; dryRun defaults to true. Use one idempotencyKey for the dry-run and a new one for the apply; reusing the dry-run key returns idempotency_key_reused. Both Bridge and MCP mutation opt-ins must be enabled for apply.",
       inputSchema: mcpSchema(OperonRelocateTaskSchema.shape),
       annotations: MUTATION_ANNOTATIONS,
     },
@@ -377,7 +377,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_set_relationships",
     {
       description:
-        "Replace or explicitly clear parentTask, blocking, or blockedBy through Operon Developer API V1. The tool rejects duplicate, self, and contradictory dependency targets; expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
+        "Replace or explicitly clear parentTask, blocking, or blockedBy through Operon Developer API V1. The tool rejects duplicate, self, and contradictory dependency targets; expectedRevision and idempotencyKey are mandatory; dryRun defaults to true. Use one idempotencyKey for the dry-run and a new one for the apply; reusing the dry-run key returns idempotency_key_reused.",
       inputSchema: mcpSchema(OperonSetRelationshipsInputSchema.shape),
       annotations: MUTATION_ANNOTATIONS,
     },
@@ -390,7 +390,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_update_recurrence",
     {
       description:
-        "Set or explicitly clear an Operon recurrence rule and its official temporal fields, except dateScheduled, for this-task or this-and-following. dateScheduled is reserved for operon_update_periodic_scheduling. This apply is reserved for full write policy; expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
+        "Set or explicitly clear an Operon recurrence rule and its official temporal fields, except dateScheduled, for this-task or this-and-following. dateScheduled is reserved for operon_update_periodic_scheduling. This apply is reserved for full write policy; expectedRevision and idempotencyKey are mandatory; dryRun defaults to true. Use one idempotencyKey for the dry-run and a new one for the apply; reusing the dry-run key returns idempotency_key_reused.",
       inputSchema: mcpSchema(OperonUpdateRecurrenceSchema.shape),
       annotations: MUTATION_ANNOTATIONS,
     },

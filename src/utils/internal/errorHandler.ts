@@ -14,6 +14,9 @@ import {
 import { NATIVE_MOVE_PUBLIC_REASON_CODES, isNativeMoveHint } from "../../services/nativeNoteMoveRefusals.js";
 import { isDatePreparationCheck } from "../../services/datePreparationProvenance.js";
 import {
+  OPERON_REFUSAL_CODES, OPERON_REFUSAL_MESSAGES, isOperonRefusalCode,
+} from "../../services/operon/refusalCodes.js";
+import {
   activeRequestCorrelationId,
   RequestContext,
 } from "./requestContext.js"; // Import RequestContext
@@ -235,6 +238,7 @@ const CALLER_DERIVED_PUBLIC_FIELDS = new Set(["suggestedPath", "suggestedName"])
 const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   ...NOTE_NAME_REASON_CODES,
   ...NATIVE_MOVE_PUBLIC_REASON_CODES,
+  ...OPERON_REFUSAL_CODES,
   "atomic_bridge_version_unsupported",
   "base_config_filter_invalid",
   "base_config_last_view",
@@ -702,6 +706,7 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
     return "Governed note deletion is not enabled in the Atomic Write Bridge settings. Ask the vault owner to enable it.";
   if (reasonCode === "operon_recovery_blocked_by_path_scope")
     return "Operon recovery is disabled by policy while OPERON_MUTATION_ALLOWED_PATH_PREFIXES is set; this is a refusal, not an empty list, and retrying will not change it. Do not replay the original mutation or relax the allowlist. Keep any known recoveryRef, inspect the affected task with authorized reads, and ask the vault owner to review it.";
+  if (isOperonRefusalCode(reasonCode)) return OPERON_REFUSAL_MESSAGES[reasonCode];
   if (typeof reasonCode === "string" && NATIVE_MOVE_PUBLIC_REASON_CODES.includes(reasonCode))
     return "The note move was refused. See reasonCode and hint.";
   if (code === BaseErrorCode.VALIDATION_ERROR && isNoteNameReasonCode(reasonCode))

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Operon refusals now say why (#152). Reusing an `idempotencyKey` (most often the dry-run key for the apply) was refused by the MCP mutation journal with a generic `CONFLICT` "The request conflicts with the current resource state", and agents read it as a Bridge/Operon incompatibility. The refusal now carries `reasonCode: idempotency_key_reused`, `retryable: false` and an action message (use a new key for the apply). The same applies to an earlier attempt with an uncertain outcome (`operon_mutation_outcome_uncertain`, `mutationMayHaveApplied: true`) and to closed Bridge refusal codes received over HTTP (`revision_conflict`, `source_line_conflict`, `consent_required`, `consent_denied`, `operon_index_not_settled`), which keep the Bridge's `retryable`. Unknown codes stay masked. The descriptions of the dry-run Operon mutation tools now state the key rule: one key for the dry-run, a new one for the apply.
+
 ## [3.19.0] - 2026-11-05
 
 Atomic Write Bridge 0.9.2 ships with this release; Operon Bridge 0.9.7 and Bases Bridge 1.2.2 are unchanged. Install the MCP and the Bridge bundle of the same release together, after draining pending operations: with an older Atomic Write Bridge, a plan on a note that has no creation date yet is refused with `date_preparation_bridge_upgrade_required`. Notes locked before this release stay locked until closed: see [notes locked by a date preparation](docs/administrative-closure.md#notes-locked-by-a-date-preparation). Vault agent instructions are on by default in `advise`, which never refuses; set `MCP_VAULT_INSTRUCTIONS=off` to keep the previous behaviour exactly. See the [English](docs/releases/3.19.0.md) and [French](docs/releases/3.19.0.fr.md) release notes.
