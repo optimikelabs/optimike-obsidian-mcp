@@ -1534,6 +1534,13 @@ test("a native failure that may have applied never reads as could-not-be-complet
   assert.match(maybe.error.message, /may have applied/u);
   assert.match(maybe.error.message, /never retry it with a new idempotencyKey/u);
   assert.doesNotMatch(JSON.stringify(maybe), /Private task text|native detail/u);
+  // The HTTP path filters a receipt twice: the message must survive.
+  const twice = payloadFactory(maybe) as Record<string, any>;
+  assert.equal(twice.error.code, "outcome_unverified");
+  assert.equal(twice.error.message, maybe.error.message);
+  const httpFactory = await exported("publicOperonHttpFailurePayload");
+  const overHttp = httpFactory(maybe) as Record<string, any>;
+  assert.equal(overHttp.error.message, maybe.error.message);
   const notApplied = payloadFactory({ ...base, mutationMayHaveApplied: false }) as Record<string, any>;
   assert.equal(notApplied.error.code, "bridge_error");
 });

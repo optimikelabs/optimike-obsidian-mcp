@@ -946,9 +946,15 @@ export function publicOperonMutationFailurePayload(
     record,
     "mutationMayHaveApplied",
   );
+  // Receipts are filtered twice on the HTTP path (durable response, then
+  // sendJson): keep the transformation idempotent.
+  const alreadyMayHaveApplied =
+    safeStringField(rawError, "message") ===
+    OPERON_PUBLIC_ERRORS.mutation_may_have_applied!.message;
   if (
     mutationMayHaveApplied === true &&
-    publicError.error.code === OPERON_PUBLIC_ERRORS.bridge_error!.code
+    (publicError.error.code === OPERON_PUBLIC_ERRORS.bridge_error!.code ||
+      alreadyMayHaveApplied)
   ) {
     const uncertain = OPERON_PUBLIC_ERRORS.mutation_may_have_applied!;
     publicError.error = {
