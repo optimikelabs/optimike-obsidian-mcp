@@ -368,6 +368,26 @@ function assertPublicError(payload, code, label) {
   );
 }
 
+const { TEXT_PATCH_REFUSAL_MESSAGES } = await import("../dist/services/textPatchRefusals.js");
+// A compiler refusal names its closed reason and the matching action (06/11/2026:
+// a replace_literal on a task line came back as a bare "could not be validated").
+function assertTextPatchRefusal(payload, reasonCode, label) {
+  assertPublicErrorShape(payload, "VALIDATION_ERROR", label);
+  assert.equal(payload.error.details?.reasonCode, reasonCode, `${label} reasonCode`);
+  assert.equal(
+    payload.error.message,
+    TEXT_PATCH_REFUSAL_MESSAGES[reasonCode] ?? PUBLIC_MESSAGES.VALIDATION_ERROR,
+    `${label} action message`,
+  );
+  assert.doesNotMatch(JSON.stringify(payload), /do not touch|statut: actif|needle|introduced|prefix/u, `${label} echoes no patch text`);
+}
+function assertPublicErrorShape(payload, code, label) {
+  assert.ok(payload.error, `${label} did not return an MCP error: ${JSON.stringify(payload)}`);
+  assert.equal(payload.error.code, code, `${label} code`);
+  const requestId = payload.requestId ?? payload.error.details?.requestId;
+  assert.match(requestId ?? "", UUID, `${label} request id`);
+}
+
 const fake = new FakeGovernedNoteReplaceRuntime();
 const first = await startClient(fake);
 const second = await startClient(fake);
@@ -597,7 +617,11 @@ try {
     if (label === "regex") {
       assert.equal(rejected.payload.transportError.includes(SECRET), false);
     } else {
-      assertPublicError(rejected.payload, "VALIDATION_ERROR", label);
+      assertTextPatchRefusal(rejected.payload, {
+        frontmatter: "literal_not_found",
+        task: "task_line_touched",
+        path: "text_patch_path_invalid",
+      }[label], label);
     }
   }
   for (const [label, content, operations] of [
@@ -638,7 +662,13 @@ try {
       },
       true,
     );
-    assertPublicError(rejected.payload, "VALIDATION_ERROR", label);
+    assertTextPatchRefusal(rejected.payload, {
+      "bare CR frontmatter source": "markdown_line_ending_unsupported",
+      "bare CR task source": "markdown_line_ending_unsupported",
+      "introduced bare CR": "markdown_line_ending_unsupported",
+      "BOM source": "markdown_bom_unsupported",
+      "BOM prepended": "markdown_bom_unsupported",
+    }[label], label);
     assert.equal(fake.casRequests, 0, `${label} fails before CAS`);
   }
   const runtimeForCompilerBoundary = new GovernedTextPatchRuntime(fake);
@@ -881,11 +911,8 @@ try {
     },
     true,
   );
-  assertPublicError(
-    redacted.payload,
-    "VALIDATION_ERROR",
-    "redacted parameters",
-  );
+  assertTextPatchRefusal(redacted.payload, "literal_not_found", "redacted parameters");
+  assert.equal(JSON.stringify(redacted.payload).includes(SECRET), false, "redacted parameters echo no replacement");
   // Compatible body + YAML changes use the same sealed child, not two writes.
   fake.reset();
   const combinedInput = { path: FIXTURE_PATH, operations: [{ op: "replace_literal", search: "needle", replacement: "révisé ✅" }], frontmatterOperations: [{ op: "set", key: "statut", value: "stable" }], idempotencyKey: "combined" };

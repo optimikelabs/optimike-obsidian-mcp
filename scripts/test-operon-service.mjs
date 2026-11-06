@@ -1050,6 +1050,7 @@ process.env.SEMANTIC_SEARCH_PREWARM = "false";
 const { OperonService } = await import("../dist/services/operon/service.js");
 const { config } = await import("../dist/config/index.js");
 const { logger } = await import("../dist/utils/index.js");
+const errorHandlerModule = await import("../dist/utils/internal/errorHandler.js");
 const loggedEvents = [];
 for (const level of ["info", "warning"]) {
   const original = logger[level].bind(logger);
@@ -1347,7 +1348,21 @@ try {
         targetFolder: "Efforts/Projets/Internes/Operon Pilot",
       },
     }),
-    (error) => error?.code === "CONFLICT",
+    (error) => {
+      assert.equal(error?.code, "CONFLICT");
+      // #152: the refusal says why, so the agent picks a new key instead of
+      // blaming the Bridge.
+      const { publicMcpToolErrorPayload } = errorHandlerModule;
+      const publicError = publicMcpToolErrorPayload(error, {
+        operation: "operon_create_task",
+        toolName: "operon_create_task",
+        params: {},
+      }).error;
+      assert.equal(publicError.details.reasonCode, "idempotency_key_reused");
+      assert.equal(publicError.details.retryable, false);
+      assert.match(publicError.message, /new idempotencyKey/u);
+      return true;
+    },
   );
   assert.equal(
     state.mutationCalls,

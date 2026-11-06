@@ -25,6 +25,7 @@ const { StdioClientTransport } = await import(
     ? "@modelcontextprotocol/client/stdio"
     : "@modelcontextprotocol/sdk/client/stdio.js"
 );
+const { TEXT_PATCH_REFUSAL_MESSAGES } = await import("../dist/services/textPatchRefusals.js");
 
 const TOOL_NAMES = [
   "obsidian_note_replace_apply",
@@ -414,7 +415,8 @@ function assertPublicError(payload, code, forbiddenMarker, label) {
     payload.error.message,
     payload.error.details?.reasonCode === "atomic_write_creation_property_missing"
       ? "La date de création est absente ou sa préparation indisponible. Demandez au propriétaire du coffre de la faire ajouter par le gestionnaire de dates, puis relancez le plan."
-      : PUBLIC_MESSAGES[code],
+      : TEXT_PATCH_REFUSAL_MESSAGES[payload.error.details?.reasonCode] ??
+        PUBLIC_MESSAGES[code],
     `${label} catalog message`,
   );
   const requestId = payload.requestId ?? payload.error.details?.requestId;

@@ -11,6 +11,8 @@ on:
       - "src/mcp-server/tools/runtimeTools/registration.ts"
       - "src/mcp-server/toolSurfaceRegistry.ts"
       - "src/services/writePolicy.ts"
+      - "src/utils/internal/errorHandler.ts"
+      - "scripts/test-operon-refusal-codes.mjs"
       - "plugins/obsidian-operon-bridge/**"
       - "scripts/test-operon-contract.mjs"
       - "scripts/test-operon-service.mjs"
@@ -56,6 +58,7 @@ jobs:
       - run: npm run test:runtime
       - run: npm run test:operon-contract
       - run: npm run test:operon-service
+      - run: node scripts/test-operon-refusal-codes.mjs
       - run: npm run test:operon-canary-path-safety
       - run: npm run test:operon-36-behavior-contract
       - run: npm run test:docs

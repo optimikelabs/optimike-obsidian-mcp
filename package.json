@@ -210,7 +210,7 @@
     "test:governed-canvas": "npm run build && node scripts/test-canvas-p3-compiler.mjs && node scripts/test-governed-canvas-operation.mjs && node scripts/test-governed-canvas-mcp.mjs && node scripts/test-governed-canvas-http.mjs && npm --prefix plugins/obsidian-atomic-write-bridge run check",
     "smoke:governed-canvas-live": "npm run build && node scripts/smoke-governed-canvas-live.mjs",
     "smoke:governed-base-live": "npm run build && node scripts/smoke-governed-base-formula-live.mjs",
-    "check:operon": "npm run build && npm run test:operon-contract && npm run test:operon-service && npm run test:operon-canary-path-safety && npm run test:operon-36-behavior-contract && npm --prefix plugins/obsidian-operon-bridge run check",
+    "check:operon": "npm run build && npm run test:operon-contract && npm run test:operon-service && node scripts/test-operon-refusal-codes.mjs && npm run test:operon-canary-path-safety && npm run test:operon-36-behavior-contract && npm --prefix plugins/obsidian-operon-bridge run check",
     "check:atomic-write": "npm run build && node scripts/test-modified-time-settlement.mjs && node scripts/test-modified-time-canary-helpers.mjs && node scripts/test-obsidian-note-replace-operation.mjs && npm --prefix plugins/obsidian-atomic-write-bridge run check",
     "smoke:operon-mutations": "node scripts/smoke-operon-mutations.mjs",
     "smoke:operon-rich-mutations": "node scripts/smoke-operon-rich-mutations.mjs",

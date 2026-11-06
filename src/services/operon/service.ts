@@ -8,6 +8,7 @@ import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { logger, requestContextService } from "../../utils/index.js";
 import { assertWriteAllowed } from "../writePolicy.js";
 import { applyWalSizeLimit } from "../sqliteWal.js";
+import { PUBLIC_OPERON_BRIDGE_REFUSAL_CODES } from "./refusalCodes.js";
 import {
   OPERON_CONTRACT_VERSION,
   OPERON_LEGACY_SNAPSHOT_SCHEMA_VERSION,
@@ -493,13 +494,23 @@ export class OperonService {
                         message:
                           "The Operon Bridge request could not be completed.",
                       };
+    // A closed, content-free Bridge refusal code tells the agent what to fix
+    // (#152). Anything else keeps the generic status-based reason code.
+    const bridgeCode =
+      typeof nativeError?.code === "string" &&
+      PUBLIC_OPERON_BRIDGE_REFUSAL_CODES.has(nativeError.code)
+        ? nativeError.code
+        : null;
+    const retryable =
+      typeof payload?.retryable === "boolean" ? payload.retryable : undefined;
     throw new McpError(
       descriptor.code,
       descriptor.message,
       this.requestContext(operation, {
         httpStatus: status,
-        reasonCode: descriptor.reasonCode,
+        reasonCode: bridgeCode ?? descriptor.reasonCode,
         hasBridgeCode: typeof nativeError?.code === "string",
+        ...(retryable === undefined ? {} : { retryable }),
       }),
     );
   }
@@ -605,10 +616,18 @@ export class OperonService {
         ) ||
         row.requestedJson !== requestedJson
       ) {
+        // Most often the dry-run key reused for the apply: the dry-run is a
+        // separate request with its own journal entry. Say so publicly
+        // (closed reason code, #152) instead of a generic conflict.
         throw new McpError(
           BaseErrorCode.CONFLICT,
           "Idempotency key was already reserved for a different Operon mutation request.",
-          this.requestContext(`operon_${action}`, { operonId, idempotencyKey }),
+          this.requestContext(`operon_${action}`, {
+            operonId,
+            idempotencyKey,
+            reasonCode: "idempotency_key_reused",
+            retryable: false,
+          }),
         );
       }
       const parsedResult = safeJsonParse(row.resultJson);
@@ -624,7 +643,13 @@ export class OperonService {
       throw new McpError(
         BaseErrorCode.CONFLICT,
         "A previous Operon mutation attempt with this idempotency key has an uncertain outcome; inspect the live task before choosing a new key.",
-        this.requestContext(`operon_${action}`, { operonId, idempotencyKey }),
+        this.requestContext(`operon_${action}`, {
+          operonId,
+          idempotencyKey,
+          reasonCode: "operon_mutation_outcome_uncertain",
+          retryable: false,
+          mutationMayHaveApplied: true,
+        }),
       );
     } finally {
       db.close();
@@ -736,12 +761,20 @@ export class OperonService {
           `pending:${result.idempotencyKey}`,
         ) as { changes: number | bigint };
       if (Number(updated.changes) !== 1) {
+        // A dry-run ("planned") proves nothing was applied: only the key is
+        // contested. Any other receipt may follow an applied mutation.
+        const provenUnapplied = result.status === "planned";
         throw new McpError(
           BaseErrorCode.CONFLICT,
           "Operon mutation journal reservation was lost before completion.",
           this.requestContext(`operon_${action}`, {
             operonId,
             idempotencyKey: result.idempotencyKey,
+            reasonCode: provenUnapplied
+              ? "idempotency_key_reused"
+              : "operon_mutation_outcome_uncertain",
+            retryable: false,
+            mutationMayHaveApplied: !provenUnapplied,
           }),
         );
       }
@@ -770,7 +803,12 @@ export class OperonService {
         throw new McpError(
           BaseErrorCode.CONFLICT,
           "Idempotency key was already used for a different Operon mutation request.",
-          this.requestContext(`operon_${action}`, { operonId, idempotencyKey }),
+          this.requestContext(`operon_${action}`, {
+            operonId,
+            idempotencyKey,
+            reasonCode: "idempotency_key_reused",
+            retryable: false,
+          }),
         );
       }
       return existing.result;
@@ -781,7 +819,12 @@ export class OperonService {
         throw new McpError(
           BaseErrorCode.CONFLICT,
           "Idempotency key is currently executing a different Operon mutation request.",
-          this.requestContext(`operon_${action}`, { operonId, idempotencyKey }),
+          this.requestContext(`operon_${action}`, {
+            operonId,
+            idempotencyKey,
+            reasonCode: "idempotency_key_reused",
+            retryable: false,
+          }),
         );
       }
       return inFlight.promise;
@@ -1240,6 +1283,9 @@ export class OperonService {
           this.requestContext(operation, {
             operonId,
             operationId: result.operationId,
+            reasonCode: "operon_mutation_outcome_uncertain",
+            retryable: false,
+            mutationMayHaveApplied: true,
           }),
         );
       }
@@ -1258,6 +1304,9 @@ export class OperonService {
           this.requestContext(operation, {
             operonId,
             operationId: result.operationId,
+            reasonCode: "operon_mutation_outcome_uncertain",
+            retryable: false,
+            mutationMayHaveApplied: true,
           }),
         );
       }
@@ -1865,6 +1914,8 @@ export class OperonService {
           BaseErrorCode.CONFLICT,
           `Operon index or settings changed during ${phase}; retry after the index settles.`,
           this.requestContext("assertStableOperonStatus", {
+            reasonCode: "operon_index_not_settled",
+            retryable: true,
             phase,
             expectedGeneration: expected.index.generation,
             observedGeneration: observed.index.generation,
@@ -1920,6 +1971,8 @@ export class OperonService {
             BaseErrorCode.CONFLICT,
             "Operon generation or settings changed between snapshot pages.",
             this.requestContext("fetchAllLiveOperonTasks", {
+              reasonCode: "operon_index_not_settled",
+              retryable: true,
               pageIndex,
               expectedGeneration: expectedStatus.index.generation,
               observedGeneration: page.generation,
@@ -1936,6 +1989,8 @@ export class OperonService {
             BaseErrorCode.CONFLICT,
             "Operon task count changed while the snapshot was being paged; retry after the index settles.",
             this.requestContext("fetchAllLiveOperonTasks", {
+              reasonCode: "operon_index_not_settled",
+              retryable: true,
               expectedTotal,
               observedTotal: page.total,
               pageIndex,
@@ -2010,6 +2065,8 @@ export class OperonService {
           BaseErrorCode.CONFLICT,
           "Operon generation or settings changed before validation completed.",
           this.requestContext("refreshLiveOperonSnapshot", {
+            reasonCode: "operon_index_not_settled",
+            retryable: true,
             expectedGeneration: finalStatus.index.generation,
             observedGeneration: validation.generation,
             expectedSettingsSignature: finalStatus.settingsSignature,
@@ -2033,6 +2090,8 @@ export class OperonService {
           BaseErrorCode.CONFLICT,
           "Operon configuration changed before the snapshot could be committed.",
           this.requestContext("refreshLiveOperonSnapshot", {
+            reasonCode: "operon_index_not_settled",
+            retryable: true,
             expectedSettingsSignature: finalStatus.settingsSignature,
             observedSettingsSignature: configuration.settingsSignature,
           }),
@@ -2307,6 +2366,8 @@ export class OperonService {
             BaseErrorCode.CONFLICT,
             "Operon settings changed while reading the configuration; retry after the plugin settles.",
             this.requestContext("operonConfiguration", {
+              reasonCode: "operon_index_not_settled",
+              retryable: true,
               expectedSettingsSignature: status.settingsSignature,
               observedSettingsSignature: configuration.settingsSignature,
             }),
@@ -2879,6 +2940,8 @@ export class OperonService {
           this.requestContext("operon_recover_mutation", {
             recoveryRef: params.recoveryRef,
             idempotencyKey: params.idempotencyKey,
+            reasonCode: "idempotency_key_reused",
+            retryable: false,
           }),
         );
       }
