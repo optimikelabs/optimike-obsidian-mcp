@@ -63,7 +63,60 @@ assert.ok(!PUBLIC_OPERON_BRIDGE_REFUSAL_CODES.has("operon_mutation_outcome_uncer
   assert.equal(payload.error.message, "The request conflicts with the current resource state.");
 }
 
-// 4. Every dry-run mutation tool states the key rule where the agent reads it.
+// 4. A real Bridge HTTP refusal goes through bridgeHttpError: a closed code and
+//    its retryable flag are forwarded; an unknown code keeps the generic reason.
+{
+  const { OperonService } = await import("../dist/services/operon/service.js");
+  const service = new OperonService();
+  const bridgeRefusal = (status, data) => {
+    try {
+      service.bridgeHttpError({ isAxiosError: true, response: { status, data } }, "operonQuerySavedFilter");
+    } catch (error) {
+      return publicPayload(error, "operon_query_saved_filter");
+    }
+    assert.fail("bridgeHttpError must throw");
+  };
+  const known = bridgeRefusal(409, {
+    ok: false,
+    error: { code: "revision_conflict", message: "raw Bridge text" },
+    retryable: true,
+  });
+  assert.equal(known.error.code, "CONFLICT");
+  assert.equal(known.error.details.reasonCode, "revision_conflict");
+  assert.equal(known.error.details.retryable, true);
+  assert.match(known.error.message, /Re-read the task/u);
+  assert.doesNotMatch(JSON.stringify(known), /raw Bridge text/u);
+
+  const unknown = bridgeRefusal(409, {
+    ok: false,
+    error: { code: "private_bridge_detail", message: "secret" },
+    retryable: "yes",
+  });
+  assert.equal(unknown.error.details.reasonCode, "OPERON_BRIDGE_CONFLICT", "generic status reason kept");
+  assert.equal(unknown.error.details.retryable, undefined, "a non-boolean retryable is dropped");
+  assert.doesNotMatch(JSON.stringify(unknown), /private_bridge_detail|secret/u);
+}
+
+// 5. The reuse message never claims the earlier request applied nothing, and
+//    the uncertain outcome says it may have applied.
+{
+  const reused = publicPayload(
+    new McpError(BaseErrorCode.CONFLICT, "x", { reasonCode: "idempotency_key_reused", retryable: false }),
+  );
+  assert.match(reused.error.message, /This call was refused and applied nothing/u);
+  assert.match(reused.error.message, /check its result first/u);
+  const uncertain = publicPayload(
+    new McpError(BaseErrorCode.CONFLICT, "x", {
+      reasonCode: "operon_mutation_outcome_uncertain",
+      retryable: false,
+      mutationMayHaveApplied: true,
+    }),
+  );
+  assert.equal(uncertain.error.details.mutationMayHaveApplied, true);
+  assert.match(uncertain.error.message, /may have applied/u);
+}
+
+// 6. Every dry-run mutation tool states the key rule where the agent reads it.
 const descriptions = new Map();
 await registerOperonTools({
   registerTool: (name, definition) => descriptions.set(name, definition.description),

@@ -767,6 +767,9 @@ export class OperonService {
           this.requestContext(`operon_${action}`, {
             operonId,
             idempotencyKey: result.idempotencyKey,
+            reasonCode: "operon_mutation_outcome_uncertain",
+            retryable: false,
+            mutationMayHaveApplied: true,
           }),
         );
       }
@@ -1275,6 +1278,9 @@ export class OperonService {
           this.requestContext(operation, {
             operonId,
             operationId: result.operationId,
+            reasonCode: "operon_mutation_outcome_uncertain",
+            retryable: false,
+            mutationMayHaveApplied: true,
           }),
         );
       }
@@ -1293,6 +1299,9 @@ export class OperonService {
           this.requestContext(operation, {
             operonId,
             operationId: result.operationId,
+            reasonCode: "operon_mutation_outcome_uncertain",
+            retryable: false,
+            mutationMayHaveApplied: true,
           }),
         );
       }
@@ -1900,6 +1909,8 @@ export class OperonService {
           BaseErrorCode.CONFLICT,
           `Operon index or settings changed during ${phase}; retry after the index settles.`,
           this.requestContext("assertStableOperonStatus", {
+            reasonCode: "operon_index_not_settled",
+            retryable: true,
             phase,
             expectedGeneration: expected.index.generation,
             observedGeneration: observed.index.generation,
@@ -1955,6 +1966,8 @@ export class OperonService {
             BaseErrorCode.CONFLICT,
             "Operon generation or settings changed between snapshot pages.",
             this.requestContext("fetchAllLiveOperonTasks", {
+              reasonCode: "operon_index_not_settled",
+              retryable: true,
               pageIndex,
               expectedGeneration: expectedStatus.index.generation,
               observedGeneration: page.generation,
@@ -1971,6 +1984,8 @@ export class OperonService {
             BaseErrorCode.CONFLICT,
             "Operon task count changed while the snapshot was being paged; retry after the index settles.",
             this.requestContext("fetchAllLiveOperonTasks", {
+              reasonCode: "operon_index_not_settled",
+              retryable: true,
               expectedTotal,
               observedTotal: page.total,
               pageIndex,
@@ -2045,6 +2060,8 @@ export class OperonService {
           BaseErrorCode.CONFLICT,
           "Operon generation or settings changed before validation completed.",
           this.requestContext("refreshLiveOperonSnapshot", {
+            reasonCode: "operon_index_not_settled",
+            retryable: true,
             expectedGeneration: finalStatus.index.generation,
             observedGeneration: validation.generation,
             expectedSettingsSignature: finalStatus.settingsSignature,
@@ -2068,6 +2085,8 @@ export class OperonService {
           BaseErrorCode.CONFLICT,
           "Operon configuration changed before the snapshot could be committed.",
           this.requestContext("refreshLiveOperonSnapshot", {
+            reasonCode: "operon_index_not_settled",
+            retryable: true,
             expectedSettingsSignature: finalStatus.settingsSignature,
             observedSettingsSignature: configuration.settingsSignature,
           }),
@@ -2342,6 +2361,8 @@ export class OperonService {
             BaseErrorCode.CONFLICT,
             "Operon settings changed while reading the configuration; retry after the plugin settles.",
             this.requestContext("operonConfiguration", {
+              reasonCode: "operon_index_not_settled",
+              retryable: true,
               expectedSettingsSignature: status.settingsSignature,
               observedSettingsSignature: configuration.settingsSignature,
             }),

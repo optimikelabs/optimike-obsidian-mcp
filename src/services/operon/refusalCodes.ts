@@ -9,9 +9,9 @@
  */
 export const OPERON_REFUSAL_MESSAGES = {
   idempotency_key_reused:
-    "This idempotencyKey was already used for a different request, usually the dry-run of this mutation. Run the apply with a new idempotencyKey; never reuse the dry-run key. Nothing was applied.",
+    "This call was refused and applied nothing: its idempotencyKey was already used for a different request (the dry-run of this mutation, or an earlier or still running apply). If that earlier request was only the dry-run, run the apply with a new idempotencyKey. Otherwise check its result first (operon_get_task or operon_find_tasks): it may already have created or changed the task.",
   operon_mutation_outcome_uncertain:
-    "A previous attempt with this idempotencyKey has an uncertain outcome. Read the live task with operon_get_task before deciding; do not retry blindly with a new key.",
+    "The outcome of this Operon mutation could not be proven and it may have applied. Read the live task with operon_get_task and check operon_list_pending_recoveries before deciding; do not retry it with a new key.",
   revision_conflict:
     "The task changed since it was read: expectedRevision is stale. Re-read the task, then plan again with its current revision.",
   source_line_conflict:

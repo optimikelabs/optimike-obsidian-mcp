@@ -56,6 +56,7 @@ jobs:
       - run: npm run test:runtime
       - run: npm run test:operon-contract
       - run: npm run test:operon-service
+      - run: node scripts/test-operon-refusal-codes.mjs
       - run: npm run test:operon-canary-path-safety
       - run: npm run test:operon-36-behavior-contract
       - run: npm run test:docs
