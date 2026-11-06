@@ -761,15 +761,20 @@ export class OperonService {
           `pending:${result.idempotencyKey}`,
         ) as { changes: number | bigint };
       if (Number(updated.changes) !== 1) {
+        // A dry-run ("planned") proves nothing was applied: only the key is
+        // contested. Any other receipt may follow an applied mutation.
+        const provenUnapplied = result.status === "planned";
         throw new McpError(
           BaseErrorCode.CONFLICT,
           "Operon mutation journal reservation was lost before completion.",
           this.requestContext(`operon_${action}`, {
             operonId,
             idempotencyKey: result.idempotencyKey,
-            reasonCode: "operon_mutation_outcome_uncertain",
+            reasonCode: provenUnapplied
+              ? "idempotency_key_reused"
+              : "operon_mutation_outcome_uncertain",
             retryable: false,
-            mutationMayHaveApplied: true,
+            mutationMayHaveApplied: !provenUnapplied,
           }),
         );
       }

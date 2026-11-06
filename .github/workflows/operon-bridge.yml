@@ -11,6 +11,8 @@ on:
       - "src/mcp-server/tools/runtimeTools/registration.ts"
       - "src/mcp-server/toolSurfaceRegistry.ts"
       - "src/services/writePolicy.ts"
+      - "src/utils/internal/errorHandler.ts"
+      - "scripts/test-operon-refusal-codes.mjs"
       - "plugins/obsidian-operon-bridge/**"
       - "scripts/test-operon-contract.mjs"
       - "scripts/test-operon-service.mjs"

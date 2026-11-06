@@ -116,6 +116,31 @@ assert.ok(!PUBLIC_OPERON_BRIDGE_REFUSAL_CODES.has("operon_mutation_outcome_uncer
   assert.match(uncertain.error.message, /may have applied/u);
 }
 
+// 5b. A lost journal reservation after a dry-run proves nothing was applied;
+//     after an apply receipt the outcome is uncertain.
+{
+  const { OperonService } = await import("../dist/services/operon/service.js");
+  const service = new OperonService();
+  const lostReservation = (status) => {
+    try {
+      service.writeMutationJournal("create", null, { probe: status }, {
+        operationId: `00000000-0000-4000-8000-00000000000${status === "planned" ? 1 : 2}`,
+        idempotencyKey: `lost-reservation-${status}`,
+        status,
+      });
+    } catch (error) {
+      return publicPayload(error);
+    }
+    assert.fail("a missing reservation must be refused");
+  };
+  const planned = lostReservation("planned");
+  assert.equal(planned.error.details.reasonCode, "idempotency_key_reused");
+  assert.equal(planned.error.details.mutationMayHaveApplied, false);
+  const applied = lostReservation("applied");
+  assert.equal(applied.error.details.reasonCode, "operon_mutation_outcome_uncertain");
+  assert.equal(applied.error.details.mutationMayHaveApplied, true);
+}
+
 // 6. Every dry-run mutation tool states the key rule where the agent reads it.
 const descriptions = new Map();
 await registerOperonTools({
