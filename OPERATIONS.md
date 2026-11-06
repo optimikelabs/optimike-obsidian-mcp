@@ -210,7 +210,7 @@ The full commands, failure states and release gate are in
 [Bridge Bundle, Upgrade and Rollback](docs/bridge-packaging.md).
 
 Upgrade the MCP and the Bridge bundle of the same release together. MCP 3.19.x
-ships Atomic Write Bridge 0.9.2, Operon Bridge 0.9.7 and Bases Bridge 1.2.2.
+ships Atomic Write Bridge 0.9.2, Operon Bridge 0.9.8 and Bases Bridge 1.2.2.
 Before switching or rolling back the pair, drain pending operations and date
 preparation fences ([Closing uncertain operations](#closing-uncertain-operations)).
 
