@@ -1467,3 +1467,73 @@ test("only a dry-run waits, bounded, for Operon to settle its index", async () =
   await assert.rejects(settle.call(never, {}, 600), /not settled/u);
   assert.ok(Date.now() - started < 2_000);
 });
+test("a reused idempotencyKey is reported as idempotency_key_reused and echoes no request data", async () => {
+  const secret = "C:\Users\private\Vault\Tasks\Client.md confidential";
+  const { handler, calls } = await mountedCreateMutationRoute(() => ({
+    ok: true,
+    code: "planned",
+    planDigest: "c".repeat(64),
+    plan: { kind: "create" },
+  }));
+  const task = { source: "inline", targetPath: "Tasks/Client.md", description: secret };
+  const dryRun = responseCapture();
+  await handler({ body: { idempotencyKey: "reused-key-0001", dryRun: true, task } }, dryRun);
+  assert.equal(dryRun.statusCode, 200);
+  // The apply reuses the dry-run key: the Bridge refuses before any dispatch.
+  const apply = responseCapture();
+  await handler({ body: { idempotencyKey: "reused-key-0001", dryRun: false, task } }, apply);
+  assert.equal(apply.statusCode, 409);
+  assert.equal(calls(), 1, "the refused apply never reaches Operon");
+  assert.equal(apply.payload.ok, false);
+  assert.equal(apply.payload.status, "conflict");
+  assert.equal(apply.payload.idempotencyKey, "reused-key-0001");
+  assert.equal(apply.payload.error.code, "idempotency_key_reused");
+  assert.equal(apply.payload.error.reasonCode, "idempotency_key_reused");
+  assert.equal(apply.payload.retryable, false);
+  assert.match(apply.payload.error.message, /new idempotencyKey/u);
+  assert.deepEqual(apply.payload.requested, {});
+  assert.doesNotMatch(JSON.stringify(apply.payload), /private|Client\.md|confidential|bridge_failure/u);
+});
+
+test("every refusal code the Bridge emits keeps its own public code", async () => {
+  const boundary = await exported("publicOperonHttpFailurePayload");
+  for (const code of ["idempotency_key_reused", "source_line_conflict", "interrupted_in_progress"]) {
+    const receipt = boundary({
+      ok: false,
+      operationId: "11111111-1111-4111-8111-111111111111",
+      idempotencyKey: "reused-key-0001",
+      status: "conflict",
+      requested: { description: "secret" },
+      error: { code, message: "raw native text" },
+      retryable: false,
+    }) as any;
+    assert.equal(receipt.error.code, code, code);
+    assert.deepEqual(receipt.requested, {});
+    assert.doesNotMatch(JSON.stringify(receipt), /secret|raw native text/u);
+  }
+});
+
+test("a native failure that may have applied never reads as could-not-be-completed", async () => {
+  const payloadFactory = await exported("publicOperonMutationFailurePayload");
+  const base = {
+    ok: false,
+    contractVersion: "1",
+    operationId: "8b7e2b7d-4c63-4470-8c28-2af9ddb0de62",
+    idempotencyKey: "maybe-applied-key-0001",
+    status: "failed",
+    requested: { description: "Private task text" },
+    retryable: false,
+    error: { code: "failed", message: "native detail with Private task text" },
+    source: "operon-live",
+    stale: false,
+  };
+  const maybe = payloadFactory({ ...base, mutationMayHaveApplied: true }) as Record<string, any>;
+  assert.equal(maybe.error.code, "outcome_unverified");
+  assert.equal(maybe.mutationMayHaveApplied, true);
+  assert.equal(maybe.retryable, false);
+  assert.match(maybe.error.message, /may have applied/u);
+  assert.match(maybe.error.message, /never retry it with a new idempotencyKey/u);
+  assert.doesNotMatch(JSON.stringify(maybe), /Private task text|native detail/u);
+  const notApplied = payloadFactory({ ...base, mutationMayHaveApplied: false }) as Record<string, any>;
+  assert.equal(notApplied.error.code, "bridge_error");
+});

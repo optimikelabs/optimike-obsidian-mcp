@@ -5,6 +5,8 @@ on:
     paths:
       - ".github/workflows/p4-governed-text-patch.yml"
       - "src/services/textPatchCompiler.ts"
+      - "src/services/textPatchRefusals.ts"
+      - "src/utils/internal/errorHandler.ts"
       - "src/services/textPatchProjectionRuntime.ts"
       - "src/mcp-server/tools/governedTextPatchTools/**"
       - "src/mcp-server/tools/governedNoteReplaceTools/**"

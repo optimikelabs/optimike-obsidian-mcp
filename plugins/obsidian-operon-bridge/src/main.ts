@@ -393,6 +393,33 @@ const OPERON_PUBLIC_ERRORS: Record<string, OperonPublicErrorDescriptor> = {
     message:
       "expectedRevision does not match the live task revision. Re-read the task, then plan again with its current revision.",
   },
+  // Preflight refusals: nothing was dispatched for THIS call. Without their own
+  // descriptor they collapsed into bridge_error ("could not be completed"),
+  // which agents read as a broken Bridge (#152 follow-up).
+  idempotency_key_reused: {
+    code: "idempotency_key_reused",
+    reasonCode: "idempotency_key_reused",
+    status: "rejected",
+    retryable: false,
+    message:
+      "This idempotencyKey was already used for a different mutation request (often the dry-run). This call applied nothing. Use a new idempotencyKey for the apply, or check the earlier request's result first.",
+  },
+  source_line_conflict: {
+    code: "source_line_conflict",
+    reasonCode: "source_line_mismatch",
+    status: "rejected",
+    retryable: true,
+    message:
+      "expectedLine does not match the live source line. Re-read the task, then plan again.",
+  },
+  interrupted_in_progress: {
+    code: "interrupted_in_progress",
+    reasonCode: "outcome_unverified",
+    status: "failed",
+    retryable: false,
+    message:
+      "The Bridge restarted while this mutation was in progress; it may have applied. Inspect pending recoveries and recover the same plan before retrying.",
+  },
   consent_required: {
     code: "consent_required",
     reasonCode: "consent_unavailable",
@@ -432,6 +459,17 @@ const OPERON_PUBLIC_ERRORS: Record<string, OperonPublicErrorDescriptor> = {
     retryable: false,
     message:
       "The mutation outcome could not be verified. Use the recovery reference before retrying.",
+  },
+  // A native failure that may have applied (mutationMayHaveApplied: true) must
+  // not read as "could not be completed": a retry with a new key could
+  // duplicate a created task (#152 follow-up, 8 production receipts).
+  mutation_may_have_applied: {
+    code: "outcome_unverified",
+    reasonCode: "outcome_unverified",
+    status: "failed",
+    retryable: false,
+    message:
+      "The Operon mutation failed and may have applied. Read the task (operon_get_task or operon_find_tasks) and check pending recoveries before any retry; never retry it with a new idempotencyKey.",
   },
   outcome_mismatch: {
     code: "outcome_mismatch",
@@ -908,6 +946,17 @@ export function publicOperonMutationFailurePayload(
     record,
     "mutationMayHaveApplied",
   );
+  if (
+    mutationMayHaveApplied === true &&
+    publicError.error.code === OPERON_PUBLIC_ERRORS.bridge_error!.code
+  ) {
+    const uncertain = OPERON_PUBLIC_ERRORS.mutation_may_have_applied!;
+    publicError.error = {
+      code: uncertain.code,
+      reasonCode: uncertain.reasonCode,
+      message: uncertain.message,
+    };
+  }
   const recoveryRequired = safeBooleanField(record, "recoveryRequired");
   const stale = safeBooleanField(record, "stale") === true;
   // A revision conflict may hand back the live revision: it is an opaque
