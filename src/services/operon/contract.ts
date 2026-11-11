@@ -86,6 +86,7 @@ export const OperonCapabilitiesSchema = z.object({
   adopt: z.boolean().optional().default(false),
   create: z.boolean(),
   update: z.boolean(),
+  pinned: z.boolean().optional().default(false),
   transition: z.boolean(),
   relationshipMutation: z.boolean().optional().default(false),
   recurrenceMutation: z.boolean().optional().default(false),
@@ -316,7 +317,15 @@ export const OperonStatusSchema = z.object({
   // `false` in `capabilities` for these names means "cold", not "impossible".
   // The first call opens the session, or leaves one consent request in Obsidian.
   firstUseCapabilities: z
-    .array(z.enum(["adopt", "periodicCreate", "periodicUpdate", "filterQuery"]))
+    .array(
+      z.enum([
+        "adopt",
+        "periodicCreate",
+        "periodicUpdate",
+        "filterQuery",
+        "pinned",
+      ]),
+    )
     .optional(),
   // The Bridge's negotiated Developer API session. Only the admission and
   // grant state cross this boundary; capability lists are not reflected.
@@ -1132,6 +1141,43 @@ export const OperonUpdateTaskSchema = MutationControlSchema.extend({
   patch: OperonUpdatePatchSchema,
 });
 
+// Pins are stored in Operon plugin data. expectedRevision protects the exact
+// source locator; Operon seals the pinned package compare-and-set at preview.
+export const OperonSetPinnedSchema = MutationControlSchema.extend({
+  operonId: z.string().min(1),
+  expectedRevision: z.string().min(1),
+  pinned: z.boolean(),
+}).strict();
+
+export const OperonUpdateTasksSchema = MutationControlSchema.extend({
+  items: z
+    .array(
+      z
+        .object({
+          operonId: z.string().min(1),
+          expectedRevision: z.string().min(1),
+          patch: OperonUpdatePatchSchema.superRefine((patch, context) => {
+            if (patch.properties !== undefined)
+              context.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["properties"],
+                message: "Batch update accepts managed fields only.",
+              });
+          }),
+        })
+        .strict(),
+    )
+    .min(2)
+    .max(64)
+    .superRefine((items, context) => {
+      if (new Set(items.map((item) => item.operonId)).size !== items.length)
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Batch task ids must be unique.",
+        });
+    }),
+}).strict();
+
 export const OperonTransitionIntentSchema = z.enum([
   "complete",
   "cancel",
@@ -1448,6 +1494,7 @@ const OperonNativeReceiptSchema = z
       "task.adopt",
       "task.create",
       "task.update",
+      "task.pinned-state",
       "task.transition",
       "task.relationship",
       "task.recurrence",
@@ -1523,6 +1570,8 @@ const OperonMutationSuccessSchema = OperonMutationReceiptBaseSchema.extend({
   before: OperonTaskSchema.nullable().optional(),
   requested: z.record(z.unknown()),
   after: OperonTaskSchema.nullable().optional(),
+  afterTasks: z.array(OperonTaskSchema).min(2).max(64).optional(),
+  pinned: z.boolean().optional(),
   error: z.object({ code: z.string(), message: z.string() }).optional(),
   retryable: z.boolean().optional(),
   planDigest: OperonPlanDigestSchema.optional(),
@@ -1594,6 +1643,8 @@ export type OperonUpdatePeriodicScheduling = z.infer<
   typeof OperonUpdatePeriodicSchedulingSchema
 >;
 export type OperonUpdateTask = z.infer<typeof OperonUpdateTaskSchema>;
+export type OperonSetPinned = z.infer<typeof OperonSetPinnedSchema>;
+export type OperonUpdateTasks = z.infer<typeof OperonUpdateTasksSchema>;
 export type OperonSetRelationships = z.infer<
   typeof OperonSetRelationshipsSchema
 >;

@@ -42,6 +42,8 @@ const DEFAULT_MUTATION_TOOLS = [
   "operon_update_periodic_scheduling",
   "operon_create_task",
   "operon_update_task",
+  "operon_set_pinned",
+  "operon_update_tasks",
   "operon_transition_task",
   "operon_convert_task",
   "operon_relocate_task",

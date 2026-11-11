@@ -189,6 +189,27 @@ function registerFakeWriteTools(server) {
     },
   );
   server.registerTool(
+    "operon_set_pinned",
+    { inputSchema: mcpSchema({ operonId: text, idempotencyKey: text }) },
+    async () => {
+      bump("operon_set_pinned");
+      return receipt({ ok: true });
+    },
+  );
+  server.registerTool(
+    "operon_update_tasks",
+    {
+      inputSchema: mcpSchema({
+        items: z.array(z.object({ operonId: text })),
+        idempotencyKey: text,
+      }),
+    },
+    async () => {
+      bump("operon_update_tasks");
+      return receipt({ ok: true });
+    },
+  );
+  server.registerTool(
     "operon_create_periodic_task",
     { inputSchema: mcpSchema({ idempotencyKey: text }) },
     async () => {
@@ -636,6 +657,13 @@ await check("unresolved targets: advise lists the root, enforce refuses with the
   assert.equal(unknownTask.json.error.details.reasonCode, "vault_instructions_target_unresolved");
   const resolved = await enforced.call("operon_update_task", { operonId: "abc1234", expectedRevision: "r", idempotencyKey: "o" });
   assert.equal(resolved.result.isError, false);
+  const pin = await enforced.call("operon_set_pinned", { operonId: "abc1234", idempotencyKey: "pin" });
+  assert.equal(pin.result.isError, false);
+  assert.deepEqual(pin.json.vaultInstructions.targets, resolved.json.vaultInstructions.targets);
+  const batchBefore = count("operon_update_tasks");
+  const batch = await enforced.call("operon_update_tasks", { items: [{ operonId: "abc1234" }, { operonId: "zzzzzzz" }], idempotencyKey: "batch-unresolved" });
+  assert.equal(batch.json.error.details.reasonCode, "vault_instructions_target_unresolved");
+  assert.equal(count("operon_update_tasks"), batchBefore);
   await enforced.close();
   enforce.closeSeals();
 });

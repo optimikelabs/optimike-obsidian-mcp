@@ -818,3 +818,12 @@ C’est la forme visée du produit.
 - Guide de routage agent : [docs/mcp-routing-guide.fr.md](docs/mcp-routing-guide.fr.md)
 - Racines externes et handoff : [docs/external-roots-setup.fr.md](docs/external-roots-setup.fr.md)
 - Guide d’exploitation anglais : [OPERATIONS.md](OPERATIONS.md)
+
+
+### Pins et mise à jour par lot (Developer API V1)
+
+`operon_set_pinned` reçoit `operonId`, `expectedRevision`, `pinned` booléen et `idempotencyKey`. Le Bridge ouvre à la première utilisation une session distincte (`tasks.read`, `tasks.pinned.preview`, `tasks.pinned.apply`). Le refus `capability_pending_approval` demande d'approuver ces capacités dans les réglages Operon ; les lectures et écritures existantes restent disponibles. Le pin vit dans les données du plugin et est vérifié par le postflight natif ; le filtre sauvegardé reste la voie de lecture des pins.
+
+`operon_update_tasks` reçoit 2 à 64 `items` distincts (`operonId`, `expectedRevision`, `patch`). Les patches gérés suivent les règles de `operon_update_task`, sans propriétés libres, date planifiée, relations ni récurrence. Un seul plan `update-batch` utilise les autorisations `tasks.update.*` existantes. Une révision périmée refuse tout le plan avant apply ; `afterTasks` contient chaque cible après succès. Un résultat partiel ou incertain exige la récupération du même plan.
+
+Les deux outils figurent dans les profils tasks et operational. `dryRun` vaut `true` par défaut ; employer une clé différente pour le dry-run et l'apply (`idempotency_key_reused` sinon). Les règles d'écriture et les instructions du coffre s'appliquent à tous les IDs cibles.

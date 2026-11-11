@@ -759,6 +759,8 @@ interface DeveloperApiV1 {
 export type DeveloperApiMutationCapability =
   | "create"
   | "update"
+  | "update-batch"
+  | "pinned"
   | "transition"
   | "relationships"
   | "recurrence"
@@ -766,6 +768,7 @@ export type DeveloperApiMutationCapability =
   | "relocate";
 
 export interface DeveloperApiMutationResult {
+  readonly pinned?: boolean;
   readonly ok: boolean;
   readonly operonId: string | null;
   readonly code:
@@ -898,6 +901,8 @@ const MUTATION_CAPABILITIES: Record<
 > = {
   create: ["tasks.create.preview", "tasks.create.apply"],
   update: ["tasks.update.preview", "tasks.update.apply"],
+  "update-batch": ["tasks.update.preview", "tasks.update.apply"],
+  pinned: ["tasks.pinned.preview", "tasks.pinned.apply"],
   transition: ["tasks.transition.preview", "tasks.transition.apply"],
   relationships: ["tasks.relationship.preview", "tasks.relationship.apply"],
   recurrence: ["tasks.recurrence.preview", "tasks.recurrence.apply"],
@@ -965,9 +970,13 @@ const PUBLIC_DEVELOPER_API_CAPABILITIES = new Set<string>([
   ...BASELINE_CAPABILITIES,
   ...CORE_READ_CAPABILITIES,
   ...OPTIONAL_READ_CAPABILITIES,
-  ...Object.values(MUTATION_CAPABILITIES).flat(),
+  ...Object.entries(MUTATION_CAPABILITIES)
+    .filter(([name]) => name !== "pinned" && name !== "update-batch")
+    .flatMap(([, pair]) => pair),
   ...Object.values(TASK_WORKFLOW_CAPABILITIES).flat(),
   "tasks.filter-query",
+  "tasks.pinned.preview",
+  "tasks.pinned.apply",
 ]);
 
 // The official runtime may settle a graph/project-serial mutation after the
@@ -1726,7 +1735,16 @@ export class OperonDeveloperApiRuntimeAdapter {
       this.readApi = api;
       this.recoveryApi = baselineApi;
       this.optionalReadApis.clear();
+      const pinnedApi = this.mutationApis.get("pinned");
       this.mutationApis.clear();
+      if (
+        includeMutationCapabilities &&
+        pinnedApi?.hasCapability("tasks.read") &&
+        MUTATION_CAPABILITIES.pinned.every((name) =>
+          pinnedApi.hasCapability(name),
+        )
+      )
+        this.mutationApis.set("pinned", pinnedApi);
       for (const capability of OPTIONAL_READ_CAPABILITIES) {
         const optionalApi = this.connectApproved(
           [...BASELINE_CAPABILITIES, capability],
@@ -1789,10 +1807,53 @@ export class OperonDeveloperApiRuntimeAdapter {
   }
 
   hasMutationCapability(capability: DeveloperApiMutationCapability): boolean {
-    const api = this.mutationApis.get(capability);
+    const api = this.mutationApis.get(
+      capability === "update-batch" ? "update" : capability,
+    );
     if (!api?.mutations?.preview || !api.mutations.apply) return false;
     const [preview, apply] = MUTATION_CAPABILITIES[capability];
     return api.hasCapability(preview) && api.hasCapability(apply);
+  }
+
+  // Exact first-use session. tasks.read is required by tasks.get to build
+  // the exact target; no catalog/query capability is needed in this session.
+  pinnedApprovalPending = false;
+
+  async refreshPinned(): Promise<boolean> {
+    this.pinnedApprovalPending = false;
+    if (!this.accessor) return false;
+    try {
+      const access = this.accessor.getDeveloperApiV1(this.consumerPlugin, {
+        ...OPERON_BRIDGE_DEVELOPER_API_CONTRACT,
+        requestedCapabilities: ["tasks.read", ...MUTATION_CAPABILITIES.pinned],
+      });
+      this.pinnedApprovalPending =
+        isRecord(access) &&
+        projectDeveloperApiChannelStatus(access.status).grant?.state ===
+          "pending";
+      // Do not project a pending optional grant onto the working base session.
+      if (
+        !isRecord(access) ||
+        access.ok !== true ||
+        !isDeveloperApiV1(access.api)
+      )
+        return false;
+      const api = access.api;
+      if (
+        !api.hasCapability("tasks.read") ||
+        !MUTATION_CAPABILITIES.pinned.every((name) =>
+          api.hasCapability(name),
+        ) ||
+        !api.mutations?.preview ||
+        !api.mutations.apply ||
+        !api.mutations.recover
+      )
+        return false;
+      this.mutationApis.set("pinned", api);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   hasReadCapability(capability: DeveloperApiReadCapability): boolean {
@@ -1836,13 +1897,15 @@ export class OperonDeveloperApiRuntimeAdapter {
    * in Obsidian. No session or request is opened by this method.
    */
   firstUseCapabilities(): Array<
-    "adopt" | "periodicCreate" | "periodicUpdate" | "filterQuery"
+    "adopt" | "periodicCreate" | "periodicUpdate" | "filterQuery" | "pinned"
   > {
     if (this.channelStatus.grant?.state !== "active") return [];
-    if (!this.taskWorkflowAccessor) return [];
     const result: Array<
-      "adopt" | "periodicCreate" | "periodicUpdate" | "filterQuery"
+      "adopt" | "periodicCreate" | "periodicUpdate" | "filterQuery" | "pinned"
     > = [];
+    if (this.accessor && !this.hasMutationCapability("pinned"))
+      result.push("pinned");
+    if (!this.taskWorkflowAccessor) return result;
     const workflows: Array<
       [DeveloperApiTaskWorkflowKind, "adopt" | "periodicCreate" | "periodicUpdate"]
     > = [
@@ -2112,6 +2175,7 @@ export class OperonDeveloperApiRuntimeAdapter {
       DeveloperApiMutationCapability,
       readonly [string, string],
     ][]) {
+      if (capability === "pinned" || capability === "update-batch") continue;
       const api = this.connectApproved(
         [...CORE_READ_CAPABILITIES, ...pair],
         false,
@@ -2202,7 +2266,11 @@ export class OperonDeveloperApiRuntimeAdapter {
     if (!this.grantedCapabilities) return;
     const desired = [
       ...OPTIONAL_READ_CAPABILITIES,
-      ...(includeMutations ? Object.values(MUTATION_CAPABILITIES).flat() : []),
+      ...(includeMutations
+        ? Object.entries(MUTATION_CAPABILITIES)
+            .filter(([name]) => name !== "pinned" && name !== "update-batch")
+            .flatMap(([, pair]) => pair)
+        : []),
     ];
     const missing = [...new Set(desired)].filter(
       (capability) => !this.grantedCapabilities?.has(capability),
@@ -2343,6 +2411,7 @@ export class OperonDeveloperApiRuntimeAdapter {
     if (
       capability === "create" ||
       capability === "update" ||
+      capability === "update-batch" ||
       capability === "recurrence"
     ) {
       const snapshot = allowDateScheduled
@@ -2361,7 +2430,9 @@ export class OperonDeveloperApiRuntimeAdapter {
       }
       requested = snapshot.snapshot;
     }
-    const api = this.mutationApis.get(capability);
+    const api = this.mutationApis.get(
+      capability === "update-batch" ? "update" : capability,
+    );
     const mutations = api?.mutations;
     if (
       !api ||
@@ -2378,7 +2449,7 @@ export class OperonDeveloperApiRuntimeAdapter {
     }
 
     let task: DeveloperApiTask | null = null;
-    if (capability !== "create") {
+    if (capability !== "create" && capability !== "update-batch") {
       if (!operonId) {
         return this.mutationFailure(
           "invalid-input",
@@ -2579,7 +2650,12 @@ export class OperonDeveloperApiRuntimeAdapter {
       );
     }
 
-    let appliedOperonId = operonId;
+    let appliedOperonId =
+      capability === "update-batch"
+        ? String(
+            (requested.items as Array<Record<string, unknown>>)[0]!.operonId,
+          )
+        : operonId;
     if (capability === "create") {
       try {
         appliedOperonId = await this.identifyCreatedTask(
@@ -2615,9 +2691,26 @@ export class OperonDeveloperApiRuntimeAdapter {
         );
       }
     }
+    let observedPinned: boolean | undefined;
+    if (capability === "pinned") {
+      try {
+        for (const delay of POST_APPLY_IDENTITY_RETRY_DELAYS_MS) {
+          if (delay) await new Promise<void>(resolve => globalThis.setTimeout(resolve, delay));
+          const live = await this.getExactTask(api, operonId!);
+          observedPinned = live?.pinned;
+          if (observedPinned === requested.pinned) break;
+        }
+        if (observedPinned !== requested.pinned) throw new Error("Pinned state does not match the request after native apply.");
+      } catch {
+        return this.mutationFailure("failed", "The final pinned state could not be verified after native apply.", operonId, false,
+          { nativeStatus: status, recoveryRef: preview.plan.recoveryRef, planDigest: preview.plan.planDigest,
+            mutationMayHaveApplied: true, nativeProof: proof });
+      }
+    }
     return {
       ok: true,
       operonId: appliedOperonId,
+      ...(observedPinned !== undefined ? { pinned: observedPinned } : {}),
       code: status === "already-applied" ? "already-applied" : "applied",
       nativeStatus: status,
       planDigest: execution.receipt?.planDigest ?? preview.plan.planDigest,
@@ -4493,8 +4586,58 @@ export class OperonDeveloperApiRuntimeAdapter {
     representation?: "inline" | "file";
   }> {
     if (capability === "create") return this.mapCreateInput(requested);
+    if (capability === "update-batch") {
+      const items = requested.items;
+      if (!Array.isArray(items) || items.length < 2 || items.length > 64)
+        throw new Error("Batch update requires 2 to 64 exact tasks.");
+      const ids = new Set<string>();
+      const mappedItems = [];
+      for (const item of items) {
+        if (
+          !isRecord(item) ||
+          typeof item.operonId !== "string" ||
+          ids.has(item.operonId) ||
+          !isRecord(item.patch) ||
+          typeof item.expectedRevision !== "string"
+        )
+          throw new Error(
+            "Each batch item needs a unique operonId, expectedRevision and managed patch.",
+          );
+        ids.add(item.operonId);
+        const live = await this.getExactTask(api, item.operonId);
+        if (!live) throw new Error(`Operon task not found: ${item.operonId}.`);
+        const mapped = await this.mapMutationInput(
+          api,
+          "update",
+          live,
+          item.patch,
+        );
+        mappedItems.push({
+          target: mapped.target,
+          changes: mapped.spec.changes,
+        });
+      }
+      return {
+        capability: "tasks.update.preview",
+        mutationKind: "task.update",
+        spec: { operation: "update-batch", items: mappedItems },
+      };
+    }
     if (!task) throw new Error("A live task is required for this mutation.");
     const target = this.exactTarget(task);
+    if (capability === "pinned") {
+      if (
+        typeof requested.pinned !== "boolean" ||
+        Object.keys(requested).some((key) => key !== "pinned")
+      )
+        throw new Error("pinned must be a boolean.");
+      return {
+        capability: "tasks.pinned.preview",
+        mutationKind: "task.pinned-state",
+        target,
+        spec: { operation: "set-pinned", pinned: requested.pinned },
+      };
+    }
     if (capability === "update") {
       if (requested.properties && typeof requested.properties === "object") {
         throw new Error(

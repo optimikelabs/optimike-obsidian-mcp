@@ -20,6 +20,8 @@ import {
   OperonTaskSchema,
   OperonTransitionTaskSchema,
   OperonUpdateTaskSchema,
+  OperonSetPinnedSchema,
+  OperonUpdateTasksSchema,
   OperonUpdatePeriodicSchedulingSchema,
   OperonSetRelationshipsSchema,
   OperonUpdateRecurrenceSchema,
@@ -1495,4 +1497,81 @@ assert.equal(
 
 console.log(
   "PASS: Operon MCP native read/mutation schemas, filtering, property gating, and freshness envelope",
+);
+
+const pinInput = {
+  operonId: "abc1234",
+  expectedRevision: "fnv1a32:12345678",
+  pinned: true,
+  idempotencyKey: "pin-contract-test",
+};
+assert.equal(OperonSetPinnedSchema.parse(pinInput).dryRun, true);
+assert.equal(
+  OperonSetPinnedSchema.safeParse({ ...pinInput, pinned: "true" }).success,
+  false,
+);
+assert.equal(
+  OperonSetPinnedSchema.safeParse({ ...pinInput, expectedRevision: undefined })
+    .success,
+  false,
+);
+const batchItem = {
+  operonId: "abc1234",
+  expectedRevision: "fnv1a32:12345678",
+  patch: { description: "Updated" },
+};
+const batchInput = {
+  idempotencyKey: "batch-contract-test",
+  items: [batchItem, { ...batchItem, operonId: "def5678" }],
+};
+assert.equal(OperonUpdateTasksSchema.parse(batchInput).dryRun, true);
+assert.equal(
+  OperonUpdateTasksSchema.safeParse({ ...batchInput, items: [batchItem] })
+    .success,
+  false,
+);
+assert.equal(
+  OperonUpdateTasksSchema.safeParse({
+    ...batchInput,
+    items: [batchItem, batchItem],
+  }).success,
+  false,
+);
+assert.equal(
+  OperonUpdateTasksSchema.safeParse({
+    ...batchInput,
+    items: Array.from({ length: 65 }, (_, i) => ({
+      ...batchItem,
+      operonId: `id${i}`,
+    })),
+  }).success,
+  false,
+);
+assert.equal(
+  OperonUpdateTasksSchema.parse({
+    ...batchInput,
+    items: Array.from({ length: 64 }, (_, i) => ({
+      ...batchItem,
+      operonId: `id${i}`,
+    })),
+  }).items.length,
+  64,
+);
+for (const patch of [
+  { properties: { extra: "x" } },
+  { fields: { dateScheduled: "2026-11-11" } },
+  { fields: { parentTask: "abc1234" } },
+  { fields: { repeat: "daily" } },
+  { description: "x", tags: [] },
+]) {
+  assert.equal(
+    OperonUpdateTasksSchema.safeParse({
+      ...batchInput,
+      items: [batchItem, { ...batchItem, operonId: "def5678", patch }],
+    }).success,
+    false,
+  );
+}
+console.log(
+  "PASS: pin and batch contracts, bounds, unique ids and dedicated-field boundaries",
 );

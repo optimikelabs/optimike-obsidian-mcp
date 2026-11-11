@@ -152,6 +152,8 @@ export function mutationPathValidationError(
 	capability:
 		| "create"
 		| "update"
+		| "update-batch"
+		| "pinned"
 		| "transition"
 		| "relationships"
 		| "recurrence"
@@ -159,6 +161,46 @@ export function mutationPathValidationError(
 		| "relocate",
 	requested: Record<string, unknown>,
 ): string | null {
+  if (
+    capability === "pinned" &&
+    (typeof requested.pinned !== "boolean" ||
+      Object.keys(requested).some((key) => key !== "pinned"))
+  )
+    return "pinned must be a boolean.";
+  if (capability === "update-batch") {
+    const items = requested.items;
+    if (!Array.isArray(items) || items.length < 2 || items.length > 64)
+      return "Batch update requires 2 to 64 items.";
+    const ids = new Set<string>();
+    for (const item of items) {
+      if (
+        !item ||
+        typeof item !== "object" ||
+        Array.isArray(item) ||
+        typeof item.operonId !== "string" ||
+        !item.operonId.trim() ||
+        ids.has(item.operonId) ||
+        typeof item.expectedRevision !== "string" ||
+        !item.expectedRevision.trim() ||
+        !item.patch ||
+        typeof item.patch !== "object" ||
+        Array.isArray(item.patch)
+      )
+        return "Each batch item needs a unique operonId, expectedRevision and managed patch.";
+      ids.add(item.operonId);
+      if (
+        Object.keys(item).some(
+          (key) => !["operonId", "expectedRevision", "patch"].includes(key),
+        ) ||
+        Object.keys(item.patch).some(
+          (key) => !["description", "tags", "fields"].includes(key),
+        )
+      )
+        return "Batch update accepts only managed patches.";
+      const invalid = mutationPathValidationError("update", item.patch);
+      if (invalid) return invalid;
+    }
+  }
 	const has = (key: string): boolean =>
 		Object.prototype.hasOwnProperty.call(requested, key);
 	if (capability === "create") {
