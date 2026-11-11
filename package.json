@@ -5,6 +5,7 @@
   "main": "dist/index.js",
   "files": [
     "dist",
+    "NOTICE",
     "README.md",
     "README.fr.md",
     "README_EMBEDDERS.md",
