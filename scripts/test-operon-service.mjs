@@ -1444,7 +1444,9 @@ try {
         targetPath: "Efforts/Projets/Internes/Operon Pilot/Pilot.md ",
       },
     }),
-    (error) => error?.name === "ZodError",
+    (error) => error?.code === "VALIDATION_ERROR" &&
+      error.details?.reasonCode === "invalid_tool_arguments" &&
+      error.details?.validationIssues?.every((issue) => issue.path === "task.targetPath"),
   );
   assert.equal(
     state.mutationCalls,
@@ -2047,7 +2049,9 @@ try {
         fields: { dateScheduled: "2026-08-30" },
       },
     }),
-    /dateScheduled.*operon_update_periodic_scheduling/u,
+    (error) => error?.code === "VALIDATION_ERROR" &&
+      error.details?.validationIssues?.some((issue) =>
+        issue.path === "task.fields.*" && /dateScheduled.*operon_update_periodic_scheduling/u.test(issue.message)),
     "task creation must reject dateScheduled before any Bridge POST",
   );
   await assert.rejects(
@@ -2059,7 +2063,9 @@ try {
       scope: "this-task",
       changes: { dateScheduled: "2026-08-30" },
     }),
-    /Unrecognized key/u,
+    (error) => error?.code === "VALIDATION_ERROR" &&
+      error.details?.validationIssues?.some((issue) =>
+        issue.path === "changes" && issue.message === "Invalid value for this field."),
     "recurrence updates must reject dateScheduled before any Bridge POST",
   );
   await assert.rejects(
@@ -2070,7 +2076,9 @@ try {
       expectedRevision: tasks[0].revision,
       patch: { fields: { dateScheduled: "2026-08-30" } },
     }),
-    /dateScheduled.*operon_update_periodic_scheduling/u,
+    (error) => error?.code === "VALIDATION_ERROR" &&
+      error.details?.validationIssues?.some((issue) =>
+        issue.path === "patch.fields.*" && /dateScheduled.*operon_update_periodic_scheduling/u.test(issue.message)),
     "generic updates must reject dateScheduled before any Bridge POST",
   );
   assert.equal(

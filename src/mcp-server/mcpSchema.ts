@@ -3,7 +3,11 @@ import {
   type StandardSchemaWithJSON,
 } from "@modelcontextprotocol/server";
 import { z } from "zod/v3";
-import { zodToJsonSchema } from "zod-to-json-schema";
+import {
+  ignoreOverride,
+  zodToJsonSchema,
+  type JsonSchema7Type,
+} from "zod-to-json-schema";
 
 /**
  * MCP-only adapter. Preserve the existing Zod 3 runtime contract (defaults,
@@ -28,11 +32,39 @@ export function mcpSchema(
     schemaOrShape instanceof z.ZodType
       ? schemaOrShape
       : z.object(schemaOrShape);
-  const jsonSchema = zodToJsonSchema(schema, {
+  const recursiveNames = new Map<z.ZodTypeDef, string>();
+  const recursiveDefinitions: Record<string, JsonSchema7Type> = {};
+  const converted = zodToJsonSchema(schema, {
     strictUnions: true,
     target: "jsonSchema7",
     pipeStrategy: io,
+    $refStrategy: "none",
+    // Inline completed duplicates, keeping each property's metadata separate.
+    // An active ancestor is genuine recursion: name it instead of degrading
+    // its children to `any` (the converter's $refStrategy: "none" behavior).
+    override: (def, refs, seen, forceResolution) => {
+      if (!seen || forceResolution || seen.jsonSchema !== undefined)
+        return ignoreOverride;
+      if (!seen.path.every((part, index) => refs.currentPath[index] === part))
+        return ignoreOverride;
+      let name = recursiveNames.get(def);
+      if (!name) {
+        name = `recursive_${recursiveNames.size + 1}`;
+        recursiveNames.set(def, name);
+      }
+      return { $ref: `#/definitions/${name}` };
+    },
+    postProcess: (jsonSchema, def) => {
+      const name = recursiveNames.get(def);
+      if (name && jsonSchema !== undefined)
+        recursiveDefinitions[name] = structuredClone(jsonSchema);
+      return jsonSchema;
+    },
   });
+  const jsonSchema = {
+    ...converted,
+    ...(recursiveNames.size > 0 ? { definitions: recursiveDefinitions } : {}),
+  };
   const wrapped = fromJsonSchema(
     jsonSchema as Parameters<typeof fromJsonSchema>[0],
     {
