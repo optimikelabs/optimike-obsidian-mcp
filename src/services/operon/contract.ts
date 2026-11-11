@@ -727,6 +727,44 @@ const OPERON_DEDICATED_UPDATE_FIELD_TOOLS: Readonly<Record<string, string>> = {
   dateScheduled: "operon_update_periodic_scheduling",
 };
 
+// Closed public messages for service input validation. Never infer safety from
+// Zod's `custom` code: e.g. relationship conflicts interpolate a caller task id.
+export const OPERON_PUBLIC_INPUT_MESSAGES: ReadonlySet<string> = new Set([
+  `Value must not exceed ${OPERON_TEXT_MAX_LENGTH} UTF-8 bytes.`,
+  ...[...OPERON_SCALAR_MUTATION_FIELDS].map((field) =>
+    `Managed field '${field}' requires one scalar string value.`),
+  ...[...OPERON_LIST_MUTATION_FIELDS].map((field) =>
+    `Managed field '${field}' requires an ordered string array.`),
+  ...Object.entries(OPERON_DEDICATED_UPDATE_FIELD_TOOLS).map(([field, tool]) =>
+    `Managed field '${field}' must use '${tool}'.`),
+  ...["exact-task", "task-neighborhood", "project-analysis"].map((projection) =>
+    `${projection} requires an exact operonId.`),
+  "taskGallery must be an ordered string array; delimiter-based strings are not accepted.",
+  ...[256, 512].map((maximum) => `taskGallery must contain at most ${maximum} items.`),
+  "Managed field 'dateScheduled' is accepted only by 'operon_update_periodic_scheduling'.",
+  "Path must be an exact canonical vault-relative path without whitespace normalization, backslashes, empty, '.' or '..' segments.",
+  "Path must be vault-relative without '.' or '..' segments.",
+  "Path must identify a canonical vault-relative Markdown file.",
+  "expectedLine must contain exactly one source line.",
+  "Operon ids must contain exactly seven lowercase letters or digits.",
+  "Date keys must use the YYYY-MM-DD format.",
+  "Periodic-note creation owns parentage; parentTask is not accepted.",
+  "Provide at most one of fields.status or statusId.",
+  "Provide at most one of fields.priority or priorityId.",
+  "targetPath is supported only for inline tasks.",
+  "targetFolder is supported only for file tasks.",
+  "Provide exactly one mutation group: description, managed fields/tags, or one unmanaged property.",
+  "Update exactly one unmanaged property per operation.",
+  "Provide exactly one of status, statusId or intent.",
+  "targetPath is required for file-to-inline conversion.",
+  "targetFolder is supported only for inline-to-file conversion.",
+  "targetPath is supported only for file-to-inline conversion.",
+  "Relationship target ids must be unique.",
+  "Provide at least one relationship field to replace or clear.",
+  "A task cannot reference itself.",
+  "Provide at least one recurrence field to set or clear.",
+]);
+
 function validateKnownMutationFieldTypes(
   fields:
     | Record<string, z.infer<typeof OperonMutationFieldValueSchema>>
@@ -985,7 +1023,7 @@ export const OperonUpdatePeriodicSchedulingSchema =
       .strict(),
   });
 
-export const OperonCreateTaskSchema = MutationControlSchema.extend({
+export const OperonCreateTaskInputSchema = MutationControlSchema.extend({
   task: z
     .object({
       source: OperonTaskSourceSchema,
@@ -999,9 +1037,15 @@ export const OperonCreateTaskSchema = MutationControlSchema.extend({
       targetFolder: OperonVaultRelativePathSchema.optional().describe(
         "Legacy engine routing only. Official Developer API V1 rejects targetFolder and uses its configured file-task destination or a genuine parentTask relationship.",
       ),
-      targetPath: OperonVaultMarkdownPathSchema.optional(),
+      targetPath: OperonVaultMarkdownPathSchema.optional().describe(
+        'Destination Markdown note of an inline task. Not valid with source: "file".',
+      ),
     })
-    .strict()
+    .strict(),
+});
+
+export const OperonCreateTaskSchema = OperonCreateTaskInputSchema.extend({
+  task: OperonCreateTaskInputSchema.shape.task
     .superRefine((value, context) => {
       validateKnownMutationFieldTypes(value.fields, context);
       validateTaskGallery(value.fields, 256, context);

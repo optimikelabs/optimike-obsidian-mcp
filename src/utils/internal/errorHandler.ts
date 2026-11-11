@@ -8,6 +8,7 @@
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { generateUUID, sanitizeInputForLogging } from "../index.js"; // Import from main barrel file
 import { logger } from "./logger.js";
+import { isPublicToolInputIssues, type PublicToolInputIssues } from "./toolInputValidation.js";
 import {
   NOTE_NAME_REASON_CODES, checkNoteName, isNoteNameHint, isNoteNameReasonCode,
 } from "../../services/noteNameRules.js";
@@ -220,6 +221,7 @@ const SAFE_ERROR_DETAIL_FIELDS = new Set([
   "planRef",
   "recoveryRef",
   "reasonCode",
+  "validationIssues",
   // Note-name refusal (shared rule): closed hint and a validated suggestion.
   "hint",
   "suggestedPath",
@@ -239,6 +241,7 @@ const SAFE_ERROR_DETAIL_FIELDS = new Set([
 const CALLER_DERIVED_PUBLIC_FIELDS = new Set(["suggestedPath", "suggestedName"]);
 
 const SAFE_PUBLIC_REASON_CODES = new Set<string>([
+  "invalid_tool_arguments",
   ...NOTE_NAME_REASON_CODES,
   ...NATIVE_MOVE_PUBLIC_REASON_CODES,
   ...OPERON_REFUSAL_CODES,
@@ -631,7 +634,8 @@ function isSafeDiagnosticString(field: string, value: string): boolean {
 function isSafeDiagnosticValue(
   field: string,
   value: unknown,
-): value is string | number | boolean {
+): value is string | number | boolean | PublicToolInputIssues {
+  if (field === "validationIssues") return isPublicToolInputIssues(value);
   if (typeof value === "string") return isSafeDiagnosticString(field, value);
   if (typeof value === "boolean") {
     return new Set([
@@ -656,8 +660,8 @@ function safeDiagnosticFields(
   source: Record<string, unknown>,
   allowedFields: ReadonlySet<string>,
   callerStrings?: CallerStringCollection,
-): Record<string, string | number | boolean> {
-  const safe: Record<string, string | number | boolean> = {};
+): Record<string, string | number | boolean | PublicToolInputIssues> {
+  const safe: Record<string, string | number | boolean | PublicToolInputIssues> = {};
   for (const field of allowedFields) {
     // Read only own data descriptors. Accessors and Proxy traps are caller
     // controlled at this boundary, so evaluating them would turn diagnostics
@@ -686,6 +690,8 @@ function safeDiagnosticFields(
 }
 
 function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
+  if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_tool_arguments")
+    return "Invalid tool arguments. See validationIssues for the field and reason.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_frontmatter")
     return "Le frontmatter doit être une table YAML valide sans clés dupliquées.";
   if (reasonCode === "date_preparation_unverified")
@@ -1025,7 +1031,7 @@ export class ErrorHandler {
     // stays intact. Their result is treated strictly as an untrusted hint and is
     // canonicalized below before it can cross the public boundary.
     let loggedErrorCode = initialErrorCode;
-    let mappedDetailsMetadata: Record<string, string | number | boolean> = {};
+    let mappedDetailsMetadata: Record<string, string | number | boolean | PublicToolInputIssues> = {};
     if (errorMapper) {
       try {
         const mapped = errorMapper(error);

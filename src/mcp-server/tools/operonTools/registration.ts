@@ -7,6 +7,7 @@ import {
   OperonConvertTaskSchema,
   OperonConvertTaskInputSchema,
   OperonCreateTaskSchema,
+  OperonCreateTaskInputSchema,
   OperonFilterQuerySchema,
   OperonRelocateTaskSchema,
   OperonRecoverMutationInputSchema,
@@ -318,8 +319,10 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_create_task",
     {
       description:
-        "Create an Operon inline or file task through the loaded engine's supported official API. targetFolder is legacy-only and rejected by official Developer API V1; file tasks use the configured destination or a genuine fields.parentTask relationship. taskFolder is not a supported argument. dateScheduled is reserved for operon_update_periodic_scheduling. dryRun defaults to true. Use one idempotencyKey for the dry-run and a new one for the apply; reusing the dry-run key returns idempotency_key_reused. Apply requires the live Bridge and an idempotencyKey; no raw Markdown fallback exists.",
-      inputSchema: mcpSchema(OperonCreateTaskSchema.shape),
+        "Create an Operon inline or file task through the loaded engine's supported official API. task.targetPath is the destination Markdown note of an inline task. A file task always goes to Operon's configured file-task folder: do not pass targetPath or targetFolder. targetFolder is legacy-only and rejected by official Developer API V1. fields.related takes Operon task ids; note links go in fields.links. taskFolder is not a supported argument. dateScheduled is reserved for operon_update_periodic_scheduling. dryRun defaults to true. Use one idempotencyKey for the dry-run and a new one for the apply; reusing the dry-run key returns idempotency_key_reused. Apply requires the live Bridge and an idempotencyKey; no raw Markdown fallback exists.",
+      // Keep business refinements in the service, so their safe diagnostics
+      // reach the application boundary instead of an opaque SDK refusal.
+      inputSchema: mcpSchema(OperonCreateTaskInputSchema.shape),
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonCreateTaskSchema>) =>

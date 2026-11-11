@@ -6,11 +6,13 @@ import { DatabaseSync } from "node:sqlite";
 import { config } from "../../config/index.js";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { logger, requestContextService } from "../../utils/index.js";
+import { parseToolInput } from "../../utils/internal/toolInputValidation.js";
 import { assertWriteAllowed } from "../writePolicy.js";
 import { applyWalSizeLimit } from "../sqliteWal.js";
 import { PUBLIC_OPERON_BRIDGE_REFUSAL_CODES } from "./refusalCodes.js";
 import {
   OPERON_CONTRACT_VERSION,
+  OPERON_PUBLIC_INPUT_MESSAGES,
   OPERON_LEGACY_SNAPSHOT_SCHEMA_VERSION,
   OPERON_SNAPSHOT_SCHEMA_VERSION,
   OperonBridgePageSchema,
@@ -77,6 +79,10 @@ import {
   type OperonUpdateTask,
 } from "./contract.js";
 import type { z } from "zod/v3";
+
+function parseOperonInput<S extends z.ZodTypeAny>(schema: S, input: unknown): z.output<S> {
+  return parseToolInput(schema, input, OPERON_PUBLIC_INPUT_MESSAGES);
+}
 
 const BRIDGE_PREFIX = "/extensions/optimike-operon-bridge/v1";
 const PAGE_SIZE = 500;
@@ -2440,13 +2446,13 @@ export class OperonService {
     queryInput: unknown,
     signal?: AbortSignal,
   ): Promise<OperonTaskPage> {
-    const query = OperonQuerySchema.parse(queryInput);
+    const query = parseOperonInput(OperonQuerySchema, queryInput);
     const snapshot = await this.ensureSnapshot(query.forceRefresh, signal);
     return queryOperonSnapshot(snapshot, query);
   }
 
   async querySavedFilter(input: unknown): Promise<Record<string, unknown>> {
-    const params: OperonFilterQuery = OperonFilterQuerySchema.parse(input);
+    const params: OperonFilterQuery = parseOperonInput(OperonFilterQuerySchema, input);
     if (!liveModeConfigured()) {
       throw new McpError(
         BaseErrorCode.SERVICE_UNAVAILABLE,
@@ -2543,7 +2549,7 @@ export class OperonService {
   }
 
   async findTasks(input: unknown): Promise<Record<string, unknown>> {
-    const params: OperonTaskFinder = OperonTaskFinderSchema.parse(input);
+    const params: OperonTaskFinder = parseOperonInput(OperonTaskFinderSchema, input);
     return this.nativeRead(
       "finder",
       "post",
@@ -2553,7 +2559,7 @@ export class OperonService {
   }
 
   async resolveTask(input: unknown): Promise<Record<string, unknown>> {
-    const params: OperonResolveTask = OperonResolveTaskSchema.parse(input);
+    const params: OperonResolveTask = parseOperonInput(OperonResolveTaskSchema, input);
     return this.nativeRead(
       "resolve",
       "post",
@@ -2563,7 +2569,7 @@ export class OperonService {
   }
 
   async relationships(input: unknown): Promise<Record<string, unknown>> {
-    const params: OperonRelationships = OperonRelationshipsSchema.parse(input);
+    const params: OperonRelationships = parseOperonInput(OperonRelationshipsSchema, input);
     return this.nativeRead(
       "relationships",
       "post",
@@ -2573,7 +2579,7 @@ export class OperonService {
   }
 
   async context(input: unknown): Promise<Record<string, unknown>> {
-    const params: OperonContext = OperonContextSchema.parse(input);
+    const params: OperonContext = parseOperonInput(OperonContextSchema, input);
     return this.nativeRead(
       "context",
       "post",
@@ -2587,7 +2593,7 @@ export class OperonService {
   }
 
   async createTask(input: unknown): Promise<OperonMutationResult> {
-    const params: OperonCreateTask = OperonCreateTaskSchema.parse(input);
+    const params: OperonCreateTask = parseOperonInput(OperonCreateTaskSchema, input);
     return this.executeMutation(
       "create",
       null,
@@ -2599,7 +2605,7 @@ export class OperonService {
   }
 
   async adoptTask(input: unknown): Promise<OperonMutationResult> {
-    const params: OperonAdoptTask = OperonAdoptTaskSchema.parse(input);
+    const params: OperonAdoptTask = parseOperonInput(OperonAdoptTaskSchema, input);
     return this.executeMutation(
       "adopt",
       null,
@@ -2612,7 +2618,7 @@ export class OperonService {
 
   async createPeriodicTask(input: unknown): Promise<OperonMutationResult> {
     const params: OperonCreatePeriodicTask =
-      OperonCreatePeriodicTaskSchema.parse(input);
+      parseOperonInput(OperonCreatePeriodicTaskSchema, input);
     return this.executeMutation(
       "periodic-create",
       null,
@@ -2627,7 +2633,7 @@ export class OperonService {
     input: unknown,
   ): Promise<OperonMutationResult> {
     const params: OperonUpdatePeriodicScheduling =
-      OperonUpdatePeriodicSchedulingSchema.parse(input);
+      parseOperonInput(OperonUpdatePeriodicSchedulingSchema, input);
     return this.executeMutation(
       "periodic-update",
       params.operonId,
@@ -2639,7 +2645,7 @@ export class OperonService {
   }
 
   async updateTask(input: unknown): Promise<OperonMutationResult> {
-    const params: OperonUpdateTask = OperonUpdateTaskSchema.parse(input);
+    const params: OperonUpdateTask = parseOperonInput(OperonUpdateTaskSchema, input);
     return this.executeMutation(
       "update",
       params.operonId,
@@ -2754,7 +2760,7 @@ export class OperonService {
   }
 
   async convertTask(input: unknown): Promise<OperonMutationResult> {
-    const params: OperonConvertTask = OperonConvertTaskSchema.parse(input);
+    const params: OperonConvertTask = parseOperonInput(OperonConvertTaskSchema, input);
     return this.executeMutation(
       "convert",
       params.operonId,
@@ -2766,7 +2772,7 @@ export class OperonService {
   }
 
   async relocateTask(input: unknown): Promise<OperonMutationResult> {
-    const params: OperonRelocateTask = OperonRelocateTaskSchema.parse(input);
+    const params: OperonRelocateTask = parseOperonInput(OperonRelocateTaskSchema, input);
     return this.executeMutation(
       "relocate",
       params.operonId,
@@ -2779,7 +2785,7 @@ export class OperonService {
 
   async setRelationships(input: unknown): Promise<OperonMutationResult> {
     const params: OperonSetRelationships =
-      OperonSetRelationshipsSchema.parse(input);
+      parseOperonInput(OperonSetRelationshipsSchema, input);
     return this.executeMutation(
       "relationships",
       params.operonId,
@@ -2792,7 +2798,7 @@ export class OperonService {
 
   async updateRecurrence(input: unknown): Promise<OperonMutationResult> {
     const params: OperonUpdateRecurrence =
-      OperonUpdateRecurrenceSchema.parse(input);
+      parseOperonInput(OperonUpdateRecurrenceSchema, input);
     return this.executeMutation(
       "recurrence",
       params.operonId,
@@ -2807,7 +2813,7 @@ export class OperonService {
     input: unknown = {},
   ): Promise<Record<string, unknown>> {
     const params: OperonPendingRecoveriesInput =
-      OperonPendingRecoveriesInputSchema.parse(input);
+      parseOperonInput(OperonPendingRecoveriesInputSchema, input);
     this.assertRecoveryPathScope("operon_list_pending_recoveries");
     if (!liveModeConfigured()) {
       throw new McpError(
@@ -2898,7 +2904,7 @@ export class OperonService {
 
   async recoverMutation(input: unknown): Promise<OperonMutationResult> {
     const params: OperonRecoverMutation =
-      OperonRecoverMutationSchema.parse(input);
+      parseOperonInput(OperonRecoverMutationSchema, input);
     // Enforce the current path policy before consulting the durable replay
     // journal. Otherwise a result sealed while the allowlist was empty could
     // bypass a later, stricter configuration after restart.
