@@ -265,7 +265,7 @@ try {
   const operonWrite = capability(statuses.tasks, "operon-write");
   assert.equal(operonWrite.discoverable, true);
   assert.equal(operonWrite.available, true);
-  assert.equal(operonWrite.operations.length, 11);
+  assert.equal(operonWrite.operations.length, 13);
   assert.ok(
     operonWrite.operations.every(
       (operation) =>
