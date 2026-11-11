@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.19.1] - 2026-11-11
+
+Operon Bridge 0.9.8 ships with this release; Atomic Write Bridge 0.9.2 and Bases Bridge 1.2.2 are unchanged. Install the MCP and the Bridge bundle of the same release together. No setting, grant or client contract change beyond new public `reasonCode` values. See the [English](docs/releases/3.19.1.md) and [French](docs/releases/3.19.1.fr.md) release notes.
+
 ### Fixed
 
 - Operon refusals now say why (#152). Reusing an `idempotencyKey` (most often the dry-run key for the apply) was refused by the MCP mutation journal with a generic `CONFLICT` "The request conflicts with the current resource state", and agents read it as a Bridge/Operon incompatibility. The refusal now carries `reasonCode: idempotency_key_reused`, `retryable: false` and an action message: this call applied nothing; if the earlier request was only the dry-run, apply with a new key, otherwise check its result first, since it may already have created or changed the task. A mutation whose outcome cannot be proven (journal reservation lost, final task identity or postcondition not matching, or an earlier in-progress attempt with the same key) now says so on the first refusal: `operon_mutation_outcome_uncertain`, `retryable: false`, `mutationMayHaveApplied: true`. Refusals while Operon's index or settings are still moving carry `operon_index_not_settled` (`retryable: true`). Closed Bridge refusal codes received over HTTP (`revision_conflict`, `source_line_conflict`, `consent_required`, `consent_denied`, `operon_index_not_settled`) keep the Bridge's boolean `retryable`; today only the saved-filter query uses this path, mutations return structured receipts. Unknown codes stay masked. The descriptions of the dry-run Operon mutation tools now state the key rule: one key for the dry-run, a new one for the apply.
