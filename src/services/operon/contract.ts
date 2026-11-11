@@ -764,6 +764,8 @@ export const OPERON_PUBLIC_INPUT_MESSAGES: ReadonlySet<string> = new Set([
   "targetFolder is supported only for file tasks.",
   "Provide exactly one mutation group: description, managed fields/tags, or one unmanaged property.",
   "Update exactly one unmanaged property per operation.",
+  "Batch update accepts managed fields only.",
+  "Batch task ids must be unique.",
   "Provide exactly one of status, statusId or intent.",
   "targetPath is required for file-to-inline conversion.",
   "targetFolder is supported only for inline-to-file conversion.",

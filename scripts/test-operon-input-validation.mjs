@@ -98,6 +98,41 @@ assert.doesNotMatch(
   "even custom issues can contain received values",
 );
 
+// #160 uses the same public parsing boundary for pins and batch updates.
+const pin = await rejectsInput("setPinned", {
+  operonId: "abc1234", expectedRevision: "r1", pinned: "Private Pin Value",
+});
+assert.equal(pin.error.code, "VALIDATION_ERROR");
+assert.deepEqual(pin.error.details.validationIssues, [
+  { path: "pinned", message: "Invalid value for this field." },
+]);
+assert.doesNotMatch(JSON.stringify(pin), /Private Pin Value/u);
+const batchItem = {
+  operonId: "abc1234", expectedRevision: "r1", patch: { description: "Private Batch Description" },
+};
+const duplicateBatch = await rejectsInput("updateTasks", { items: [batchItem, batchItem] });
+assert.equal(duplicateBatch.error.code, "VALIDATION_ERROR");
+assert.deepEqual(duplicateBatch.error.details.validationIssues, [
+  { path: "items", message: "Batch task ids must be unique." },
+]);
+assert.doesNotMatch(JSON.stringify(duplicateBatch), /abc1234|Private Batch Description/u);
+const unmanagedBatch = await rejectsInput("updateTasks", { items: [batchItem, {
+  ...batchItem, operonId: "def5678", patch: { properties: { "Private Property": "Private Value" } },
+}] });
+assert.equal(unmanagedBatch.error.code, "VALIDATION_ERROR");
+assert.deepEqual(unmanagedBatch.error.details.validationIssues, [
+  { path: "items.*.patch.properties", message: "Batch update accepts managed fields only." },
+]);
+assert.doesNotMatch(JSON.stringify(unmanagedBatch), /Private Property|Private Value|def5678/u);
+const invalidBatchField = await rejectsInput("updateTasks", { items: [batchItem, {
+  ...batchItem, operonId: "def5678", patch: { fields: { "Private Field Key": 42 } },
+}] });
+assert.deepEqual(invalidBatchField.error.details.validationIssues, [
+  { path: "items.*.patch.fields.*", message: "Invalid value for this field." },
+]);
+assert.doesNotMatch(JSON.stringify(invalidBatchField), /Private Field Key|Private Batch Description/u);
+console.log("PASS #160: pin and batch input refusals preserve authored messages and redact caller data");
+
 // An untrusted McpError cannot inject a diagnostic array, nor can an upstream
 // output ZodError be mistaken for a validated service input failure.
 const forged = payload(

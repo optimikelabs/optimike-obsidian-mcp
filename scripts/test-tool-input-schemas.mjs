@@ -111,6 +111,17 @@ function checkRecursiveConstraints(tools) {
 // authenticated local status fixture, exposing every live-profile registration.
 for (const profile of await measureCanonicalLiveProfileSchemas()) {
   checkTools(profile.publicTools, `live-fixture/${profile.profile}`);
+  if (["tasks", "operational", "full"].includes(profile.profile)) {
+    const pinSchema = profile.publicTools.find(tool => tool.name === "operon_set_pinned")?.inputSchema;
+    const batchSchema = profile.publicTools.find(tool => tool.name === "operon_update_tasks")?.inputSchema;
+    assert.ok(pinSchema, `${profile.profile}: pin tool is present`);
+    assert.ok(batchSchema, `${profile.profile}: batch tool is present`);
+    assert.equal(pinSchema.properties.pinned.type, "boolean");
+    assert.equal(batchSchema.properties.items.minItems, 2);
+    assert.equal(batchSchema.properties.items.maxItems, 64);
+    for (const field of ["operonId", "expectedRevision", "patch"])
+      assert.ok(batchSchema.properties.items.items.properties[field], `${profile.profile}: batch ${field} is inline`);
+  }
   if (profile.profile === "full")
     checkRecursiveConstraints(profile.publicTools);
 }

@@ -2721,7 +2721,7 @@ export class OperonService {
   }
 
   async setPinned(input: unknown): Promise<OperonMutationResult> {
-    const params = OperonSetPinnedSchema.parse(input);
+    const params = parseOperonInput(OperonSetPinnedSchema, input);
     return this.executeMutation(
       "pinned",
       params.operonId,
@@ -2733,7 +2733,7 @@ export class OperonService {
   }
 
   async updateTasks(input: unknown): Promise<OperonMutationResult> {
-    const params = OperonUpdateTasksSchema.parse(input);
+    const params = parseOperonInput(OperonUpdateTasksSchema, input);
     return this.executeMutation(
       "update-batch",
       null,
