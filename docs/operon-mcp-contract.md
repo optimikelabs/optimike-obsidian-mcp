@@ -24,6 +24,8 @@ The main MCP server registers twenty-five Operon tools:
 - `operon_create_periodic_task`
 - `operon_update_periodic_scheduling`
 - `operon_update_task`
+- `operon_set_pinned`
+- `operon_update_tasks`
 - `operon_transition_task`
 - `operon_set_relationships`
 - `operon_update_recurrence`
@@ -256,3 +258,11 @@ they never authorize accepting unrelated postflight drift.
 Pending recovery listing is also blocked when `OPERON_MUTATION_ALLOWED_PATH_PREFIXES` is nonempty. A policy refusal is not an empty list. Preserve any known `recoveryRef`, inspect the affected task using authorized reads, and escalate to the operator without replaying the original mutation or relaxing the allowlist as a workaround.
 
 Native Operon task creation can fail before writing when path-derived journal identifiers exceed the native 128-character limit (`task-source:` plus a path longer than 116 characters). [Operon issue #241](https://github.com/hasanyilmaz/operon/issues/241) also reports the same journal-persistence error during status transitions on 63–100-character paths; the cause of those shorter-path failures has not been established. The report isolates the native gateway/receipt validation and compares the relevant sources in 3.9.3 and 3.10.0; it does not certify a full CLI-to-Desktop apply on 3.10.0. This MCP change neither patches Operon nor changes the certified compatibility baseline. Report native engine defects upstream; change this repository only for a demonstrated MCP or Bridge responsibility.
+
+
+### Pin and batch update (Developer API V1)
+
+- `operon_set_pinned`: `operonId`, `expectedRevision`, boolean `pinned`, `idempotencyKey`, `dryRun` (default `true`). The Bridge negotiates an exact first-use session with `tasks.read`, `tasks.pinned.preview` and `tasks.pinned.apply`; pins are never requested in the base session. `capability_pending_approval` means approve the Bridge pin capabilities in Operon settings, then retry the same request/key. Core reads and existing writes remain usable. Pins live in plugin data; native sealed postflight verifies the pinned package, and a live `tasks.get` read-back must confirm the requested `pinned` state. Read pins through `operon_query_saved_filter`.
+- `operon_update_tasks`: `items` (2–64 unique exact ids), each with `operonId`, `expectedRevision` and `patch`. Managed patches follow `operon_update_task` rules; unmanaged properties, `dateScheduled`, relationships and recurrence fields are excluded. One `update-batch` plan uses existing `tasks.update.*` capabilities. Every revision is checked before preview and again before apply; one stale revision refuses the whole plan. A successful receipt includes `afterTasks` for every target. Native partial/uncertain outcomes require recovery of the same plan.
+
+Use different idempotency keys for dry-run and apply; a dry-run key reused for apply returns `idempotency_key_reused`. Both tools are in the tasks and operational profiles, gated by write policy and vault instructions for all exact target ids. No Markdown fallback or new base grant is used.

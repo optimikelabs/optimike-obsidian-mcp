@@ -193,6 +193,7 @@ interface BridgeCapabilities {
   periodicUpdate: boolean;
   create: boolean;
   update: boolean;
+  pinned: boolean;
   transition: boolean;
   relationshipMutation: boolean;
   recurrenceMutation: boolean;
@@ -353,6 +354,14 @@ type OperonPublicErrorDescriptor = {
 };
 
 const OPERON_PUBLIC_ERRORS: Record<string, OperonPublicErrorDescriptor> = {
+  capability_pending_approval: {
+    code: "capability_pending_approval",
+    reasonCode: "capability_pending_approval",
+    status: "unavailable",
+    retryable: true,
+    message:
+      "Pin capability approval is pending. Approve tasks.pinned.preview and tasks.pinned.apply for the Bridge in Operon settings, then retry.",
+  },
   bridge_error: {
     code: "bridge_error",
     reasonCode: "bridge_failure",
@@ -1053,6 +1062,8 @@ class OperonIndexNotSettledError extends Error {
   }
 }
 
+class PinnedCapabilityPendingError extends Error {}
+
 class OperonMutationCapabilityUnavailableError extends Error {
   constructor(capability?: string) {
     super(
@@ -1636,6 +1647,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           ),
         create: supports("create"),
         update: supports("update"),
+        pinned: supports("pinned"),
         transition: supports("transition"),
         relationshipMutation: supports("relationships"),
         recurrenceMutation: supports("recurrence"),
@@ -1677,6 +1689,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       periodicUpdate: false,
       create: Boolean(mutation?.ready && mutation.create),
       update: Boolean(mutation?.ready && mutation.update),
+      pinned: false,
       transition: Boolean(mutation?.ready && mutation.transition),
       relationshipMutation: false,
       recurrenceMutation: false,
@@ -3068,7 +3081,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       error,
       TaskWorkflowCapabilityUnavailableError,
     );
-    const failureCode = taskWorkflowUnavailable
+    const failureCode = safeInstanceOf(error, PinnedCapabilityPendingError)
+      ? "capability_pending_approval" : taskWorkflowUnavailable
       ? "task_workflow_capability_unavailable"
       : safeInstanceOf(error, OperonIndexNotSettledError)
         ? "operon_index_not_settled"
@@ -3135,6 +3149,17 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       ) {
         throw new TaskWorkflowCapabilityUnavailableError("adopt");
       }
+      if (
+        capability === "pinned" &&
+        !runtime.developerApi.hasMutationCapability("pinned")
+      ) {
+        await runtime.developerApi.refreshPinned();
+        if (
+          !runtime.developerApi.hasMutationCapability("pinned") &&
+          runtime.developerApi.pinnedApprovalPending
+        )
+          throw new PinnedCapabilityPendingError();
+      }
       if (capability !== "adopt") {
         const blocked = (
           OPERON_BRIDGE_BLOCKED_MUTATIONS[
@@ -3155,6 +3180,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     if (
       capability === "relationships" ||
       capability === "recurrence" ||
+      capability === "pinned" ||
+      capability === "update-batch" ||
       !runtime.api ||
       !available?.ready ||
       !available[capability]
@@ -4530,12 +4557,56 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       this.cacheMutation(idempotencyKey, signature, payload);
       return { httpStatus: 409, payload };
     }
+    const batchItems =
+      capability === "update-batch"
+        ? (requested.items as Array<{
+            operonId: string;
+            expectedRevision: string;
+            patch: Record<string, unknown>;
+          }>)
+        : [];
+    const revisionsMatch = async (): Promise<boolean> => {
+      for (const item of batchItems) {
+        const live = (await this.oneTask(item.operonId, true)).task;
+        if (!live || live.revision !== item.expectedRevision) return false;
+      }
+      return true;
+    };
+    if (!(await revisionsMatch())) {
+      const payload = {
+        ok: false,
+        contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+        operationId,
+        idempotencyKey,
+        status: "conflict",
+        requested,
+        error: {
+          code: "revision_conflict",
+          message:
+            "A batch expectedRevision does not match the live task revision; no plan was applied.",
+        },
+        retryable: true,
+        mutationMayHaveApplied: false,
+        source: "operon-live",
+        stale: false,
+      };
+      this.cacheMutation(idempotencyKey, signature, payload);
+      return { httpStatus: 409, payload };
+    }
     if (runtime.developerApi) {
       const native = await runtime.developerApi.executeMutation(
         capability,
         operonId,
         requested,
         body.dryRun !== false,
+        false,
+        capability === "update-batch"
+          ? async () => ({
+              ok: await revisionsMatch(),
+              message:
+                "A batch revision changed after preview; no plan was applied.",
+            })
+          : undefined,
       );
       if (body.dryRun !== false) {
         const payload = {
@@ -4671,7 +4742,27 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         native.ok && !mismatch && capability === "recurrence"
           ? await this.recurrenceStateMismatch(runtime, operonId, requested)
           : null;
-      const outcomeMismatch = mismatch ?? inverseMismatch ?? recurrenceMismatch;
+      const afterTasks: OperonBridgeTask[] = [];
+      let batchMismatch: string | null = null;
+      if (capability === "update-batch") {
+        try {
+          for (const item of batchItems) {
+            const task = (await this.oneTaskAfterMutation(item.operonId, true))
+              .task;
+            batchMismatch ??= this.mutationOutcomeMismatch(
+              "update",
+              task,
+              item.patch,
+              runtime,
+            );
+            if (task) afterTasks.push(task);
+          }
+        } catch {
+          batchMismatch = "The final batch indexed state could not be proven.";
+        }
+      }
+      const outcomeMismatch =
+        mismatch ?? inverseMismatch ?? recurrenceMismatch ?? batchMismatch;
       const applied = native.ok && !outcomeMismatch;
       const payload = {
         ok: applied,
@@ -4686,6 +4777,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         before,
         requested,
         after: afterRead.task,
+        ...(capability === "update-batch" ? { afterTasks } : {}),
+        ...(capability === "pinned" ? { pinned: native.pinned } : {}),
+        ...(outcomeMismatch ? { mutationMayHaveApplied: true } : {}),
         ...(native.planDigest ? { planDigest: native.planDigest } : {}),
         ...(native.recoveryRef ? { recoveryRef: native.recoveryRef } : {}),
         ...(native.nativeProof ? { nativeProof: native.nativeProof } : {}),
@@ -5802,6 +5896,55 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           );
         }
       });
+
+    api.addRoute(`${REST_PREFIX}/tasks/:operonId/pinned`).post(async (req: any, res: any) => {
+      const body = this.bodyRecord(req);
+      const failureScope: MutationFailureScope = {};
+      try {
+        const operonId = decodeURIComponent(
+          String(req?.params?.operonId ?? ""),
+        ).trim();
+        const result = await this.executeExistingMutation(
+          "pinned", operonId, body, { pinned: body.pinned },
+          async () => { throw new Error("Developer API V1 required."); },
+          failureScope,
+        );
+        await this.sendDurableMutationResponse(res, result);
+      } catch (error) {
+        await this.sendMutationFailure(res, body, error, "mutation_unavailable", failureScope);
+      }
+    });
+
+    api.addRoute(`${REST_PREFIX}/tasks/update-batch`).post(async (req: any, res: any) => {
+      let body = this.bodyRecord(req);
+      const failureScope: MutationFailureScope = {};
+      try {
+        const snapshot = genericRestMutationBodySnapshot(body);
+        if ("error" in snapshot) {
+          sendJson(res, 400, errorPayload(new Error(snapshot.error), "validation_error"));
+          return;
+        }
+        body = snapshot.body;
+        const requested = { items: body.items };
+        const invalid = mutationPathValidationError("update-batch", requested);
+        if (invalid) {
+          sendJson(res, 400, errorPayload(new Error(invalid), "validation_error"));
+          return;
+        }
+        const first = (body.items as Array<Record<string, unknown>>)[0]!;
+        // Keep the existing single-task receipt fields on the first item;
+        // every batch target gets its own revision gate and afterTasks read-back.
+        const result = await this.executeExistingMutation(
+          "update-batch", String(first.operonId),
+          { ...body, expectedRevision: first.expectedRevision }, requested,
+          async () => { throw new Error("Developer API V1 required."); },
+          failureScope,
+        );
+        await this.sendDurableMutationResponse(res, result);
+      } catch (error) {
+        await this.sendMutationFailure(res, body, error, "mutation_unavailable", failureScope);
+      }
+    });
 
     api
       .addRoute(`${REST_PREFIX}/tasks/:operonId/update`)

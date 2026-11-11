@@ -1544,3 +1544,196 @@ test("a native failure that may have applied never reads as could-not-be-complet
   const notApplied = payloadFactory({ ...base, mutationMayHaveApplied: false }) as Record<string, any>;
   assert.equal(notApplied.error.code, "bridge_error");
 });
+
+test("pin route negotiates pending grant without breaking update, then pins, replays and unpins", async () => {
+  const { bridge, handlers } = await mountedCreateMutationRoute(() => ({
+    ok: true,
+  }));
+  const pin = handlers.get(
+    "POST /extensions/optimike-operon-bridge/v1/tasks/:operonId/pinned",
+  )!;
+  const update = handlers.get(
+    "POST /extensions/optimike-operon-bridge/v1/tasks/:operonId/update",
+  )!;
+  let approved = false,
+    negotiated = false,
+    writes = 0,
+    pinned = false;
+  const task = { operonId: "abc1234", revision: "fnv1a32:12345678" };
+  const adapter = {
+    pinnedApprovalPending: false,
+    hasMutationCapability: (name: string) => name !== "pinned" || negotiated,
+    hasRecoverySupport: () => true,
+    refreshPinned: async () => {
+      adapter.pinnedApprovalPending = !approved;
+      negotiated = approved;
+      return approved;
+    },
+    executeMutation: async (
+      name: string,
+      _id: string,
+      requested: any,
+      dryRun: boolean,
+    ) => {
+      if (!dryRun) {
+        writes++;
+        if (name === "pinned") pinned = requested.pinned;
+      }
+      return {
+        ok: true,
+        code: dryRun ? "planned" : "applied",
+        operonId: "abc1234",
+        pinned,
+      };
+    },
+  };
+  bridge.requireMutationRuntime = (name: string) =>
+    bridge.constructor.prototype.requireMutationRuntime.call(bridge, name);
+  bridge.requireRuntime = () => ({ developerApi: adapter });
+  bridge.requireSettledMutationIndex = async () => undefined;
+  bridge.oneTask = bridge.oneTaskAfterMutation = async () => ({ task });
+  const request = {
+    params: { operonId: "abc1234" },
+    body: {
+      idempotencyKey: "pin-pending",
+      expectedRevision: task.revision,
+      dryRun: false,
+      pinned: true,
+    },
+  };
+  const pending = responseCapture();
+  await pin(request, pending);
+  assert.equal(pending.statusCode, 503);
+  assert.equal(pending.payload.error.code, "capability_pending_approval");
+  assert.match(pending.payload.error.message, /Operon settings/u);
+  assert.equal(pending.payload.mutationMayHaveApplied, false);
+  assert.equal(writes, 0);
+  const ordinary = responseCapture();
+  await update(
+    {
+      params: request.params,
+      body: {
+        ...request.body,
+        idempotencyKey: "ordinary-still-works",
+        dryRun: true,
+        patch: { tags: [] },
+      },
+    },
+    ordinary,
+  );
+  assert.equal(ordinary.statusCode, 200);
+  approved = true;
+  const applied = responseCapture();
+  await pin(request, applied);
+  assert.equal(applied.statusCode, 200);
+  assert.equal(pinned, true);
+  assert.equal(applied.payload.pinned, true);
+  const replay = responseCapture();
+  await pin(request, replay);
+  assert.equal(replay.payload.replayed, true);
+  assert.equal(writes, 1);
+  const unpin = responseCapture();
+  await pin(
+    {
+      ...request,
+      body: { ...request.body, idempotencyKey: "unpin-apply", pinned: false },
+    },
+    unpin,
+  );
+  assert.equal(unpin.statusCode, 200);
+  assert.equal(pinned, false);
+  assert.equal(writes, 2);
+});
+
+test("batch route refuses every write for one stale revision and verifies every target after apply", async () => {
+  let nativeCalls = 0;
+  const { bridge, handlers } = await mountedCreateMutationRoute(() => ({
+    ok: true,
+  }));
+  const route = handlers.get(
+    "POST /extensions/optimike-operon-bridge/v1/tasks/update-batch",
+  )!;
+  const tasks = [
+    {
+      operonId: "abc1234",
+      revision: "fnv1a32:11111111",
+      description: "First",
+      fields: {},
+      tags: [],
+    },
+    {
+      operonId: "def5678",
+      revision: "fnv1a32:22222222",
+      description: "Second",
+      fields: {},
+      tags: [],
+    },
+  ];
+  const items = tasks.map((task) => ({
+    operonId: task.operonId,
+    expectedRevision: task.revision,
+    patch: { description: task.description + " updated" },
+  }));
+  bridge.oneTask = bridge.oneTaskAfterMutation = async (id: string) => ({
+    task: tasks.find((task) => task.operonId === id),
+  });
+  bridge.requireMutationRuntime = async () => ({
+    developerApi: {
+      executeMutation: async (
+        _name: string,
+        _id: string,
+        _requested: unknown,
+        dryRun: boolean,
+        _allow: boolean,
+        gate: Function,
+      ) => {
+        nativeCalls++;
+        if (!dryRun) {
+          assert.equal((await gate()).ok, true);
+          tasks.forEach(
+            (task, i) => (task.description = items[i].patch.description),
+          );
+        }
+        return {
+          ok: true,
+          code: dryRun ? "planned" : "applied",
+          operonId: tasks[0].operonId,
+          plan: { targets: tasks.map((task) => ({ operonId: task.operonId })) },
+        };
+      },
+    },
+  });
+  const stale = responseCapture();
+  await route(
+    {
+      body: {
+        idempotencyKey: "batch-stale",
+        dryRun: false,
+        items: [items[0], { ...items[1], expectedRevision: "stale" }],
+      },
+    },
+    stale,
+  );
+  assert.equal(stale.statusCode, 409);
+  assert.equal(stale.payload.error.code, "revision_conflict");
+  assert.equal(nativeCalls, 0);
+  assert.equal(tasks[0].description, "First");
+  const preview = responseCapture();
+  await route({ body: { idempotencyKey: "batch-preview", items } }, preview);
+  assert.equal(preview.payload.plan.targets.length, 2);
+  const applied = responseCapture();
+  await route(
+    { body: { idempotencyKey: "batch-apply", dryRun: false, items } },
+    applied,
+  );
+  assert.equal(applied.statusCode, 200);
+  assert.equal(applied.payload.afterTasks.length, 2);
+  assert.equal(tasks[1].description, "Second updated");
+  const replay = responseCapture();
+  await route(
+    { body: { idempotencyKey: "batch-apply", dryRun: false, items } },
+    replay,
+  );
+  assert.equal(replay.payload.replayed, true);
+  assert.equal(nativeCalls, 2);
+});

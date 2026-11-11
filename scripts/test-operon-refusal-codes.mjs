@@ -154,3 +154,18 @@ for (const [name, text] of withDryRun) {
 }
 
 console.log("PASS Operon refusal codes reach the client with an action message (#152)");
+
+const pendingPin = publicPayload(
+  new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "private native text", {
+    reasonCode: "capability_pending_approval",
+    retryable: true,
+    mutationMayHaveApplied: false,
+  }),
+  "operon_set_pinned",
+);
+assert.equal(
+  pendingPin.error.details.reasonCode,
+  "capability_pending_approval",
+);
+assert.match(pendingPin.error.message, /Operon settings/u);
+assert.doesNotMatch(JSON.stringify(pendingPin), /private native text/u);

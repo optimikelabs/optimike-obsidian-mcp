@@ -28,8 +28,8 @@ registration and tool-profile exposure are separate filters:
 - a hidden tool remains protected by the same runtime/write/security checks;
   visibility is not authorization.
 
-The current cross-runtime registry contains 109 unique names, including three
-optional asset tools. Full live/hybrid registration currently contains 102 names
+The current cross-runtime registry contains 111 unique names, including three
+optional asset tools. Full live/hybrid registration currently contains 104 names
 without them. See
 [Tool Surface Profiles](tool-surface-profiles.md) for exact profile semantics.
 
@@ -458,3 +458,11 @@ exact plugin engine semantics remains outside the current headless surface.
 ## Dedicated frontmatter reads and operational profile
 
 `obsidian_get_frontmatter`: read-only live/hybrid key access using filePath and key; no set/delete/value inputs. `operational` retains complete workflows while suppressing redundant direct note/frontmatter mutations and reserving whole-Base replacement for `full`. See [Tool Surface Profiles](tool-surface-profiles.md).
+
+
+### Pin and batch update (Developer API V1)
+
+- `operon_set_pinned`: `operonId`, `expectedRevision`, boolean `pinned`, `idempotencyKey`, `dryRun` (default `true`). The Bridge negotiates an exact first-use session with `tasks.read`, `tasks.pinned.preview` and `tasks.pinned.apply`; pins are never requested in the base session. `capability_pending_approval` means approve the Bridge pin capabilities in Operon settings, then retry the same request/key. Core reads and existing writes remain usable. Pins live in plugin data; native sealed postflight verifies the pinned package, and a live `tasks.get` read-back must confirm the requested `pinned` state. Read pins through `operon_query_saved_filter`.
+- `operon_update_tasks`: `items` (2–64 unique exact ids), each with `operonId`, `expectedRevision` and `patch`. Managed patches follow `operon_update_task` rules; unmanaged properties, `dateScheduled`, relationships and recurrence fields are excluded. One `update-batch` plan uses existing `tasks.update.*` capabilities. Every revision is checked before preview and again before apply; one stale revision refuses the whole plan. A successful receipt includes `afterTasks` for every target. Native partial/uncertain outcomes require recovery of the same plan.
+
+Use different idempotency keys for dry-run and apply; a dry-run key reused for apply returns `idempotency_key_reused`. Both tools are in the tasks and operational profiles, gated by write policy and vault instructions for all exact target ids. No Markdown fallback or new base grant is used.

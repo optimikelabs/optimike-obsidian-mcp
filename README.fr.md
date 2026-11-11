@@ -14,7 +14,7 @@ Optimike Obsidian MCP fournit aux clients MCP une surface opérationnelle gouver
 | ----------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------- |
 | Notes                   | Lecture/recherche/éditions directes + opérations gouvernées Note et Frontmatter | Coffre ; Local REST API + Atomic Write Bridge        |
 | Bases et Canvas         | Requêtes, écritures bornées, formules et graphes Canvas gouvernés               | Bases Bridge ; Atomic Write Bridge                   |
-| Tâches                  | Markdown Tasks-compatible + 25 outils Operon gouvernés                          | Operon Developer API V1 via le Bridge                |
+| Tâches                  | Markdown Tasks-compatible + 27 outils Operon gouvernés                          | Operon Developer API V1 via le Bridge                |
 | Recherche sémantique    | Recherche dans l’index Smart Connections                                        | `.smart-env` + embedding Ollama, compatible OpenAI ou modèle intégré |
 | Runtime                 | Cache SQLite partagé, santé, maintenance et modes dégradés                      | Filesystem local                                     |
 | Documents externes      | Lectures/handoff default-deny + diagnostic de move local                        | Allowlist de racines                                 |
@@ -47,11 +47,11 @@ Le runtime répond à ce que le backend peut exécuter. Il ne décide pas combie
 | ---------------------------------------------------- | ----------- | --------------------------: |
 | Travail général sur le coffre                        | `standard`  |                          30 |
 | Notes, tags, Bases et Canvas                         | `authoring` |                          54 |
-| Workflows Tasks / Operon                             | `tasks`     |                          36 |
-| Usage courant complet, préférence gouvernée | `operational` | 97 |
-| Surface complète explicite, admin et spécialisations | `full`      |                          102 |
+| Workflows Tasks / Operon                             | `tasks`     |                          38 |
+| Usage courant complet, préférence gouvernée | `operational` | 99 |
+| Surface complète explicite, admin et spécialisations | `full`      |                          104 |
 
-Les tailles ci-dessus excluent les trois outils optionnels d’assets : la configuration locale actuelle expose 100 outils operational et 105 full. Le lanceur local configure explicitement operational ; le défaut générique du paquet reste standard. En 3.0, l’absence de profil sélectionne `standard`. `smart_semantic_search` est le seul nom de recherche sémantique enregistré ; les anciens alias `smart_search` et `smart-search` ont été supprimés. `full` reste disponible par opt-in explicite pour toute la surface du runtime actif. `bases_upsert_config` reste une voie de compatibilité whole-Base réservée à `full` ; l’authoring normal utilise la création/écriture de lignes bornée et la famille gouvernée des formules.
+Les tailles ci-dessus excluent les trois outils optionnels d’assets : la configuration locale actuelle expose 102 outils operational et 107 full. Le lanceur local configure explicitement operational ; le défaut générique du paquet reste standard. En 3.0, l’absence de profil sélectionne `standard`. `smart_semantic_search` est le seul nom de recherche sémantique enregistré ; les anciens alias `smart_search` et `smart-search` ont été supprimés. `full` reste disponible par opt-in explicite pour toute la surface du runtime actif. `bases_upsert_config` reste une voie de compatibilité whole-Base réservée à `full` ; l’authoring normal utilise la création/écriture de lignes bornée et la famille gouvernée des formules.
 
 Sélectionner le profil avant `tools/list` :
 

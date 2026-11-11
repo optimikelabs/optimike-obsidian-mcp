@@ -328,3 +328,14 @@ Relocation is limited to inline tasks. The Bridge asks official Operon 3.2.0 for
 ## Errors
 
 Validation errors use HTTP 400, revision conflicts 409, domain rejection 422, and unavailable live mutation surfaces 503. No error path silently reads or writes Markdown as a fallback.
+
+
+### `POST /tasks/:operonId/pinned`
+
+Body: `{ expectedRevision, pinned: boolean, idempotencyKey, dryRun?: boolean }`.
+Uses a separate first-use Developer API session (`tasks.read`, `tasks.pinned.preview`, `tasks.pinned.apply`); never the base grant. Pending consent returns a safe 503 receipt with `capability_pending_approval`, `mutationMayHaveApplied: false` and an Operon-settings next action. The same key can be retried after approval. Existing endpoints retain their sessions. Native preview/apply/recover use `task.pinned-state` / `set-pinned`; the receipt includes the verified desired `pinned` value.
+
+### `POST /tasks/update-batch`
+
+Body: `{ items: [{ operonId, expectedRevision, patch }, ...], idempotencyKey, dryRun?: boolean }`.
+Requires 2–64 unique exact task ids, managed patches only, using existing `tasks.update.*` capabilities. No root target is sent to native preview: the `update-batch` spec carries each exact target and its typed changes. Every revision is checked before preview and before apply. Success includes `afterTasks` for every target; partial outcomes use the existing same-plan recovery route. Both endpoints default to dry-run and use different keys for preview and apply.

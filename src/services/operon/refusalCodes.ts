@@ -16,6 +16,8 @@ export const OPERON_REFUSAL_MESSAGES = {
     "The task changed since it was read: expectedRevision is stale. Re-read the task, then plan again with its current revision.",
   source_line_conflict:
     "The task source line changed since it was read: expectedLine does not match. Re-read the task, then plan again.",
+  capability_pending_approval:
+    "Pin capability approval is pending. Approve the Bridge tasks.pinned.preview and tasks.pinned.apply capabilities in Operon settings, then retry the same request and idempotencyKey.",
   consent_required:
     "Operon needs a fresh confirmation in the Obsidian window for this plan. Ask the vault owner to bring the window to the front, then apply again and confirm within 45 seconds.",
   consent_denied:

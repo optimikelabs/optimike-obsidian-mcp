@@ -164,3 +164,11 @@ The previous renderer policy is restored when the REST mount is removed or the
 Bridge unloads. An already unthrottled window stays unthrottled. Mobile does not
 load Electron; unsupported Desktop hosts emit a bounded warning. This can increase
 background CPU activity for that vault while the Bridge is serving requests.
+
+
+### Pin and batch update (Developer API V1)
+
+- `operon_set_pinned`: `operonId`, `expectedRevision`, boolean `pinned`, `idempotencyKey`, `dryRun` (default `true`). The Bridge negotiates an exact first-use session with `tasks.read`, `tasks.pinned.preview` and `tasks.pinned.apply`; pins are never requested in the base session. `capability_pending_approval` means approve the Bridge pin capabilities in Operon settings, then retry the same request/key. Core reads and existing writes remain usable. Pins live in plugin data; native sealed postflight verifies the pinned package, and a live `tasks.get` read-back must confirm the requested `pinned` state. Read pins through `operon_query_saved_filter`.
+- `operon_update_tasks`: `items` (2–64 unique exact ids), each with `operonId`, `expectedRevision` and `patch`. Managed patches follow `operon_update_task` rules; unmanaged properties, `dateScheduled`, relationships and recurrence fields are excluded. One `update-batch` plan uses existing `tasks.update.*` capabilities. Every revision is checked before preview and again before apply; one stale revision refuses the whole plan. A successful receipt includes `afterTasks` for every target. Native partial/uncertain outcomes require recovery of the same plan.
+
+Use different idempotency keys for dry-run and apply; a dry-run key reused for apply returns `idempotency_key_reused`. Both tools are in the tasks and operational profiles, gated by write policy and vault instructions for all exact target ids. No Markdown fallback or new base grant is used.

@@ -129,7 +129,13 @@ try {
       nextAction: "enable_operon_mutations",
     },
   );
-  assert.equal(write.operations.length, 11);
+  assert.equal(write.operations.length, 13);
+  for (const [id, tool] of [
+    ["pinned", "operon_set_pinned"],
+    ["update-batch", "operon_update_tasks"],
+  ]) {
+    assert.equal(write.operations.find((operation) => operation.id === id)?.tool, tool);
+  }
   assert.ok(
     write.operations.every(
       (operation) => operation.reasonCode === "operon_mutations_disabled",

@@ -260,6 +260,19 @@ function directTargets(
         hint: "Give task.targetPath, the note that receives this inline task: the default inline destination of Operon is not known before creation.",
       };
     }
+    case "operon_update_tasks": {
+      const items = Array.isArray(p.items) ? p.items : [];
+      const ids = items.map((item) =>
+        item && typeof item === "object"
+          ? (item as Record<string, unknown>).operonId
+          : undefined,
+      );
+      return ids.length >= 2 &&
+        ids.every((id) => typeof id === "string" && id.length > 0)
+        ? { kind: "operon", operonIds: ids as string[], targets: [] }
+        : { kind: "unresolved", hint: "Give every task operonId in items." };
+    }
+    case "operon_set_pinned":
     case "operon_update_task":
     case "operon_transition_task":
     case "operon_set_relationships":
@@ -332,6 +345,8 @@ const DIRECT_TOOLS = new Set([
   "operon_create_periodic_task",
   "operon_create_task",
   "operon_update_task",
+  "operon_set_pinned",
+  "operon_update_tasks",
   "operon_transition_task",
   "operon_set_relationships",
   "operon_update_recurrence",

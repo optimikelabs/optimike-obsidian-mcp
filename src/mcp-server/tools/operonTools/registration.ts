@@ -22,6 +22,8 @@ import {
   OperonTransitionTaskSchema,
   OperonTransitionTaskInputSchema,
   OperonUpdateTaskSchema,
+  OperonUpdateTasksSchema,
+  OperonSetPinnedSchema,
   OperonSetRelationshipsSchema,
   OperonSetRelationshipsInputSchema,
   OperonUpdateRecurrenceSchema,
@@ -327,6 +329,28 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     },
     async (params: z.infer<typeof OperonCreateTaskSchema>) =>
       runTool("operon_create_task", params, () => service.createTask(params)),
+  );
+  server.registerTool(
+    "operon_set_pinned",
+    {
+      description:
+        "Pin or unpin one exact Operon task in plugin data through Developer API V1. Requests a separate pin session on first use; approve pending capabilities in Operon settings. expectedRevision protects the exact target. dryRun defaults to true. Use one idempotencyKey for the dry-run and a new one for the apply; reusing the dry-run key returns idempotency_key_reused. Native sealed postflight verifies pinned state; read pins through operon_query_saved_filter.",
+      inputSchema: mcpSchema(OperonSetPinnedSchema.shape),
+      annotations: MUTATION_ANNOTATIONS,
+    },
+    async (params: z.infer<typeof OperonSetPinnedSchema>) =>
+      runTool("operon_set_pinned", params, () => service.setPinned(params)),
+  );
+  server.registerTool(
+    "operon_update_tasks",
+    {
+      description:
+        "Update managed fields on 2 to 64 distinct exact Operon tasks in one sealed Developer API update-batch plan. Each item needs operonId, expectedRevision and patch, with the same field rules as operon_update_task. A stale revision refuses the whole plan. No unmanaged properties, scheduled dates, relationships or recurrence changes. dryRun defaults to true; use one idempotencyKey for the dry-run and a new one for the apply (otherwise idempotency_key_reused).",
+      inputSchema: mcpSchema(OperonUpdateTasksSchema.shape),
+      annotations: MUTATION_ANNOTATIONS,
+    },
+    async (params: z.infer<typeof OperonUpdateTasksSchema>) =>
+      runTool("operon_update_tasks", params, () => service.updateTasks(params)),
   );
   server.registerTool(
     "operon_update_task",

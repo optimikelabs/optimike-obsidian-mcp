@@ -85,6 +85,7 @@ function operonReady(overrides = {}) {
         periodicUpdate: true,
         create: true,
         update: true,
+        pinned: true,
         transition: true,
         relationshipMutation: true,
         recurrenceMutation: true,
@@ -396,7 +397,7 @@ assert.equal(partialWrite.available, true);
 assert.equal(partialWrite.authorized, false);
 assert.equal(partialWrite.state, "degraded");
 assert.equal(partialWrite.reasonCode, "operon_partial_capabilities");
-assert.equal(partialWrite.operations.length, 11);
+assert.equal(partialWrite.operations.length, 13);
 assert.equal(
   partialWrite.operations.find((operation) => operation.id === "transition")
     .reasonCode,
@@ -892,3 +893,25 @@ for (const [probeName, ids, reason] of [
   for(const id of ids){const c=capability(manifest,id);assert.equal(c.available,false);assert.equal(c.authorized,false);assert.equal(c.reasonCode,reason);assert.equal(c.nextAction,'retry_capability_probe');}
 }
 console.log('PASS REST, Atomic, Base and Operon deadlines are distinguished from missing services, without permission promotion');
+
+const coldPins = capability(
+  projectCapabilityManifest(
+    input({
+      profile: "tasks",
+      operon: {
+        state: "ready",
+        value: operonReady({ capabilities: { pinned: false } }),
+      },
+    }),
+  ),
+  "operon-write",
+);
+assert.equal(
+  coldPins.operations.find((operation) => operation.id === "pinned").nextAction,
+  "negotiate_exact_operon_capability",
+);
+assert.equal(
+  coldPins.operations.find((operation) => operation.id === "update-batch")
+    .authorized,
+  true,
+);

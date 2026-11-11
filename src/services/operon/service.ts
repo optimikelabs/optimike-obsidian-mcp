@@ -44,6 +44,8 @@ import {
   OperonMutationResultSchema,
   OperonTransitionTaskSchema,
   OperonUpdateTaskSchema,
+  OperonUpdateTasksSchema,
+  OperonSetPinnedSchema,
   OperonSetRelationshipsSchema,
   OperonUpdateRecurrenceSchema,
   isCanonicalOperonVaultRelativePath,
@@ -91,6 +93,7 @@ const PRE_DISPATCH_MUTATION_CODES = new Set([
   "task_workflow_capability_unavailable",
   "operon_index_not_settled",
   "operon_mutation_capability_unavailable",
+  "capability_pending_approval",
   "mutation_unavailable",
   "recovery_unavailable",
   "task_workflow_recovery_unavailable",
@@ -163,6 +166,8 @@ type OperonMutationAction =
   | "periodic-update"
   | "create"
   | "update"
+  | "update-batch"
+  | "pinned"
   | "transition"
   | "relationships"
   | "recurrence"
@@ -322,6 +327,7 @@ function readOnlyCapabilities(): OperonCapabilities {
     adopt: false,
     create: false,
     update: false,
+    pinned: false,
     transition: false,
     relationshipMutation: false,
     recurrenceMutation: false,
@@ -728,7 +734,9 @@ export class OperonService {
   }
 
   private preDispatchUnavailableMessage(reason: string): string {
-    return reason === "task_workflow_capability_unavailable"
+    return reason === "capability_pending_approval"
+      ? "Pin capability approval is pending in Operon settings; approve the Bridge pin capabilities, then retry the same idempotency key."
+      : reason === "task_workflow_capability_unavailable"
       ? "The exact Operon task-workflow grant is pending; retry the same idempotency key."
       : reason === "operon_index_not_settled"
         ? "The Operon live index is not settled yet; retry the same idempotency key."
@@ -1101,7 +1109,7 @@ export class OperonService {
     }
     const status = await this.fetchLiveStatus();
     const capability =
-      action === "relationships"
+      action === "update-batch" ? "update" : action === "relationships"
         ? "relationshipMutation"
         : action === "recurrence"
           ? "recurrenceMutation"
@@ -1112,6 +1120,7 @@ export class OperonService {
               : action;
     const taskWorkflowAction =
       action === "adopt" ||
+      action === "pinned" ||
       action === "periodic-create" ||
       action === "periodic-update";
     if (
@@ -1129,7 +1138,7 @@ export class OperonService {
     }
     await this.assertMutationPathScope(action, operonId, payload, dryRun);
     const operation =
-      action === "relationships"
+      action === "pinned" ? "operon_set_pinned" : action === "update-batch" ? "operon_update_tasks" : action === "relationships"
         ? "operon_set_relationships"
         : action === "recurrence"
           ? "operon_update_recurrence"
@@ -1155,6 +1164,13 @@ export class OperonService {
         ? (mutationData as Record<string, unknown>)
         : {};
     const frontmatterKeys = [
+      ...(action === "update-batch"
+        ? (
+            payload.items as Array<{
+              patch: { fields?: Record<string, unknown> };
+            }>
+          ).flatMap((item) => Object.keys(item.patch.fields ?? {}))
+        : []),
       ...Object.keys(
         mutationRecord.fields && typeof mutationRecord.fields === "object"
           ? mutationRecord.fields
@@ -1228,6 +1244,9 @@ export class OperonService {
           responseStatus: response.status,
           preDispatch: true,
           preDispatchReason,
+          ...(preDispatchReason === "capability_pending_approval"
+            ? { reasonCode: preDispatchReason, retryable: true }
+            : {}),
           hasBridgeCode: true,
           mutationMayHaveApplied: false,
         }),
@@ -1295,6 +1314,58 @@ export class OperonService {
           }),
         );
       }
+      if (action === "update-batch") {
+        const items = payload.items as Array<{
+          operonId: string;
+          patch: Record<string, unknown>;
+        }>;
+        const tasks = result.afterTasks;
+        const configuration = await this.fetchLiveConfiguration();
+        if (
+          !tasks ||
+          tasks.length !== items.length ||
+          new Set(tasks.map((task) => task.operonId)).size !== items.length ||
+          items.some((item) => {
+            const task = tasks.find((task) => task.operonId === item.operonId);
+            return (
+              !task ||
+              this.mutationOutcomeMismatch(
+                "update",
+                { patch: item.patch },
+                task,
+                configuration.configuration.priorities.items,
+                configuration.configuration.workflow,
+              ) !== null
+            );
+          })
+        )
+          throw new McpError(
+            BaseErrorCode.CONFLICT,
+            "Operon batch read-back does not prove every requested target.",
+            this.requestContext(operation, {
+              reasonCode: "operon_mutation_outcome_uncertain",
+              mutationMayHaveApplied: true,
+              retryable: false,
+            }),
+          );
+        for (const task of tasks)
+          this.assertAllowedMutationPath(task.path, "batch result");
+      }
+      if (
+        action === "pinned" &&
+        (result.pinned !== payload.pinned ||
+          result.nativeProof?.receipt?.mutationKind !== "task.pinned-state" ||
+          result.nativeProof.postflight?.status !== "verified")
+      )
+        throw new McpError(
+          BaseErrorCode.CONFLICT,
+          "Operon pin receipt does not prove the requested pinned state.",
+          this.requestContext(operation, {
+            reasonCode: "operon_mutation_outcome_uncertain",
+            mutationMayHaveApplied: true,
+            retryable: false,
+          }),
+        );
       const configuration = await this.fetchLiveConfiguration();
       const mismatch = this.mutationOutcomeMismatch(
         action,
@@ -1429,6 +1500,11 @@ export class OperonService {
       );
     }
     if (config.operonMutationAllowedPathPrefixes.length === 0) return;
+    if (action === "update-batch") {
+      for (const item of payload.items as Array<{ operonId: string }>)
+        await this.assertMutationPathScope("update", item.operonId, {}, dryRun);
+      return;
+    }
 
     if (action === "adopt") {
       const adoption = payload.adoption as Record<string, unknown> | undefined;
@@ -2644,6 +2720,30 @@ export class OperonService {
     );
   }
 
+  async setPinned(input: unknown): Promise<OperonMutationResult> {
+    const params = parseOperonInput(OperonSetPinnedSchema, input);
+    return this.executeMutation(
+      "pinned",
+      params.operonId,
+      params.idempotencyKey,
+      params.dryRun,
+      `${BRIDGE_PREFIX}/tasks/${encodeURIComponent(params.operonId)}/pinned`,
+      params,
+    );
+  }
+
+  async updateTasks(input: unknown): Promise<OperonMutationResult> {
+    const params = parseOperonInput(OperonUpdateTasksSchema, input);
+    return this.executeMutation(
+      "update-batch",
+      null,
+      params.idempotencyKey,
+      params.dryRun,
+      `${BRIDGE_PREFIX}/tasks/update-batch`,
+      params,
+    );
+  }
+
   async updateTask(input: unknown): Promise<OperonMutationResult> {
     const params: OperonUpdateTask = parseOperonInput(OperonUpdateTaskSchema, input);
     return this.executeMutation(
@@ -3059,6 +3159,9 @@ export class OperonService {
           responseStatus: response.status,
           preDispatch: true,
           preDispatchReason,
+          ...(preDispatchReason === "capability_pending_approval"
+            ? { reasonCode: preDispatchReason, retryable: true }
+            : {}),
           hasBridgeCode: true,
           mutationMayHaveApplied: false,
         }),

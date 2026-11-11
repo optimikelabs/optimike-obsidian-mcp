@@ -12,12 +12,42 @@ import { TOOL_REGISTRATION_MODES } from "../dist/mcp-server/toolSurfaceRegistry.
 const WITH_CACHE = ["vault-cache"];
 
 const EXPECTED_COUNTS = {
-  live: { standard: 30, authoring: 54, tasks: 36, full: 102, operational: 97 },
-  "hybrid-live": { standard: 30, authoring: 54, tasks: 36, full: 102, operational: 97 },
-  "hybrid-degraded": { standard: 6, authoring: 6, tasks: 14, full: 45, operational: 45 },
-  "headless-readonly": { standard: 9, authoring: 9, tasks: 14, full: 48, operational: 48 },
-  "headless-guarded": { standard: 12, authoring: 12, tasks: 14, full: 51, operational: 51 },
-  "headless-filesystem": { standard: 12, authoring: 16, tasks: 14, full: 60, operational: 59 },
+  live: { standard: 30, authoring: 54, tasks: 38, full: 104, operational: 99 },
+  "hybrid-live": {
+    standard: 30,
+    authoring: 54,
+    tasks: 38,
+    full: 104,
+    operational: 99,
+  },
+  "hybrid-degraded": {
+    standard: 6,
+    authoring: 6,
+    tasks: 14,
+    full: 47,
+    operational: 47,
+  },
+  "headless-readonly": {
+    standard: 9,
+    authoring: 9,
+    tasks: 14,
+    full: 50,
+    operational: 50,
+  },
+  "headless-guarded": {
+    standard: 12,
+    authoring: 12,
+    tasks: 14,
+    full: 53,
+    operational: 53,
+  },
+  "headless-filesystem": {
+    standard: 12,
+    authoring: 16,
+    tasks: 14,
+    full: 62,
+    operational: 61,
+  },
 };
 
 assert.deepEqual(TOOL_PROFILE_IDS, ["standard", "authoring", "tasks", "full", "operational"]);
@@ -359,4 +389,10 @@ for (const profile of ["authoring", "full"]) {
 }
 for (const profile of ["standard", "tasks"]) {
   assert.deepEqual(selectAvailableToolProfileNames({ profile, availableNames: rowsNames }), []);
+}
+
+for (const profile of ["tasks", "operational", "full"]) {
+  const names = compileToolProfileNames({ profile, registrationMode: "live" });
+  assert.ok(names.includes("operon_set_pinned"));
+  assert.ok(names.includes("operon_update_tasks"));
 }

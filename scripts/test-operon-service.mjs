@@ -758,6 +758,109 @@ const server = http.createServer((request, response) => {
   }
   if (
     request.method === "POST" &&
+    (url.pathname.endsWith("/pinned") ||
+      url.pathname.endsWith("/tasks/update-batch"))
+  ) {
+    state.mutationCalls++;
+    let body = "";
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      const params = JSON.parse(body);
+      const pin = url.pathname.endsWith("/pinned");
+      if (
+        pin &&
+        params.idempotencyKey === "pin-pending-grant" &&
+        !state.pinApproved
+      ) {
+        sendJson(response, 503, {
+          ok: false,
+          contractVersion: "1",
+          operationId: "pin-pending",
+          idempotencyKey: params.idempotencyKey,
+          status: "not-ready",
+          requested: {},
+          retryable: true,
+          mutationMayHaveApplied: false,
+          source: "operon-live",
+          stale: false,
+          error: {
+            code: "capability_pending_approval",
+            reasonCode: "capability_pending_approval",
+            message: "Approve pin capabilities in Operon settings.",
+          },
+        });
+        return;
+      }
+      const items = pin
+        ? [{ operonId: params.operonId, patch: {} }]
+        : params.items;
+      const afterTasks = items.map((item) =>
+        makeTask(item.operonId, {
+          ...tasks.find((task) => task.operonId === item.operonId),
+          ...item.patch,
+        }),
+      );
+      if (state.badBatchReadback && !pin) afterTasks[1] = afterTasks[0];
+      sendJson(response, 200, {
+        ok: true,
+        contractVersion: "1",
+        operationId: `new-tools-${state.mutationCalls}`,
+        idempotencyKey: params.idempotencyKey,
+        status: params.dryRun ? "planned" : "applied",
+        requested: params,
+        before: null,
+        after: params.dryRun ? null : afterTasks[0],
+        ...(pin
+          ? {
+              pinned: params.pinned,
+              nativeProof: {
+                contractVersion: 1,
+                kind: "mutation-result",
+                status: "applied",
+                mutationMayHaveApplied: true,
+                retryAllowed: false,
+                groupResults: [
+                  {
+                    groupId: "pinned",
+                    status: "committed",
+                    resourceRevisions: [
+                      {
+                        resourceKind: "pinned",
+                        resourceKey: params.operonId,
+                        revision: "a".repeat(64),
+                      },
+                    ],
+                  },
+                ],
+                receipt: {
+                  contractVersion: 1,
+                  planDigest: "a".repeat(64),
+                  mutationKind: "task.pinned-state",
+                  targetDigest: "b".repeat(64),
+                  terminalOutcome: "applied",
+                  effectiveAt: "2026-11-11T00:00:00Z",
+                  completedAt: "2026-11-11T00:00:01Z",
+                  expiresAt: "2026-11-11T00:05:00Z",
+                },
+                postflight: {
+                  status: "verified",
+                  observedAt: "2026-11-11T00:00:01Z",
+                },
+              },
+            }
+          : params.dryRun
+            ? {}
+            : { afterTasks }),
+        source: "operon-live",
+        stale: false,
+      });
+    });
+    return;
+  }
+  if (
+    request.method === "POST" &&
     /\/tasks\/([^/]+)\/update$/u.test(url.pathname)
   ) {
     state.mutationCalls += 1;
@@ -1554,6 +1657,86 @@ try {
   );
 
   config.mcpWriteMode = "full";
+
+  const pinRequest = {
+    operonId: tasks[0].operonId,
+    expectedRevision: tasks[0].revision,
+    pinned: true,
+    dryRun: false,
+    idempotencyKey: "pin-pending-grant",
+  };
+  await assert.rejects(
+    service.setPinned(pinRequest),
+    (error) =>
+      error.details?.preDispatchReason === "capability_pending_approval" &&
+      /Operon settings/u.test(error.message),
+  );
+  state.pinApproved = true;
+  const pinApplied = await service.setPinned(pinRequest);
+  assert.equal(pinApplied.pinned, true);
+  const afterPinCalls = state.mutationCalls;
+  const pinReplay = await new OperonService().setPinned(pinRequest);
+  assert.equal(pinReplay.replayed, true);
+  assert.equal(state.mutationCalls, afterPinCalls);
+  assert.equal(
+    (
+      await service.setPinned({
+        ...pinRequest,
+        pinned: false,
+        idempotencyKey: "pin-unpin",
+      })
+    ).pinned,
+    false,
+  );
+  const batchItems = tasks
+    .slice(0, 2)
+    .map((task) => ({
+      operonId: task.operonId,
+      expectedRevision: task.revision,
+      patch: { description: "Batch updated" },
+    }));
+  const batchRequest = { items: batchItems, idempotencyKey: "batch-dry-run" };
+  assert.equal((await service.updateTasks(batchRequest)).status, "planned");
+  await assert.rejects(
+    service.updateTasks({ ...batchRequest, dryRun: false }),
+    (error) => error.code === "CONFLICT",
+  );
+  const batchApplied = await service.updateTasks({
+    ...batchRequest,
+    dryRun: false,
+    idempotencyKey: "batch-apply",
+  });
+  assert.equal(batchApplied.afterTasks.length, 2);
+  const afterBatchCalls = state.mutationCalls;
+  assert.equal(
+    (
+      await new OperonService().updateTasks({
+        ...batchRequest,
+        dryRun: false,
+        idempotencyKey: "batch-apply",
+      })
+    ).replayed,
+    true,
+  );
+  assert.equal(state.mutationCalls, afterBatchCalls);
+  state.badBatchReadback = true;
+  await assert.rejects(
+    service.updateTasks({
+      ...batchRequest,
+      dryRun: false,
+      idempotencyKey: "batch-incomplete-readback",
+    }),
+    (error) => error.details?.mutationMayHaveApplied === true,
+  );
+  state.badBatchReadback = false;
+  config.operonMutationAllowedPathPrefixes = ["Allowed"];
+  const scopedCalls = state.mutationCalls;
+  await assert.rejects(
+    service.updateTasks({ ...batchRequest, idempotencyKey: "batch-scoped" }),
+    (error) => error.code === "FORBIDDEN",
+  );
+  assert.equal(state.mutationCalls, scopedCalls);
+  config.operonMutationAllowedPathPrefixes = [];
 
   // A public Bridge failure must remain a terminal MCP receipt (not a parsing
   // error), replay by its original mutation key, and retain enough evidence

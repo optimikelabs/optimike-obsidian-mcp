@@ -24,6 +24,8 @@ Le serveur MCP principal enregistre vingt-cinq outils Operon :
 - `operon_create_periodic_task`
 - `operon_update_periodic_scheduling`
 - `operon_update_task`
+- `operon_set_pinned`
+- `operon_update_tasks`
 - `operon_transition_task`
 - `operon_set_relationships`
 - `operon_update_recurrence`
@@ -429,3 +431,12 @@ du coffre ; ils n’autorisent jamais l’acceptation d’une dérive postflight
 La liste des recoveries est également bloquée lorsque `OPERON_MUTATION_ALLOWED_PATH_PREFIXES` est non vide. Un refus de politique ne signifie pas une liste vide. Conserver le `recoveryRef` connu, relire la tâche concernée via des lectures autorisées et transmettre le diagnostic à l’opérateur sans rejouer la mutation initiale ni retirer l’allowlist comme contournement.
 
 La création native Operon peut échouer avant écriture lorsque les identifiants de journal dérivés du chemin dépassent la limite native de 128 caractères (`task-source:` plus un chemin de plus de 116 caractères). [L’issue Operon #241](https://github.com/hasanyilmaz/operon/issues/241) rapporte aussi la même erreur de persistance du journal lors de transitions de statut sur des chemins de 63 à 100 caractères ; la cause de ces échecs sur chemins plus courts n’est pas établie. Le rapport isole la validation native gateway/receipt et compare les sources concernées en 3.9.3 et 3.10.0 ; il ne certifie pas un apply complet CLI vers Desktop en 3.10.0. Ce changement MCP ne corrige pas Operon et ne modifie pas la baseline de compatibilité certifiée. Les défauts natifs sont signalés en amont ; ce dépôt ne change que pour une responsabilité MCP ou Bridge démontrée.
+
+
+### Pins et mise à jour par lot (Developer API V1)
+
+`operon_set_pinned` reçoit `operonId`, `expectedRevision`, `pinned` booléen et `idempotencyKey`. Le Bridge ouvre à la première utilisation une session distincte (`tasks.read`, `tasks.pinned.preview`, `tasks.pinned.apply`). Le refus `capability_pending_approval` demande d'approuver ces capacités dans les réglages Operon ; les lectures et écritures existantes restent disponibles. Le pin vit dans les données du plugin et est vérifié par le postflight natif ; le filtre sauvegardé reste la voie de lecture des pins.
+
+`operon_update_tasks` reçoit 2 à 64 `items` distincts (`operonId`, `expectedRevision`, `patch`). Les patches gérés suivent les règles de `operon_update_task`, sans propriétés libres, date planifiée, relations ni récurrence. Un seul plan `update-batch` utilise les autorisations `tasks.update.*` existantes. Une révision périmée refuse tout le plan avant apply ; `afterTasks` contient chaque cible après succès. Un résultat partiel ou incertain exige la récupération du même plan.
+
+Les deux outils figurent dans les profils tasks et operational. `dryRun` vaut `true` par défaut ; employer une clé différente pour le dry-run et l'apply (`idempotency_key_reused` sinon). Les règles d'écriture et les instructions du coffre s'appliquent à tous les IDs cibles.
