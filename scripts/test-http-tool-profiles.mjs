@@ -302,7 +302,12 @@ try {
 
   assert.equal(standardNames.length, 9);
   assert.equal(tasksNames.length, 14);
-  assert.equal(fullNames.length, 48);
+  assert.equal(fullNames.length, 50);
+  for (const name of ["operon_set_pinned", "operon_update_tasks"]) {
+    assert.ok(fullNames.includes(name));
+    assert.ok(!standardNames.includes(name));
+    assert.ok(!tasksNames.includes(name));
+  }
   assert.deepEqual(
     legacyNames,
     standardNames,

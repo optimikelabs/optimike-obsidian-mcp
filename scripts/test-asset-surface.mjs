@@ -63,9 +63,11 @@ for (const name of ["asset_import_status","asset_import_apply"]) {
 
 test("configured asset family is opt-in, complete, live-only and absent from default registry surface",()=>{
  for(const mode of ["live","hybrid-live"]) {
-  assert.equal(compileToolNames({registrationMode:mode}).length,102);
+  const baseline=compileToolNames({registrationMode:mode});
+  assert.equal(baseline.length,104);
   const configured=compileToolNames({registrationMode:mode,availableStaticRequirements:["vault-cache","asset-policy"]});
-  assert.equal(configured.length,105);assert.deepEqual(configured.filter(n=>n.startsWith("asset_import_")),names);
+  assert.equal(configured.length,107);assert.deepEqual(configured.filter(n=>n.startsWith("asset_import_")),names);
+  assert.deepEqual(configured.filter(n=>!n.startsWith("asset_import_")),baseline);
  }
  for(const mode of ["hybrid-degraded","headless-readonly","headless-guarded","headless-filesystem"])assert.equal(compileToolNames({registrationMode:mode,availableStaticRequirements:["vault-cache","asset-policy"]}).some(n=>names.includes(n)),false);
 });
