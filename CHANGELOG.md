@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [3.19.1] - 2026-11-06
+## [3.19.1] - 2026-11-11
 
 Operon Bridge 0.9.8 ships with this release; Atomic Write Bridge 0.9.2 and Bases Bridge 1.2.2 are unchanged. Install the MCP and the Bridge bundle of the same release together. No setting, grant or client contract change beyond new public `reasonCode` values. See the [English](docs/releases/3.19.1.md) and [French](docs/releases/3.19.1.fr.md) release notes.
 
