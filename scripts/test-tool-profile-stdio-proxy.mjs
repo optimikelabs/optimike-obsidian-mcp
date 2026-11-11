@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { assertHeadlessProfileNames } from "./test-support/assert-headless-profile-names.mjs";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
@@ -174,7 +175,7 @@ try {
   try {
     const result = await full.listTools();
     const names = result.tools.map((tool) => tool.name);
-    assert.equal(names.length, 48);
+    assertHeadlessProfileNames(names, "full");
     assert.ok(names.includes("smart_semantic_search"));
     assert.ok(!names.includes("smart_search"));
     assert.ok(!names.includes("smart-search"));
@@ -184,7 +185,7 @@ try {
   }
 
   const operational=await openProxy(vault,port,"operational");
-  try {const names=(await operational.listTools()).tools.map(x=>x.name);assert.equal(names.length,48);assert.ok(names.includes("external_read"));const status=await operational.callTool({name:"obsidian_runtime_status",arguments:{}});assert.equal(JSON.parse(status.content[0].text).capabilityManifest.profile,"full");}
+  try {const names=(await operational.listTools()).tools.map(x=>x.name);assertHeadlessProfileNames(names,"operational");assert.ok(names.includes("external_read"));const status=await operational.callTool({name:"obsidian_runtime_status",arguments:{}});assert.equal(JSON.parse(status.content[0].text).capabilityManifest.profile,"full");}
   finally{await operational.close().catch(()=>undefined);}
 
   console.log(

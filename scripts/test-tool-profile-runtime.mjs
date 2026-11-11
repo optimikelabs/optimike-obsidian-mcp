@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { assertHeadlessProfileNames } from "./test-support/assert-headless-profile-names.mjs";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -183,11 +184,7 @@ try {
     });
     try {
       const names = await listedNames(client);
-      assert.equal(
-        names.length,
-        48,
-        "explicit full must retain the complete runtime surface",
-      );
+      assertHeadlessProfileNames(names, "full");
       assert.ok(names.includes("smart_semantic_search"));
       assert.ok(!names.includes("smart_search"));
       assert.ok(!names.includes("smart-search"));

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { assertHeadlessProfileNames } from "./test-support/assert-headless-profile-names.mjs";
 import { readFile } from "node:fs/promises";
 import {
   Client,
@@ -79,10 +80,9 @@ try {
     schemaAndBehavior(catalogs[0].tools),
     "legacy and modern schemas/annotations must be identical; legacy Tasks stays explicitly forbidden only on the legacy wire",
   );
-  assert.deepEqual(
-    catalogs.map((r) => r.tools.length),
-    [9, 9, 14, 48],
-  );
+  for (const [index, profile] of ["standard", "standard", "tasks", "full"].entries()) {
+    assertHeadlessProfileNames(catalogs[index].tools.map(tool => tool.name), profile);
+  }
   for (const { client } of [standard, tasks, full])
     assert.match(
       payload(

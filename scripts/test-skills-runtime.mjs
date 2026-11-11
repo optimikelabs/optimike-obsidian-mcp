@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { assertHeadlessProfileNames } from "./test-support/assert-headless-profile-names.mjs";
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {createHash} from 'node:crypto';import os from 'node:os';import path from 'node:path';
 import {Client,StreamableHTTPClientTransport} from '@modelcontextprotocol/client';
@@ -24,7 +25,7 @@ try{
  const modern=new Client({name:'modern-skills-runtime',version:'1'},{versionNegotiation:{mode:{pin:revision}}});clients.push(modern);
  await modern.connect(new StreamableHTTPClientTransport(new URL(backend.base+'/mcp/full'),{requestInit:{headers:{Authorization:`Bearer ${bearer}`}}}));
  assert.deepEqual(modern.getServerCapabilities().extensions['io.modelcontextprotocol/skills'],{});assert.ok(modern.getServerCapabilities().resources);checks++;
- const tools=(await modern.listTools()).tools;assert.equal(tools.length,48);assert.equal(tools.some(t=>/skills[\/_]/.test(t.name)),false);checks++;
+ const tools=(await modern.listTools()).tools;assertHeadlessProfileNames(tools.map(t=>t.name),"full");assert.equal(tools.some(t=>/skills[\/_]/.test(t.name)),false);checks++;
  let page=await raw(backend.base,envelope('skills/list'),bearer);
  assert.equal(page.response.status,200,page.text);assert.equal(page.response.headers.has('mcp-session-id'),false);assert.equal(page.payload.result.resultType,'complete');assert.equal(page.payload.result.skills.length,1);assert.ok(page.payload.result.nextCursor);checks++;
  const first=page.payload.result.skills[0];
@@ -53,12 +54,12 @@ try{
  // v1 clients retain the same catalog, session behavior and resource guide.
  const legacy=new LegacyClient({name:'real-v1-skills-regression',version:'1'});clients.push(legacy);
  await legacy.connect(new LegacyHTTP(new URL(backend.base+'/mcp/full'),{requestInit:{headers:{Authorization:`Bearer ${bearer}`}}}));
- assert.equal(legacy.getServerCapabilities().extensions?.['io.modelcontextprotocol/skills'],undefined);assert.equal((await legacy.listTools()).tools.length,48);checks++;
+ assert.equal(legacy.getServerCapabilities().extensions?.['io.modelcontextprotocol/skills'],undefined);assertHeadlessProfileNames((await legacy.listTools()).tools.map(t=>t.name),"full");checks++;
  assert.ok((await legacy.readResource({uri:'optimike://guides/tool-routing'})).contents[0].text.includes('Governed sequence'));checks++;
  // The same product factory also serves local modern stdio, not only a fixture server.
  const transport=new StdioClientTransport({command:process.execPath,args:['dist/index.js','--tool-profile','full'],cwd:process.cwd(),env:{...backend.env,MCP_TRANSPORT_TYPE:'stdio'},stderr:'pipe'});
  const stdio=new Client({name:'stdio-skills-runtime',version:'1'},{versionNegotiation:{mode:{pin:revision}}});clients.push(stdio);
- await stdio.connect(transport);assert.deepEqual(stdio.getServerCapabilities().extensions['io.modelcontextprotocol/skills'],{});assert.equal((await stdio.listTools()).tools.length,48);checks++;
+ await stdio.connect(transport);assert.deepEqual(stdio.getServerCapabilities().extensions['io.modelcontextprotocol/skills'],{});assertHeadlessProfileNames((await stdio.listTools()).tools.map(t=>t.name),"full");checks++;
  const text=(await stdio.readResource({uri:first.uri})).contents[0].text;assert.equal(text,await readFile(path.join(skillRoot,'sample/SKILL.md'),'utf8'));checks++;
  // The proxy publishes its own explicitly configured sources, not backend skills.
  const proxyRoots=path.join(root,'proxy-roots.json'),proxyConfig=path.join(root,'proxy-skills.json');
@@ -67,15 +68,15 @@ try{
  const proxyEnv={...backend.env,MCP_TRANSPORT_TYPE:'stdio',MCP_EXTERNAL_ROOTS_FILE:proxyRoots,MCP_SKILLS_CONFIG_FILE:proxyConfig,MCP_PROXY_REQUIRE_EXISTING_BACKEND:'true',MCP_BACKEND_BEARER_TOKEN:bearer};
  const proxy=new Client({name:'proxy-skills-runtime',version:'1'},{versionNegotiation:{mode:{pin:revision}}});clients.push(proxy);
  await proxy.connect(new StdioClientTransport({command:process.execPath,args:['dist/stdio-proxy.js','--tool-profile','full'],cwd:process.cwd(),env:proxyEnv,stderr:'pipe'}));
- assert.deepEqual(proxy.getServerCapabilities().extensions['io.modelcontextprotocol/skills'],{});assert.equal((await proxy.listTools()).tools.length,48);checks++;
+ assert.deepEqual(proxy.getServerCapabilities().extensions['io.modelcontextprotocol/skills'],{});assertHeadlessProfileNames((await proxy.listTools()).tools.map(t=>t.name),"full");checks++;
  assert.equal((await proxy.readResource({uri:'skill://proxy.skills/sample/SKILL.md'})).contents[0].text,text);checks++;
  await assert.rejects(()=>proxy.readResource({uri:first.uri}));checks++;
  const oldProxy=new LegacyClient({name:'legacy-proxy-skills-regression',version:'1'});clients.push(oldProxy);
  await oldProxy.connect(new LegacyStdio({command:process.execPath,args:['dist/stdio-proxy.js','--tool-profile','full'],cwd:process.cwd(),env:proxyEnv,stderr:'pipe'}));
- assert.equal(oldProxy.getServerCapabilities().extensions?.['io.modelcontextprotocol/skills'],undefined);assert.equal((await oldProxy.listTools()).tools.length,48);checks++;
+ assert.equal(oldProxy.getServerCapabilities().extensions?.['io.modelcontextprotocol/skills'],undefined);assertHeadlessProfileNames((await oldProxy.listTools()).tools.map(t=>t.name),"full");checks++;
  // Broken modern publication configuration cannot remove legacy availability.
  await writeFile(configFile,'INVALID_PRIVATE_CONFIGURATION');
- assert.equal((await legacy.listTools()).tools.length,48);checks++;
+ assertHeadlessProfileNames((await legacy.listTools()).tools.map(t=>t.name),"full");checks++;
  const bad=await raw(backend.base,envelope('skills/list'),bearer);assert.ok(bad.payload?.error || bad.response.status>=400);assert.equal(bad.text.includes('INVALID_PRIVATE_CONFIGURATION'),false);assert.equal(bad.text.includes(configFile),false);checks++;
  console.log(`PASS: ${checks} actual HTTP/stdio Skills, auth/profile isolation and genuine v1 legacy checks`);
 }finally{

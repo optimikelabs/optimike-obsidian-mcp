@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { assertHeadlessProfileNames } from "./test-support/assert-headless-profile-names.mjs";
 import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -49,13 +50,7 @@ const watchdog = setTimeout(() => {
 // Seven fresh processes include SDK bounded shutdown grace periods.
 }, 120000);
 try {
-  for (const [profile, count] of [
-    ["standard", 9],
-    ["authoring", 9],
-    ["tasks", 14],
-    ["full", 48],
-    ["operational", 48],
-  ]) {
+  for (const profile of ["standard", "authoring", "tasks", "full", "operational"]) {
     const transport = new ModernStdio({
       command: process.execPath,
       args: ["dist/index.js", "--tool-profile", profile],
@@ -77,7 +72,7 @@ try {
     await client.connect(transport);
     assert.equal(client.getProtocolEra(), "modern");
     await client.discover();
-    assert.equal((await client.listTools()).tools.length, count);
+    assertHeadlessProfileNames((await client.listTools()).tools.map(tool => tool.name), profile);
     const status = await client.callTool({
       name: "obsidian_runtime_status",
       arguments: {},
