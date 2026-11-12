@@ -220,6 +220,11 @@ test("pins negotiate only on first use, preserve base reads/update on pending gr
   assert.equal(previews.at(-1).target, undefined);
   assert.equal(previews.at(-1).spec.operation, "update-batch");
   assert.equal(previews.at(-1).spec.items.length, 2);
+  assert.deepEqual(
+    previews.at(-1).spec.items.map((item: { itemRef?: string }) => item.itemRef),
+    tasks.map((task) => task.identity.operonId),
+    "Operon's UpdateTaskBatchItemV1 requires an itemRef on every item",
+  );
   const beforeCalls = applied.length;
   const stale = await adapter.executeMutation(
     "update-batch",

@@ -4612,7 +4612,9 @@ export class OperonDeveloperApiRuntimeAdapter {
           live,
           item.patch,
         );
+        // Operon's UpdateTaskBatchItemV1 requires a caller-chosen itemRef per item.
         mappedItems.push({
+          itemRef: item.operonId,
           target: mapped.target,
           changes: mapped.spec.changes,
         });
