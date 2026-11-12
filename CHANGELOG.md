@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.20.0] - 2026-11-12
+
+Operon Bridge 0.9.9 ships with this release; Atomic Write Bridge 0.9.2 and Bases Bridge 1.2.2 are unchanged. Install the MCP and the Bridge bundle of the same release together, then approve the pin capability once in Operon settings to use `operon_set_pinned`. See the [English](docs/releases/3.20.0.md) and [French](docs/releases/3.20.0.fr.md) release notes.
+
+### Added
+
+- `operon_set_pinned`: pin or unpin one exact Operon task through the Developer API (`tasks.pinned`), negotiated in its own session on first use; a pending approval returns `capability_pending_approval` without affecting the other Operon tools (#160).
+- `operon_update_tasks`: update managed fields of 2 to 64 exact tasks in one sealed plan under the existing `tasks.update` grant, with every revision checked before the plan and before apply (#160).
+
+### Fixed
+
+- Tool input schemas no longer collapse repeated fields into `$ref`; `operon_create_task.task.targetPath` has its own description (destination note of an inline task) (#159).
+- An invalid Operon tool argument returns `VALIDATION_ERROR` with `invalid_tool_arguments` and safe `validationIssues` instead of `INTERNAL_ERROR` (#159).
+
 ## [3.19.1] - 2026-11-11
 
 Operon Bridge 0.9.8 ships with this release; Atomic Write Bridge 0.9.2 and Bases Bridge 1.2.2 are unchanged. Install the MCP and the Bridge bundle of the same release together. No setting, grant or client contract change beyond new public `reasonCode` values. See the [English](docs/releases/3.19.1.md) and [French](docs/releases/3.19.1.fr.md) release notes.
