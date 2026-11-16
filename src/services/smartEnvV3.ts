@@ -242,7 +242,11 @@ export async function readSmartBlockVectors(
   let chunkEnd = 0;
   const handle = await fs.open(vectorFile, "r");
   try {
+    const rowCount = Math.floor((await handle.stat()).size / rowBytes);
     for (const ref of refs) {
+      // Sorted: every later row is past the end of the file too. Checked
+      // before reading, so an absurd index cannot overflow the file position.
+      if (ref.fileIndex >= rowCount) break;
       if (ref.fileIndex < chunkStart || ref.fileIndex >= chunkEnd) {
         const { bytesRead } = await handle.read(
           chunkBytes,
@@ -252,7 +256,6 @@ export async function readSmartBlockVectors(
         );
         chunkStart = ref.fileIndex;
         chunkEnd = chunkStart + Math.floor(bytesRead / rowBytes);
-        // Sorted: every later row is past the end of the file too.
         if (ref.fileIndex >= chunkEnd) break;
       }
       const rowOffset = (ref.fileIndex - chunkStart) * dimensions;
@@ -293,7 +296,7 @@ export async function readSmartBlockVectors(
  */
 export async function readSmartEnvV3(
   baseDir: string,
-  options: { blocks: boolean },
+  options: { blocks: boolean; notes?: boolean },
 ): Promise<SmartEnvV3Index | null> {
   const directory = path.join(baseDir, "smart_sources");
   let files: string[];
@@ -346,13 +349,17 @@ export async function readSmartEnvV3(
       }
     }
   }
-  const vectors = await readNoteVectors(
-    path.join(directory, fingerprint),
-    latest,
-    fingerprint,
-    dimensions,
-    model.model_key,
-  );
+  // A caller whose note snapshot already matches these files skips them.
+  const vectors =
+    options.notes === false
+      ? []
+      : await readNoteVectors(
+          path.join(directory, fingerprint),
+          latest,
+          fingerprint,
+          dimensions,
+          model.model_key,
+        );
   if (!options.blocks) return { notes: vectors };
 
   const refs: SmartBlockRef[] = [];

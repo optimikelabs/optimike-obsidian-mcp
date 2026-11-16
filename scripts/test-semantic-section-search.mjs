@@ -1,7 +1,7 @@
 import "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { McpServer, InMemoryTransport } from "@modelcontextprotocol/server";
@@ -262,6 +262,39 @@ try {
     "the rewritten block vectors are read",
   );
   timed.db.close();
+
+  // A section read that started before a newer note snapshot was published
+  // never replaces it with its older notes.
+  const racing = new SemanticCacheService(source, dbPath, 60_000);
+  racing.db.prepare("DELETE FROM semantic_section_manifest").run();
+  const readSections = racing.loadSectionSource.bind(racing);
+  let readDone;
+  let release;
+  const sectionRead = new Promise((resolve) => (readDone = resolve));
+  const gate = new Promise((resolve) => (release = resolve));
+  racing.loadSectionSource = async (...args) => {
+    const index = await readSections(...args);
+    readDone();
+    await gate;
+    return index;
+  };
+  const pendingSections = racing.getSectionSnapshot();
+  await sectionRead;
+  await appendFile(
+    path.join(source, "smart_sources", "smart_sources.ajson"),
+    ',\n"smart_sources:Other/Beta.md": null',
+    "utf8",
+  );
+  const newer = await racing.getSnapshot();
+  assert.deepEqual(newer.items.map((item) => item.notePath), ["Notes/Alpha.md"]);
+  release();
+  await pendingSections;
+  assert.deepEqual(
+    (await racing.getSnapshot()).items.map((item) => item.notePath),
+    ["Notes/Alpha.md"],
+    "an older section read does not overwrite a newer note snapshot",
+  );
+  racing.db.close();
 
   // Without block vectors for the active model, sections are refused before
   // the query is embedded; notes still work.

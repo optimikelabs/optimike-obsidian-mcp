@@ -490,10 +490,14 @@ export class SemanticCacheService {
       smartEnvDir: this.smartEnvDir,
       sourceFileCount: sourceState.fileCount,
     });
-    const index = await readSmartEnvV3(this.smartEnvDir, { blocks: true });
+    const readStartedAt = Date.now();
+    const index = await this.loadSectionSource(
+      this.memorySnapshot?.sourceSignature !== sourceState.signature,
+    );
     if (generation !== this.refreshGeneration)
       return this.refreshSections(context);
-    if (index?.notes.length) this.adoptNotesFromSectionRead(index.notes, sourceState);
+    if (index?.notes.length)
+      this.adoptNotesFromSectionRead(index.notes, sourceState, readStartedAt);
     const blocks = index?.blocks;
     const snapshot = this.persistSections(
       signature,
@@ -508,6 +512,14 @@ export class SemanticCacheService {
     return this.publishSections(snapshot);
   }
 
+  // The single source read of a section refresh (notes included on request).
+  private loadSectionSource(includeNotes: boolean) {
+    return readSmartEnvV3(this.smartEnvDir, {
+      blocks: true,
+      notes: includeNotes,
+    });
+  }
+
   private publishSections(
     snapshot: SemanticSectionSnapshot,
   ): SemanticSectionSnapshot {
@@ -519,14 +531,17 @@ export class SemanticCacheService {
   /**
    * The section read parsed every current note vector of the same files: use
    * it instead of parsing the sources a second time for the note snapshot.
-   * A note refresh already in flight publishes its own result instead.
+   * A note refresh already in flight publishes its own result instead, and a
+   * note snapshot published after this read started may hold newer files.
    */
   private adoptNotesFromSectionRead(
     items: SmartVec[],
     sourceState: SmartEnvSourceState,
+    readStartedAt: number,
   ): void {
     if (
       this.pendingSnapshot ||
+      this.memorySnapshotLoadedAt >= readStartedAt ||
       this.memorySnapshot?.sourceSignature === sourceState.signature
     )
       return;

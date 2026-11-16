@@ -243,7 +243,8 @@ function headingPath(blockKey: string): string[] {
     .filter((segment) => segment && !/^\{\d+\}$/u.test(segment));
 }
 
-// Bounds the search for a section that moved: positions tried × lines hashed.
+// Bounds the search for sections that moved, per request: lines hashed while
+// relocating. The search is synchronous; past the budget, lines are unverified.
 const SECTION_RELOCATION_MAX_LINES_HASHED = 200_000;
 
 /**
@@ -256,6 +257,7 @@ const SECTION_RELOCATION_MAX_LINES_HASHED = 200_000;
 function locateSection(
   noteLines: readonly string[],
   ref: SmartBlockRef,
+  budget: { lines: number },
 ): [number, number] | undefined {
   const span = ref.lineEnd - ref.lineStart + 1;
   const lastStart = noteLines.length - span + 1;
@@ -265,11 +267,13 @@ function locateSection(
     smartTextHash(noteLines.slice(start - 1, start - 1 + span).join("\n")) ===
       ref.readHash;
   if (matches(ref.lineStart)) return [ref.lineStart, ref.lineEnd];
-  if (lastStart < 1 || lastStart * span > SECTION_RELOCATION_MAX_LINES_HASHED)
-    return undefined;
   for (let delta = 1; ref.lineStart - delta >= 1 || ref.lineStart + delta <= lastStart; delta++) {
-    for (const start of [ref.lineStart - delta, ref.lineStart + delta])
+    for (const start of [ref.lineStart - delta, ref.lineStart + delta]) {
+      if (start < 1 || start > lastStart) continue;
+      if (budget.lines < span) return undefined;
+      budget.lines -= span;
       if (matches(start)) return [start, start + span - 1];
+    }
   }
   return undefined;
 }
@@ -539,6 +543,7 @@ async function performSearch(input: InType): Promise<OutType> {
     return text;
   };
 
+  const relocationBudget = { lines: SECTION_RELOCATION_MAX_LINES_HASHED };
   const snippetsStartedAt = nowMs();
   for (const entry of merged) {
     if (entry.kind === "note") {
@@ -559,7 +564,7 @@ async function performSearch(input: InType): Promise<OutType> {
     // Smart Connections may not have re-indexed a later edit yet.
     const ref = sections!.refs[entry.item]!;
     const noteLines = (await readNote(ref.notePath))?.split("\n");
-    const located = noteLines && locateSection(noteLines, ref);
+    const located = noteLines && locateSection(noteLines, ref, relocationBudget);
     results.push({
       kind: "section",
       path: ref.notePath,

@@ -140,6 +140,7 @@ try {
         "#NotFinite": block([9, 9], "h3", "h3", 4),
         "#OtherModel": block([10, 10], "h4", "h4", 1, "mf_other"),
         "#OutOfBounds": block([11, 11], "h5", "h5", 9),
+        "#Absurd": block([13, 13], "h6", "h6", Number.MAX_SAFE_INTEGER),
         "#NoVector": { lines: [12, 12], last_read: { hash: "x" } },
       }),
       withBlocks("Deleted", { "#Gone": block([1, 1], "g", "g", 5) }),
@@ -161,7 +162,7 @@ try {
   assert.deepEqual(
     index.blocks.refs.map((ref) => [ref.blockKey, ref.lineStart, ref.lineEnd, ref.readHash]),
     [["#Current", 4, 6, "h1"], ["#Current#{1}", 5, 6, "h2"]],
-    "only current-model, fresh, finite, in-bounds, non-frontmatter blocks of live notes are kept",
+    "only current-model, fresh, finite, in-bounds, non-frontmatter blocks of live notes are kept; an absurd row index does not drop the others",
   );
   assert.equal(index.blocks.vectors.length, 2 * 1024);
   assert.deepEqual(

@@ -341,17 +341,8 @@ async function listEmbeddingFiles(directory: string): Promise<string[]> {
   return [...new Set([...files, ...fromRipgrep])];
 }
 
-/**
- * `currentModelSources` lets a caller that already read the v3 sources (for
- * example together with their blocks) reuse that read: `null` means "not a v3
- * index", exactly as `loadSmartEnvV3` reports it.
- */
-export async function loadSmartEnv(
-  baseDir: string,
-  currentModelSources?: SmartVec[] | null,
-): Promise<SmartVec[]> {
-  if (currentModelSources === undefined)
-    currentModelSources = await loadSmartEnvV3(baseDir);
+export async function loadSmartEnv(baseDir: string): Promise<SmartVec[]> {
+  const currentModelSources = await loadSmartEnvV3(baseDir);
   if (currentModelSources) {
     if (!currentModelSources.length) throw new Error("No current Smart Environment v3 embeddings found");
     return currentModelSources;
