@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.21.0] - 2026-11-16
+
+No Bridge change: Atomic Write Bridge 0.9.2, Operon Bridge 0.9.9 and Bases Bridge 1.2.2 ship unchanged in the bundle of this release, so upgrading from 3.20.0 needs no Bridge reinstall. A section search loads the section vectors once per process. See the [English](docs/releases/3.21.0.md) and [French](docs/releases/3.21.0.fr.md) release notes.
+
 ### Added
 
 - `smart_semantic_search` returns the sections that answer, not only whole notes. The optional `granularity` takes `notes` (default, result shape unchanged), `sections` or `both` (notes and sections ranked together). A section result gives the note `path`, `block_key`, `headings`, `lines` `[start, end]` and `score`, plus the text of those lines as `snippet` (at most 1,200 characters). Sections use the block vectors Smart Connections already stores for the active model in `.smart-env/smart_blocks/<model fingerprint>`, with the same freshness rule as notes (`read_hash` equal to `last_read.hash`); frontmatter blocks are skipped and the `folders` and `tags` filters apply. Each section is checked against the note as it reads now: `lines_verified: true` proves the lines hold the embedded text, found again when an edit above moved it; `false` returns the indexed lines without a snippet. On a real vault of 6,889 notes, 16 % of the 44,924 sections had moved since indexing and 0.5 % had changed. Section vectors load on the first section query only (about 123 MB for 44,924 vectors of 640 dimensions); the shared store keeps their references, not the vectors. Without block vectors for the active model, a section search answers `semantic_sections_unavailable` before embedding the query. See [semantic search](README.md#semantic-search) and [section search](OPERATIONS.md#section-search).
