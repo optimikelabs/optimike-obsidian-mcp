@@ -35,6 +35,7 @@ The shared store contains:
 - `task_file_cache`: parsed Tasks data reused by `list_all_tasks` and `query_tasks`
 - `semantic_manifest`: semantic metadata used to avoid unnecessary `.smart-env` rescans
 - `semantic_vectors`: persisted vector-side metadata
+- `semantic_section_manifest`, `semantic_sections`, `semantic_section_tags`: section references for `granularity: sections` (note, block key, lines, vector row, content hash, note tags); no vectors, which are read again from `.smart-env/smart_blocks/<model fingerprint>`
 
 What stays in RAM:
 
@@ -453,6 +454,12 @@ Examples:
 - if your vault uses the Smart Connections built-in model, the optional `@huggingface/transformers` package must be installed next to the MCP (`npm install @huggingface/transformers`); the model (about 66 MB for BGE Micro) is downloaded from Hugging Face once, then runs locally on CPU
 
 At startup, the backend prewarms semantic search by loading the semantic snapshot and sending a small embedding request to the configured provider. With the built-in model, this background prewarm is where the model is first downloaded and loaded, so the first agent query does not wait for it. Disable it with `SEMANTIC_SEARCH_PREWARM=false`; override the warmup text with `SEMANTIC_SEARCH_PREWARM_TEXT`.
+
+### Section search
+
+`granularity: sections` or `both` loads the section vectors on the first such query, never at prewarm: a runtime that only searches notes keeps its previous memory footprint. The section vectors stay in memory as one float32 array for the life of the process. The first cold load reads the Smart Connections source records once for both notes and sections; afterwards, the section references come from the shared store and only the vectors are read again from `smart_blocks/<model fingerprint>`. The section cache is refreshed when the source records, the active model or that block vector file (modification time or size) change, with the same TTL as notes. Each section result reads its note to verify its lines, even without `with_snippets`.
+
+Local measurement on 16 November 2026 (not an SLA): a vault of 6,889 notes holding 44,924 section vectors of 640 dimensions. First cold load of notes and sections: 7.7 to 8.2 s (notes alone: 5.5 s). Load from the shared store in a new process: 0.45 to 0.56 s for sections, after 0.7 to 0.9 s for notes. Section ranking: 50 to 85 ms per query, besides the query embedding. Sections add about 123 MB of resident memory (110 MB of vectors, 13 to 15 MB of references).
 
 ## Degraded Mode
 

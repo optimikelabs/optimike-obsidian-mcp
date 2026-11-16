@@ -239,6 +239,7 @@ const SAFE_LOG_ENUM_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
     "semantic_embedder_configuration_invalid",
     "semantic_query_embedding_failed",
     "semantic_query_vector_invalid",
+    "semantic_sections_unavailable",
     "atomic_write_creation_property_missing",
   ]),
   errorCode: new Set([

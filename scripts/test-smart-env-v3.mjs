@@ -3,7 +3,10 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { loadSmartEnv } from "../dist/services/smartEnv.js";
-import { detectSmartEnvQueryProvider } from "../dist/services/smartEnvV3.js";
+import {
+  detectSmartEnvQueryProvider,
+  readSmartEnvV3,
+} from "../dist/services/smartEnvV3.js";
 import { getQueryEmbedder } from "../dist/adapters/embed/index.js";
 
 const root = await mkdtemp(path.join(os.tmpdir(), "smart-env-v3-"));
@@ -108,6 +111,73 @@ try {
     ["Notes/Deleted.md"],
     "a note re-created after its tombstone is indexed again",
   );
+
+  // Section (block) vectors come from the same source records, in one pass,
+  // but from their own file `smart_blocks/<fingerprint>`.
+  const block = (lines, readHash, lastRead, fileIndex, file = fingerprint) => ({
+    lines,
+    should_embed: true,
+    last_read: { hash: lastRead },
+    embedding: { default: { [file]: { file, file_i: fileIndex, read_hash: readHash } } },
+  });
+  const withBlocks = (name, blocks_data) =>
+    `"smart_sources:Notes/${name}.md": ` +
+    JSON.stringify({
+      path: `Notes/${name}.md`,
+      last_read: { hash: "same" },
+      metadata: { tags: ["#keep"] },
+      embedding: { default: { [fingerprint]: { file: fingerprint, file_i: 0, read_hash: "same" } } },
+      blocks_data,
+    });
+  await writeFile(
+    path.join(root, "smart_sources", "smart_sources.ajson"),
+    [
+      withBlocks("Sections", {
+        "#---frontmatter---": block([1, 3], "fm", "fm", 0),
+        "#Current": block([4, 6], "h1", "h1", 1),
+        "#Current#{1}": block([5, 6], "h2", "h2", 2),
+        "#Stale": block([7, 8], "old", "new", 3),
+        "#NotFinite": block([9, 9], "h3", "h3", 4),
+        "#OtherModel": block([10, 10], "h4", "h4", 1, "mf_other"),
+        "#OutOfBounds": block([11, 11], "h5", "h5", 9),
+        "#NoVector": { lines: [12, 12], last_read: { hash: "x" } },
+      }),
+      withBlocks("Deleted", { "#Gone": block([1, 1], "g", "g", 5) }),
+      '"smart_sources:Notes/Deleted.md": null',
+    ].join(",\n"),
+    "utf8",
+  );
+  await mkdir(path.join(root, "smart_blocks"));
+  const blockRows = Buffer.alloc(6 * 1024 * 4);
+  for (let row = 0; row < 6; row++) blockRows.writeFloatLE(10 + row, row * 1024 * 4);
+  blockRows.writeFloatLE(Number.NaN, 4 * 1024 * 4 + 8);
+  await writeFile(path.join(root, "smart_blocks", fingerprint), blockRows);
+  const index = await readSmartEnvV3(root, { blocks: true });
+  assert.deepEqual(
+    index.notes.map((item) => item.notePath),
+    ["Notes/Sections.md"],
+    "the same pass still yields the note vectors",
+  );
+  assert.deepEqual(
+    index.blocks.refs.map((ref) => [ref.blockKey, ref.lineStart, ref.lineEnd, ref.readHash]),
+    [["#Current", 4, 6, "h1"], ["#Current#{1}", 5, 6, "h2"]],
+    "only current-model, fresh, finite, in-bounds, non-frontmatter blocks of live notes are kept",
+  );
+  assert.equal(index.blocks.vectors.length, 2 * 1024);
+  assert.deepEqual(
+    [index.blocks.vectors[0], index.blocks.vectors[1024]],
+    [11, 12],
+    "block rows are read from smart_blocks/<fingerprint>, not from the source vector file",
+  );
+  assert.equal(index.blocks.norms[0], 11);
+  assert.deepEqual(index.blocks.tagsByNote.get("Notes/Sections.md"), ["#keep"]);
+  assert.equal(
+    (await readSmartEnvV3(root, { blocks: false })).blocks,
+    undefined,
+    "a notes-only read never loads block vectors",
+  );
+  await rm(path.join(root, "smart_blocks"), { recursive: true });
+
   await writeFile(
     path.join(root, "smart_sources", "smart_sources.ajson"),
     [record("Current", "same", "same", 0), record("Stale", "new", "old", 1)].join(",\n"),

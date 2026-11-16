@@ -35,6 +35,7 @@ Le store partagé contient :
 - `task_file_cache` : données Tasks parsées et réutilisées par `list_all_tasks` et `query_tasks`
 - `semantic_manifest` : métadonnées sémantiques pour éviter des rescans `.smart-env` inutiles
 - `semantic_vectors` : métadonnées côté vecteurs
+- `semantic_section_manifest`, `semantic_sections`, `semantic_section_tags` : références des sections pour `granularity: sections` (note, clé de bloc, lignes, rang du vecteur, empreinte du contenu, tags de la note) ; aucun vecteur, ils sont relus dans `.smart-env/smart_blocks/<empreinte du modèle>`
 
 Ce qui reste en RAM :
 
@@ -469,6 +470,12 @@ Exemples :
 - si ton vault utilise le modèle intégré de Smart Connections, le paquet optionnel `@huggingface/transformers` doit être installé à côté du MCP (`npm install @huggingface/transformers`) ; le modèle (environ 66 Mo pour BGE Micro) est téléchargé une fois depuis Hugging Face, puis tourne en local sur le CPU
 
 Au démarrage, le backend préchauffe la recherche sémantique en chargeant le snapshot et en envoyant une petite requête d’embedding au provider configuré. Avec le modèle intégré, c’est ce préchauffage en arrière-plan qui télécharge et charge le modèle la première fois : la première requête d’un agent ne l’attend pas. Désactivation possible avec `SEMANTIC_SEARCH_PREWARM=false` ; texte de warmup surchargeable avec `SEMANTIC_SEARCH_PREWARM_TEXT`.
+
+### Recherche par sections
+
+`granularity: sections` ou `both` charge les vecteurs de sections à la première requête de ce type, jamais au préchauffage : un runtime qui ne cherche que des notes garde son empreinte mémoire précédente. Les vecteurs de sections restent en mémoire dans un seul tableau float32 pendant toute la vie du processus. Le premier chargement à froid lit une seule fois les enregistrements sources de Smart Connections pour les notes et les sections ; ensuite, les références des sections viennent du store partagé et seuls les vecteurs sont relus dans `smart_blocks/<empreinte du modèle>`. Le cache des sections se rafraîchit quand les enregistrements sources, le modèle actif ou ce fichier de vecteurs de blocs (date de modification ou taille) changent, avec le même TTL que les notes. Chaque résultat de section lit sa note pour vérifier ses lignes, même sans `with_snippets`.
+
+Mesure locale du 16 novembre 2026 (pas un engagement de service) : un coffre de 6 889 notes avec 44 924 vecteurs de sections de 640 dimensions. Premier chargement à froid des notes et des sections : 7,7 à 8,2 s (notes seules : 5,5 s). Chargement depuis le store partagé dans un nouveau processus : 0,45 à 0,56 s pour les sections, après 0,7 à 0,9 s pour les notes. Classement des sections : 50 à 85 ms par requête, en plus de l’embedding de la requête. Les sections ajoutent environ 123 Mo de mémoire résidente (110 Mo de vecteurs, 13 à 15 Mo de références).
 
 ## Mode dégradé
 
