@@ -308,6 +308,10 @@ fail-closed; no private or Markdown fallback is introduced.
 
 - `smart_semantic_search`: **canonical** semantic search over Smart Connections
   embeddings and the only semantic-search tool registered in 3.0.
+  `granularity` (`notes` by default, `sections`, `both`) selects whole notes,
+  the matching heading sections and paragraphs (block key, heading path,
+  verified line range), or both ranked together. See the
+  [README](../README.md#semantic-search).
 
 The former `smart_search` and `smart-search` aliases were physically removed in
 3.0. Existing clients must migrate to `smart_semantic_search`.

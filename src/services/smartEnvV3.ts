@@ -12,21 +12,65 @@ type ModelRecord = {
   max_tokens?: number;
 };
 
+type VectorReference = { file?: string; file_i?: number; read_hash?: string };
+
+type BlockRecord = {
+  lines?: unknown;
+  last_read?: { hash?: string };
+  embedding?: { default?: Record<string, VectorReference> };
+};
+
 type SourceRecord = {
   path?: string;
   last_import?: { hash?: string };
   last_read?: { hash?: string };
   embedding?: {
-    default?: Record<string, { file?: string; file_i?: number; read_hash?: string }>;
+    default?: Record<string, VectorReference>;
   };
   metadata?: { tags?: string[] };
+  blocks_data?: Record<string, BlockRecord | null>;
 };
 
 type SearchSource = {
   path: string;
-  reference: { file?: string; file_i?: number; read_hash?: string } | undefined;
+  reference: VectorReference | undefined;
   readHash: string | undefined;
   tags: string[] | undefined;
+  blocks: SmartBlockCandidate[] | undefined;
+};
+
+/** A block whose current vector reference passed every metadata check. */
+export type SmartBlockCandidate = {
+  /** Sub-key after the note path, for example `##Heading#Sub#{1}`. */
+  blockKey: string;
+  lineStart: number;
+  lineEnd: number;
+  fileIndex: number;
+  /** `smartTextHash` of the embedded lines, as Smart Connections read them. */
+  readHash: string;
+};
+
+export type SmartBlockRef = SmartBlockCandidate & { notePath: string };
+
+/**
+ * Section (block) vectors of the active model. Row `i` of `vectors` (length
+ * `dimensions`) belongs to `refs[i]`; `norms[i]` is its Euclidean norm.
+ */
+export type SmartBlockIndex = {
+  model: string;
+  /** Model fingerprint: block vectors are read from `smart_blocks/<fingerprint>`. */
+  fingerprint: string;
+  dimensions: number;
+  refs: SmartBlockRef[];
+  vectors: Float32Array;
+  norms: Float32Array;
+  tagsByNote: Map<string, string[]>;
+};
+
+export type SmartEnvV3Index = {
+  notes: SmartVec[];
+  /** Present only when blocks were requested and a model is active. */
+  blocks?: SmartBlockIndex;
 };
 
 function hash32(value: string): number {
@@ -63,6 +107,15 @@ function hash32(value: string): number {
   hash = Math.imul(hash, 0xc2b2ae35);
   hash ^= hash >>> 16;
   return hash >>> 0;
+}
+
+/**
+ * The content hash Smart Connections records as `last_read.hash`. For a block
+ * it covers the note lines `[start, end]` joined with "\n"; for a source, the
+ * whole note. Comparing it with the current file proves the text is unchanged.
+ */
+export function smartTextHash(text: string): string {
+  return hash32(text).toString(36);
 }
 
 function modelFingerprint(model: ModelRecord): string {
@@ -118,6 +171,133 @@ export async function detectSmartEnvQueryProvider(
 }
 
 export async function loadSmartEnvV3(baseDir: string): Promise<SmartVec[] | null> {
+  return (await readSmartEnvV3(baseDir, { blocks: false }))?.notes ?? null;
+}
+
+// The frontmatter block holds YAML properties, not prose an agent would quote.
+const FRONTMATTER_BLOCK = /^#+---frontmatter---/u;
+
+function blockCandidates(
+  blocks: SourceRecord["blocks_data"],
+  fingerprint: string,
+): SmartBlockCandidate[] | undefined {
+  if (!blocks || typeof blocks !== "object") return undefined;
+  const candidates: SmartBlockCandidate[] = [];
+  for (const [blockKey, block] of Object.entries(blocks)) {
+    if (!block || FRONTMATTER_BLOCK.test(blockKey)) continue;
+    const reference = block.embedding?.default?.[fingerprint];
+    const index = reference?.file_i;
+    const lines = block.lines;
+    // Same freshness rule as sources: the vector must describe the block text
+    // Smart Connections read last, from the active model's file.
+    if (
+      reference?.file !== fingerprint ||
+      index === undefined ||
+      !Number.isSafeInteger(index) ||
+      index < 0 ||
+      !reference.read_hash ||
+      reference.read_hash !== block.last_read?.hash ||
+      !Array.isArray(lines) ||
+      !Number.isSafeInteger(lines[0]) ||
+      !Number.isSafeInteger(lines[1]) ||
+      lines[0] < 1 ||
+      lines[1] < lines[0]
+    ) continue;
+    candidates.push({
+      blockKey,
+      lineStart: lines[0],
+      lineEnd: lines[1],
+      fileIndex: index,
+      readHash: reference.read_hash,
+    });
+  }
+  return candidates.length ? candidates : undefined;
+}
+
+const LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
+const BLOCK_READ_CHUNK_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Reads the referenced rows of a Smart Connections float32 little-endian
+ * vector file into one contiguous Float32Array, in bounded chunks: the file is
+ * never held whole in memory. Rows past the end of the file or holding a
+ * non-finite value are dropped. Sorts `refs` by file index in place.
+ */
+export async function readSmartBlockVectors(
+  vectorFile: string,
+  refs: SmartBlockRef[],
+  dimensions: number,
+): Promise<{ refs: SmartBlockRef[]; vectors: Float32Array; norms: Float32Array }> {
+  refs.sort((left, right) => left.fileIndex - right.fileIndex);
+  const rowBytes = dimensions * 4;
+  const chunkRows = Math.max(1, Math.floor(BLOCK_READ_CHUNK_BYTES / rowBytes));
+  const chunk = new ArrayBuffer(chunkRows * rowBytes);
+  const chunkBytes = new Uint8Array(chunk);
+  const chunkFloats = new Float32Array(chunk);
+  const chunkView = new DataView(chunk);
+  const vectors = new Float32Array(refs.length * dimensions);
+  const norms = new Float32Array(refs.length);
+  const kept: SmartBlockRef[] = [];
+  let chunkStart = 0;
+  let chunkEnd = 0;
+  const handle = await fs.open(vectorFile, "r");
+  try {
+    const rowCount = Math.floor((await handle.stat()).size / rowBytes);
+    for (const ref of refs) {
+      // Sorted: every later row is past the end of the file too. Checked
+      // before reading, so an absurd index cannot overflow the file position.
+      if (ref.fileIndex >= rowCount) break;
+      if (ref.fileIndex < chunkStart || ref.fileIndex >= chunkEnd) {
+        const { bytesRead } = await handle.read(
+          chunkBytes,
+          0,
+          chunk.byteLength,
+          ref.fileIndex * rowBytes,
+        );
+        chunkStart = ref.fileIndex;
+        chunkEnd = chunkStart + Math.floor(bytesRead / rowBytes);
+        if (ref.fileIndex >= chunkEnd) break;
+      }
+      const rowOffset = (ref.fileIndex - chunkStart) * dimensions;
+      const target = kept.length * dimensions;
+      let sum = 0;
+      let finite = true;
+      for (let i = 0; i < dimensions; i++) {
+        const value = LITTLE_ENDIAN
+          ? chunkFloats[rowOffset + i]!
+          : chunkView.getFloat32((rowOffset + i) * 4, true);
+        if (!Number.isFinite(value)) {
+          finite = false;
+          break;
+        }
+        vectors[target + i] = value;
+        sum += value * value;
+      }
+      if (!finite) continue;
+      norms[kept.length] = Math.sqrt(sum);
+      kept.push(ref);
+    }
+  } finally {
+    await handle.close();
+  }
+  // A view, not a copy: dropping a few rows must not duplicate the array.
+  return {
+    refs: kept,
+    vectors: vectors.subarray(0, kept.length * dimensions),
+    norms: norms.subarray(0, kept.length),
+  };
+}
+
+/**
+ * One pass over the append-only source records yields the current note vector
+ * references and, when requested, the current block (section) references.
+ * Note and block bodies are parsed one line at a time and never retained.
+ * Returns null when the directory holds no Smart Environment v3 sources.
+ */
+export async function readSmartEnvV3(
+  baseDir: string,
+  options: { blocks: boolean; notes?: boolean },
+): Promise<SmartEnvV3Index | null> {
   const directory = path.join(baseDir, "smart_sources");
   let files: string[];
   try {
@@ -133,7 +313,7 @@ export async function loadSmartEnvV3(baseDir: string): Promise<SmartVec[] | null
   if (!files.length) return null;
   const model = await activeModel(baseDir);
   const dimensions = Number(model?.dims || model?.dimensions || 0);
-  if (!model?.model_key || !Number.isInteger(dimensions) || dimensions <= 0) return [];
+  if (!model?.model_key || !Number.isInteger(dimensions) || dimensions <= 0) return { notes: [] };
   const fingerprint = modelFingerprint(model);
   const latest = new Map<string, SearchSource>();
   for (const file of files) {
@@ -160,13 +340,65 @@ export async function loadSmartEnvV3(baseDir: string): Promise<SmartVec[] | null
           reference: source.embedding?.default?.[fingerprint],
           readHash: source.last_read?.hash ?? source.last_import?.hash,
           tags: Array.isArray(source.metadata?.tags) ? source.metadata.tags : undefined,
+          blocks: options.blocks
+            ? blockCandidates(source.blocks_data, fingerprint)
+            : undefined,
         });
       } catch {
         // A partial append must not prevent reading the other source records.
       }
     }
   }
-  const vectorFile = path.join(directory, fingerprint);
+  // A caller whose note snapshot already matches these files skips them.
+  const vectors =
+    options.notes === false
+      ? []
+      : await readNoteVectors(
+          path.join(directory, fingerprint),
+          latest,
+          fingerprint,
+          dimensions,
+          model.model_key,
+        );
+  if (!options.blocks) return { notes: vectors };
+
+  const refs: SmartBlockRef[] = [];
+  const tagsByNote = new Map<string, string[]>();
+  for (const source of latest.values()) {
+    if (!source.blocks) continue;
+    if (source.tags?.length) tagsByNote.set(source.path, source.tags);
+    for (const block of source.blocks) refs.push({ notePath: source.path, ...block });
+  }
+  latest.clear();
+  // Block vectors live in their own file: never assume that sources and
+  // blocks share one (brianpetro/obsidian-smart-connections#1375).
+  let rows: Awaited<ReturnType<typeof readSmartBlockVectors>>;
+  try {
+    rows = await readSmartBlockVectors(
+      smartBlockVectorFile(baseDir, fingerprint),
+      refs,
+      dimensions,
+    );
+  } catch {
+    rows = { refs: [], vectors: new Float32Array(0), norms: new Float32Array(0) };
+  }
+  return {
+    notes: vectors,
+    blocks: { model: model.model_key, fingerprint, dimensions, ...rows, tagsByNote },
+  };
+}
+
+export function smartBlockVectorFile(baseDir: string, fingerprint: string): string {
+  return path.join(baseDir, "smart_blocks", fingerprint);
+}
+
+async function readNoteVectors(
+  vectorFile: string,
+  latest: Map<string, SearchSource>,
+  fingerprint: string,
+  dimensions: number,
+  modelKey: string,
+): Promise<SmartVec[]> {
   let binary: Buffer;
   try {
     binary = await fs.readFile(vectorFile);
@@ -195,7 +427,7 @@ export async function loadSmartEnvV3(baseDir: string): Promise<SmartVec[] | null
       notePath,
       title: path.basename(notePath, path.extname(notePath)),
       tags: source.tags,
-      model: model.model_key,
+      model: modelKey,
       vec,
     });
   }

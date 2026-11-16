@@ -18,6 +18,7 @@ The tool and doctor use the same Smart Environment host inference. Public errors
 - `semantic_embedder_configuration_invalid`
 - `semantic_query_embedding_failed`
 - `semantic_query_vector_invalid`
+- `semantic_sections_unavailable` (a section search without block vectors of the active model)
 
 Provider messages, query content, credentials and physical paths remain redacted. A query vector must match the index dimension, contain finite values and have nonzero norm.
 

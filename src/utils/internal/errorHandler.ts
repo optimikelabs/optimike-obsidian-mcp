@@ -465,6 +465,7 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "semantic_embedder_configuration_invalid",
   "semantic_query_embedding_failed",
   "semantic_query_vector_invalid",
+  "semantic_sections_unavailable",
   "atomic_write_creation_property_missing",
   "date_preparation_unverified",
   "date_preparation_bridge_upgrade_required",

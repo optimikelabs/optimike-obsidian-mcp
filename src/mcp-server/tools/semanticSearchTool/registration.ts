@@ -11,8 +11,15 @@ import { z } from "zod/v3";
 import { promises as fs } from "fs";
 import path from "path";
 import { type SmartVec } from "../../../services/smartEnv.js";
-import { getSemanticCacheService } from "../../../services/semanticCache.js";
-import { detectSmartEnvQueryProvider } from "../../../services/smartEnvV3.js";
+import {
+  getSemanticCacheService,
+  type SemanticSectionSnapshot,
+} from "../../../services/semanticCache.js";
+import {
+  detectSmartEnvQueryProvider,
+  smartTextHash,
+  type SmartBlockRef,
+} from "../../../services/smartEnvV3.js";
 import { getQueryEmbedder } from "../../../adapters/embed/index.js";
 import {
   detectOllamaBaseUrlFromSmartEnv,
@@ -48,7 +55,15 @@ const In = z.object({
   folders: z.array(z.string()).optional(),
   tags: z.array(z.string()).optional(),
   with_snippets: z.boolean().default(true),
+  granularity: z
+    .enum(["notes", "sections", "both"])
+    .default("notes")
+    .describe(
+      "notes: whole notes (default). sections: the heading sections and paragraphs that match, with heading path and line range [start, end] (1-based, inclusive) in the note. both: notes and sections ranked together.",
+    ),
 });
+
+const SECTION_SNIPPET_MAX_CHARS = 1200;
 
 const Out = z.object({
   model: z.string().optional(),
@@ -59,22 +74,32 @@ const Out = z.object({
   ollama_base_url: z.string().optional(),
   vector_count: z.number().optional(),
   filtered_count: z.number().optional(),
+  section_count: z.number().optional(),
+  section_filtered_count: z.number().optional(),
   timings_ms: z
     .object({
       total: z.number(),
       semantic_cache: z.number().optional(),
+      section_cache: z.number().optional(),
       embedder_setup: z.number().optional(),
       query_embedding: z.number().optional(),
       filter: z.number().optional(),
       ranking: z.number().optional(),
+      section_ranking: z.number().optional(),
       snippets: z.number().optional(),
     })
     .optional(),
   results: z.array(
     z.object({
+      // Present only when sections were requested.
+      kind: z.enum(["note", "section"]).optional(),
       path: z.string(),
       score: z.number(),
       title: z.string().optional(),
+      block_key: z.string().optional(),
+      headings: z.array(z.string()).optional(),
+      lines: z.tuple([z.number(), z.number()]).optional(),
+      lines_verified: z.boolean().optional(),
       snippet: z.string().optional(),
     }),
   ),
@@ -167,6 +192,8 @@ function insertRankedTopK<T>(
   candidate: { item: T; score: number },
   limit: number,
 ): void {
+  if (ranked.length >= limit && candidate.score <= ranked[ranked.length - 1]!.score)
+    return;
   const insertAt = ranked.findIndex((entry) => candidate.score > entry.score);
   if (insertAt === -1) {
     if (ranked.length < limit) {
@@ -202,6 +229,95 @@ function pickDominantModel(items: SmartVec[]): string | undefined {
 
   const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]);
   return ranked[0]?.[0];
+}
+
+/**
+ * Smart Connections block sub-keys chain headings with `#` (`##A#B`) and mark
+ * content blocks under a heading `#{n}`. Best effort: a heading whose text
+ * contains `#` is split; `block_key` stays the exact identifier.
+ */
+function headingPath(blockKey: string): string[] {
+  return blockKey
+    .split("#")
+    .map((segment) => segment.trim())
+    .filter((segment) => segment && !/^\{\d+\}$/u.test(segment));
+}
+
+// Bounds the search for sections that moved, per request: lines hashed while
+// relocating. The search is synchronous; past the budget, lines are unverified.
+const SECTION_RELOCATION_MAX_LINES_HASHED = 200_000;
+
+/**
+ * Where the embedded text of a section is in the note as it reads now. The
+ * block hash covers its lines joined with "\n", so a match proves the text is
+ * the one Smart Connections embedded. When an edit elsewhere shifted the
+ * section, the nearest identical span wins. Undefined: the text changed (or
+ * the search bound was reached); the indexed lines are then unverified.
+ */
+function locateSection(
+  noteLines: readonly string[],
+  ref: SmartBlockRef,
+  budget: { lines: number },
+): [number, number] | undefined {
+  const span = ref.lineEnd - ref.lineStart + 1;
+  const lastStart = noteLines.length - span + 1;
+  const matches = (start: number) =>
+    start >= 1 &&
+    start <= lastStart &&
+    smartTextHash(noteLines.slice(start - 1, start - 1 + span).join("\n")) ===
+      ref.readHash;
+  if (matches(ref.lineStart)) return [ref.lineStart, ref.lineEnd];
+  for (let delta = 1; ref.lineStart - delta >= 1 || ref.lineStart + delta <= lastStart; delta++) {
+    for (const start of [ref.lineStart - delta, ref.lineStart + delta]) {
+      if (start < 1 || start > lastStart) continue;
+      if (budget.lines < span) return undefined;
+      budget.lines -= span;
+      if (matches(start)) return [start, start + span - 1];
+    }
+  }
+  return undefined;
+}
+
+function matchesFilters(
+  input: InType,
+  notePath: string,
+  tags: readonly string[] | undefined,
+): boolean {
+  const folderOk =
+    !input.folders || input.folders.some((folder) => notePath.startsWith(folder));
+  const tagsOk =
+    !input.tags || (tags ?? []).some((tag) => input.tags?.includes(tag));
+  return folderOk && tagsOk;
+}
+
+function rankSections(
+  sections: SemanticSectionSnapshot,
+  input: InType,
+  queryVector: number[],
+  queryNorm: number,
+): { ranked: Array<{ item: number; score: number }>; filteredCount: number } {
+  const { refs, vectors, norms, dimensions, tagsByNote } = sections;
+  const query = Float64Array.from(queryVector);
+  const ranked: Array<{ item: number; score: number }> = [];
+  let filteredCount = 0;
+  let lastPath: string | undefined;
+  let lastMatch = false;
+  for (let row = 0; row < refs.length; row++) {
+    const notePath = refs[row]!.notePath;
+    if (notePath !== lastPath) {
+      lastPath = notePath;
+      lastMatch = matchesFilters(input, notePath, tagsByNote.get(notePath));
+    }
+    if (!lastMatch) continue;
+    filteredCount += 1;
+    const norm = norms[row]!;
+    let dot = 0;
+    const offset = row * dimensions;
+    for (let i = 0; i < dimensions; i++) dot += query[i]! * vectors[offset + i]!;
+    const score = queryNorm && norm ? dot / (queryNorm * norm) : 0;
+    insertRankedTopK(ranked, { item: row, score }, input.top_k);
+  }
+  return { ranked, filteredCount };
 }
 
 function makeSuccessResult(payload: OutType) {
@@ -280,6 +396,16 @@ async function performSearch(input: InType): Promise<OutType> {
   }
 
   const semanticCache = getSemanticCacheService();
+  const wantNotes = input.granularity !== "sections";
+  let sections: SemanticSectionSnapshot | undefined;
+  if (input.granularity !== "notes") {
+    // Before the note snapshot: one cold source read can then serve both.
+    const sectionCacheStartedAt = nowMs();
+    sections = await semanticStage("semantic_index_unavailable", () =>
+      semanticCache.getSectionSnapshot(),
+    );
+    timings.section_cache = elapsedSince(sectionCacheStartedAt);
+  }
   const semanticCacheStartedAt = nowMs();
   const snapshot = await semanticStage("semantic_index_unavailable", () =>
     semanticCache.getSnapshot(),
@@ -297,6 +423,21 @@ async function performSearch(input: InType): Promise<OutType> {
 
   const itemsWithDim = items.filter((item) => item.vec?.length === dimension);
   const model = snapshot.dominantModel ?? pickDominantModel(itemsWithDim);
+
+  // Refuse before embedding the query: sections need block vectors of the
+  // very model the query embedder will match.
+  if (
+    sections &&
+    (!sections.refs.length ||
+      sections.dimensions !== dimension ||
+      sections.model !== model)
+  ) {
+    throw new McpError(
+      BaseErrorCode.SERVICE_UNAVAILABLE,
+      "No section vectors of the active Smart Connections model are available; search with granularity notes.",
+      { reasonCode: "semantic_sections_unavailable" },
+    );
+  }
 
   const openaiDimensions = Number.isFinite(Number(OPENAI_EMBEDDING_DIMENSIONS))
     ? Number(OPENAI_EMBEDDING_DIMENSIONS)
@@ -347,21 +488,16 @@ async function performSearch(input: InType): Promise<OutType> {
   }
 
   const filterStartedAt = nowMs();
-  const filtered = itemsWithDim.filter((item) => {
-    const folderOk =
-      !input.folders ||
-      input.folders.some((folder) => item.notePath.startsWith(folder));
-    const tagsOk =
-      !input.tags || (item.tags ?? []).some((tag) => input.tags?.includes(tag));
-    return folderOk && tagsOk;
-  });
+  const filtered = itemsWithDim.filter((item) =>
+    matchesFilters(input, item.notePath, item.tags),
+  );
   timings.filter = elapsedSince(filterStartedAt);
 
   const rankingStartedAt = nowMs();
   const queryNorm = vectorNorm(queryVector);
   const ranked: Array<{ item: SmartVec; score: number }> = [];
 
-  for (const item of filtered) {
+  for (const item of wantNotes ? filtered : []) {
     insertRankedTopK(
       ranked,
       {
@@ -373,30 +509,79 @@ async function performSearch(input: InType): Promise<OutType> {
   }
   timings.ranking = elapsedSince(rankingStartedAt);
 
+  let rankedSections: Array<{ item: number; score: number }> = [];
+  let sectionFilteredCount: number | undefined;
+  if (sections) {
+    const sectionRankingStartedAt = nowMs();
+    const sectionRanking = rankSections(sections, input, queryVector, queryNorm);
+    rankedSections = sectionRanking.ranked;
+    sectionFilteredCount = sectionRanking.filteredCount;
+    timings.section_ranking = elapsedSince(sectionRankingStartedAt);
+  }
+
+  // One list, best score first: notes and sections share the query model.
+  const merged: Array<
+    | { kind: "note"; item: SmartVec; score: number }
+    | { kind: "section"; item: number; score: number }
+  > = [
+    ...ranked.map((entry) => ({ kind: "note" as const, ...entry })),
+    ...rankedSections.map((entry) => ({ kind: "section" as const, ...entry })),
+  ]
+    .sort((left, right) => right.score - left.score)
+    .slice(0, input.top_k);
+
   const results: OutType["results"] = [];
-
-  const snippetsStartedAt = nowMs();
-  for (const { item, score } of ranked) {
-    let snippet: string | undefined;
-
-    if (input.with_snippets) {
-      const absolutePath = resolveNoteAbsolutePath(
-        item.notePath,
-        OBSIDIAN_VAULT,
-      );
-      try {
-        const content = await fs.readFile(absolutePath, "utf-8");
-        snippet = content.slice(0, 300);
-      } catch {
-        snippet = undefined;
-      }
+  const noteTexts = new Map<string, Promise<string | undefined>>();
+  const readNote = (notePath: string) => {
+    let text = noteTexts.get(notePath);
+    if (!text) {
+      text = fs
+        .readFile(resolveNoteAbsolutePath(notePath, OBSIDIAN_VAULT), "utf-8")
+        .catch(() => undefined);
+      noteTexts.set(notePath, text);
     }
+    return text;
+  };
 
+  const relocationBudget = { lines: SECTION_RELOCATION_MAX_LINES_HASHED };
+  const snippetsStartedAt = nowMs();
+  for (const entry of merged) {
+    if (entry.kind === "note") {
+      const { item, score } = entry;
+      const content = input.with_snippets
+        ? await readNote(item.notePath)
+        : undefined;
+      results.push({
+        ...(sections ? { kind: "note" as const } : {}),
+        path: item.notePath,
+        score,
+        title: item.title,
+        snippet: content?.slice(0, 300),
+      });
+      continue;
+    }
+    // Section lines are always checked against the note as it reads now:
+    // Smart Connections may not have re-indexed a later edit yet.
+    const ref = sections!.refs[entry.item]!;
+    const noteLines = (await readNote(ref.notePath))?.split("\n");
+    const located = noteLines && locateSection(noteLines, ref, relocationBudget);
     results.push({
-      path: item.notePath,
-      score,
-      title: item.title,
-      snippet,
+      kind: "section",
+      path: ref.notePath,
+      score: entry.score,
+      title: path.basename(ref.notePath, path.extname(ref.notePath)),
+      block_key: ref.blockKey,
+      headings: headingPath(ref.blockKey),
+      lines: located ?? [ref.lineStart, ref.lineEnd],
+      lines_verified: Boolean(located),
+      snippet:
+        input.with_snippets && located
+          ? noteLines!
+              .slice(located[0] - 1, located[1])
+              .map((line) => line.replace(/\r$/u, ""))
+              .join("\n")
+              .slice(0, SECTION_SNIPPET_MAX_CHARS)
+          : undefined,
     });
   }
   timings.snippets = elapsedSince(snippetsStartedAt);
@@ -413,6 +598,12 @@ async function performSearch(input: InType): Promise<OutType> {
       selection.provider === "ollama" ? inferredOllamaBaseUrl : undefined,
     vector_count: itemsWithDim.length,
     filtered_count: filtered.length,
+    ...(sections
+      ? {
+          section_count: sections.refs.length,
+          section_filtered_count: sectionFilteredCount,
+        }
+      : {}),
     timings_ms: timings,
     results,
   };
@@ -557,7 +748,7 @@ export const registerSemanticSearchTool = async (
 
   register(
     "smart_semantic_search",
-    "Semantic search powered by Smart Connections embeddings (query embedder auto-matches the vault model).",
+    "Semantic search powered by Smart Connections embeddings (query embedder auto-matches the vault model). Set granularity to sections to get the heading sections and paragraphs that answer, with their line range in the note, instead of whole notes.",
   );
 };
 

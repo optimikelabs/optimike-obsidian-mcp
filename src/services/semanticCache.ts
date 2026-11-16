@@ -9,6 +9,12 @@ import {
   type RequestContext,
 } from "../utils/index.js";
 import { loadSmartEnv, type SmartVec } from "./smartEnv.js";
+import {
+  readSmartBlockVectors,
+  readSmartEnvV3,
+  smartBlockVectorFile,
+  type SmartBlockRef,
+} from "./smartEnvV3.js";
 import { applyWalSizeLimit } from "./sqliteWal.js";
 
 type SemanticManifestRow = {
@@ -41,9 +47,36 @@ export type SemanticCacheSnapshot = {
   items: SmartVec[];
 };
 
+/**
+ * Section (block) vectors of the active model, loaded only for section
+ * queries. Row `i` of `vectors` (length `dimensions`) belongs to `refs[i]`.
+ */
+export type SemanticSectionSnapshot = {
+  sourceSignature: string;
+  model: string;
+  dimensions: number;
+  refreshedAt: number;
+  refs: SmartBlockRef[];
+  vectors: Float32Array;
+  norms: Float32Array;
+  tagsByNote: Map<string, string[]>;
+};
+
+type SemanticSectionManifestRow = {
+  smart_env_dir: string;
+  source_signature: string;
+  model: string;
+  fingerprint: string;
+  dim: number;
+  section_count: number;
+  refreshed_at: number;
+};
+
 type SmartEnvSourceState = {
   signature: string;
   fileCount: number;
+  /** Notes signature inputs plus the block vector files; scanned on request. */
+  sectionSignature?: string;
 };
 
 const SUBDIRS = [
@@ -54,6 +87,7 @@ const SUBDIRS = [
   "smart_sources",
   "embedding_models",
 ];
+const SECTION_SUBDIR = "smart_blocks";
 const EXTS = [".ajson", ".json", ".jsonl", ".ndjson"];
 
 const SCHEMA_SQL = `
@@ -79,6 +113,29 @@ CREATE TABLE IF NOT EXISTS semantic_vectors (
 );
 CREATE INDEX IF NOT EXISTS idx_semantic_vectors_dim ON semantic_vectors (dim);
 CREATE INDEX IF NOT EXISTS idx_semantic_vectors_model ON semantic_vectors (model);
+CREATE TABLE IF NOT EXISTS semantic_section_manifest (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  smart_env_dir TEXT NOT NULL,
+  source_signature TEXT NOT NULL,
+  model TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  dim INTEGER NOT NULL,
+  section_count INTEGER NOT NULL,
+  refreshed_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS semantic_sections (
+  ord INTEGER PRIMARY KEY,
+  note_path TEXT NOT NULL,
+  block_key TEXT NOT NULL,
+  line_start INTEGER NOT NULL,
+  line_end INTEGER NOT NULL,
+  file_index INTEGER NOT NULL,
+  read_hash TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS semantic_section_tags (
+  note_path TEXT PRIMARY KEY,
+  tags_json TEXT NOT NULL
+);
 `;
 
 let semanticCacheServiceSingleton: SemanticCacheService | null = null;
@@ -152,11 +209,12 @@ function makeSourceSignature(
 
 async function scanSmartEnvSourceState(
   baseDir: string,
+  includeSections = false,
 ): Promise<SmartEnvSourceState> {
   const entries: Array<{ path: string; mtimeMs: number; size: number }> = [];
   const paths: string[] = [];
 
-  for (const subdir of SUBDIRS) {
+  for (const subdir of includeSections ? [...SUBDIRS, SECTION_SUBDIR] : SUBDIRS) {
     const directory = subdir ? path.join(baseDir, subdir) : baseDir;
     let files: string[] = [];
     try {
@@ -166,9 +224,13 @@ async function scanSmartEnvSourceState(
     }
 
     for (const file of files) {
+      const vectorFile =
+        (subdir === "smart_sources" || subdir === SECTION_SUBDIR) &&
+        /^mf_[a-z0-9]+$/i.test(file);
       if (
-        !EXTS.some((extension) => file.toLowerCase().endsWith(extension)) &&
-        !(subdir === "smart_sources" && /^mf_[a-z0-9]+$/i.test(file))
+        !vectorFile &&
+        (subdir === SECTION_SUBDIR ||
+          !EXTS.some((extension) => file.toLowerCase().endsWith(extension)))
       ) {
         continue;
       }
@@ -195,9 +257,20 @@ async function scanSmartEnvSourceState(
   }
 
   entries.sort((a, b) => a.path.localeCompare(b.path));
+  // The note signature keeps its exact inputs, so existing note caches stay
+  // valid; the section signature adds the block vector files (mtime, size).
+  const noteEntries = entries.filter(
+    (entry) => !entry.path.startsWith(`${SECTION_SUBDIR}/`),
+  );
   return {
-    signature: makeSourceSignature(entries),
-    fileCount: entries.length,
+    signature: makeSourceSignature(noteEntries),
+    fileCount: noteEntries.length,
+    sectionSignature: includeSections
+      ? createHash("sha1")
+          .update("smart-env-v3:sections-v1\n")
+          .update(JSON.stringify(entries))
+          .digest("hex")
+      : undefined,
   };
 }
 
@@ -229,6 +302,11 @@ export class SemanticCacheService {
   // Start of the oldest snapshot refresh or readiness validation still in
   // flight; null when none is running.
   private loadStartedAt: number | null = null;
+  // Section vectors are loaded on the first section query only: a notes-only
+  // runtime never pays their memory.
+  private sectionSnapshot: SemanticSectionSnapshot | null = null;
+  private sectionSnapshotLoadedAt = 0;
+  private pendingSections: Promise<SemanticSectionSnapshot> | null = null;
 
   constructor(
     private readonly smartEnvDir: string,
@@ -347,6 +425,297 @@ export class SemanticCacheService {
     this.memorySnapshot = snapshot;
     this.memorySnapshotLoadedAt = Date.now();
     return snapshot;
+  }
+
+  /**
+   * Section (block) vectors of the active model. Call it before getSnapshot:
+   * when both caches are stale, the single source read made here also
+   * publishes the note snapshot of the same files.
+   */
+  public async getSectionSnapshot(
+    context?: RequestContext,
+  ): Promise<SemanticSectionSnapshot> {
+    if (!this.smartEnvDir) {
+      throw new Error("SMART_ENV_DIR is not configured");
+    }
+    if (
+      this.sectionSnapshot &&
+      (this.ttlMs === 0 ||
+        Date.now() - this.sectionSnapshotLoadedAt < this.ttlMs)
+    ) {
+      return this.sectionSnapshot;
+    }
+    if (this.pendingSections) return this.pendingSections;
+    const pending = this.refreshSections(context);
+    this.pendingSections = pending;
+    try {
+      return await pending;
+    } finally {
+      if (this.pendingSections === pending) this.pendingSections = null;
+    }
+  }
+
+  private async refreshSections(
+    context?: RequestContext,
+  ): Promise<SemanticSectionSnapshot> {
+    const generation = this.refreshGeneration;
+    const opContext =
+      context ??
+      requestContextService.createRequestContext({
+        operation: "SemanticCacheService.getSectionSnapshot",
+      });
+    const sourceState = await scanSmartEnvSourceState(this.smartEnvDir, true);
+    const signature = sourceState.sectionSignature!;
+    if (generation !== this.refreshGeneration)
+      return this.refreshSections(context);
+    if (this.sectionSnapshot?.sourceSignature === signature) {
+      this.sectionSnapshotLoadedAt = Date.now();
+      return this.sectionSnapshot;
+    }
+
+    const manifest = this.readSectionManifest();
+    if (
+      manifest &&
+      manifest.source_signature === signature &&
+      manifest.smart_env_dir === this.smartEnvDir
+    ) {
+      const snapshot = await this.tryLoadSectionsFromDb(manifest, opContext);
+      if (generation !== this.refreshGeneration)
+        return this.refreshSections(context);
+      if (snapshot) return this.publishSections(snapshot);
+    }
+
+    logger.info("Refreshing semantic section cache from .smart-env", {
+      ...opContext,
+      smartEnvDir: this.smartEnvDir,
+      sourceFileCount: sourceState.fileCount,
+    });
+    const readStartedAt = Date.now();
+    const index = await this.loadSectionSource(
+      this.memorySnapshot?.sourceSignature !== sourceState.signature,
+    );
+    if (generation !== this.refreshGeneration)
+      return this.refreshSections(context);
+    if (index?.notes.length)
+      this.adoptNotesFromSectionRead(index.notes, sourceState, readStartedAt);
+    const blocks = index?.blocks;
+    const snapshot = this.persistSections(
+      signature,
+      blocks?.model ?? "",
+      blocks?.fingerprint ?? "",
+      blocks?.dimensions ?? 0,
+      blocks?.refs ?? [],
+      blocks?.vectors ?? new Float32Array(0),
+      blocks?.norms ?? new Float32Array(0),
+      blocks?.tagsByNote ?? new Map(),
+    );
+    return this.publishSections(snapshot);
+  }
+
+  // The single source read of a section refresh (notes included on request).
+  private loadSectionSource(includeNotes: boolean) {
+    return readSmartEnvV3(this.smartEnvDir, {
+      blocks: true,
+      notes: includeNotes,
+    });
+  }
+
+  private publishSections(
+    snapshot: SemanticSectionSnapshot,
+  ): SemanticSectionSnapshot {
+    this.sectionSnapshot = snapshot;
+    this.sectionSnapshotLoadedAt = Date.now();
+    return snapshot;
+  }
+
+  /**
+   * The section read parsed every current note vector of the same files: use
+   * it instead of parsing the sources a second time for the note snapshot.
+   * A note refresh already in flight publishes its own result instead, and a
+   * note snapshot published after this read started may hold newer files.
+   */
+  private adoptNotesFromSectionRead(
+    items: SmartVec[],
+    sourceState: SmartEnvSourceState,
+    readStartedAt: number,
+  ): void {
+    if (
+      this.pendingSnapshot ||
+      this.memorySnapshotLoadedAt >= readStartedAt ||
+      this.memorySnapshot?.sourceSignature === sourceState.signature
+    )
+      return;
+    const manifest = this.readManifest();
+    const persisted =
+      manifest?.source_signature === sourceState.signature &&
+      manifest.smart_env_dir === this.smartEnvDir;
+    this.memorySnapshot = persisted
+      ? {
+          sourceSignature: manifest.source_signature,
+          sourceFileCount: manifest.source_file_count,
+          vectorCount: items.length,
+          dominantModel: pickDominantModel(items),
+          dominantDim: pickDominantDimension(items),
+          refreshedAt: manifest.refreshed_at,
+          items,
+        }
+      : this.persistSnapshot(items, sourceState);
+    this.memorySnapshotLoadedAt = Date.now();
+  }
+
+  private readSectionManifest(): SemanticSectionManifestRow | null {
+    const row = this.db
+      .prepare(
+        `SELECT smart_env_dir, source_signature, model, fingerprint, dim, section_count, refreshed_at
+         FROM semantic_section_manifest WHERE singleton = 1`,
+      )
+      .get() as SemanticSectionManifestRow | undefined;
+    return row ?? null;
+  }
+
+  /**
+   * The cache keeps section references only. Vectors are read again from the
+   * block vector file whose mtime and size the signature covers; a row that
+   * no longer reads back means the cache is not trustworthy: rebuild.
+   */
+  private async tryLoadSectionsFromDb(
+    manifest: SemanticSectionManifestRow,
+    context: RequestContext,
+  ): Promise<SemanticSectionSnapshot | null> {
+    try {
+      const refs = (
+        this.db
+          .prepare(
+            `SELECT note_path, block_key, line_start, line_end, file_index, read_hash
+             FROM semantic_sections ORDER BY ord ASC`,
+          )
+          .all() as Array<{
+          note_path: string;
+          block_key: string;
+          line_start: number;
+          line_end: number;
+          file_index: number;
+          read_hash: string;
+        }>
+      ).map(
+        (row): SmartBlockRef => ({
+          notePath: row.note_path,
+          blockKey: row.block_key,
+          lineStart: row.line_start,
+          lineEnd: row.line_end,
+          fileIndex: row.file_index,
+          readHash: row.read_hash,
+        }),
+      );
+      if (refs.length !== manifest.section_count)
+        throw new Error("Section cache row count mismatch");
+      const tagsByNote = new Map<string, string[]>();
+      for (const row of this.db
+        .prepare("SELECT note_path, tags_json FROM semantic_section_tags")
+        .all() as Array<{ note_path: string; tags_json: string }>)
+        tagsByNote.set(row.note_path, JSON.parse(row.tags_json) as string[]);
+      const rows = refs.length
+        ? await readSmartBlockVectors(
+            smartBlockVectorFile(this.smartEnvDir, manifest.fingerprint),
+            refs,
+            manifest.dim,
+          )
+        : { refs, vectors: new Float32Array(0), norms: new Float32Array(0) };
+      if (rows.refs.length !== refs.length)
+        throw new Error("Section vectors no longer match the cache");
+      return {
+        sourceSignature: manifest.source_signature,
+        model: manifest.model,
+        dimensions: manifest.dim,
+        refreshedAt: manifest.refreshed_at,
+        tagsByNote,
+        ...rows,
+      };
+    } catch {
+      logger.warning(
+        "Semantic section cache is unreadable; rebuilding from .smart-env.",
+        { ...context },
+      );
+      return null;
+    }
+  }
+
+  private persistSections(
+    signature: string,
+    model: string,
+    fingerprint: string,
+    dimensions: number,
+    refs: SmartBlockRef[],
+    vectors: Float32Array,
+    norms: Float32Array,
+    tagsByNote: Map<string, string[]>,
+  ): SemanticSectionSnapshot {
+    const refreshedAt = Date.now();
+    this.db.exec("BEGIN");
+    try {
+      this.db.prepare("DELETE FROM semantic_sections").run();
+      this.db.prepare("DELETE FROM semantic_section_tags").run();
+      const insertSection = this.db.prepare(`
+        INSERT INTO semantic_sections (ord, note_path, block_key, line_start, line_end, file_index, read_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      refs.forEach((ref, index) =>
+        insertSection.run(
+          index,
+          ref.notePath,
+          ref.blockKey,
+          ref.lineStart,
+          ref.lineEnd,
+          ref.fileIndex,
+          ref.readHash,
+        ),
+      );
+      const insertTags = this.db.prepare(
+        "INSERT INTO semantic_section_tags (note_path, tags_json) VALUES (?, ?)",
+      );
+      for (const [notePath, tags] of tagsByNote)
+        insertTags.run(notePath, JSON.stringify(tags));
+      this.db
+        .prepare(
+          `
+        INSERT INTO semantic_section_manifest (
+          singleton, smart_env_dir, source_signature, model, fingerprint, dim, section_count, refreshed_at
+        )
+        VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(singleton) DO UPDATE SET
+          smart_env_dir = excluded.smart_env_dir,
+          source_signature = excluded.source_signature,
+          model = excluded.model,
+          fingerprint = excluded.fingerprint,
+          dim = excluded.dim,
+          section_count = excluded.section_count,
+          refreshed_at = excluded.refreshed_at
+      `,
+        )
+        .run(
+          this.smartEnvDir,
+          signature,
+          model,
+          fingerprint,
+          dimensions,
+          refs.length,
+          refreshedAt,
+        );
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return {
+      sourceSignature: signature,
+      model,
+      dimensions,
+      refreshedAt,
+      refs,
+      vectors,
+      norms,
+      tagsByNote,
+    };
   }
 
   /**
@@ -499,6 +868,8 @@ export class SemanticCacheService {
     this.readiness = null;
     this.memorySnapshot = null;
     this.memorySnapshotLoadedAt = 0;
+    this.sectionSnapshot = null;
+    this.sectionSnapshotLoadedAt = 0;
   }
 
   private readManifest(): SemanticManifestRow | null {
