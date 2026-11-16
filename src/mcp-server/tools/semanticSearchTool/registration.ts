@@ -266,10 +266,15 @@ function locateSection(
     start <= lastStart &&
     smartTextHash(noteLines.slice(start - 1, start - 1 + span).join("\n")) ===
       ref.readHash;
+  // The span no longer fits in the note: no position can match.
+  if (lastStart < 1) return undefined;
   if (matches(ref.lineStart)) return [ref.lineStart, ref.lineEnd];
-  for (let delta = 1; ref.lineStart - delta >= 1 || ref.lineStart + delta <= lastStart; delta++) {
-    for (const start of [ref.lineStart - delta, ref.lineStart + delta]) {
-      if (start < 1 || start > lastStart) continue;
+  // Search outward from the nearest valid position, so the loop is bounded by
+  // the note length even when the indexed line is far past its end.
+  const center = Math.min(Math.max(ref.lineStart, 1), lastStart);
+  for (let delta = 0; center - delta >= 1 || center + delta <= lastStart; delta++) {
+    for (const start of delta === 0 ? [center] : [center - delta, center + delta]) {
+      if (start < 1 || start > lastStart || start === ref.lineStart) continue;
       if (budget.lines < span) return undefined;
       budget.lines -= span;
       if (matches(start)) return [start, start + span - 1];

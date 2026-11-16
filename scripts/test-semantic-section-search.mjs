@@ -1,5 +1,8 @@
 import "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
 import { createServer } from "node:http";
 import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -296,6 +299,49 @@ try {
   );
   racing.db.close();
 
+  // A section indexed far past the end of its note is reported unverified
+  // without walking every line number up to it (it used to block the process).
+  const gamma = ["# Gamma", "Short note."].join("\n");
+  const far = 1_000_000_000_000;
+  await writeFile(path.join(root, "Notes", "Gamma.md"), gamma, "utf8");
+  await appendFile(
+    path.join(source, "smart_sources", "smart_sources.ajson"),
+    ",\n" +
+      record("Notes/Gamma.md", gamma, 1, undefined, {
+        "#Far": { ...block("Text no longer\nin the note.", 1, 2, 4), lines: [far, far + 1] },
+      }),
+    "utf8",
+  );
+  // The old loop was synchronous, so an in-process timer could never fire:
+  // run this search in a child process bounded by a watchdog.
+  const child = await promisify(execFile)(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `const { McpServer, InMemoryTransport } = await import("@modelcontextprotocol/server");
+       const { Client } = await import("@modelcontextprotocol/client");
+       const { registerSemanticSearchTool } = await import(${JSON.stringify(
+         pathToFileURL(path.resolve("dist/mcp-server/tools/semanticSearchTool/registration.js")).href,
+       )});
+       const server = new McpServer({ name: "far", version: "1" });
+       const client = new Client({ name: "far", version: "1" });
+       const [c, s] = InMemoryTransport.createLinkedPair();
+       await registerSemanticSearchTool(server);
+       await server.connect(s);
+       await client.connect(c);
+       const r = await client.callTool({ name: "smart_semantic_search", arguments: { query: "far", granularity: "sections", folders: ["Notes/Gamma"], top_k: 5 } });
+       console.log(r.content[0].text.replace(/\\s+/g, " "));
+       await client.close();`,
+    ],
+    { cwd: process.cwd(), env: { ...process.env, OBSIDIAN_SHARED_CACHE_DB_PATH: path.join(root, "far.sqlite") }, encoding: "utf8", timeout: 60_000 },
+  ).catch((error) => assert.fail(`the relocation search did not finish within the watchdog: ${error.killed ? "killed" : error.code}`));
+  const farResult = JSON.parse(child.stdout.trim().split("\n").at(-1));
+  assert.deepEqual(
+    farResult.results.map((result) => [result.block_key, result.lines, result.lines_verified]),
+    [["#Far", [far, far + 1], false]],
+  );
+
   // Without block vectors for the active model, sections are refused before
   // the query is embedded; notes still work.
   await rm(blockFile);
@@ -308,7 +354,7 @@ try {
   assert.equal((await search({})).isError, false);
 
   console.log(
-    "PASS semantic section search: block selection, one cold read for both caches, persisted references, filters, merged ranking, line verification and relocation, refresh on block file change, refusal without block vectors",
+    "PASS semantic section search: block selection, one cold read for both caches, persisted references, filters, merged ranking, line verification and relocation, relocation bounded by the note length, refresh on block file change, refusal without block vectors",
   );
 } finally {
   await client.close().catch(() => undefined);
