@@ -15,7 +15,7 @@ Lire un coffre, n’importe quelle connexion le fait. Optimike Obsidian MCP sert
 | Vous voulez… | Ce que fait le MCP |
 | --- | --- |
 | Valider avant que l’IA écrive | Elle prépare un plan ; ce qui s’écrit est exactement ce que vous avez validé, puis c’est vérifié. Si la connexion coupe, l’écriture n’est pas rejouée à l’aveugle. |
-| Continuer à écrire pendant qu’elle travaille | Son écriture est refusée si la note a changé depuis sa lecture : elle n’écrase pas votre version. |
+| Continuer à écrire pendant qu’elle travaille | Son écriture est refusée si la note change entre son plan et l’écriture : une modification faite entre-temps n’est pas écrasée. |
 | Garder vos Bases, liens et tâches justes | Propriétés au format d’Obsidian, déplacements par Obsidian, suppression vers la corbeille, tâches Operon par Operon. |
 | Que vos règles s’appliquent | Avant chaque écriture, l’IA est renvoyée vers les `AGENTS.md` qui s’appliquent, depuis Claude, ChatGPT ou Codex ; un mode strict refuse l’écriture tant qu’elle ne les a pas lus. |
 | Trouver le bon passage | La recherche par le sens renvoie le passage qui répond, avec ses lignes. |
