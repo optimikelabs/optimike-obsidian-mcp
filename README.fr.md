@@ -20,7 +20,7 @@ Lire un coffre, n’importe quelle connexion le fait. Optimike Obsidian MCP sert
 | Que vos règles s’appliquent | Avant chaque écriture, l’IA est renvoyée vers les `AGENTS.md` qui s’appliquent, depuis Claude, ChatGPT ou Codex ; un mode strict refuse l’écriture tant qu’elle ne les a pas lus. |
 | Trouver le bon passage | La recherche par le sens renvoie le passage qui répond, avec ses lignes. |
 
-Ces garanties s’appliquent aux écritures gouvernées, actives avec Obsidian ouvert et le plugin Atomic Write Bridge. Si votre IA ne fait que lire votre coffre, un accès aux fichiers ou un MCP plus léger suffit.
+Ces garanties s’appliquent aux écritures gouvernées : Obsidian ouvert et le plugin Atomic Write Bridge, dont les écritures restent fermées tant que vous ne les ouvrez pas dans ses réglages. Si votre IA ne fait que lire votre coffre, un accès aux fichiers ou un MCP plus léger suffit.
 
 ## Carte des capacités
 
