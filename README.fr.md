@@ -6,8 +6,22 @@ English version: [README.md](README.md) · [Hub documentaire](docs/README.fr.md)
 
 ![Vue d’ensemble d’Optimike Obsidian MCP entre clients agentiques, Obsidian et documents externes gouvernés](docs/assets/readme/overview.fr.svg)
 
-Optimike Obsidian MCP fournit aux clients MCP une surface opérationnelle gouvernée au-dessus d’un coffre Obsidian : opérations Desktop live, modes headless résilients, Tasks et Operon, Bases et Canvas, recherche sémantique, observabilité runtime et accès borné à des documents externes configurés. La version 3.9 ajoute l’observation bornée des liens de notes, le déplacement natif gouverné, la création durable d’une note absente et le patch d’une seule row Base. Chaque mutation suit un cycle distinct `plan → apply → status` et échoue de façon sûre si sa preuve scellée ne peut pas être réconciliée. Voir le [protocole de qualification](docs/cycle-20260920/CODEX-FINALISATION.md) et la [roadmap bornée](docs/cycle-20260920/ROADMAP.md). La version 3.10 fiabilise la recherche et les diagnostics sémantiques, sert côte à côte les clients MCP historiques et `2026-07-28`, et peut publier des Agent Skills explicitement configurées comme ressources en lecture seule. La prise en charge native des Skills doit être vérifiée pour chaque client. Le Bridge Operon reste aussi réactif quand la fenêtre Obsidian est masquée. Voir les contrats [dual-stack](docs/mcp-2026-dual-stack.md) et de [publication Skills](docs/mcp-skills.md).
- La version 3.11 ajoute le rafraîchissement du cache assisté par événements et l’import gouverné d’images ChatGPT, avec une politique d’images portable et explicitement configurée. Elle corrige aussi la sélection du modèle Smart Connections v3, les réponses HTTP et la planification Operon, et clarifie les contrats de création et de récupération des tâches.
+Optimike Obsidian MCP fournit aux clients MCP une surface opérationnelle gouvernée au-dessus d’un coffre Obsidian : opérations Desktop live, modes headless résilients, Tasks et Operon, Bases et Canvas, recherche sémantique, observabilité runtime et accès borné à des documents externes configurés. L’historique des versions se trouve dans le [changelog](CHANGELOG.md) et les [notes de version](docs/releases/).
+
+## Ce que ça change pour vous
+
+Lire un coffre, n’importe quelle connexion le fait. Optimike Obsidian MCP sert quand votre IA écrit dedans : vous pouvez lui confier le coffre sans relire derrière elle.
+
+| Vous voulez… | Ce que fait le MCP |
+| --- | --- |
+| Valider avant que l’IA écrive | Elle prépare un plan ; ce qui s’écrit est exactement ce que vous avez validé, puis c’est vérifié. Si la connexion coupe, l’écriture n’est pas rejouée à l’aveugle. |
+| Continuer à écrire pendant qu’elle travaille | Son écriture est refusée si la note a changé depuis sa lecture : elle n’écrase pas votre version. |
+| Garder vos Bases, liens et tâches justes | Propriétés au format d’Obsidian, déplacements par Obsidian, suppression vers la corbeille, tâches Operon par Operon. |
+| Que vos règles s’appliquent | Avant chaque écriture, l’IA est renvoyée vers les `AGENTS.md` qui s’appliquent, depuis Claude, ChatGPT ou Codex ; un mode strict refuse l’écriture tant qu’elle ne les a pas lus. |
+| Trouver le bon passage | La recherche par le sens renvoie le passage qui répond, avec ses lignes. |
+
+Ces garanties s’appliquent aux écritures gouvernées, actives avec Obsidian ouvert et le plugin Atomic Write Bridge. Si votre IA ne fait que lire votre coffre, un accès aux fichiers ou un MCP plus léger suffit.
+
 ## Carte des capacités
 
 | Domaine                 | Ce que fournit le MCP                                                           | Dépendance principale                                |
@@ -21,12 +35,6 @@ Optimike Obsidian MCP fournit aux clients MCP une surface opérationnelle gouver
 | Administration headless | Opérations métadonnées/filesystem bornées                                       | Copie ou coffre dédié                                |
 
 Le registre canonique des outils est documenté dans [Surface des outils](docs/obsidian_mcp_tools_spec.md).
-
-La version 3.12 ajoute le profil operational, la lecture dédiée du frontmatter et une certification gouvernée plus rapide avec une intégration FDM facultative qualifiée. Voir les gains mesurés et leurs conditions dans le [changelog](CHANGELOG.md#3120---2026-10-08). La version 3.13 rétablit la recherche sémantique sur les index Smart Connections construits avec le modèle intégré du plugin (BGE Micro par défaut), via le paquet optionnel `@huggingface/transformers` ; voir [embedders](README_EMBEDDERS.md).
-
-La version 3.14 fait dater les notes sans création par FDM avant une modification protégée, préserve les modèles et chemins exclus sans dates et accepte la normalisation CRLF/LF par Obsidian pendant la préparation. FDM 1.6.0 est qualifié ; les autres gestionnaires ne le sont pas. Voir les [notes de version 3.14.0](docs/releases/3.14.0.fr.md).
-
-La version 3.21 permet à `smart_semantic_search` de renvoyer les sections de titre et les paragraphes qui répondent, avec des plages de lignes vérifiées, au lieu des seules notes entières (`granularity: sections`, PR #169) ; les Bridges ne changent pas ; voir les [notes de version 3.21.0](docs/releases/3.21.0.fr.md). La version 3.20 permet aux agents d’épingler et de désépingler une tâche Operon (`operon_set_pinned`, après une approbation unique dans les réglages d’Operon) et de modifier 2 à 64 tâches dans un seul plan scellé (`operon_update_tasks`), et corrige les schémas d’outils et les refus qui trompaient les agents sur la création d’une tâche dans une note (issues #159 et #160). Installer le MCP 3.20.0 avec Operon Bridge 0.9.9, depuis le même bundle des Bridges ; voir les [notes de version 3.20.0](docs/releases/3.20.0.fr.md). La version 3.19.1 rend explicites les refus d’Operon et des patchs de texte gouvernés (issue #152), avec Operon Bridge 0.9.8 ; voir les [notes de version 3.19.1](docs/releases/3.19.1.fr.md). La version 3.19 débloque les modifications gouvernées des notes que Frontmatter Date Manager date avec la vraie date de création du fichier (issue #147), avec Atomic Write Bridge 0.9.2, et sert les [fichiers d’instructions d’agent](docs/vault-instructions.fr.md) du coffre (cascade `AGENTS.md`) avant les écritures, en mode `advise` par défaut. Installer le MCP 3.19.0 avec Atomic Write Bridge 0.9.2, depuis le même bundle des Bridges ; voir les [notes de version 3.19.0](docs/releases/3.19.0.fr.md). La version 3.18 prend en charge Operon 4.4.0 avec des refus lisibles (`revision_conflict`, `operon_rejected`, `consent_required`) et des révisions de tâches qui survivent aux mises à jour, ajoute `intent` à `operon_transition_task` et `fieldIncludes` à `operon_query_tasks`, explique les déplacements de notes refusés, garde trouvables les notes réindexées par Smart Connections et ne déclare plus la recherche sémantique indisponible pendant le chargement de son cache après un redémarrage. Installer le MCP 3.18.0 avec Atomic Write Bridge 0.9.1 et Operon Bridge 0.9.7, depuis le même bundle des Bridges ; voir les [notes de version 3.18.0](docs/releases/3.18.0.fr.md). La version 3.17 ajoute la [configuration gouvernée d’une Base](docs/governed-base-config.fr.md) (`bases_config_patch_plan` : filtres, formules, réglages des propriétés, résumés et vues d’une Base existante) et toutes les options JSON Canvas au patch Canvas gouverné (nœuds fichier, lien et groupe, champs des nœuds, étiquettes, couleurs et flèches des arêtes) ; aucun changement de Bridge. La version 3.16 ajoute la [création gouvernée de Bases et de Canvas](docs/governed-file-create.fr.md) : `bases_create_plan` et `obsidian_canvas_create_plan` créent un nouveau fichier `.base` ou `.canvas` validé, sans jamais écraser, par deux nouveaux grants d’Atomic Write Bridge 0.9.0 désactivés par défaut. Installer le MCP 3.16.0 avec Atomic Write Bridge 0.9.0, depuis le bundle des Bridges de la même release ; voir les [notes de version 3.16.0](docs/releases/3.16.0.fr.md). La version 3.15 ajoute la [suppression gouvernée de note](docs/governed-note-delete.md) (en anglais) vers la corbeille d’Obsidian (désactivée par défaut : grant Bridge `allowNoteDeletes` et `MCP_WRITE_MODE=full`), la fence d’effet du Bridge avec [`obsidian_operation_close`](docs/administrative-closure.fr.md) pour les opérations incertaines, une [règle commune de noms de notes](docs/note-name-rules.fr.md), le format natif du frontmatter d’Obsidian pour les écritures gouvernées, des journaux lisibles avec rotation, l’action de maintenance `checkpoint_wal`, une [compatibilité ChatGPT](docs/chatgpt-secure-tunnel.fr.md) activable et un [superviseur du backend](docs/backend-supervision.fr.md) facultatif. Les outils qui exposent `responseMode` répondent désormais en `compact` par défaut ; demander `detailed` (ou `tree` / `legacy` quand l’outil le propose) pour l’ancienne forme. En `operational`, `obsidian_delete_note` est masqué au profit de la famille de suppression gouvernée. Les versions 3.15.1 et 3.15.2 rendent plus tôt les reçus des mutations Operon et bornent les relances de lecture après une mutation. Installer ensemble le MCP 3.15.x et Atomic Write Bridge 0.8.5, depuis le bundle des Bridges de la même release. Voir les notes de version [3.15.0](docs/releases/3.15.0.fr.md), [3.15.1](docs/releases/3.15.1.fr.md) et [3.15.2](docs/releases/3.15.2.fr.md).
 
 ## Runtime et transport
 
@@ -59,15 +67,7 @@ Sélectionner le profil avant `tools/list` :
 node dist/stdio-proxy.js --tool-profile standard
 ```
 
-Routes HTTP profilées :
-
-```text
-/mcp/standard
-/mcp/authoring
-/mcp/tasks
-/mcp/full
-/mcp/operational
-```
+Routes HTTP profilées : `/mcp/standard`, `/mcp/authoring`, `/mcp/tasks`, `/mcp/full`, `/mcp/operational`.
 
 Le chemin `/mcp` sans qualificatif utilise désormais `standard` ; `/mcp/full` reste la route complète explicite. Voir [Profils de surface d’outils](docs/tool-surface-profiles.fr.md).
 
