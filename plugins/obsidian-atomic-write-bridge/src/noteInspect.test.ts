@@ -171,6 +171,39 @@ test("valid links, self-anchors and code spans produce no findings", async () =>
   assert.deepEqual(codes(afterSpan.findings), ["link-unresolved:Missing after span"]);
 });
 
+test("code inside blockquotes, callouts and indented blocks is not checked; list continuations are", async () => {
+  const { inspector } = fixture({ files: {} });
+  const content = [
+    "> [!example]",
+    "> ```markdown",
+    "> ![[missing-in-callout-fence.png]]",
+    "> ```",
+    "",
+    "> > ~~~",
+    "> > [[Missing in nested quote fence]]",
+    "> > ~~~",
+    "",
+    "Paragraph before indented code.",
+    "",
+    "    ![[missing-in-indented-code.png]]",
+    "    [[Missing in indented code]]",
+    "",
+    "- list item",
+    "",
+    "    [[Missing in list continuation]]",
+    "",
+    "> ```",
+    "> unclosed fence in a quote",
+    "",
+    "[[Missing after quote]]",
+  ].join("\n");
+  const result = await inspector.inspect({ content, baseline: "none" });
+  assert.deepEqual(codes(result.findings).sort(), [
+    "link-unresolved:Missing after quote",
+    "link-unresolved:Missing in list continuation",
+  ]);
+});
+
 test("reports only what the candidate introduces compared with the current file", async () => {
   const current = "---\nstatus: maybe\n---\n[[Old missing]] [[AGENTS#Gone]]\n> [!legacy]\n";
   const { inspector } = fixture({

@@ -283,24 +283,54 @@ type Document = {
   blocks: Array<{ id: string; line: number; offset: number; length: number }>;
 };
 
+const LIST_ITEM = /^ {0,3}(?:[-+*]|\d{1,9}[.)])(?:[ \t]|$)/u;
+
+/**
+ * Blanks fenced and indented code, also inside blockquotes and callouts, so
+ * examples written as code are not checked as references. The quote markers
+ * stay in place; line lengths and offsets are unchanged.
+ */
 function maskFences(text: string): string {
-  let fence: { char: string; size: number } | null = null;
+  let fence: { char: string; size: number; depth: number } | null = null;
+  let indented = false;
+  let previousBlank = true;
+  let lastContent = "";
   return text
     .split("\n")
     .map((line) => {
-      const opener = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line.replace(/\r$/u, ""));
+      const clean = line.replace(/\r$/u, "");
+      const quote = /^(?: {0,3}>[ \t]?)*/u.exec(clean)?.[0] ?? "";
+      const depth = (quote.match(/>/gu) ?? []).length;
+      const rest = clean.slice(quote.length);
+      const blank = !rest.trim();
+      const masked = quote + " ".repeat(line.length - quote.length);
+      const opener = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(rest);
+      // Leaving the blockquote that holds a fence closes it.
+      if (fence && depth < fence.depth) fence = null;
       if (fence) {
         if (opener && opener[1][0] === fence.char && opener[1].length >= fence.size && !opener[2].trim()) {
           fence = null;
         }
-        return " ".repeat(line.length);
+        previousBlank = false;
+        return masked;
       }
       // CommonMark: a backtick fence's info string has no backtick, so ```x``` is an inline span.
       if (opener && (opener[1][0] === "~" || !opener[2].includes("`"))) {
-        fence = { char: opener[1][0], size: opener[1].length };
-        return " ".repeat(line.length);
+        fence = { char: opener[1][0], size: opener[1].length, depth };
+        indented = false;
+        previousBlank = false;
+        return masked;
       }
-      return line;
+      // Indented code: four spaces or a tab after a blank line, unless the text
+      // before the blank line is a list item or its continuation.
+      const codeIndent = /^(?: {4}|\t)/u.test(rest);
+      if (indented && !blank && !codeIndent) indented = false;
+      if (!indented && codeIndent && !blank && previousBlank && !LIST_ITEM.test(lastContent) && !/^[ \t]/u.test(lastContent)) {
+        indented = true;
+      }
+      previousBlank = blank;
+      if (!blank) lastContent = rest;
+      return indented && !blank ? masked : line;
     })
     .join("\n");
 }
