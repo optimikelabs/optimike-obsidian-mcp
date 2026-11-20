@@ -28,6 +28,7 @@ import type { NoteDeleteApply } from "../noteDeleteContract.js";
 import * as activeFileMethods from "./methods/activeFileMethods.js";
 import * as atomicWriteMethods from "./methods/atomicWriteMethods.js";
 import * as baseAtomicWriteMethods from "./methods/baseAtomicWriteMethods.js";
+import * as basesEngineMethods from "./methods/basesEngineMethods.js";
 import * as basesMethods from "./methods/basesMethods.js";
 import * as commandMethods from "./methods/commandMethods.js";
 import * as openMethods from "./methods/openMethods.js";
@@ -940,6 +941,33 @@ export class ObsidianRestApiService {
       this._request.bind(this),
       baseId,
       payload,
+      context,
+    );
+  }
+
+  /**
+   * Evaluates a Base's formulas with Obsidian's Bases engine (Bases Bridge).
+   * Unavailability is a result, never an exception.
+   */
+  async evaluateBaseEngine(
+    payload: { path: string; yaml?: string; formulas?: string[] },
+    context: RequestContext,
+  ): Promise<basesEngineMethods.BaseEngineEvaluation> {
+    return basesEngineMethods.evaluateBaseEngine(
+      this._request.bind(this),
+      payload,
+      context,
+    );
+  }
+
+  /** Reads the Bases function registry of the installed Obsidian. */
+  async listBaseEngineFunctions(
+    on: basesEngineMethods.BaseFunctionType | undefined,
+    context: RequestContext,
+  ): Promise<basesEngineMethods.BaseFunctionRegistry> {
+    return basesEngineMethods.listBaseEngineFunctions(
+      this._request.bind(this),
+      on,
       context,
     );
   }

@@ -86,7 +86,7 @@ export async function registerGovernedBaseFormulaTools(
     "bases_formula_patch_plan",
     {
       description:
-        "Plan a source-preserving set/delete patch of named formulas in one existing Obsidian Base. The complete next YAML, backend binding, hashes, and byte-preservation proof are sealed without writing.",
+        "Plan a source-preserving set/delete patch of named formulas in one existing Obsidian Base. Before sealing, Obsidian's Bases engine evaluates the Base as stored and as planned: a formula the plan breaks (syntax or runtime error) is refused with the engine message, unknown functions and suggestions; errors already present do not block. engineCheck is verified, or unverified with a reason when the engine is unavailable. Syntax: https://help.obsidian.md/bases/syntax; functions: https://help.obsidian.md/bases/functions. The complete next YAML, backend binding, hashes, and byte-preservation proof are sealed without writing.",
       inputSchema: mcpSchema(PlanSchema.shape),
       annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,
     },

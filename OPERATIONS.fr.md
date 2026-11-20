@@ -376,6 +376,13 @@ V1. Dans les réglages du Bridge, activer **Autoriser le CAS atomique des
 Bases** pour le pilote et laisser la compatibilité legacy désactivée afin que
 `bases_upsert_config` ne contourne pas le chemin gouverné.
 
+Les plans de formules et de configuration sont vérifiés par le moteur Bases
+d’Obsidian avant scellement quand le Bases Bridge expose sa route moteur et
+qu’Obsidian tourne. Un plan qui casse une formule est refusé avec le message du
+moteur ; si le moteur est indisponible, le plan continue avec
+`engineCheck.status: "unverified"` et sa raison. Voir
+[Vérification par le moteur d’Obsidian](docs/governed-base-formula-p2.fr.md#vérification-par-le-moteur-dobsidian).
+
 Gates déterministes :
 
 ```bash

@@ -52,8 +52,17 @@ atomic compare-and-replace on the exact SHA-256 and backend binding, the same
 `allowAtomicBaseWrites` grant. No Bridge change is needed. Recovery replays only
 the sealed plan; it is not undo.
 
+Before sealing, the plan runs the same Obsidian engine check as the formula
+family ([Obsidian engine check](governed-base-formula-p2.md#obsidian-engine-check)):
+every formula is evaluated as stored and as planned, a newly broken formula
+refuses the plan, and the receipt carries `engineCheck` (`verified`, or
+`unverified` with a reason). Deleting a formula that another one uses is caught
+this way.
+
 Refusals return closed `base_config_*` reason codes and never echo the
-submitted values.
+submitted values. The engine refusal `base_formula_engine_error` is the
+exception: its `formulaCheck` names the broken formulas and quotes Obsidian's
+bounded messages so the caller can fix them.
 
 ## Tests
 
