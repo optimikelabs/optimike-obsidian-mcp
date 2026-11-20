@@ -14,6 +14,7 @@ import {
 } from "./basesEngineContract.js";
 import type { BaseEngine } from "./baseFormulaEngineCheck.js";
 import type { BaseFunctionDescriptor } from "./obsidianRestAPI/methods/basesEngineMethods.js";
+import { BaseErrorCode, McpError } from "../types-global/errors.js";
 
 const DOCS = [BASES_FUNCTIONS_DOC_URL, BASES_SYNTAX_DOC_URL] as const;
 export const MAX_CHECKED_BASES = 100;
@@ -115,7 +116,16 @@ export async function basesCheck(
     const report = await checkOne(engine, path);
     return { ...report, docs: DOCS };
   }
-  const all = [...new Set(await listBasePaths())].sort();
+  let listed: string[];
+  try {
+    listed = await listBasePaths();
+  } catch (error) {
+    // Obsidian closed or no Bases Bridge: the report is unverified, as for one Base.
+    const reason: BaseEngineUnavailableReason =
+      error instanceof McpError && error.code === BaseErrorCode.NOT_FOUND ? "bridge_route_missing" : "engine_request_failed";
+    return { status: "unverified", reason, docs: DOCS } as const;
+  }
+  const all = [...new Set(listed)].sort();
   const paths = all.slice(0, MAX_CHECKED_BASES);
   if (paths.length === 0) return { summary: summary([]), problems: [], docs: DOCS };
   // The first answer tells whether the engine itself is reachable; when it is

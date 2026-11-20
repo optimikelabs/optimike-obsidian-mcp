@@ -21,6 +21,8 @@ let writes = 0;
 // Replay of the Bases Bridge engine routes. Statuses follow the live check of
 // 2026-11-20; an older Bridge (engine off) answers 404.
 let engineEnabled = false;
+// The Bases list itself fails when the Bases Bridge is absent (404) or broken.
+let basesListStatus = 200;
 const ENGINE_RESULTS = new Map([
   ["fooBar(file.name)", ["runtime_error", 'Error: Unknown function "fooBar"']],
   ["fooBar(1)", ["runtime_error", 'Error: Unknown function "fooBar"']],
@@ -181,6 +183,7 @@ const server = http.createServer((req, res) => {
       });
     }
     if (req.method === "GET" && url.pathname === "/bases") {
+      if (basesListStatus !== 200) return json(res, basesListStatus, { error: "bases list unavailable" });
       return json(res, 200, {
         bases: [fixturePath, "Canary/Missing.base"].map((path) => ({ id: path, name: path, path })),
       });
@@ -426,6 +429,15 @@ try {
   });
   assert.equal((await read("bases_check", { path: fixturePath })).status, "unverified");
   assert.equal((await read("bases_functions")).status, "unverified");
+  // A failed Bases list is unverified too, not a tool error.
+  for (const [status, reason] of [[404, "bridge_route_missing"], [500, "engine_request_failed"]]) {
+    basesListStatus = status;
+    assert.deepEqual((({ status, reason }) => ({ status, reason }))(await read("bases_check")), {
+      status: "unverified",
+      reason,
+    }, `a ${status} Bases list leaves bases_check unverified`);
+  }
+  basesListStatus = 200;
 
   engineEnabled = true;
   const grouped = await read("bases_functions");
