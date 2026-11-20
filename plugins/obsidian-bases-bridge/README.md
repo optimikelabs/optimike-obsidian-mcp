@@ -23,6 +23,8 @@ Préfixe officiel (recommandé) :
 - `POST /extensions/obsidian-bases-bridge/bases`
 - `GET /extensions/obsidian-bases-bridge/bases/:id/config`
 - `PUT /extensions/obsidian-bases-bridge/bases/:id/config`
+- `POST /extensions/obsidian-bases-bridge/engine/evaluate`
+- `GET /extensions/obsidian-bases-bridge/engine/functions`
 - `GET /extensions/obsidian-bases-bridge/atomic/status`
 - `POST /extensions/obsidian-bases-bridge/atomic/bases/read`
 - `POST /extensions/obsidian-bases-bridge/atomic/bases/cas`
@@ -38,6 +40,99 @@ Alias legacy (compat MCP) :
 - `PUT /bases/:id/config`
 
 Les routes héritent de l’authentification Bearer + TLS local du plugin REST.
+
+## Moteur d’Obsidian (`/engine/*`)
+
+Ces deux routes lisent sans écrire. Elles répondent toujours `200` avec
+`available`, sauf un corps de requête invalide (`400`,
+`reason: "invalid_request"`).
+
+### `POST /engine/evaluate`
+
+Corps : `{ "path": "Dossier/X.base", "yaml"?: string, "formulas"?: string[] }`.
+Sans `yaml`, la Base est évaluée telle qu’elle est enregistrée. Sans
+`formulas`, toutes les formules de la Base candidate sont évaluées.
+
+Le calcul passe par le handler CLI natif `base:query` du plugin cœur Bases
+(`app.cli.handlers`), pas par un évaluateur du Bridge. Le Bridge prépare en
+mémoire une Base candidate avec `parseYaml`/`stringifyYaml` : une vue de sonde
+sans filtre de vue ni limite, une formule de sonde `if(false, EXPR, "PARSED")`
+par formule et deux formules canari. Le handler la reçoit par une interception
+unique de `app.vault.cachedRead` pour ce chemin exact, restaurée dans un
+`finally`. Les appels sont sérialisés. Aucun fichier n’est modifié.
+
+Chaque formule est évaluée sur toutes les lignes retenues par les filtres
+globaux de la Base, quelle que soit la limite des vues :
+
+```json
+{ "available": true, "engine": "obsidian", "obsidianVersion": "1.15.1",
+  "canary": { "ok": true },
+  "formulas": { "total": { "status": "runtime_error", "rows": 120,
+    "errorRows": 2, "nullRows": 3,
+    "samples": [ { "path": "a.md", "message": "Error: ..." } ] } },
+  "warnings": [] }
+```
+
+Statuts, par ordre de priorité :
+
+- `syntax_error` : la sonde ne renvoie pas `PARSED` (Obsidian rend `null`
+  pour une formule qu’il ne sait pas analyser).
+- `runtime_error` : au moins une valeur commence par `Error:` (message
+  localisé, non analysé ; au plus 3 exemples dans `samples`).
+- `all_null` : des lignes existent et toutes valent `null` ou vide.
+- `ok` sinon ; `not_evaluated` quand aucune ligne ne correspond, ou pour une
+  formule demandée absente de la Base (avertissement
+  `formula_not_found:<nom>`).
+
+À chaque appel, une formule canari correcte doit être `ok` et une formule
+canari fautive (fonction inconnue) doit être en `runtime_error`, sinon la
+réponse est `{ "available": false, "reason": "canary_failed" }`. Sans ligne
+dans la Base, le canari est vérifié sur une note du coffre.
+
+Indisponibilités (`formulas: {}`) : `engine_unavailable` (handler absent, par
+exemple plugin cœur Bases désactivé), `canary_failed`,
+`unsupported_obsidian` (avant Obsidian 1.15.0, première version prouvée),
+`base_not_found`, `invalid_yaml`.
+
+Limites :
+
+- Le handler natif résout la Base par l’index du coffre : le fichier `.base`
+  doit exister, même quand `yaml` fournit une candidate
+  (`base_not_found` sinon).
+- Une valeur légitime qui commence par `Error:` compte comme une erreur
+  d’exécution.
+- Une exception levée pendant le calcul d’une cellule devient une cellule
+  vide dans la sortie native, donc un `null`.
+
+### `GET /engine/functions?on=<Type>`
+
+Renvoie le registre des fonctions de formule de la version installée :
+
+```json
+{ "available": true, "obsidianVersion": "1.15.1",
+  "source": "obsidian-app-bundle",
+  "functions": [ { "name": "round", "on": "Number",
+    "params": [ { "name": "digits", "types": ["Number"],
+      "optional": true, "variadic": false } ],
+    "doc": "Rounds the number to the nearest integer." } ],
+  "warnings": [] }
+```
+
+Le registre n’est pas dans l’API publique. Le Bridge lit le bundle en cours
+d’exécution (`fetch("app.js")`) et retrouve les enregistrements
+`<id>.addGlobal(new class …)` / `<id>.addForType(<Type>,new class …)`, sans
+identifiant minifié codé en dur : il exige un récepteur unique et découvre les
+constructeurs de paramètres et les noms de type dans le bundle. `on` vient de
+la clé de documentation (`labelStringLower` → `String`, `labelValue…` →
+`Any`), `Global` pour les fonctions globales. Les fonctions d’instance ne
+listent pas leur premier paramètre (`self`), comme l’autocomplétion
+d’Obsidian. `doc` vient de `i18next` (`formulas.funcs.<clé>`), `null` sinon.
+`on` filtre sans tenir compte de la casse.
+
+Le résultat est mis en cache par version d’Obsidian. Garde-fou : moins de 60
+fonctions, ou absence de `if`, `now` ou `link`, donne
+`{ "available": false, "reason": "canary_failed", "functions": [] }` ; un
+bundle illisible donne `engine_unavailable`.
 
 ## Écritures de configuration
 
