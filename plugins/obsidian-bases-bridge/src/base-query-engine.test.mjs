@@ -261,3 +261,22 @@ test("past 1,000 rows a formula filter is not evaluated, and says so", async () 
   assert.equal(payload.rows.length, 10);
   assert.deepEqual(counts, { label: 10, shout: 10 }, "only the page is computed");
 });
+
+test("past the cap, formula predicates are skipped, not run on missing values", async () => {
+  const notes = Array.from({ length: 1001 }, (_, i) => `Notes/m${String(i).padStart(4, "0")}.md`);
+  const query = await queryRoute({ baseText: JSON.stringify(UNLIMITED), notes, table: countingTable().table });
+  for (const predicate of ['formula.shout == "m0000.md!"', "formula.shout == null"]) {
+    const { payload } = await query({ view: "All", evaluate: true, limit: 5, filter: { and: [predicate] } });
+    assert.equal(payload.total, 1001, `${predicate} keeps every row`);
+    assert.ok(payload.warnings.includes("formula_filter_not_evaluated:too_many_rows:1001:1000"));
+  }
+  // A non-formula predicate still applies next to a skipped formula one.
+  const { payload } = await query({
+    view: "All",
+    evaluate: true,
+    limit: 5,
+    filter: { and: ['file.name == "m0007"', "formula.shout == null"] },
+  });
+  assert.equal(payload.total, 1);
+  assert.equal(payload.rows[0].file.path, "Notes/m0007.md");
+});

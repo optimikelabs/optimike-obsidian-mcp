@@ -169,8 +169,8 @@ est `bases_formula_patch_*`, pas l’envoi de YAML arbitraire.
   partir des octets exacts de la Base décrits par `baseSnapshot`. Seuls un
   `filter` ou un `sort` de la requête sur `formula.*` font calculer toutes les
   lignes, par lots de 100 entre lesquels Obsidian reprend la main, jusqu’à
-  1 000 lignes ; au-delà, la partie formule du filtre ou du tri n’est pas
-  évaluée et `formula_filter_not_evaluated:too_many_rows:<lignes>:1000` le
+  1 000 lignes ; au-delà, les conditions et tris sur formule sont ignorés (les
+  autres conditions filtrent toujours) et `formula_filter_not_evaluated:too_many_rows:<lignes>:1000` le
   signale : réduisez les lignes avec une vue ou un filtre sans formule. `computed`
   et les clés de formule de `props` portent ces valeurs, sous la forme texte que
   rend le moteur (`null` si vide). Mesuré par le Bridge sur 8 000 notes liées :
@@ -182,7 +182,8 @@ est `bases_formula_patch_*`, pas l’envoi de YAML arbitraire.
   formule : les clés de formule sont absentes de `props`, `computed` est absent.
   Si `evaluate` était demandé, chaque formule est signalée dans `warnings`
   (`formula_not_evaluated:<nom>:<raison>`). Un filtre ou un tri sur
-  `formula.*` est signalé. Quand la vue a une limite plus petite que le nombre
+  `formula.*` est signalé et ignoré : une condition sur formule dans un `and`
+  est retirée, un `or` ou un `not` qui en contient une garde toutes les lignes. Quand la vue a une limite plus petite que le nombre
   de lignes, seules les premières lignes dans l’ordre du Bridge sont gardées
   et `view_limit_applied_with_bridge_order:<limite>` le signale : cet ordre
   peut différer du tri d’Obsidian.

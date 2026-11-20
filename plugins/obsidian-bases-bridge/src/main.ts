@@ -623,6 +623,21 @@ type QueryCandidateRow = {
 };
 
 /** True when a filter tree references a formula, which only the engine computes. */
+/**
+ * The request filter without its formula predicates, for rows whose formula
+ * values were not computed: a predicate that cannot be evaluated keeps the row
+ * instead of being evaluated against missing values. In `and`, the predicate
+ * is dropped; an `or` or a `not` that involves a formula keeps every row.
+ */
+export function withoutFormulaPredicates(filter: unknown): unknown {
+  if (!filterMentionsFormula(filter)) return filter;
+  if (filter && typeof filter === "object" && !Array.isArray(filter)) {
+    const and = (filter as any).and;
+    if (Array.isArray(and)) return { and: and.map((part: unknown) => withoutFormulaPredicates(part)) };
+  }
+  return null;
+}
+
 function filterMentionsFormula(filter: unknown, depth = 0): boolean {
   if (depth > 32) return true;
   if (typeof filter === "string") return /(^|[^\w.])formula\./u.test(filter);
@@ -1740,10 +1755,12 @@ export default class BasesBridgePlugin extends Plugin {
     const needsAllValues =
       (!!body?.filter && filterMentionsFormula(body.filter)) ||
       sortSpecs.some((s) => s.prop.startsWith("formula."));
+    let formulaValuesMissing = false;
     if (needsAllValues && source === "engine" && formulaNames.length > 0) {
       if (candidates.length <= ENGINE_MAX_FORMULA_FILTER_ROWS) {
         await fillValues(candidates);
       } else {
+        formulaValuesMissing = true;
         // Computing every row would block Obsidian for seconds: the formula
         // part of the request filter or sort is not evaluated, and says so.
         addWarnings([
@@ -1752,10 +1769,14 @@ export default class BasesBridgePlugin extends Plugin {
       }
     }
 
+    // Without formula values (fallback, or past the row cap), formula
+    // predicates and sorts are skipped rather than run on missing values.
+    const skipFormulas = source === "fallback" || formulaValuesMissing;
     if (body?.filter) {
       if (source === "fallback") formulaFilterWarning(body.filter);
+      const filter = skipFormulas ? withoutFormulaPredicates(body.filter) : body.filter;
       candidates = candidates.filter((row) => {
-        const r = this.evaluateFilter(row.file, body.filter, schema, row.values);
+        const r = this.evaluateFilter(row.file, filter, schema, row.values);
         addWarnings(r.warnings);
         return r.ok;
       });
@@ -1764,7 +1785,11 @@ export default class BasesBridgePlugin extends Plugin {
     if (source === "fallback" && sortSpecs.some((s) => s.prop.startsWith("formula."))) {
       addWarnings(["Tri sur formule non évalué par le Bridge."]);
     }
-    this.sortRows(candidates, sortSpecs, schema);
+    this.sortRows(
+      candidates,
+      skipFormulas ? sortSpecs.filter((s) => !s.prop.startsWith("formula.")) : sortSpecs,
+      schema,
+    );
 
     const total = candidates.length;
     const start = (page - 1) * limit;
