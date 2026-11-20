@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Bases Bridge: `POST /extensions/obsidian-bases-bridge/engine/evaluate` evaluates Base formulas with Obsidian's own Bases engine (the core `base:query` CLI handler) on every row of the Base's global filters, for the stored file or an in-memory candidate YAML, and reports `ok`, `syntax_error`, `runtime_error`, `all_null` or `not_evaluated` per formula with counts and up to 3 error samples. A good and a bad canary formula are checked on each call; if they do not behave, the answer is `available: false` with `canary_failed`. `GET /extensions/obsidian-bases-bridge/engine/functions` returns the formula function registry of the installed Obsidian version, read from the running app bundle and refused below 60 functions or without `if`, `now` and `link`. See the [Bases Bridge README](plugins/obsidian-bases-bridge/README.md#moteur-dobsidian-engine).
+
 ## [3.21.0] - 2026-11-16
 
 No Bridge change: Atomic Write Bridge 0.9.2, Operon Bridge 0.9.9 and Bases Bridge 1.2.2 ship unchanged in the bundle of this release, so upgrading from 3.20.0 needs no Bridge reinstall. A section search loads the section vectors once per process. See the [English](docs/releases/3.21.0.md) and [French](docs/releases/3.21.0.fr.md) release notes.

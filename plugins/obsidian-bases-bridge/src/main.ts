@@ -6,9 +6,20 @@ import {
   PluginSettingTab,
   Setting,
   TFile,
+  apiVersion,
   parseYaml,
   stringifyYaml,
 } from "obsidian";
+import {
+  EngineRequestError,
+  evaluateBaseFormulas,
+  parseEvaluateRequest,
+  unavailableEvaluation,
+} from "./engine-evaluate.mjs";
+import {
+  createFunctionRegistry,
+  unavailableRegistry,
+} from "./function-registry.mjs";
 import {
   compareFilterValues,
   isTruthyFilterReference,
@@ -1691,6 +1702,63 @@ export default class BasesBridgePlugin extends Plugin {
     return props;
   }
 
+  private functionRegistry = createFunctionRegistry({
+    obsidianVersion: apiVersion,
+    fetchBundle: async () => {
+      // The renderer serves its own bundle; this reads the running app's code.
+      const response = await fetch("app.js");
+      if (!response.ok) throw new Error("bundle_unavailable");
+      return response.text();
+    },
+    translate: (key: string) => (window as any).i18next?.t?.(key),
+  });
+
+  /** Engine routes answer 200 with `available`; they never use the error envelope. */
+  private registerEngineRoutes(api: any): void {
+    const send = (res: any, status: number, payload: unknown) =>
+      responseStatus(res, status).json(payload);
+
+    api
+      .addRoute(`${REST_PREFIX}/engine/evaluate`)
+      .post(async (req: any, res: any) => {
+        let request: ReturnType<typeof parseEvaluateRequest>;
+        try {
+          request = parseEvaluateRequest(req?.body);
+        } catch (error) {
+          send(res, 400, {
+            ...unavailableEvaluation("invalid_request"),
+            ...(error instanceof EngineRequestError
+              ? { message: error.message }
+              : {}),
+          });
+          return;
+        }
+        try {
+          send(
+            res,
+            200,
+            await evaluateBaseFormulas(
+              { app: this.app, parseYaml, stringifyYaml, obsidianVersion: apiVersion },
+              request,
+            ),
+          );
+        } catch {
+          send(res, 200, unavailableEvaluation("engine_unavailable"));
+        }
+      });
+
+    api
+      .addRoute(`${REST_PREFIX}/engine/functions`)
+      .get(async (req: any, res: any) => {
+        try {
+          const on = req?.query?.on;
+          send(res, 200, await this.functionRegistry(typeof on === "string" ? on : undefined));
+        } catch {
+          send(res, 200, unavailableRegistry("engine_unavailable"));
+        }
+      });
+  }
+
   private async registerRestExtension(): Promise<void> {
     await new Promise<void>((resolve) =>
       this.app.workspace.onLayoutReady(() => resolve()),
@@ -1880,6 +1948,8 @@ export default class BasesBridgePlugin extends Plugin {
               );
             }
           });
+
+        this.registerEngineRoutes(api);
 
         api
           .addRoute(`${REST_PREFIX}/debug/engine-keys`)
