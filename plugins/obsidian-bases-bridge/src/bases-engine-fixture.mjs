@@ -26,6 +26,8 @@ function evaluateExpression(expression, row, table) {
 function matches(filter, row) {
   if (filter === undefined || filter === null) return true;
   if (typeof filter === "string") {
+    const list = /^\[(.*)\]\.contains\(file\.path\)$/s.exec(filter);
+    if (list) return JSON.parse(`[${list[1]}]`).includes(row.path);
     const folder = /^file\.inFolder\("(.*)"\)$/.exec(filter);
     if (!folder) throw new Error(`fixture does not support filter ${filter}`);
     return row.path.startsWith(`${folder[1]}/`);

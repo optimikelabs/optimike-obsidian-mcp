@@ -49,6 +49,8 @@ export type BaseEngineEvaluation =
       available: true;
       obsidianVersion: string;
       formulas: Record<string, BaseFormulaEvaluation>;
+      /** Bases Bridge 1.3.0+: formulas were evaluated on at most this many rows. */
+      rowLimit?: number;
     }
   | BaseEngineUnavailable;
 
@@ -82,6 +84,7 @@ const EvaluateResponse = z.union([
     available: z.literal(true),
     obsidianVersion: z.string().min(1).max(64),
     canary: z.object({ ok: z.boolean() }).passthrough().optional(),
+    rowLimit: z.number().int().positive().optional(),
     formulas: z.record(
       Name,
       z
@@ -210,7 +213,12 @@ export async function evaluateBaseEngine(
         .slice(0, MAX_SAMPLES),
     };
   }
-  return { available: true, obsidianVersion: data.obsidianVersion, formulas };
+  return {
+    available: true,
+    obsidianVersion: data.obsidianVersion,
+    formulas,
+    ...(data.rowLimit === undefined ? {} : { rowLimit: data.rowLimit }),
+  };
 }
 
 /** Reads the Bases function registry, optionally for one receiver type. */

@@ -52,7 +52,11 @@ fin des effets UI, index ou plugins.
 
 Avant de sceller, `plan` demande à la route moteur du Bases Bridge d’évaluer
 deux fois toutes les formules de la Base : telle qu’enregistrée et telle que
-prévue. Une formule que la Base prévue fait passer en `syntax_error` ou
+prévue. Le moteur s’exécute sur le fil principal d’Obsidian : chaque évaluation
+lit au plus les 100 premières lignes retenues par les filtres globaux de la
+Base (`rowLimit`). Une erreur de syntaxe ou une fonction inconnue échoue sur
+n’importe quelle ligne ; une erreur limitée à des lignes au-delà de
+l’échantillon peut passer. Une formule que la Base prévue fait passer en `syntax_error` ou
 `runtime_error`, et qui n’avait pas déjà ce statut, refuse le plan avec le
 code `base_formula_engine_error` : rien n’est scellé ni écrit. Le champ
 `formulaCheck` du refus donne, par formule, jusqu’à trois messages du moteur,

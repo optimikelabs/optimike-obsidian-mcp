@@ -18,7 +18,11 @@ import { BaseErrorCode, McpError } from "../types-global/errors.js";
 
 const DOCS = [BASES_FUNCTIONS_DOC_URL, BASES_SYNTAX_DOC_URL] as const;
 export const MAX_CHECKED_BASES = 100;
-const CHECK_CONCURRENCY = 4;
+// The engine runs on Obsidian's main thread: Bases are checked one at a time,
+// so Obsidian handles its own work between them.
+const CHECK_CONCURRENCY = 1;
+/** Time budget of an all-Bases check, below the usual 60 s client timeout. */
+export const CHECK_ALL_BUDGET_MS = 30_000;
 const MAX_DOC_CHARS = 200;
 
 /** Reasons that concern one Base; any other reason means the engine is out. */
@@ -72,16 +76,27 @@ type FormulaReport = {
 };
 
 type BaseReport =
-  | { path: string; status: "verified"; obsidianVersion: string; formulas: FormulaReport[] }
+  | {
+      path: string;
+      status: "verified";
+      obsidianVersion: string;
+      /** Set when the Base has more rows than the engine sample: formulas were checked on this many rows. */
+      sampledRows?: number;
+      formulas: FormulaReport[];
+    }
   | ({ path: string } & Unverified);
 
 async function checkOne(engine: BaseEngine, path: string): Promise<BaseReport> {
   const result = await engine.evaluate({ path });
   if (!result.available) return { path, status: "unverified", reason: result.reason };
+  const sampled =
+    result.rowLimit !== undefined &&
+    Object.values(result.formulas).some((formula) => formula.rows === result.rowLimit);
   return {
     path,
     status: "verified",
     obsidianVersion: result.obsidianVersion,
+    ...(sampled ? { sampledRows: result.rowLimit } : {}),
     formulas: Object.entries(result.formulas).map(([name, formula]) => ({
       name,
       status: formula.status,
@@ -111,6 +126,7 @@ export async function basesCheck(
   engine: BaseEngine,
   listBasePaths: () => Promise<string[]>,
   path?: string,
+  { budgetMs = CHECK_ALL_BUDGET_MS, now = () => Date.now() }: { budgetMs?: number; now?: () => number } = {},
 ) {
   if (path) {
     const report = await checkOne(engine, path);
@@ -128,30 +144,45 @@ export async function basesCheck(
   const all = [...new Set(listed)].sort();
   const paths = all.slice(0, MAX_CHECKED_BASES);
   if (paths.length === 0) return { summary: summary([]), problems: [], docs: DOCS };
+  const deadline = now() + budgetMs;
   // The first answer tells whether the engine itself is reachable; when it is
   // not, every other Base would be unverified for the same reason.
   const first = await checkOne(engine, paths[0]!);
   if (first.status === "unverified" && !PER_BASE_REASONS.has(first.reason)) {
     return { status: "unverified", reason: first.reason, bases: all.length, docs: DOCS } as const;
   }
-  const reports: BaseReport[] = new Array(paths.length);
-  reports[0] = first;
+  const reports: BaseReport[] = [first];
   let next = 1;
   await Promise.all(
     Array.from({ length: Math.min(CHECK_CONCURRENCY, paths.length) }, async () => {
-      for (let index = next++; index < paths.length; index = next++) {
+      for (let index = next++; index < paths.length && now() < deadline; index = next++) {
         reports[index] = await checkOne(engine, paths[index]!);
       }
     }),
   );
-  const problems = reports.flatMap((report): BaseReport[] => {
+  // Bases left past the time budget are named, never reported healthy.
+  const unchecked = paths.filter((_, index) => !reports[index]);
+  const checked = reports.filter(Boolean);
+  const problems = checked.flatMap((report): BaseReport[] => {
     if (report.status === "unverified") return [report];
     const broken = report.formulas.filter((formula) => formula.status !== "ok");
     return broken.length ? [{ ...report, formulas: broken }] : [];
   });
   return {
-    summary: summary(reports),
-    ...(all.length > paths.length ? { truncated: { checked: paths.length, total: all.length } } : {}),
+    summary: summary(checked),
+    ...(all.length > paths.length || unchecked.length
+      ? { truncated: { checked: checked.length, total: all.length } }
+      : {}),
+    ...(unchecked.length
+      ? {
+          unchecked: {
+            reason: "time_budget",
+            budgetMs,
+            paths: unchecked,
+            next: "Check them one at a time with path.",
+          },
+        }
+      : {}),
     problems,
     docs: DOCS,
   };
