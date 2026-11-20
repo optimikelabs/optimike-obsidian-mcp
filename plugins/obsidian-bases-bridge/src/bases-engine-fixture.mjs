@@ -8,8 +8,10 @@
 export const PARSE_ERRORS = new Set(['if(file.name == "x", 1', '"unterminated + file.name']);
 
 function evaluateExpression(expression, row, table) {
+  if (expression === '"PARSED"') return "PARSED";
   const probe = /^if\(false, (.*), "PARSED"\)$/s.exec(expression);
-  if (probe) return PARSE_ERRORS.has(probe[1]) ? null : "PARSED";
+  // Like Obsidian's parser, an empty argument (`if(false, , ...)`) does not parse.
+  if (probe) return PARSE_ERRORS.has(probe[1]) || probe[1].trim() === "" ? null : "PARSED";
   if (expression === '"oobb-canary:" + file.name') return `oobb-canary:${row.name}`;
   if (expression === "oobbCanaryMissingFunction()") {
     return "unknownFunctionValue" in table
@@ -33,13 +35,16 @@ function matches(filter, row) {
 }
 
 /** Returns the handler; `calls` records every invocation. */
-export function fakeBaseQueryHandler(vault, { rows, table = {}, handlerError, calls = [] }) {
+export function fakeBaseQueryHandler(vault, { rows, table = {}, handlerError, rejectBase, calls = [] }) {
   return async ({ path, view, format }) => {
     calls.push({ path, view, format });
     if (handlerError) throw handlerError;
     const file = vault.getFileByPath(path);
     if (!file) throw `Base file not found: ${path}`;
     const base = JSON.parse(await vault.cachedRead(file));
+    // Obsidian's Base parser throws a plain Error on a schema error.
+    const rejection = rejectBase?.(base);
+    if (rejection) throw rejection;
     const config = base.views.find((candidate) => candidate.name === view);
     let selected = rows.filter((row) => matches(base.filters, row) && matches(config.filters, row));
     if (config.limit) selected = selected.slice(0, config.limit);
