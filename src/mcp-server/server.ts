@@ -73,6 +73,7 @@ import { registerObsidianManageFrontmatterTool } from "./tools/obsidianManageFro
 import { registerObsidianGetFrontmatterTool } from "./tools/obsidianGetFrontmatterTool/registration.js";
 import { registerObsidianManageTagsTool } from "./tools/obsidianManageTagsTool/index.js";
 import { registerSemanticSearchTool } from "./tools/semanticSearchTool/index.js";
+import { registerBasesEngineTools } from "./tools/basesEngineTools/registration.js";
 import { registerBasesListTool } from "./tools/basesListTool/index.js";
 import { registerBasesGetSchemaTool } from "./tools/basesGetSchemaTool/index.js";
 import { registerBasesQueryTool } from "./tools/basesQueryTool/index.js";
@@ -1983,6 +1984,7 @@ async function createMcpServerInstance(
       await registerBasesUpsertRowsTool(server, obsidianService);
       await registerBasesCreateTool(server, obsidianService);
       await registerBasesUpsertConfigTool(server, obsidianService);
+      registerBasesEngineTools(server, obsidianService);
     } else if (isHeadlessReadonly && localBasesService) {
       await registerBasesListTool(server, undefined, localBasesService);
       await registerBasesGetSchemaTool(server, undefined, localBasesService);

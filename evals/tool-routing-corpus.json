@@ -177,6 +177,30 @@
       ]
     },
     {
+      "id": "bases-functions",
+      "prompt": "Which functions can a Base formula call on a text value in this Obsidian version?",
+      "recommendedProfile": "standard",
+      "expectedToolFamily": "bases",
+      "clarificationExpectation": "none",
+      "acceptableFirstTools": [
+        "bases_functions"
+      ]
+    },
+    {
+      "id": "bases-check",
+      "prompt": "Check whether any formula in my Bases is broken, without changing anything.",
+      "recommendedProfile": "standard",
+      "expectedToolFamily": "bases",
+      "clarificationExpectation": "none",
+      "acceptableFirstTools": [
+        "bases_check"
+      ],
+      "forbiddenTools": [
+        "bases_config_patch_plan",
+        "bases_formula_patch_plan"
+      ]
+    },
+    {
       "id": "bases-query",
       "prompt": "Query Projects.base for active projects without modifying the Base.",
       "recommendedProfile": "standard",

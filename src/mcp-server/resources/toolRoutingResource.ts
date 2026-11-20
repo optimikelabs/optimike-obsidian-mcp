@@ -38,6 +38,9 @@ runtime- and profile-dependent; never infer that an absent tool can be emulated 
 - Named Base formula set/delete: prefer \`bases_formula_patch_plan\`.
   \`bases_upsert_config\` is a whole-config compatibility path and must not bypass
   the governed formula contract.
+- Base formula health or available functions: \`bases_check\` and
+  \`bases_functions\` ask Obsidian's own engine (live only).
+  \`obsidian_validate_format\` checks Base structure, not formula evaluation.
 - Existing JSON Canvas graph mutation in live/hybrid mode: prefer
   \`obsidian_canvas_patch_plan\`, then its matching apply/status/recover tools.
   \`obsidian_manage_canvas\` is a direct headless-filesystem helper without a

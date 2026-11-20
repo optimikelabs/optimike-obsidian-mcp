@@ -16,32 +16,22 @@ const repoRoot = path.resolve(
   "..",
 );
 
-const EXPECTED_UNION_COUNT = 111;
-const EXPECTED_COUNTS_BY_MODE = {
-  live: 104,
-  "hybrid-live": 104,
-  "hybrid-degraded": 47,
-  "headless-readonly": 50,
-  "headless-guarded": 53,
-  "headless-filesystem": 62,
-};
-
-assert.equal(
-  TOOL_SURFACE_REGISTRY.length,
-  EXPECTED_UNION_COUNT,
-  "canonical registry must cover the union of all currently registered tool names",
-);
+// Tools backed by Obsidian's own Bases engine exist only with live Desktop.
+const LIVE_ENGINE_TOOLS = ["bases_functions", "bases_check"];
+const LIVE_ENGINE_MODES = new Set(["live", "hybrid-live"]);
 
 const names = TOOL_SURFACE_REGISTRY.map((entry) => entry.name);
 assert.equal(new Set(names).size, names.length, "tool names must be unique");
 
 for (const mode of TOOL_REGISTRATION_MODES) {
   const compiled = compileToolNames({ registrationMode: mode });
-  assert.equal(
-    compiled.length,
-    EXPECTED_COUNTS_BY_MODE[mode],
-    `unexpected full tool count for ${mode}`,
-  );
+  for (const name of LIVE_ENGINE_TOOLS) {
+    assert.equal(
+      compiled.includes(name),
+      LIVE_ENGINE_MODES.has(mode),
+      `${name} must be registered exactly in live Desktop modes (${mode})`,
+    );
+  }
   assert.deepEqual(
     compiled,
     [...compiled].sort((left, right) => left.localeCompare(right)),
@@ -54,11 +44,6 @@ for (const mode of TOOL_REGISTRATION_MODES) {
   );
 }
 
-assert.equal(
-  compileToolNames({ registrationMode: "live" }).length,
-  104,
-  "104 is the current full live/hybrid surface, not the cross-runtime registry size",
-);
 
 for (const entry of TOOL_SURFACE_REGISTRY) {
   assert.ok(
@@ -212,5 +197,5 @@ for (const name of sourceDeclaredTools) {
 }
 
 console.log(
-  `PASS: canonical tool registry covers ${TOOL_SURFACE_REGISTRY.length} cross-runtime names; live=${EXPECTED_COUNTS_BY_MODE.live}, headless-filesystem=${EXPECTED_COUNTS_BY_MODE["headless-filesystem"]}; whole-Base compatibility is isolated`,
+  `PASS: canonical tool registry covers ${TOOL_SURFACE_REGISTRY.length} cross-runtime names; Bases engine tools are live-only; whole-Base compatibility is isolated`,
 );

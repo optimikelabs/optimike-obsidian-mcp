@@ -27,7 +27,7 @@ Ces garanties s’appliquent aux écritures gouvernées : Obsidian ouvert et le 
 | Domaine                 | Ce que fournit le MCP                                                           | Dépendance principale                                |
 | ----------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------- |
 | Notes                   | Lecture/recherche/éditions directes + opérations gouvernées Note et Frontmatter | Coffre ; Local REST API + Atomic Write Bridge        |
-| Bases et Canvas         | Requêtes, écritures bornées, formules et graphes Canvas gouvernés               | Bases Bridge ; Atomic Write Bridge                   |
+| Bases et Canvas         | Requêtes, vérification des formules par le moteur d’Obsidian, écritures bornées, formules et graphes Canvas gouvernés | Bases Bridge ; Atomic Write Bridge                   |
 | Tâches                  | Markdown Tasks-compatible + 27 outils Operon gouvernés                          | Operon Developer API V1 via le Bridge                |
 | Recherche sémantique    | Recherche dans l’index Smart Connections                                        | `.smart-env` + embedding Ollama, compatible OpenAI ou modèle intégré |
 | Runtime                 | Cache SQLite partagé, santé, maintenance et modes dégradés                      | Filesystem local                                     |
@@ -53,13 +53,13 @@ Le runtime répond à ce que le backend peut exécuter. Il ne décide pas combie
 
 | Besoin                                               | Profil      | Taille live/hybrid complète |
 | ---------------------------------------------------- | ----------- | --------------------------: |
-| Travail général sur le coffre                        | `standard`  |                          30 |
-| Notes, tags, Bases et Canvas                         | `authoring` |                          54 |
+| Travail général sur le coffre                        | `standard`  |                          32 |
+| Notes, tags, Bases et Canvas                         | `authoring` |                          56 |
 | Workflows Tasks / Operon                             | `tasks`     |                          38 |
-| Usage courant complet, préférence gouvernée | `operational` | 99 |
-| Surface complète explicite, admin et spécialisations | `full`      |                          104 |
+| Usage courant complet, préférence gouvernée | `operational` | 101 |
+| Surface complète explicite, admin et spécialisations | `full`      |                          106 |
 
-Les tailles ci-dessus excluent les trois outils optionnels d’assets : la configuration locale actuelle expose 102 outils operational et 107 full. Le lanceur local configure explicitement operational ; le défaut générique du paquet reste standard. En 3.0, l’absence de profil sélectionne `standard`. `smart_semantic_search` est le seul nom de recherche sémantique enregistré ; les anciens alias `smart_search` et `smart-search` ont été supprimés. `full` reste disponible par opt-in explicite pour toute la surface du runtime actif. `bases_upsert_config` reste une voie de compatibilité whole-Base réservée à `full` ; l’authoring normal utilise la création/écriture de lignes bornée et la famille gouvernée des formules.
+Les tailles ci-dessus excluent les trois outils optionnels d’assets : la configuration locale actuelle expose 104 outils operational et 109 full. Le lanceur local configure explicitement operational ; le défaut générique du paquet reste standard. En 3.0, l’absence de profil sélectionne `standard`. `smart_semantic_search` est le seul nom de recherche sémantique enregistré ; les anciens alias `smart_search` et `smart-search` ont été supprimés. `full` reste disponible par opt-in explicite pour toute la surface du runtime actif. `bases_upsert_config` reste une voie de compatibilité whole-Base réservée à `full` ; l’authoring normal utilise la création/écriture de lignes bornée et la famille gouvernée des formules.
 
 Sélectionner le profil avant `tools/list` :
 

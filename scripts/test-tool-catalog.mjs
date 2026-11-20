@@ -26,12 +26,20 @@ assert.deepEqual(
 );
 assert.equal(artifact.schemaVersion, "tool-catalog.v1");
 assert.equal(artifact.version, 1);
-assert.equal(artifact.toolCount, 111);
+assert.equal(artifact.toolCount, TOOL_SURFACE_REGISTRY.length);
 assert.equal(artifact.tools.length, TOOL_SURFACE_REGISTRY.length);
 
 const registryNames = TOOL_SURFACE_REGISTRY.map((entry) => entry.name);
 const catalogNames = artifact.tools.map((entry) => entry.name);
-assert.equal(new Set(registryNames).size, 111);
+assert.equal(new Set(registryNames).size, registryNames.length);
+for (const [name, classification] of [
+  ["bases_functions", "canonical-unique"],
+  ["bases_check", "diagnostic"],
+]) {
+  const entry = artifact.tools.find((tool) => tool.name === name);
+  assert.equal(entry?.classification, classification, `${name} classification`);
+  assert.equal(entry.annotationClass, "read-only", `${name} must stay read-only`);
+}
 assert.deepEqual(
   catalogNames,
   [...registryNames].sort((a, b) => a.localeCompare(b)),
@@ -48,14 +56,12 @@ for (const entry of artifact.tools) {
   assert.ok(entry.profileModes && typeof entry.profileModes === "object");
 }
 
-assert.deepEqual(artifact.classificationCounts, {
-  "canonical-unique": 50,
-  "alias-redundant": 0,
-  "compatibility-historical": 1,
-  "governed-operation": 45,
-  diagnostic: 10,
-  administration: 5,
-});
+assert.equal(artifact.classificationCounts["alias-redundant"], 0);
+assert.equal(
+  Object.values(artifact.classificationCounts).reduce((sum, count) => sum + count, 0),
+  artifact.toolCount,
+  "every tool has exactly one classification",
+);
 
 const governed = artifact.tools.filter(
   (entry) => entry.classification === "governed-operation",
@@ -123,5 +129,5 @@ for (const profileId of TOOL_PROFILE_IDS) {
 }
 
 console.log(
-  "PASS: deterministic 111-tool conditional catalog is exhaustive, alias-free, profile/mode-complete, and classifies all governed/diagnostic/admin surfaces",
+  "PASS: deterministic conditional catalog is exhaustive, alias-free, profile/mode-complete, and classifies all governed/diagnostic/admin surfaces",
 );

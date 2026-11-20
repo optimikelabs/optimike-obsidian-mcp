@@ -35,7 +35,11 @@ const REGISTRY = [
   ...["contains", "lower", "upper", "trim", "replace", "split", "startsWith"].map((name) => ({ name, on: "String" })),
   ...["round", "abs", "ceil", "floor", "toFixed"].map((name) => ({ name, on: "Number" })),
   ...["isTruthy", "isType", "toString"].map((name) => ({ name, on: "Value" })),
-].map((fn) => ({ ...fn, params: [], doc: "" }));
+].map((fn) =>
+  fn.name === "round"
+    ? { ...fn, params: [{ name: "digits", types: ["Number"], optional: true, variadic: false }], doc: "Rounds the number." }
+    : { ...fn, params: [], doc: "" },
+);
 
 function engineEvaluate(source) {
   const formulas = {};
@@ -155,6 +159,8 @@ const server = http.createServer((req, res) => {
       url.pathname === "/extensions/obsidian-bases-bridge/engine/evaluate"
     ) {
       const request = await body(req);
+      if (request.path !== fixturePath)
+        return json(res, 200, { available: false, reason: "base_not_found", formulas: {} });
       return json(res, 200, engineEvaluate(request.yaml ?? yaml));
     }
     if (
@@ -162,7 +168,18 @@ const server = http.createServer((req, res) => {
       req.method === "GET" &&
       url.pathname === "/extensions/obsidian-bases-bridge/engine/functions"
     ) {
-      return json(res, 200, { available: true, obsidianVersion: "1.15.1", source: "obsidian-app-bundle", functions: REGISTRY });
+      const on = url.searchParams.get("on");
+      return json(res, 200, {
+        available: true,
+        obsidianVersion: "1.15.1",
+        source: "obsidian-app-bundle",
+        functions: REGISTRY.filter((fn) => !on || fn.on === on),
+      });
+    }
+    if (req.method === "GET" && url.pathname === "/bases") {
+      return json(res, 200, {
+        bases: [fixturePath, "Canary/Missing.base"].map((path) => ({ id: path, name: path, path })),
+      });
     }
     json(res, 404, { error: "fixture route not found" });
   })().catch((error) => json(res, 500, { error: String(error) }));
@@ -382,6 +399,55 @@ try {
   const replayed = parsed(await plan("bases_formula_patch_plan", [accepted], "engine-accept-1"));
   assert.equal(replayed.planRef, verified.planRef);
   assert.deepEqual(replayed.engineCheck, verified.engineCheck);
+
+  // Read tools: an unavailable engine is unverified, never healthy.
+  const read = async (name, args = {}) => {
+    const result = await client.callTool({ name, arguments: args });
+    assert.equal(result.isError, false, `${name} failed: ${JSON.stringify(result.content)}`);
+    return parsed(result);
+  };
+  assert.deepEqual((({ status, reason }) => ({ status, reason }))(await read("bases_check")), {
+    status: "unverified",
+    reason: "bridge_route_missing",
+  });
+  assert.equal((await read("bases_check", { path: fixturePath })).status, "unverified");
+  assert.equal((await read("bases_functions")).status, "unverified");
+
+  engineEnabled = true;
+  const grouped = await read("bases_functions");
+  assert.deepEqual(grouped.functions.Number, ["abs", "ceil", "floor", "round", "toFixed"]);
+  assert.ok(grouped.functions.Global.includes("if"));
+  const numbers = await read("bases_functions", { on: "Number" });
+  assert.equal(numbers.on, "Number");
+  assert.deepEqual(numbers.functions.find((fn) => fn.signature.startsWith("round(")), {
+    signature: "round(digits?: Number)",
+    doc: "Rounds the number.",
+  });
+
+  const one = await read("bases_check", { path: fixturePath });
+  assert.equal(one.status, "verified");
+  assert.deepEqual(
+    one.formulas.map(({ name, status }) => [name, status]),
+    [["score", "ok"], ["legacy", "runtime_error"]],
+    "one Base lists every formula",
+  );
+  assert.equal(one.formulas[1].message, 'Error: Unknown function "fooBar"');
+
+  const all = await read("bases_check");
+  assert.deepEqual(all.summary, {
+    bases: 2,
+    unverifiedBases: 1,
+    formulas: { ok: 1, syntax_error: 0, runtime_error: 1, all_null: 0, not_evaluated: 0 },
+  });
+  assert.deepEqual(
+    all.problems.map((problem) => [problem.path, problem.status, problem.reason ?? problem.formulas.map((formula) => formula.name)]),
+    [
+      ["Canary/Missing.base", "unverified", "base_not_found"],
+      [fixturePath, "verified", ["legacy"]],
+    ],
+    "all Bases lists only problems; the healthy formula is only counted",
+  );
+  assert.equal(yaml, before, "read tools write nothing");
 } catch (error) {
   throw new Error(
     `${error instanceof Error ? error.stack : String(error)}\nMCP stderr:\n${childStderr}`,
@@ -394,5 +460,5 @@ try {
 }
 
 console.log(
-  "PASS: governed Base formula tools traverse the live stdio MCP surface and atomic Base backend",
+  "PASS: governed Base formula tools and Bases engine reads traverse the live stdio MCP surface and atomic Base backend",
 );

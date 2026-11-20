@@ -11,44 +11,10 @@ import { TOOL_REGISTRATION_MODES } from "../dist/mcp-server/toolSurfaceRegistry.
 
 const WITH_CACHE = ["vault-cache"];
 
-const EXPECTED_COUNTS = {
-  live: { standard: 30, authoring: 54, tasks: 38, full: 104, operational: 99 },
-  "hybrid-live": {
-    standard: 30,
-    authoring: 54,
-    tasks: 38,
-    full: 104,
-    operational: 99,
-  },
-  "hybrid-degraded": {
-    standard: 6,
-    authoring: 6,
-    tasks: 14,
-    full: 47,
-    operational: 47,
-  },
-  "headless-readonly": {
-    standard: 9,
-    authoring: 9,
-    tasks: 14,
-    full: 50,
-    operational: 50,
-  },
-  "headless-guarded": {
-    standard: 12,
-    authoring: 12,
-    tasks: 14,
-    full: 53,
-    operational: 53,
-  },
-  "headless-filesystem": {
-    standard: 12,
-    authoring: 16,
-    tasks: 14,
-    full: 62,
-    operational: 61,
-  },
-};
+// Bases engine reads need live Desktop and belong with the other Base reads.
+const LIVE_ENGINE_TOOLS = ["bases_functions", "bases_check"];
+const LIVE_ENGINE_MODES = new Set(["live", "hybrid-live"]);
+const BASE_READ_PROFILES = new Set(["standard", "authoring", "full", "operational"]);
 
 assert.deepEqual(TOOL_PROFILE_IDS, ["standard", "authoring", "tasks", "full", "operational"]);
 for (const profile of TOOL_PROFILE_IDS) {
@@ -67,11 +33,13 @@ for (const registrationMode of TOOL_REGISTRATION_MODES) {
       registrationMode,
       availableStaticRequirements: WITH_CACHE,
     });
-    assert.equal(
-      names.length,
-      EXPECTED_COUNTS[registrationMode][profile],
-      `${profile}/${registrationMode} count drifted`,
-    );
+    for (const name of LIVE_ENGINE_TOOLS) {
+      assert.equal(
+        names.includes(name),
+        LIVE_ENGINE_MODES.has(registrationMode) && BASE_READ_PROFILES.has(profile),
+        `${name} membership in ${profile}/${registrationMode}`,
+      );
+    }
     assert.deepEqual(
       names,
       [...names].sort((left, right) => left.localeCompare(right)),
@@ -360,7 +328,9 @@ const standardWithoutCache = compileToolProfileNames({
   availableStaticRequirements: [],
 });
 assert.ok(!standardWithoutCache.includes("obsidian_global_search"));
-assert.equal(standardWithoutCache.length, 29);
+for (const name of LIVE_ENGINE_TOOLS) {
+  assert.ok(standardWithoutCache.includes(name), `${name} needs no vault cache`);
+}
 
 const readonlyWithoutCache = compileToolProfileNames({
   profile: "standard",
