@@ -337,7 +337,7 @@ semantic manifest/vector metadata are cached locally for faster warm refreshes.
 - `bases_check`: live only; formula health of one Base or of every Base as
   Obsidian's own engine evaluates it (`ok`, `syntax_error`, `runtime_error`,
   `all_null`, `not_evaluated`), on at most the first 100 rows of each Base
-  (`sampledRows` when a Base has more). An unavailable engine is `unverified`.
+  (`sampledRows` when a Base has more; for every Base, `sampled` names them). An unavailable engine is `unverified`.
   Every Base: checked one at a time within 30 s; the Bases left are listed in
   `unchecked`, never counted healthy.
 - `bases_create`: live REST `.base` create, or guarded YAML create in

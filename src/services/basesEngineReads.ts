@@ -163,6 +163,14 @@ export async function basesCheck(
   // Bases left past the time budget are named, never reported healthy.
   const unchecked = paths.filter((_, index) => !reports[index]);
   const checked = reports.filter(Boolean);
+  // Healthy Bases are only counted: name those checked on a sample, so a
+  // sampled pass is never mistaken for an exhaustive one.
+  const sampledPaths = checked.flatMap((report) =>
+    report.status === "verified" && report.sampledRows !== undefined ? [report.path] : [],
+  );
+  const sampledRows = checked.find(
+    (report) => report.status === "verified" && report.sampledRows !== undefined,
+  );
   const problems = checked.flatMap((report): BaseReport[] => {
     if (report.status === "unverified") return [report];
     const broken = report.formulas.filter((formula) => formula.status !== "ok");
@@ -182,6 +190,9 @@ export async function basesCheck(
             next: "Check them one at a time with path.",
           },
         }
+      : {}),
+    ...(sampledPaths.length && sampledRows?.status === "verified"
+      ? { sampled: { rows: sampledRows.sampledRows, paths: sampledPaths } }
       : {}),
     problems,
     docs: DOCS,

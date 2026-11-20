@@ -47,6 +47,7 @@ assert.deepEqual(all.unchecked, {
   next: "Check them one at a time with path.",
 });
 assert.deepEqual(all.problems, [], "unchecked Bases are not problems and not healthy");
+assert.deepEqual(all.sampled, { rows: 100, paths: ["B/big.base"] }, "a healthy sampled Base is named in the aggregate");
 
 const big = await basesCheck(engine, async () => paths, "B/big.base");
 assert.equal(big.status, "verified");
