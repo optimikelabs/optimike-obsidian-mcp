@@ -19,6 +19,8 @@ import type {
 } from "./operations/obsidianNoteReplaceJournal.js";
 import type { RestBaseAtomicWriteBackend } from "./operations/restBaseAtomicWriteBackend.js";
 import { assertWriteAllowed } from "./writePolicy.js";
+import { BaseEngineCheckSchema, type BaseEngineCheck } from "./basesEngineContract.js";
+import { checkBaseFormulasBeforeSealing, type BaseEngine } from "./baseFormulaEngineCheck.js";
 
 export const BASE_CONFIG_OPERATION_KIND = "obsidian.base.config.patch" as const;
 export const BASE_CONFIG_PLAN_REF_PREFIX = "obsidian-base-config-patch:v1:";
@@ -47,6 +49,8 @@ const StoredProjectionSchema = z.object({
   publicIdempotencyKey: z.string().min(1).max(256),
   intentDigest: z.string().regex(SHA256),
   proof: ProofSchema,
+  // Plans sealed before the engine check have no record of it.
+  engineCheck: BaseEngineCheckSchema.optional(),
 });
 
 /** Same Bases Bridge Atomic V1 CAS as formulas; a distinct operation kind and plan prefix. */
@@ -69,6 +73,8 @@ export type GovernedBaseConfigPlanInput = {
 
 export type GovernedBaseConfigReceipt = Omit<OperationReceipt, "idempotencyKey"> & {
   idempotencyKey?: string;
+  /** Obsidian engine check made once, before sealing; absent on older plans. */
+  engineCheck?: BaseEngineCheck;
   projection: {
     kind: typeof BASE_CONFIG_OPERATION_KIND;
     intentDigest: string;
@@ -122,6 +128,7 @@ function exposed(receipt: OperationReceipt, plan: ObsidianNoteReplacePlan, expos
   return {
     ...redacted,
     ...(exposePublicKey ? { idempotencyKey: stored.publicIdempotencyKey } : {}),
+    ...(stored.engineCheck ? { engineCheck: stored.engineCheck as BaseEngineCheck } : {}),
     planDigest: operationDigest({ contractVersion: 1, operationKind: BASE_CONFIG_OPERATION_KIND,
       atomicPlanDigest: receipt.planDigest, intentDigest: stored.intentDigest, proof: stored.proof }),
     projection: { kind: BASE_CONFIG_OPERATION_KIND, intentDigest: stored.intentDigest,
@@ -139,7 +146,11 @@ function assertPolicy(action: "plan" | "apply" | "recover", path: string, count:
 /** Whole-Base governed edits; shares the formula runtime's journal, lease and backend. */
 export class GovernedBaseConfigRuntime {
   private readonly adapter: ObsidianNoteReplaceOperationAdapter;
-  constructor(private readonly backend: RestBaseAtomicWriteBackend, private readonly journal: ObsidianNoteReplaceJournal) {
+  constructor(
+    private readonly backend: RestBaseAtomicWriteBackend,
+    private readonly journal: ObsidianNoteReplaceJournal,
+    private readonly engine?: BaseEngine,
+  ) {
     this.adapter = new ObsidianNoteReplaceOperationAdapter(backend, journal, BASE_CONFIG_ATOMIC_PROFILE);
   }
 
@@ -161,9 +172,12 @@ export class GovernedBaseConfigRuntime {
       throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The Base edit cannot be represented in a receipt.", { reasonCode: "base_config_value_invalid" });
     }
     assertPolicy("plan", input.path, canonical.operations.length, compiled.nextYaml.length);
+    // Refuses before sealing when the candidate adds a formula error.
+    const engineCheck = await checkBaseFormulasBeforeSealing(this.engine, input.path, compiled.nextYaml);
     const storedProjection: ObsidianNoteReplaceProjection = {
       contractVersion: 1, kind: BASE_CONFIG_OPERATION_KIND, publicIdempotencyKey: key,
       intentDigest: canonical.digest, proof: compiled.proof as unknown as Record<string, unknown>,
+      engineCheck,
     };
     const child = await this.adapter.plan({
       path: input.path, nextContent: compiled.nextYaml, idempotencyKey: durableKey,

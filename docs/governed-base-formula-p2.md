@@ -45,6 +45,34 @@ proves the raw before/after hashes and source-preservation contract. It does not
 claim that every formula is semantically valid in every future Obsidian build,
 or that UI/index/plugin side effects have completed.
 
+## Obsidian engine check
+
+Before sealing, `plan` asks the Bases Bridge engine route to evaluate every
+formula of the Base twice: as stored and as planned. A formula that the planned
+Base turns into a `syntax_error` or `runtime_error`, and that did not already
+have that status, refuses the plan with reason code `base_formula_engine_error`:
+nothing is sealed or written. The refusal's `formulaCheck` lists, per formula,
+up to three engine messages, the unknown functions it calls (`name(` and
+`.name(` calls missing from the function registry of the installed Obsidian,
+with the type when it can be inferred), the valid functions for that type and
+up to three close names. Errors already present in the stored Base do not block.
+A formula whose values are all empty (`all_null`) is a warning, never a
+refusal.
+
+The plan receipt carries `engineCheck`, sealed with the plan and returned
+unchanged by replay and `status`:
+
+- `{ "status": "verified", "obsidianVersion": "…" }`, with `warnings` for
+  `all_null` or `not_evaluated` formulas, when both evaluations succeeded;
+- `{ "status": "unverified", "reason": "…" }` otherwise: Obsidian closed, a
+  Bridge without the engine route (`bridge_route_missing`), a failed engine
+  canary, an unsupported Obsidian version or an unusable answer. The plan then
+  proceeds as before; it is never reported as verified.
+
+The check runs at plan time only. `apply`, `status` and `recover` are
+unchanged. Formula syntax: <https://help.obsidian.md/bases/syntax>; functions:
+<https://help.obsidian.md/bases/functions>.
+
 ## Write gates and legacy migration
 
 Both Bases Bridge write switches are disabled by default:

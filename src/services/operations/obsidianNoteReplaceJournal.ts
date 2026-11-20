@@ -58,6 +58,8 @@ export type ObsidianNoteReplaceProjection = {
   intentDigest: string;
   proof: Record<string, unknown>;
   normalizationProtectedFrontmatterKeys?: string[];
+  /** Governed Base plans: Obsidian engine check made before sealing. */
+  engineCheck?: Record<string, unknown>;
 };
 
 export type ObsidianNoteReplacePlan = {
