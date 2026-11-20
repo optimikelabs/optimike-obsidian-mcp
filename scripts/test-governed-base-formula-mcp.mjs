@@ -28,14 +28,18 @@ const ENGINE_RESULTS = new Map([
   ["formula.inexistante + 1", ["runtime_error", 'Error: Unknown formula "inexistante"']],
   ["file.name.round()", ["runtime_error", "Error: round is not a function"]],
   ["file.name.lowr()", ["runtime_error", "Error: lowr is not a function"]],
+  ["file.name.LOWER()", ["runtime_error", "Error: LOWER is not a function"]],
+  ["file.toString.foo()", ["runtime_error", "Error: foo is not a function"]],
   ["note.champ_inexistant_zz", ["all_null"]],
 ]);
+// Registry as the Bridge sends it: generic value methods on `Any`, and
+// `doc: null` for functions without a description.
 const REGISTRY = [
   ...["if", "now", "today", "date", "number", "list", "link", "max", "min"].map((name) => ({ name, on: "Global" })),
   ...["contains", "lower", "upper", "trim", "replace", "split", "startsWith"].map((name) => ({ name, on: "String" })),
   ...["round", "abs", "ceil", "floor", "toFixed"].map((name) => ({ name, on: "Number" })),
-  ...["isTruthy", "isType", "toString"].map((name) => ({ name, on: "Value" })),
-].map((fn) => ({ ...fn, params: [], doc: "" }));
+  ...["isTruthy", "isType", "toString"].map((name) => ({ name, on: "Any" })),
+].map((fn) => ({ ...fn, params: [], doc: null }));
 
 function engineEvaluate(source) {
   const formulas = {};
@@ -357,6 +361,16 @@ try {
 
   const nearMiss = await refusal("bases_config_patch_plan", "file.name.lowr()", "engine-refuse-5");
   assert.deepEqual(nearMiss.suggestions, ["lower"]);
+
+  const caseOnly = await refusal("bases_formula_patch_plan", "file.name.LOWER()", "engine-refuse-6");
+  assert.equal(caseOnly.suggestions[0], "lower", "a case-only typo suggests the exact name first");
+
+  const prototypeKey = await refusal("bases_formula_patch_plan", "file.toString.foo()", "engine-refuse-7");
+  assert.deepEqual(
+    prototypeKey.unknownFunctions,
+    [{ name: "foo", on: "any", definedOn: [] }],
+    "an Object.prototype key is not a file property type",
+  );
 
   assert.equal(writes, 1, "a refused plan writes nothing");
   assert.equal(yaml, before);
