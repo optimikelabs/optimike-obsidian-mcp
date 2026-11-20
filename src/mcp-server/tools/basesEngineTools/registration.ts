@@ -42,7 +42,7 @@ export function registerBasesEngineTools(server: McpServer, service: ObsidianRes
   const engine = restBaseEngine(service);
   server.registerTool("bases_functions", {
     description:
-      "List the Bases formula functions of the installed Obsidian, as its own engine knows them (via the Bases Bridge). Without on: function names grouped by receiver type (Global, String, Number, List, Date, File, ...). With on: that type's signatures and short descriptions. Use it before writing or fixing a Base formula. Read-only. When the engine is unavailable the answer is status unverified with a reason. Reference: https://help.obsidian.md/bases/functions",
+      "List the Bases formula functions of the installed Obsidian, as its own engine knows them (via the Bases Bridge). Without on: function names grouped by receiver type (Global, Any, String, Number, List, Date, File, ...); methods under Any apply to every value. With on: that type's signatures and short descriptions. Use it before writing or fixing a Base formula. Read-only. When the engine is unavailable the answer is status unverified with a reason. Reference: https://help.obsidian.md/bases/functions",
     inputSchema: mcpSchema(FunctionsSchema.shape),
     annotations: READ_ONLY_TOOL_ANNOTATIONS,
   }, (params) => runTool("bases_functions", params, () => basesFunctions(engine, FunctionsSchema.parse(params).on)));

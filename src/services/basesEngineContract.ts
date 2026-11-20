@@ -15,8 +15,11 @@ export const BASE_FORMULA_STATUSES = [
 ] as const;
 export type BaseFormulaStatus = (typeof BASE_FORMULA_STATUSES)[number];
 
+// `Any` is the documented type of the generic value methods (the Bridge maps
+// Obsidian's internal `Value` prefix to it); `Value` stays accepted for tolerance.
 export const BASE_FUNCTION_TYPES = [
   "Global",
+  "Any",
   "Value",
   "Null",
   "String",
@@ -132,4 +135,3 @@ export type PublicFormulaCheck = z.infer<typeof PublicFormulaCheckSchema>;
 export function isPublicFormulaCheck(value: unknown): value is PublicFormulaCheck {
   return PublicFormulaCheckSchema.safeParse(value).success;
 }
-

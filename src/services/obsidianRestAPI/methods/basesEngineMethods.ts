@@ -124,7 +124,8 @@ const FunctionDescriptor = z
       )
       .max(32)
       .optional(),
-    doc: z.string().optional(),
+    // The Bridge sends null for a function without a description.
+    doc: z.string().nullable().optional(),
   })
   .passthrough();
 
@@ -236,14 +237,19 @@ export async function listBaseEngineFunctions(
   if (!parsed.success) return unavailable("engine_response_invalid");
   const data = parsed.data;
   if (data.available === false) return unavailable(data.reason);
+  const valid = data.functions.flatMap((entry) => {
+    const fn = FunctionDescriptor.safeParse(entry);
+    return fn.success ? [fn.data] : [];
+  });
+  // A registry whose every entry is unusable would make every call look
+  // unknown; it is a broken answer, not an empty registry.
+  if (data.functions.length > 0 && valid.length === 0) {
+    return unavailable("engine_response_invalid");
+  }
   return {
     available: true,
     obsidianVersion: data.obsidianVersion,
-    functions: data.functions
-      .flatMap((entry) => {
-        const fn = FunctionDescriptor.safeParse(entry);
-        return fn.success ? [fn.data] : [];
-      })
+    functions: valid
       .filter((fn) => !on || fn.on === on)
       .map((fn) => ({
         name: fn.name,

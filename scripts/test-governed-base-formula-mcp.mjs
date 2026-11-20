@@ -28,17 +28,21 @@ const ENGINE_RESULTS = new Map([
   ["formula.inexistante + 1", ["runtime_error", 'Error: Unknown formula "inexistante"']],
   ["file.name.round()", ["runtime_error", "Error: round is not a function"]],
   ["file.name.lowr()", ["runtime_error", "Error: lowr is not a function"]],
+  ["file.name.LOWER()", ["runtime_error", "Error: LOWER is not a function"]],
+  ["file.toString.foo()", ["runtime_error", "Error: foo is not a function"]],
   ["note.champ_inexistant_zz", ["all_null"]],
 ]);
+// Registry as the Bridge sends it: generic value methods on `Any`, and
+// `doc: null` for functions without a description.
 const REGISTRY = [
   ...["if", "now", "today", "date", "number", "list", "link", "max", "min"].map((name) => ({ name, on: "Global" })),
   ...["contains", "lower", "upper", "trim", "replace", "split", "startsWith"].map((name) => ({ name, on: "String" })),
   ...["round", "abs", "ceil", "floor", "toFixed"].map((name) => ({ name, on: "Number" })),
-  ...["isTruthy", "isType", "toString"].map((name) => ({ name, on: "Value" })),
+  ...["isTruthy", "isType", "toString"].map((name) => ({ name, on: "Any" })),
 ].map((fn) =>
   fn.name === "round"
     ? { ...fn, params: [{ name: "digits", types: ["Number"], optional: true, variadic: false }], doc: "Rounds the number." }
-    : { ...fn, params: [], doc: "" },
+    : { ...fn, params: [], doc: null },
 );
 
 function engineEvaluate(source) {
@@ -375,6 +379,16 @@ try {
   const nearMiss = await refusal("bases_config_patch_plan", "file.name.lowr()", "engine-refuse-5");
   assert.deepEqual(nearMiss.suggestions, ["lower"]);
 
+  const caseOnly = await refusal("bases_formula_patch_plan", "file.name.LOWER()", "engine-refuse-6");
+  assert.equal(caseOnly.suggestions[0], "lower", "a case-only typo suggests the exact name first");
+
+  const prototypeKey = await refusal("bases_formula_patch_plan", "file.toString.foo()", "engine-refuse-7");
+  assert.deepEqual(
+    prototypeKey.unknownFunctions,
+    [{ name: "foo", on: "any", definedOn: [] }],
+    "an Object.prototype key is not a file property type",
+  );
+
   assert.equal(writes, 1, "a refused plan writes nothing");
   assert.equal(yaml, before);
   assert.equal(await pendingCount(), pendingBefore, "a refused plan seals nothing");
@@ -416,7 +430,14 @@ try {
   engineEnabled = true;
   const grouped = await read("bases_functions");
   assert.deepEqual(grouped.functions.Number, ["abs", "ceil", "floor", "round", "toFixed"]);
-  assert.ok(grouped.functions.Global.includes("if"));
+  assert.ok(grouped.functions.Global.includes("if"), "doc: null functions are listed");
+  assert.deepEqual(grouped.functions.Any, ["isTruthy", "isType", "toString"]);
+  const anyMethods = await read("bases_functions", { on: "Any" });
+  assert.deepEqual(anyMethods.functions, [
+    { signature: "isTruthy()" },
+    { signature: "isType()" },
+    { signature: "toString()" },
+  ], "on accepts Any; a null doc is omitted");
   const numbers = await read("bases_functions", { on: "Number" });
   assert.equal(numbers.on, "Number");
   assert.deepEqual(numbers.functions.find((fn) => fn.signature.startsWith("round(")), {

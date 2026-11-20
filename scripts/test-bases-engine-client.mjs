@@ -130,6 +130,9 @@ try {
     functions: [
       { name: "lower", on: "String", params: [], doc: "Lowercase." },
       { name: "round", on: "Number", params: [{ name: "digits", types: ["Number"], optional: true, variadic: false }] },
+      // As the Bridge sends them: generic methods on `Any`, no description as null.
+      { name: "if", on: "Global", params: [], doc: null },
+      { name: "toString", on: "Any", params: [], doc: null },
       { name: "future", on: "Duration", params: [] },
       { name: "bad name", on: "String", params: [] },
     ],
@@ -140,6 +143,22 @@ try {
     available: true,
     obsidianVersion: "1.15.1",
     functions: [{ name: "lower", on: "String", params: [], doc: "Lowercase." }],
+  });
+  assert.deepEqual(
+    (await rest.listBaseEngineFunctions(undefined, context)).functions.map((fn) => `${fn.on}.${fn.name}`),
+    ["String.lower", "Number.round", "Global.if", "Any.toString"],
+    "doc: null and on: Any entries are kept",
+  );
+
+  // A registry with entries but none usable is a broken answer, not an empty registry.
+  reply = () => [200, {
+    available: true,
+    obsidianVersion: "1.15.1",
+    functions: [{ name: "bad name", on: "String", params: [] }, { name: "future", on: "Duration" }],
+  }];
+  assert.deepEqual(await rest.listBaseEngineFunctions(undefined, context), {
+    available: false,
+    reason: "engine_response_invalid",
   });
   reply = () => [404, { error: "not found" }];
   assert.deepEqual(await rest.listBaseEngineFunctions(undefined, context), {

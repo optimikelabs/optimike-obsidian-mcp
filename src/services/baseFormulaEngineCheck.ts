@@ -52,22 +52,23 @@ export function restBaseEngine(service: ObsidianRestApiService): BaseEngine {
 }
 
 /** Known receiver types of `file.*` properties; anything else stays unknown. */
-const FILE_PROPERTY_TYPES: Record<string, BaseFunctionType> = {
-  name: "String",
-  basename: "String",
-  path: "String",
-  folder: "String",
-  ext: "String",
-  size: "Number",
-  ctime: "Date",
-  mtime: "Date",
-  tags: "List",
-  links: "List",
-  backlinks: "List",
-  embeds: "List",
-  properties: "Object",
-  file: "File",
-};
+// A Map, so `file.toString` or `file.constructor` never reach Object.prototype.
+const FILE_PROPERTY_TYPES = new Map<string, BaseFunctionType>([
+  ["name", "String"],
+  ["basename", "String"],
+  ["path", "String"],
+  ["folder", "String"],
+  ["ext", "String"],
+  ["size", "Number"],
+  ["ctime", "Date"],
+  ["mtime", "Date"],
+  ["tags", "List"],
+  ["links", "List"],
+  ["backlinks", "List"],
+  ["embeds", "List"],
+  ["properties", "Object"],
+  ["file", "File"],
+]);
 
 type FunctionCall = { name: string; receiver?: BaseFunctionType | "any" };
 
@@ -82,7 +83,7 @@ function receiverType(before: string): BaseFunctionType | "any" {
   if (/(?:^|[^\w$.])\d+(?:\.\d+)?$/u.test(text)) return "Number";
   if (/(?:^|[^\w$.])(?:now|today)\(\s*\)$/u.test(text)) return "Date";
   const property = /(?:^|[^\w$.])file\.([A-Za-z_$][\w$]*)$/u.exec(text);
-  if (property) return FILE_PROPERTY_TYPES[property[1]!] ?? "any";
+  if (property) return FILE_PROPERTY_TYPES.get(property[1]!) ?? "any";
   if (/(?:^|[^\w$.])file$/u.test(text)) return "File";
   return "any";
 }
@@ -132,7 +133,8 @@ export function suggestFunctionNames(name: string, candidates: Iterable<string>)
   const limit = Math.max(2, Math.ceil(name.length / 2));
   return [...new Set(candidates)]
     .map((candidate) => ({ candidate, distance: editDistance(name, candidate) }))
-    .filter((entry) => entry.distance > 0 && entry.distance <= limit)
+    // Case-only typos (distance 0 here) are the best suggestion, not an exclusion.
+    .filter((entry) => entry.candidate !== name && entry.distance <= limit)
     .sort((x, y) => x.distance - y.distance || x.candidate.localeCompare(y.candidate))
     .slice(0, MAX_FUNCTION_SUGGESTIONS)
     .map((entry) => entry.candidate);
@@ -149,10 +151,14 @@ function registryByType(functions: BaseFunctionDescriptor[]): Registry {
   return registry;
 }
 
-/** Functions callable on a receiver type: its own plus the generic Value ones. */
+/** Functions callable on a receiver type: its own plus the generic Any ones. */
 function namesFor(registry: Registry, on: BaseFunctionType): Set<string> {
   if (on === "Global") return new Set(registry.get("Global") ?? []);
-  return new Set([...(registry.get(on) ?? []), ...(registry.get("Value") ?? [])]);
+  return new Set([
+    ...(registry.get(on) ?? []),
+    ...(registry.get("Any") ?? []),
+    ...(registry.get("Value") ?? []),
+  ]);
 }
 
 function methodTypesDefining(registry: Registry, name: string): BaseFunctionType[] {
