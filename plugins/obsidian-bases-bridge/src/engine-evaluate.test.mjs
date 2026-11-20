@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   EngineRequestError,
+  ENGINE_SAMPLE_ROWS,
   evaluateBaseFormulas,
   parseEvaluateRequest,
   withOneShotCachedRead,
@@ -239,4 +240,24 @@ test("rejects malformed requests before touching the engine", () => {
     assert.throws(() => parseEvaluateRequest(body), EngineRequestError);
   }
   assert.equal(parseEvaluateRequest({ path: "A\\X.base" }).path, "A/X.base");
+});
+
+test("a formula check computes at most ENGINE_SAMPLE_ROWS rows and says so", async () => {
+  let computed = 0;
+  const many = Array.from({ length: 250 }, (_, i) => ({ name: `n${i}`, path: `Notes/n${i}.md` }));
+  const base = { filters: 'file.inFolder("Notes")', formulas: { name: "file.name" }, views: [] };
+  const { app } = syntheticApp({
+    rows: many,
+    files: { "B/Big.base": JSON.stringify(base) },
+    table: { "file.name": (row) => (computed++, row.name) },
+  });
+
+  const result = await evaluateBaseFormulas(deps(app), parseEvaluateRequest({ path: "B/Big.base" }));
+
+  assert.equal(ENGINE_SAMPLE_ROWS, 100);
+  assert.equal(result.available, true);
+  assert.equal(result.rowLimit, 100);
+  assert.equal(result.formulas.name.status, "ok");
+  assert.equal(result.formulas.name.rows, 100);
+  assert.equal(computed, 100, "the engine computes the formula for the sampled rows only");
 });

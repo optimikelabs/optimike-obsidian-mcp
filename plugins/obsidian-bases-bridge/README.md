@@ -56,22 +56,32 @@ Sans `yaml`, la Base est évaluée telle qu’elle est enregistrée. Sans
 Le calcul passe par le handler CLI natif `base:query` du plugin cœur Bases
 (`app.cli.handlers`), pas par un évaluateur du Bridge. Le Bridge prépare en
 mémoire une Base candidate avec `parseYaml`/`stringifyYaml` : une vue de sonde
-sans filtre de vue ni limite, une formule de sonde `if(false, EXPR, "PARSED")`
+sans filtre de vue, limitée à 100 lignes, une formule de sonde `if(false, EXPR, "PARSED")`
 par formule et deux formules canari. Le handler la reçoit par une interception
 unique de `app.vault.cachedRead` pour ce chemin exact, restaurée dans un
 `finally`. Les appels sont sérialisés. Aucun fichier n’est modifié.
 
-Chaque formule est évaluée sur toutes les lignes retenues par les filtres
-globaux de la Base, quelle que soit la limite des vues :
+Le moteur s’exécute sur le fil principal d’Obsidian : tant qu’il calcule,
+Obsidian ne répond plus. Chaque formule est donc évaluée sur au plus
+100 lignes (`rowLimit`), les premières que retiennent les filtres globaux de la
+Base, quelle que soit la limite des vues. Une erreur de syntaxe ou une fonction
+inconnue échoue sur n’importe quelle ligne ; une erreur qui ne touche que des
+lignes plus loin, ou une formule vide seulement sur ces 100 lignes, peut
+échapper à l’échantillon. Mesuré sur 8 000 notes liées avec des formules
+`file.backlinks` : toutes les lignes 15,9 s, Obsidian bloqué tout ce temps ;
+200 lignes 0,4 s.
 
 ```json
 { "available": true, "engine": "obsidian", "obsidianVersion": "1.15.1",
-  "canary": { "ok": true },
-  "formulas": { "total": { "status": "runtime_error", "rows": 120,
+  "canary": { "ok": true }, "rowLimit": 100,
+  "formulas": { "total": { "status": "runtime_error", "rows": 100,
     "errorRows": 2, "nullRows": 3,
     "samples": [ { "path": "a.md", "message": "Error: ..." } ] } },
   "warnings": [] }
 ```
+
+`rows` vaut le nombre de lignes évaluées : égal à `rowLimit`, la Base en a
+peut-être davantage.
 
 Statuts, par ordre de priorité :
 
@@ -150,19 +160,30 @@ est `bases_formula_patch_*`, pas l’envoi de YAML arbitraire.
 `evaluate`. `source` dit d’où viennent les lignes et les valeurs :
 
 - `evaluate: true` → `source: "engine"`. Le moteur d’Obsidian (même chemin que
-  `/engine/evaluate`, avec les mêmes canaris) sélectionne les lignes de la vue :
-  filtres globaux et de vue, tri et limite de la vue. Il calcule chaque formule
-  à partir des octets exacts de la Base décrits par `baseSnapshot`. `computed`
+  `/engine/evaluate`, avec les mêmes canaris) sélectionne d’abord les lignes de
+  la vue, sans calculer de colonne de formule : filtres globaux et de vue, tri
+  et limite de la vue (une formule sur laquelle la vue filtre ou trie est
+  calculée par le moteur, comme quand Obsidian affiche la vue). `filter` et
+  `sort` de la requête s’appliquent ensuite côté Bridge, puis la pagination.
+  Le moteur ne calcule les formules que pour les lignes de la page demandée, à
+  partir des octets exacts de la Base décrits par `baseSnapshot`. Seuls un
+  `filter` ou un `sort` de la requête sur `formula.*` font calculer toutes les
+  lignes, par lots de 100 entre lesquels Obsidian reprend la main, jusqu’à
+  1 000 lignes ; au-delà, les conditions et tris sur formule sont ignorés (les
+  autres conditions filtrent toujours) et `formula_filter_not_evaluated:too_many_rows:<lignes>:1000` le
+  signale : réduisez les lignes avec une vue ou un filtre sans formule. `computed`
   et les clés de formule de `props` portent ces valeurs, sous la forme texte que
-  rend le moteur (`null` si vide). `filter` et `sort` de la requête
-  s’appliquent ensuite côté Bridge, y compris sur `formula.*` avec ces
-  valeurs, puis la pagination.
+  rend le moteur (`null` si vide). Mesuré par le Bridge sur 8 000 notes liées :
+  une page de 50 lignes 0,45 s, Obsidian répondant en 0,2 s au plus ; un filtre
+  et un tri sur formule sur 820 lignes 2,5 s, Obsidian bloqué 1,2 s au plus
+  par lot ; toutes les lignes d’un coup bloquaient Obsidian 15,9 s.
 - `evaluate: false`, ou moteur indisponible → `source: "fallback"`. Le Bridge
   sélectionne les lignes avec ses filtres supportés et ne calcule aucune
   formule : les clés de formule sont absentes de `props`, `computed` est absent.
   Si `evaluate` était demandé, chaque formule est signalée dans `warnings`
   (`formula_not_evaluated:<nom>:<raison>`). Un filtre ou un tri sur
-  `formula.*` est signalé. Quand la vue a une limite plus petite que le nombre
+  `formula.*` est signalé et ignoré : une condition sur formule dans un `and`
+  est retirée, un `or` ou un `not` qui en contient une garde toutes les lignes. Quand la vue a une limite plus petite que le nombre
   de lignes, seules les premières lignes dans l’ordre du Bridge sont gardées
   et `view_limit_applied_with_bridge_order:<limite>` le signale : cet ordre
   peut différer du tri d’Obsidian.

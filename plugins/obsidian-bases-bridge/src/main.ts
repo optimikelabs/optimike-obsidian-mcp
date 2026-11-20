@@ -11,10 +11,12 @@ import {
   stringifyYaml,
 } from "obsidian";
 import {
+  ENGINE_MAX_FORMULA_FILTER_ROWS,
   EngineRequestError,
   evaluateBaseFormulas,
+  evaluateRowsWithEngine,
   parseEvaluateRequest,
-  queryBaseViewWithEngine,
+  selectBaseViewRowsWithEngine,
   unavailableEvaluation,
 } from "./engine-evaluate.mjs";
 import {
@@ -621,6 +623,21 @@ type QueryCandidateRow = {
 };
 
 /** True when a filter tree references a formula, which only the engine computes. */
+/**
+ * The request filter without its formula predicates, for rows whose formula
+ * values were not computed: a predicate that cannot be evaluated keeps the row
+ * instead of being evaluated against missing values. In `and`, the predicate
+ * is dropped; an `or` or a `not` that involves a formula keeps every row.
+ */
+export function withoutFormulaPredicates(filter: unknown): unknown {
+  if (!filterMentionsFormula(filter)) return filter;
+  if (filter && typeof filter === "object" && !Array.isArray(filter)) {
+    const and = (filter as any).and;
+    if (Array.isArray(and)) return { and: and.map((part: unknown) => withoutFormulaPredicates(part)) };
+  }
+  return null;
+}
+
 function filterMentionsFormula(filter: unknown, depth = 0): boolean {
   if (depth > 32) return true;
   if (typeof filter === "string") return /(^|[^\w.])formula\./u.test(filter);
@@ -1640,17 +1657,21 @@ export default class BasesBridgePlugin extends Plugin {
 
     let source: "engine" | "fallback" = "fallback";
     let candidates: QueryCandidateRow[] | null = null;
+    const engineDeps = { app: this.app, parseYaml, stringifyYaml, obsidianVersion: apiVersion };
     if (evaluate) {
-      const engine = await queryBaseViewWithEngine(
-        { app: this.app, parseYaml, stringifyYaml, obsidianVersion: apiVersion },
-        { path: config.id, text: config.yaml, viewIndex },
-      );
+      // The engine first selects the rows without computing formulas; values
+      // are computed below, only for the rows that need them.
+      const engine = await selectBaseViewRowsWithEngine(engineDeps, {
+        path: config.id,
+        text: config.yaml,
+        viewIndex,
+      });
       if (engine.available) {
         source = "engine";
         candidates = [];
-        for (const row of engine.rows) {
-          const file = this.app.vault.getAbstractFileByPath(row.path);
-          if (file instanceof TFile) candidates.push({ file, values: row.values });
+        for (const rowPath of engine.paths) {
+          const file = this.app.vault.getAbstractFileByPath(rowPath);
+          if (file instanceof TFile) candidates.push({ file });
           else addWarnings(["Ligne du moteur introuvable dans le coffre."]);
         }
       } else {
@@ -1692,15 +1713,6 @@ export default class BasesBridgePlugin extends Plugin {
       }
     }
 
-    if (body?.filter) {
-      if (source === "fallback") formulaFilterWarning(body.filter);
-      candidates = candidates.filter((row) => {
-        const r = this.evaluateFilter(row.file, body.filter, schema, row.values);
-        addWarnings(r.warnings);
-        return r.ok;
-      });
-    }
-
     const sortSpecs: Array<{ prop: string; dir: "asc" | "desc" }> = [];
     if (Array.isArray(body?.sort)) {
       for (const s of body.sort) {
@@ -1714,15 +1726,76 @@ export default class BasesBridgePlugin extends Plugin {
         sortSpecs.push({ prop, dir });
       }
     }
+
+    // Computes the formula values of the given rows with the engine. When the
+    // engine fails midway, the query falls back: no formula value is returned.
+    const fillValues = async (rows: QueryCandidateRow[]) => {
+      if (source !== "engine" || formulaNames.length === 0) return;
+      const missing = rows.filter((row) => !row.values);
+      if (missing.length === 0) return;
+      const result = await evaluateRowsWithEngine(engineDeps, {
+        path: config.id,
+        text: config.yaml,
+        paths: missing.map((row) => row.file.path),
+      });
+      if (!result.available) {
+        source = "fallback";
+        for (const row of candidates ?? []) delete row.values;
+        for (const name of formulaNames) {
+          addWarnings([`formula_not_evaluated:${name}:${result.reason}`]);
+        }
+        return;
+      }
+      for (const row of missing) {
+        row.values = result.values.get(row.file.path) ?? Object.fromEntries(formulaNames.map((name) => [name, null]));
+      }
+    };
+
+    // A request filter or sort on a formula needs the values of every row.
+    const needsAllValues =
+      (!!body?.filter && filterMentionsFormula(body.filter)) ||
+      sortSpecs.some((s) => s.prop.startsWith("formula."));
+    let formulaValuesMissing = false;
+    if (needsAllValues && source === "engine" && formulaNames.length > 0) {
+      if (candidates.length <= ENGINE_MAX_FORMULA_FILTER_ROWS) {
+        await fillValues(candidates);
+      } else {
+        formulaValuesMissing = true;
+        // Computing every row would block Obsidian for seconds: the formula
+        // part of the request filter or sort is not evaluated, and says so.
+        addWarnings([
+          `formula_filter_not_evaluated:too_many_rows:${candidates.length}:${ENGINE_MAX_FORMULA_FILTER_ROWS}`,
+        ]);
+      }
+    }
+
+    // Without formula values (fallback, or past the row cap), formula
+    // predicates and sorts are skipped rather than run on missing values.
+    const skipFormulas = source === "fallback" || formulaValuesMissing;
+    if (body?.filter) {
+      if (source === "fallback") formulaFilterWarning(body.filter);
+      const filter = skipFormulas ? withoutFormulaPredicates(body.filter) : body.filter;
+      candidates = candidates.filter((row) => {
+        const r = this.evaluateFilter(row.file, filter, schema, row.values);
+        addWarnings(r.warnings);
+        return r.ok;
+      });
+    }
+
     if (source === "fallback" && sortSpecs.some((s) => s.prop.startsWith("formula."))) {
       addWarnings(["Tri sur formule non évalué par le Bridge."]);
     }
-    this.sortRows(candidates, sortSpecs, schema);
+    this.sortRows(
+      candidates,
+      skipFormulas ? sortSpecs.filter((s) => !s.prop.startsWith("formula.")) : sortSpecs,
+      schema,
+    );
 
     const total = candidates.length;
     const start = (page - 1) * limit;
-    const rows: BaseQueryRow[] = candidates
-      .slice(start, start + limit)
+    const pageRows = candidates.slice(start, start + limit);
+    await fillValues(pageRows);
+    const rows: BaseQueryRow[] = pageRows
       .map(({ file, values }) => ({
         file: { path: file.path, name: file.basename },
         props: this.buildRowProps(file, schema, values),

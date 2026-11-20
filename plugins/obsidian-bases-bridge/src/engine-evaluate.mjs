@@ -14,6 +14,23 @@ const ENGINE_HANDLER_ID = "base:query";
 const PROBE_PREFIX = "__oobb_";
 const PROBE_VIEW_NAME = "__oobb_engine_probe";
 const MAX_SAMPLES = 3;
+/**
+ * The engine runs on Obsidian's main thread and computes a formula only for
+ * the rows a view keeps, so every call bounds its rows. A formula check reads
+ * the first rows selected by the global filters: a syntax error or an unknown
+ * function fails on any row. Measured on 8,000 linked notes with
+ * `file.backlinks` formulas: all rows 15.9 s (Obsidian blocked throughout),
+ * 200 rows 0.4 s.
+ */
+export const ENGINE_SAMPLE_ROWS = 100;
+/**
+ * Rows whose formula values are computed per engine call by a query. The
+ * call restricts the probe view to these paths, a check the engine runs on
+ * every row of the Base: smaller chunks keep each call short.
+ */
+export const ENGINE_VALUE_CHUNK_ROWS = 100;
+/** Most rows a request filter or sort on `formula.*` computes; past it, it is not evaluated. */
+export const ENGINE_MAX_FORMULA_FILTER_ROWS = 1000;
 const PARSED_MARKER = "PARSED";
 const CANARY_OK_PREFIX = "oobb-canary:";
 // A known-good formula (string concatenation over a row field) and a formula
@@ -138,7 +155,7 @@ function freshName(taken, base) {
 export function buildProbeCandidate(
   doc,
   formulaNames,
-  { parseProbes = true, baseView = null } = {},
+  { parseProbes = true, baseView = null, limit = undefined, onlyPaths = undefined } = {},
 ) {
   const candidate = clonePlain(doc);
   if (candidate.formulas === undefined || candidate.formulas === null) {
@@ -210,7 +227,17 @@ export function buildProbeCandidate(
       if (key !== "name" && key !== "order" && key !== "type") inherited[key] = value;
     }
   }
-  candidate.views.push({ ...inherited, type: "table", name: viewName, order });
+  const view = { ...inherited, type: "table", name: viewName, order };
+  if (Array.isArray(onlyPaths)) {
+    // Restrict the probe to rows already selected, so formulas are computed
+    // for those rows only.
+    view.filters = { and: [`[${onlyPaths.map((p) => JSON.stringify(p)).join(", ")}].contains(file.path)`] };
+  }
+  if (Number.isInteger(limit) && limit > 0) {
+    const inheritedLimit = Number.isInteger(view.limit) && view.limit > 0 ? view.limit : Infinity;
+    view.limit = Math.min(inheritedLimit, limit);
+  }
+  candidate.views.push(view);
   return { candidate, columns, viewName };
 }
 
@@ -429,55 +456,97 @@ async function canaryOnlyHolds(engine, path, stringifyYaml) {
   );
 }
 
+function engineFailure(error) {
+  return {
+    available: false,
+    reason: error instanceof EngineUnavailable ? error.reason : "engine_unavailable",
+  };
+}
+
+function prepareQuery(deps, path, text) {
+  const engine = resolveEngine(deps.app, deps.obsidianVersion);
+  resolveBaseFile(engine, path);
+  const doc = parseBaseDocument(deps.parseYaml, text);
+  const declared = declaredFormulas(doc);
+  const names = Object.keys(declared);
+  if (names.some((name) => typeof declared[name] !== "string")) {
+    throw new EngineUnavailable("invalid_yaml");
+  }
+  return { engine, doc, names };
+}
+
 /**
- * Selects the rows of one view of a stored Base with Obsidian's engine and
- * returns every formula value of those rows.
+ * Selects the rows of one view of a stored Base with Obsidian's engine,
+ * without computing any formula column: the paths in the engine's order.
  *
  * The engine applies the Base's global filters and the view's filters, sort
- * and limit. `text` must be the exact stored bytes the caller read, so any
- * proof derived from them describes what the engine evaluated. `viewIndex`
- * is the index of the view in `views`; a negative or missing index means no
- * view (global filters only, no limit).
+ * and limit; a formula the view filters or sorts on is computed by the engine
+ * as when Obsidian shows the view. `text` must be the exact stored bytes the
+ * caller read, so any proof derived from them describes what the engine
+ * selected. `viewIndex` is the index of the view in `views`; a negative or
+ * missing index means no view (global filters only, no limit).
  *
- * Returns { available: true, formulas: string[], rows: [{ path, values }] } or
- * { available: false, reason }. Values are the engine's text rendering of each
- * cell, null when empty.
+ * Returns { available: true, formulas: string[], paths: string[] } or
+ * { available: false, reason }.
  */
-export function queryBaseViewWithEngine(deps, { path, text, viewIndex }) {
+export function selectBaseViewRowsWithEngine(deps, { path, text, viewIndex }) {
   return runExclusive(async () => {
     try {
-      const engine = resolveEngine(deps.app, deps.obsidianVersion);
-      resolveBaseFile(engine, path);
-      const doc = parseBaseDocument(deps.parseYaml, text);
-      const declared = declaredFormulas(doc);
-      const names = Object.keys(declared);
-      if (names.some((name) => typeof declared[name] !== "string")) {
-        throw new EngineUnavailable("invalid_yaml");
-      }
+      const { engine, doc, names } = prepareQuery(deps, path, text);
       const views = Array.isArray(doc.views) ? doc.views : [];
       const baseView =
         Number.isInteger(viewIndex) && viewIndex >= 0 ? (views[viewIndex] ?? null) : null;
-      const probe = buildProbeCandidate(doc, names, { parseProbes: false, baseView });
+      const probe = buildProbeCandidate(doc, [], { parseProbes: false, baseView });
       const rows = await runVerifiedProbe(engine, path, deps.stringifyYaml, probe);
-      return {
-        available: true,
-        formulas: names,
-        rows: rows.map((row) => {
-          const values = {};
-          for (const name of names) {
-            const value = row[columnKey(probe.columns, "value", name)];
-            values[name] = isNullValue(value) ? null : value;
-          }
-          return { path: String(row.path ?? ""), values };
-        }),
-      };
+      return { available: true, formulas: names, paths: rows.map((row) => String(row.path ?? "")) };
     } catch (error) {
-      return {
-        available: false,
-        reason: error instanceof EngineUnavailable ? error.reason : "engine_unavailable",
-      };
+      return engineFailure(error);
     }
   });
+}
+
+/**
+ * Computes every formula of a stored Base for the given rows only, in chunks
+ * of ENGINE_VALUE_CHUNK_ROWS rows. Each chunk is one engine call, and Obsidian
+ * handles its own work between chunks, so it is never blocked for more than
+ * one chunk.
+ *
+ * Returns { available: true, values: Map<path, { [formula]: string | null }> }
+ * or { available: false, reason }. Values are the engine's text rendering of
+ * each cell, null when empty. A path the engine does not return is absent.
+ */
+export async function evaluateRowsWithEngine(deps, { path, text, paths }) {
+  const values = new Map();
+  const unique = Array.from(new Set(paths));
+  for (let start = 0; start < unique.length; start += ENGINE_VALUE_CHUNK_ROWS) {
+    if (start > 0) await new Promise((resolve) => setTimeout(resolve, 0));
+    const chunk = unique.slice(start, start + ENGINE_VALUE_CHUNK_ROWS);
+    const result = await runExclusive(async () => {
+      try {
+        const { engine, doc, names } = prepareQuery(deps, path, text);
+        if (names.length === 0) return { available: true, rows: [], names };
+        const probe = buildProbeCandidate(doc, names, { parseProbes: false, onlyPaths: chunk });
+        const rows = await runVerifiedProbe(engine, path, deps.stringifyYaml, probe);
+        return { available: true, rows, names, columns: probe.columns };
+      } catch (error) {
+        return engineFailure(error);
+      }
+    });
+    if (!result.available) return result;
+    if (result.names.length === 0) {
+      for (const p of chunk) values.set(p, {});
+      continue;
+    }
+    for (const row of result.rows) {
+      const rowValues = {};
+      for (const name of result.names) {
+        const value = row[columnKey(result.columns, "value", name)];
+        rowValues[name] = isNullValue(value) ? null : value;
+      }
+      values.set(String(row.path ?? ""), rowValues);
+    }
+  }
+  return { available: true, values };
 }
 
 async function evaluateOrThrow({ app, parseYaml, stringifyYaml, obsidianVersion }, request) {
@@ -504,9 +573,9 @@ async function evaluateOrThrow({ app, parseYaml, stringifyYaml, obsidianVersion 
     evaluable.push(name);
   }
 
-  const probe = buildProbeCandidate(doc, evaluable);
-  // Only the canaries need computing: one row is enough.
-  if (evaluable.length === 0) probe.candidate.views[probe.candidate.views.length - 1].limit = 1;
+  // Only the canaries need computing without formulas: one row is enough.
+  const rowLimit = evaluable.length === 0 ? 1 : ENGINE_SAMPLE_ROWS;
+  const probe = buildProbeCandidate(doc, evaluable, { limit: rowLimit });
   const rows = await runVerifiedProbe(engine, path, stringifyYaml, probe);
 
   for (const name of evaluable) {
@@ -521,6 +590,9 @@ async function evaluateOrThrow({ app, parseYaml, stringifyYaml, obsidianVersion 
     engine: "obsidian",
     obsidianVersion,
     canary: { ok: true },
+    // Formulas were evaluated on at most this many rows (the first rows the
+    // global filters select); `rows` of each formula says how many.
+    rowLimit,
     formulas,
     warnings,
   };

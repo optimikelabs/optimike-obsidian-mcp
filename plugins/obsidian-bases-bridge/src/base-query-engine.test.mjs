@@ -57,7 +57,7 @@ const TABLE = {
   'file.name + "!"': (row) => `${row.name}!`,
 };
 
-async function queryRoute({ baseText = JSON.stringify(BASE), engine = true } = {}) {
+async function queryRoute({ baseText = JSON.stringify(BASE), engine = true, notes = NOTES, table = TABLE } = {}) {
   const { Bridge, TFile } = await loadBridge();
   const files = new Map();
   const add = (path) => {
@@ -68,7 +68,7 @@ async function queryRoute({ baseText = JSON.stringify(BASE), engine = true } = {
     file.stat = { size: 1, ctime: 1, mtime: 1 };
     files.set(path, file);
   };
-  [BASE_PATH, ...NOTES].forEach(add);
+  [BASE_PATH, ...notes].forEach(add);
   const vault = Object.create({
     cachedRead: async (file) => (file.path === BASE_PATH ? baseText : ""),
   });
@@ -80,8 +80,8 @@ async function queryRoute({ baseText = JSON.stringify(BASE), engine = true } = {
     on: () => ({}),
   });
   const calls = [];
-  const rows = NOTES.map((path) => ({ path, name: path.split("/").pop() }));
-  const handler = fakeBaseQueryHandler(vault, { rows, table: TABLE, calls });
+  const rows = notes.map((path) => ({ path, name: path.split("/").pop() }));
+  const handler = fakeBaseQueryHandler(vault, { rows, table, calls });
   const routes = new Map();
   const api = {
     addRoute(path) {
@@ -144,7 +144,8 @@ test("evaluate returns the engine's rows, view limit and formula values", async 
   assert.deepEqual(payload.warnings, []);
   // The engine evaluated the exact bytes the snapshot proves.
   assert.equal(payload.baseSnapshot.sha256, sha256);
-  assert.equal(calls.length, 1);
+  // One call selects the rows, one computes the formulas of the page.
+  assert.equal(calls.length, 2);
 });
 
 test("without the engine, every formula is reported instead of dropped", async () => {
@@ -198,4 +199,84 @@ test("request filters and formula column settings use the engine's formula value
   );
   assert.equal(payload.rows[0].props["formula.label"], "[[a.md]]");
   assert.ok(!payload.warnings.some((warning) => warning.startsWith("Filtre sur formule")));
+});
+
+// 250 notes and a counting formula table: the engine computes a formula only
+// for the rows its view keeps, like Obsidian.
+function countingTable() {
+  const counts = { label: 0, shout: 0 };
+  return {
+    counts,
+    table: {
+      "link(file, file.name)": (row) => (counts.label++, `[[${row.name}]]`),
+      'file.name + "!"': (row) => (counts.shout++, `${row.name}!`),
+    },
+  };
+}
+const MANY = Array.from({ length: 250 }, (_, i) => `Notes/n${String(i).padStart(3, "0")}.md`);
+const UNLIMITED = { ...BASE, views: [{ type: "table", name: "All", filters: 'file.inFolder("Notes")' }] };
+
+test("formulas are computed for the requested page only", async () => {
+  const { counts, table } = countingTable();
+  const query = await queryRoute({ baseText: JSON.stringify(UNLIMITED), notes: MANY, table });
+  const { payload, calls } = await query({ view: "All", evaluate: true, limit: 20, page: 2 });
+
+  assert.equal(payload.source, "engine");
+  assert.equal(payload.total, 250);
+  assert.deepEqual(payload.rows.map((row) => row.file.path), MANY.slice(20, 40));
+  assert.deepEqual(payload.rows[0].computed, { label: "[[n020.md]]", shout: "n020.md!" });
+  assert.deepEqual(counts, { label: 20, shout: 20 }, "only the 20 rows of the page are computed");
+  assert.equal(calls.length, 2);
+});
+
+test("a request filter on a formula computes every row in chunks of 100", async () => {
+  const { counts, table } = countingTable();
+  const query = await queryRoute({ baseText: JSON.stringify(UNLIMITED), notes: MANY, table });
+  const { payload, calls } = await query({
+    view: "All",
+    evaluate: true,
+    filter: { and: ['formula.shout == "n123.md!"'] },
+  });
+
+  assert.equal(payload.source, "engine");
+  assert.deepEqual(payload.rows.map((row) => row.file.path), ["Notes/n123.md"]);
+  assert.deepEqual(counts, { label: 250, shout: 250 });
+  // One selection call, then three value chunks (100 + 100 + 50 rows).
+  assert.equal(calls.length, 4);
+});
+
+test("past 1,000 rows a formula filter is not evaluated, and says so", async () => {
+  const { counts, table } = countingTable();
+  const notes = Array.from({ length: 1001 }, (_, i) => `Notes/m${String(i).padStart(4, "0")}.md`);
+  const query = await queryRoute({ baseText: JSON.stringify(UNLIMITED), notes, table });
+  const { payload } = await query({
+    view: "All",
+    evaluate: true,
+    limit: 10,
+    sort: [{ prop: "formula.shout", dir: "desc" }],
+  });
+
+  assert.equal(payload.source, "engine");
+  assert.ok(payload.warnings.includes("formula_filter_not_evaluated:too_many_rows:1001:1000"));
+  assert.equal(payload.rows.length, 10);
+  assert.deepEqual(counts, { label: 10, shout: 10 }, "only the page is computed");
+});
+
+test("past the cap, formula predicates are skipped, not run on missing values", async () => {
+  const notes = Array.from({ length: 1001 }, (_, i) => `Notes/m${String(i).padStart(4, "0")}.md`);
+  const query = await queryRoute({ baseText: JSON.stringify(UNLIMITED), notes, table: countingTable().table });
+  for (const predicate of ['formula.shout == "m0000.md!"', "formula.shout == null"]) {
+    const { payload } = await query({ view: "All", evaluate: true, limit: 5, filter: { and: [predicate] } });
+    assert.equal(payload.total, 1001, `${predicate} keeps every row`);
+    assert.ok(payload.warnings.includes("formula_filter_not_evaluated:too_many_rows:1001:1000"));
+  }
+  // A non-formula predicate still applies next to a skipped formula one.
+  const { payload } = await query({
+    view: "All",
+    evaluate: true,
+    limit: 5,
+    filter: { and: ['file.name == "m0007"', "formula.shout == null"] },
+  });
+  assert.equal(payload.total, 1);
+  assert.equal(payload.rows[0].file.path, "Notes/m0007.md");
 });

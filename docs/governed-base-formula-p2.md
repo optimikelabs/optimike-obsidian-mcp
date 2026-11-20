@@ -48,7 +48,11 @@ or that UI/index/plugin side effects have completed.
 ## Obsidian engine check
 
 Before sealing, `plan` asks the Bases Bridge engine route to evaluate every
-formula of the Base twice: as stored and as planned. A formula that the planned
+formula of the Base twice: as stored and as planned. The engine runs on
+Obsidian's main thread, so each evaluation reads at most the first 100 rows the
+Base's global filters select (`rowLimit`): a syntax error or an unknown
+function fails on any row, while an error limited to rows past the sample can
+pass. A formula that the planned
 Base turns into a `syntax_error` or `runtime_error`, and that did not already
 have that status, refuses the plan with reason code `base_formula_engine_error`:
 nothing is sealed or written. The refusal's `formulaCheck` lists, per formula,
