@@ -1254,6 +1254,7 @@ export default class BasesBridgePlugin extends Plugin {
     file: TFile,
     ref: string,
     schema?: BaseSchemaResponse,
+    formulaValues?: Record<string, string | null>,
   ): any {
     const fm = this.getFrontmatter(file);
     const trimmed = ref.trim();
@@ -1284,7 +1285,9 @@ export default class BasesBridgePlugin extends Plugin {
     }
 
     // Formula values are computed only by Obsidian's engine (query route).
-    if (trimmed.startsWith("formula.")) return undefined;
+    if (trimmed.startsWith("formula.")) {
+      return formulaValues?.[trimmed.slice("formula.".length)] ?? undefined;
+    }
 
     return fm[trimmed];
   }
@@ -1293,6 +1296,7 @@ export default class BasesBridgePlugin extends Plugin {
     file: TFile,
     statement: string,
     schema?: BaseSchemaResponse,
+    formulaValues?: Record<string, string | null>,
   ): { ok: boolean; warnings: string[] } {
     const warnings: string[] = [];
     const raw = String(statement ?? "").trim();
@@ -1303,7 +1307,7 @@ export default class BasesBridgePlugin extends Plugin {
     if (orParts.length > 1) {
       let any = false;
       for (const part of orParts) {
-        const res = this.evaluateStatement(file, part, schema);
+        const res = this.evaluateStatement(file, part, schema, formulaValues);
         warnings.push(...res.warnings);
         if (res.ok) any = true;
       }
@@ -1313,7 +1317,7 @@ export default class BasesBridgePlugin extends Plugin {
     if (orParts2.length > 1) {
       let any = false;
       for (const part of orParts2) {
-        const res = this.evaluateStatement(file, part, schema);
+        const res = this.evaluateStatement(file, part, schema, formulaValues);
         warnings.push(...res.warnings);
         if (res.ok) any = true;
       }
@@ -1323,7 +1327,7 @@ export default class BasesBridgePlugin extends Plugin {
     const andParts = splitOutsideQuotes(raw, " and ");
     if (andParts.length > 1) {
       for (const part of andParts) {
-        const res = this.evaluateStatement(file, part, schema);
+        const res = this.evaluateStatement(file, part, schema, formulaValues);
         warnings.push(...res.warnings);
         if (!res.ok) return { ok: false, warnings };
       }
@@ -1332,7 +1336,7 @@ export default class BasesBridgePlugin extends Plugin {
     const andParts2 = splitOutsideQuotes(raw, "&&");
     if (andParts2.length > 1) {
       for (const part of andParts2) {
-        const res = this.evaluateStatement(file, part, schema);
+        const res = this.evaluateStatement(file, part, schema, formulaValues);
         warnings.push(...res.warnings);
         if (!res.ok) return { ok: false, warnings };
       }
@@ -1341,12 +1345,12 @@ export default class BasesBridgePlugin extends Plugin {
 
     // Unary not
     if (raw.startsWith("not ")) {
-      const res = this.evaluateStatement(file, raw.slice(4), schema);
+      const res = this.evaluateStatement(file, raw.slice(4), schema, formulaValues);
       warnings.push(...res.warnings);
       return { ok: !res.ok, warnings };
     }
     if (raw.startsWith("!")) {
-      const res = this.evaluateStatement(file, raw.slice(1), schema);
+      const res = this.evaluateStatement(file, raw.slice(1), schema, formulaValues);
       warnings.push(...res.warnings);
       return { ok: !res.ok, warnings };
     }
@@ -1376,7 +1380,7 @@ export default class BasesBridgePlugin extends Plugin {
     if (listContainsMatch) {
       const items = parseStringListLiteral(listContainsMatch[1]);
       const needleRef = listContainsMatch[2].trim();
-      let needle = this.getValueForRef(file, needleRef, schema);
+      let needle = this.getValueForRef(file, needleRef, schema, formulaValues);
       if (needle === undefined) needle = stripQuotes(needleRef);
       return { ok: items.includes(String(needle ?? "")), warnings };
     }
@@ -1424,7 +1428,7 @@ export default class BasesBridgePlugin extends Plugin {
       const key = listPropContainsLinkMatch[1];
       const targetRaw = stripQuotes(listPropContainsLinkMatch[2]);
       const want = normalizeLinkish(targetRaw);
-      const v = this.getValueForRef(file, key, schema);
+      const v = this.getValueForRef(file, key, schema, formulaValues);
       const arr = Array.isArray(v)
         ? v
         : v === undefined || v === null
@@ -1440,7 +1444,7 @@ export default class BasesBridgePlugin extends Plugin {
       const key = propContainsLinkMatch[1];
       const targetRaw = stripQuotes(propContainsLinkMatch[2]);
       const want = normalizeLinkish(targetRaw);
-      const v = this.getValueForRef(file, key, schema);
+      const v = this.getValueForRef(file, key, schema, formulaValues);
       const arr = Array.isArray(v)
         ? v
         : v === undefined || v === null
@@ -1458,7 +1462,7 @@ export default class BasesBridgePlugin extends Plugin {
       const field = `file.${fileFieldOpMatch[1]}`;
       const op = fileFieldOpMatch[2];
       const needle = stripQuotes(fileFieldOpMatch[3]);
-      const hay = String(this.getValueForRef(file, field, schema) ?? "");
+      const hay = String(this.getValueForRef(file, field, schema, formulaValues) ?? "");
       if (op === "contains") return { ok: hay.includes(needle), warnings };
       return { ok: hay.startsWith(needle), warnings };
     }
@@ -1470,7 +1474,7 @@ export default class BasesBridgePlugin extends Plugin {
       const op = opMatch[2];
       const rightRaw = opMatch[3].trim();
 
-      const left = this.getValueForRef(file, leftRef, schema);
+      const left = this.getValueForRef(file, leftRef, schema, formulaValues);
       const right = parseComparisonLiteral(rightRaw);
       return { ok: compareFilterValues(left, op, right), warnings };
     }
@@ -1478,7 +1482,7 @@ export default class BasesBridgePlugin extends Plugin {
     // Bare identifier: treat as "truthy" frontmatter key (used a lot in Bases configs)
     // Ex: `- groupe_réunion` or `- sas_statut`
     if (isTruthyFilterReference(raw)) {
-      const v = this.getValueForRef(file, raw, schema);
+      const v = this.getValueForRef(file, raw, schema, formulaValues);
       return { ok: isTruthyFilterValue(v), warnings };
     }
 
@@ -1490,16 +1494,17 @@ export default class BasesBridgePlugin extends Plugin {
     file: TFile,
     filter: any,
     schema?: BaseSchemaResponse,
+    formulaValues?: Record<string, string | null>,
   ): { ok: boolean; warnings: string[] } {
     if (!filter) return { ok: true, warnings: [] };
     if (typeof filter === "string")
-      return this.evaluateStatement(file, filter, schema);
+      return this.evaluateStatement(file, filter, schema, formulaValues);
 
     if (typeof filter === "object" && !Array.isArray(filter)) {
       if (Array.isArray((filter as any).and)) {
         const warnings: string[] = [];
         for (const part of (filter as any).and) {
-          const res = this.evaluateFilter(file, part, schema);
+          const res = this.evaluateFilter(file, part, schema, formulaValues);
           warnings.push(...res.warnings);
           if (!res.ok) return { ok: false, warnings };
         }
@@ -1509,14 +1514,14 @@ export default class BasesBridgePlugin extends Plugin {
         const warnings: string[] = [];
         let any = false;
         for (const part of (filter as any).or) {
-          const res = this.evaluateFilter(file, part, schema);
+          const res = this.evaluateFilter(file, part, schema, formulaValues);
           warnings.push(...res.warnings);
           if (res.ok) any = true;
         }
         return { ok: any, warnings };
       }
       if ((filter as any).not) {
-        const res = this.evaluateFilter(file, (filter as any).not, schema);
+        const res = this.evaluateFilter(file, (filter as any).not, schema, formulaValues);
         return { ok: !res.ok, warnings: res.warnings };
       }
     }
@@ -1539,6 +1544,12 @@ export default class BasesBridgePlugin extends Plugin {
     for (const p of schema.properties) {
       if (p.kind === "formula") {
         if (formulaValues) props[p.key] = formulaValues[p.key] ?? null;
+        continue;
+      }
+      // Settings stored under `properties` as `formula.<name>` (displayName...)
+      // name a formula column, not a note property.
+      if (p.key.startsWith("formula.")) {
+        if (formulaValues) props[p.key] = formulaValues[p.key.slice("formula.".length)] ?? null;
         continue;
       }
       props[p.key] = this.getValueForRef(file, p.key, schema);
@@ -1682,9 +1693,9 @@ export default class BasesBridgePlugin extends Plugin {
     }
 
     if (body?.filter) {
-      formulaFilterWarning(body.filter);
+      if (source === "fallback") formulaFilterWarning(body.filter);
       candidates = candidates.filter((row) => {
-        const r = this.evaluateFilter(row.file, body.filter, schema);
+        const r = this.evaluateFilter(row.file, body.filter, schema, row.values);
         addWarnings(r.warnings);
         return r.ok;
       });

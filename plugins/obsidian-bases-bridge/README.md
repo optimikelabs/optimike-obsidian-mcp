@@ -155,7 +155,8 @@ est `bases_formula_patch_*`, pas l’envoi de YAML arbitraire.
   à partir des octets exacts de la Base décrits par `baseSnapshot`. `computed`
   et les clés de formule de `props` portent ces valeurs, sous la forme texte que
   rend le moteur (`null` si vide). `filter` et `sort` de la requête
-  s’appliquent ensuite côté Bridge, puis la pagination.
+  s’appliquent ensuite côté Bridge, y compris sur `formula.*` avec ces
+  valeurs, puis la pagination.
 - `evaluate: false`, ou moteur indisponible → `source: "fallback"`. Le Bridge
   sélectionne les lignes avec ses filtres supportés et ne calcule aucune
   formule : les clés de formule sont absentes de `props`, `computed` est absent.

@@ -178,3 +178,24 @@ test("evaluate:false keeps the Bridge snapshot without calling the engine", asyn
   assert.equal(payload.baseSnapshot.sha256, sha256);
   assert.equal(calls.length, 0);
 });
+
+test("request filters and formula column settings use the engine's formula values", async () => {
+  const withSettings = {
+    ...BASE,
+    properties: { "formula.label": { displayName: "Label" } },
+  };
+  const query = await queryRoute({ baseText: JSON.stringify(withSettings) });
+  const { payload } = await query({
+    view: "Top",
+    evaluate: true,
+    filter: { and: ['formula.shout == "a.md!"'] },
+  });
+
+  assert.equal(payload.source, "engine");
+  assert.deepEqual(
+    payload.rows.map((row) => row.file.path),
+    ["Notes/a.md"],
+  );
+  assert.equal(payload.rows[0].props["formula.label"], "[[a.md]]");
+  assert.ok(!payload.warnings.some((warning) => warning.startsWith("Filtre sur formule")));
+});
