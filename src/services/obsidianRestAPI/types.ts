@@ -168,6 +168,38 @@ export type NoteLinksRequest = {
   limit: number;
 };
 
+/** Read-only vault-aware inspection of candidate Markdown (Atomic Write Bridge `/notes/inspect`). */
+export type NoteInspectRequest = {
+  contractVersion: 1;
+  path?: string;
+  content: string;
+  baseline: "current_file" | "none";
+};
+
+export type NoteInspectFinding = {
+  code: string;
+  severity: "error" | "warning";
+  location: "body" | "frontmatter";
+  line: number;
+  target: string;
+  declaredType?: string;
+  suggestions?: string[];
+};
+
+export type NoteInspectResponse = {
+  ok: true;
+  contractVersion: 1;
+  path: string | null;
+  baseline: "current_file" | "none";
+  findings: NoteInspectFinding[];
+  coverage: {
+    references: { checked: number; truncated: boolean };
+    findings: { total: number; returned: number; truncated: boolean };
+    callouts: { source: "stylesheets"; partialSelectors: boolean };
+    properties: { source: "metadataTypeManager" | "types.json" | "unavailable" };
+  };
+};
+
 export type NoteSubpathValidation =
   | { status: "not_requested" }
   | { status: "valid"; type: "heading" | "block" | "footnote" }

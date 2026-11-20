@@ -165,6 +165,7 @@ The final server can expose different capabilities depending on which Obsidian p
   - required for governed note writes, note/Base/Canvas creation, native move, deletion, Frontmatter and Canvas
   - MCP 3.19.x ships version 0.9.2 (0.9.0 or later is required for Base and Canvas creation); deploy and roll back both as one pair
   - 0.9.2 or later is required to date an undated note before a plan: an older Bridge cannot prove the creation date FDM writes, so the plan is refused before any change with `date_preparation_bridge_upgrade_required` (the note is not locked; update the Bridge, then plan again)
+  - 0.10.0 or later lets `obsidian_validate_format` check Markdown against the open vault; with an older Bridge, or when Obsidian does not answer within 5 seconds, it keeps its static checks and reports `vaultCheck.status: not_checked` (see [Format validation](docs/mcp-routing-guide.md#format-validation))
 
 - Optimike Operon Bridge (bundled)
 

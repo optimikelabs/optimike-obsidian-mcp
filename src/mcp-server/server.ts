@@ -61,6 +61,10 @@ import {
   validateObsidianFormat,
   type ObsidianFormatKind,
 } from "../services/obsidianFormatService.js";
+import {
+  checkMarkdownAgainstVault,
+  type VaultInspectClient,
+} from "../services/vaultFormatCheck.js";
 // Import registration functions for specific resources and tools.
 import { registerObsidianDeleteNoteTool } from "./tools/obsidianDeleteNoteTool/index.js";
 import { registerObsidianGlobalSearchTool } from "./tools/obsidianGlobalSearchTool/index.js";
@@ -228,12 +232,15 @@ function renderCanvas(canvas: {
   return `${JSON.stringify({ nodes: canvas.nodes, edges: canvas.edges }, null, 2)}\n`;
 }
 
-function registerFormatValidationTool(server: McpServer): void {
+function registerFormatValidationTool(
+  server: McpServer,
+  vaultInspectClient: VaultInspectClient | undefined,
+): void {
   server.registerTool(
     "obsidian_validate_format",
     {
       description:
-        "Validate Obsidian-facing file formats before writing. Checks Markdown frontmatter/tags/wikilinks/callouts, .base YAML/formula references/views, and JSON Canvas nodes/edges. kind=note_name checks only a proposed vault-relative filePath against the shared note name rules (read-only; no content, nothing is read or created) and returns reasonCode, hint and suggestedPath.",
+        "Validate Obsidian-facing file formats before writing. Checks Markdown frontmatter/tags/wikilinks/callouts, .base YAML/formula references/views, and JSON Canvas nodes/edges. When Obsidian is open, Markdown is also checked against the vault (unresolved links and embeds, missing headings or block ids, callout types, property values vs declared types); with content and filePath, only issues added to the current file are reported, and vaultCheck says whether the vault check ran. kind=note_name checks only a proposed vault-relative filePath against the shared note name rules (read-only; no content, nothing is read or created) and returns reasonCode, hint and suggestedPath.",
       inputSchema: mcpSchema(
         z.object({
           kind: z
@@ -277,7 +284,16 @@ function registerFormatValidationTool(server: McpServer): void {
         context,
       );
       const kind = inferFormatKind(params.kind, filePath ?? params.filePath);
-      const result = validateObsidianFormat(kind, content);
+      const staticResult = validateObsidianFormat(kind, content);
+      const result =
+        kind === "markdown"
+          ? await checkMarkdownAgainstVault(
+              staticResult,
+              { content, filePath, source },
+              vaultInspectClient,
+              context,
+            )
+          : staticResult;
       return {
         content: [
           {
@@ -1938,7 +1954,13 @@ async function createMcpServerInstance(
       config.mcpTransportType === "stdio",
     );
     await registerAssetImportTools(server, governedNoteReplaceRuntime?.assetImport, externalRootsService, config.mcpTransportType === "stdio");
-    registerFormatValidationTool(server);
+    // Vault-aware Markdown checks need Obsidian; headless modes keep static checks.
+    registerFormatValidationTool(
+      server,
+      isHeadlessReadonly || isHeadlessGuarded || isHeadlessFilesystem
+        ? undefined
+        : obsidianService,
+    );
 
     if (isHeadlessGuarded || isHeadlessFilesystem) {
       registerHeadlessGuardedWriteTools(

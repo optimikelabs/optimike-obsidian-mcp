@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `obsidian_validate_format` checks Markdown against the open vault when Atomic Write Bridge 0.10.0 or later answers: links and embeds that resolve to no file, missing headings and block ids, callout types defined by Obsidian, the theme or CSS snippets, and property values against declared types. Only issues the content adds to the current file are reported; findings carry `line` and `target` (never a property value) and `vaultCheck` says whether the check ran. The vault-aware callout check replaces the fixed-list warning that flagged theme callouts. Without the Bridge, the static checks stand and `limitations` says `not checked against the vault` (#177).
+- Atomic Write Bridge 0.10.0: read-only `notes/inspect` route (#177).
+
 ## [3.21.0] - 2026-11-16
 
 No Bridge change: Atomic Write Bridge 0.9.2, Operon Bridge 0.9.9 and Bases Bridge 1.2.2 ship unchanged in the bundle of this release, so upgrading from 3.20.0 needs no Bridge reinstall. A section search loads the section vectors once per process. See the [English](docs/releases/3.21.0.md) and [French](docs/releases/3.21.0.fr.md) release notes.

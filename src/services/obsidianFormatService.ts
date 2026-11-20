@@ -9,7 +9,15 @@ export type FormatIssue = {
   code: string;
   message: string;
   path?: string;
+  /** Vault-aware findings only: 1-based line, the link/callout/property named, never a value. */
+  line?: number;
+  target?: string;
+  declaredType?: string;
+  suggestions?: string[];
 };
+
+export const STATIC_MARKDOWN_LIMITATION =
+  "This validates conservative Obsidian Markdown syntax; it does not render the note or resolve links against the Obsidian index.";
 
 export type FormatValidationResult = {
   ok: boolean;
@@ -304,9 +312,7 @@ export function validateObsidianMarkdown(
       embeds: (body.match(/!\[\[/gu) ?? []).length,
       callouts: callouts.length,
     },
-    limitations: [
-      "This validates conservative Obsidian Markdown syntax; it does not render the note or resolve links against the Obsidian index.",
-    ],
+    limitations: [STATIC_MARKDOWN_LIMITATION],
   };
 }
 

@@ -211,6 +211,34 @@ export function parseNoteLinksRequest(input: unknown): NoteLinksRequest {
   };
 }
 
+export type NoteInspectRequest = {
+  contractVersion: typeof ATOMIC_WRITE_CONTRACT_VERSION;
+  path?: string;
+  content: string;
+  baseline: "current_file" | "none";
+};
+
+/** Read-only inspection of candidate content; `path` is optional (content not yet placed). */
+export function parseNoteInspectRequest(input: unknown): NoteInspectRequest {
+  const body = bodyRecord(input);
+  const keys = ["contractVersion", "content"];
+  if (body.path !== undefined) keys.push("path");
+  if (body.baseline !== undefined) keys.push("baseline");
+  assertExactKeys(body, keys);
+  if (typeof body.content !== "string" || Buffer.byteLength(body.content, "utf8") > MAX_NOTE_BYTES) {
+    throw new Error(`content must be a string of at most ${MAX_NOTE_BYTES} UTF-8 bytes.`);
+  }
+  if (body.baseline !== undefined && body.baseline !== "current_file" && body.baseline !== "none") {
+    throw new Error("baseline must be current_file or none.");
+  }
+  return {
+    contractVersion: contractVersion(body.contractVersion),
+    ...(body.path === undefined ? {} : { path: validateVaultMarkdownPath(body.path) }),
+    content: body.content,
+    baseline: body.baseline === "none" ? "none" : "current_file",
+  };
+}
+
 export function parseCasRequest(input: unknown): NoteCasRequest {
   const body = bodyRecord(input);
   assertExactKeys(body, withOptionalFence(body, [

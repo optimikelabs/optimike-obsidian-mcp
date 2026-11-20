@@ -64,6 +64,8 @@ import {
   BaseUpsertResponse,
   ComplexSearchResult,
   NoteJson,
+  NoteInspectRequest,
+  NoteInspectResponse,
   NoteLinksRequest,
   NoteLinksResponse,
   NoteStat,
@@ -565,6 +567,20 @@ export class ObsidianRestApiService {
       this._request.bind(this),
       payload,
       context,
+    );
+  }
+
+  /** Vault-aware, read-only inspection of candidate Markdown inside Obsidian. */
+  async inspectAtomicNote(
+    payload: NoteInspectRequest,
+    context: RequestContext,
+    timeoutMs?: number,
+  ): Promise<NoteInspectResponse> {
+    return atomicWriteMethods.inspectAtomicNote(
+      this._request.bind(this),
+      payload,
+      context,
+      timeoutMs,
     );
   }
 
