@@ -10,6 +10,7 @@ read-modify-write operation.
 - `GET /extensions/obsidian-atomic-write-bridge/status`
 - `POST /extensions/obsidian-atomic-write-bridge/notes/read`
 - `POST /extensions/obsidian-atomic-write-bridge/notes/links` (read-only semantic observation)
+- `POST /extensions/obsidian-atomic-write-bridge/notes/inspect` (read-only vault-aware check of candidate Markdown)
 - `POST /extensions/obsidian-atomic-write-bridge/notes/cas`
 - `POST /extensions/obsidian-atomic-write-bridge/canvas/read`
 - `POST /extensions/obsidian-atomic-write-bridge/canvas/cas`
@@ -108,6 +109,31 @@ Copy `build/main.js` and `build/manifest.json` to:
 ```
 
 Enable Local REST API first, then enable Optimike Atomic Write Bridge.
+
+## Version 0.10.0 — vault-aware check of candidate Markdown
+
+`POST /extensions/obsidian-atomic-write-bridge/notes/inspect` takes
+`{ contractVersion: 1, content, path?, baseline? }` (`path` a vault-relative
+`.md`, `baseline` `current_file` by default or `none`) and never writes. It
+parses the candidate inside Obsidian and reports:
+
+- wikilinks, embeds and frontmatter links that `metadataCache.getFirstLinkpathDest`
+  does not resolve, and headings or block ids that the target's
+  `metadataCache.getFileCache` does not have (`resolveSubpath`; links into the
+  note itself use the candidate's own headings and blocks);
+- callout types not declared by `data-callout` attribute selectors in the loaded
+  stylesheets (exact, `*=`, `^=`, `$=`, inside grouping rules) or by core
+  Obsidian. The catalog is built once and rebuilt after `css-change`; a finding
+  carries at most three suggestions by edit distance and the catalog is never
+  returned;
+- frontmatter values that do not fit the declared type (date, datetime, number,
+  checkbox, list) from `app.metadataTypeManager`, else `.obsidian/types.json`.
+
+With `baseline: current_file` and an existing note at `path`, only findings the
+candidate adds compared with that note are returned. Findings name the link
+text, callout type or property key and a line, never a property value. Work is
+bounded: 2,000 references per document, 100 findings, 200,000 CSS rules per
+catalog build. `status.noteInspect` advertises the route.
 
 ## Version 0.9.2 — file-stat provenance of date preparation
 
