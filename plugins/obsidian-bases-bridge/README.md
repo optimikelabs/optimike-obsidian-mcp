@@ -8,7 +8,7 @@ Plugin compagnon pour **optimike-obsidian-mcp**. Il ajoute une vue headless « B
 2. Créer `.obsidian/plugins/obsidian-bases-bridge/` et y copier `main.js` et `manifest.json` depuis l’artefact ou depuis `build/`.
 3. Lancer Obsidian → _Settings → Community plugins_ → activer **Bases Bridge (REST)**.
 4. Vérifier que le plugin **Local REST API** est actif (v3.x) et que le coffre est autorisé.
-5. Dans chaque base ciblée, activer la vue « Bridge (Headless) » pour profiter des valeurs évaluées par l’engine.
+5. Garder le plugin cœur **Bases** actif : les formules sont calculées par son moteur (voir [Requêtes](#requêtes-query)). La vue « Bridge (Headless) » n’est plus nécessaire pour obtenir des valeurs évaluées.
 
 La CI exécute les tests, construit le plugin et publie ces deux fichiers installables. Le package MCP vérifie également qu’ils sont bien présents avant distribution.
 
@@ -143,6 +143,31 @@ existant, empreinte exacte du backend, précondition SHA-256 et remplacement via
 remplacements complets via `PUT /config` et `POST /bases`; sans lui, ces routes
 n’acceptent que la validation et refusent l’effet. La surface MCP recommandée
 est `bases_formula_patch_*`, pas l’envoi de YAML arbitraire.
+
+## Requêtes (`/query`)
+
+`POST /bases/:id/query` accepte `view`, `filter`, `sort`, `limit`, `page` et
+`evaluate`. `source` dit d’où viennent les lignes et les valeurs :
+
+- `evaluate: true` → `source: "engine"`. Le moteur d’Obsidian (même chemin que
+  `/engine/evaluate`, avec les mêmes canaris) sélectionne les lignes de la vue :
+  filtres globaux et de vue, tri et limite de la vue. Il calcule chaque formule
+  à partir des octets exacts de la Base décrits par `baseSnapshot`. `computed`
+  et les clés de formule de `props` portent ces valeurs, sous la forme texte que
+  rend le moteur (`null` si vide). `filter` et `sort` de la requête
+  s’appliquent ensuite côté Bridge, puis la pagination.
+- `evaluate: false`, ou moteur indisponible → `source: "fallback"`. Le Bridge
+  sélectionne les lignes avec ses filtres supportés et ne calcule aucune
+  formule : les clés de formule sont absentes de `props`, `computed` est absent.
+  Si `evaluate` était demandé, chaque formule est signalée dans `warnings`
+  (`formula_not_evaluated:<nom>:<raison>`). Un filtre ou un tri sur
+  `formula.*` est signalé. Quand la vue a une limite plus petite que le nombre
+  de lignes, seules les premières lignes dans l’ordre du Bridge sont gardées
+  et `view_limit_applied_with_bridge_order:<limite>` le signale : cet ordre
+  peut différer du tri d’Obsidian.
+
+L’ancien évaluateur de formules interne au Bridge est retiré : aucune valeur
+de formule ne vient plus d’une approximation.
 
 ## Upsert robuste
 

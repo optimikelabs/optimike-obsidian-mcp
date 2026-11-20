@@ -14,6 +14,7 @@ import {
   EngineRequestError,
   evaluateBaseFormulas,
   parseEvaluateRequest,
+  queryBaseViewWithEngine,
   unavailableEvaluation,
 } from "./engine-evaluate.mjs";
 import {
@@ -48,7 +49,6 @@ import {
 type EngineRow = Record<string, any>;
 type EngineSnap = { ts: number; rows: EngineRow[]; total: number };
 const ENGINE_CACHE = new Map<string, EngineSnap>();
-const ENGINE_CACHE_TTL_MS = 15_000;
 
 interface BridgeSettings {
   engineEnabled: boolean;
@@ -613,8 +613,27 @@ type BaseQueryRequest = {
 type BaseQueryRow = {
   file: { path: string; name: string };
   props: Record<string, any>;
-  computed?: Record<string, any>;
+  computed?: Record<string, string | null>;
 };
+type QueryCandidateRow = {
+  file: TFile;
+  values?: Record<string, string | null>;
+};
+
+/** True when a filter tree references a formula, which only the engine computes. */
+function filterMentionsFormula(filter: unknown, depth = 0): boolean {
+  if (depth > 32) return true;
+  if (typeof filter === "string") return /(^|[^\w.])formula\./u.test(filter);
+  if (Array.isArray(filter)) {
+    return filter.some((part) => filterMentionsFormula(part, depth + 1));
+  }
+  if (filter && typeof filter === "object") {
+    return Object.values(filter).some((part) =>
+      filterMentionsFormula(part, depth + 1),
+    );
+  }
+  return false;
+}
 type BaseQueryResponse = {
   baseSnapshot?: ReturnType<typeof baseQuerySnapshot>;
   total: number;
@@ -753,44 +772,6 @@ function parseStringListLiteral(inner: string): string[] {
     if (v) values.push(v);
   }
   return values;
-}
-
-function splitTopLevelCommas(input: string): string[] {
-  const parts: string[] = [];
-  let current = "";
-  let depth = 0;
-  let inSingle = false;
-  let inDouble = false;
-
-  for (let i = 0; i < input.length; i++) {
-    const ch = input[i]!;
-    const prev = i > 0 ? input[i - 1]! : "";
-
-    if (ch === "'" && !inDouble && prev !== "\\") {
-      inSingle = !inSingle;
-      current += ch;
-      continue;
-    }
-    if (ch === '"' && !inSingle && prev !== "\\") {
-      inDouble = !inDouble;
-      current += ch;
-      continue;
-    }
-
-    if (!inSingle && !inDouble) {
-      if (ch === "(") depth++;
-      else if (ch === ")") depth = Math.max(0, depth - 1);
-      else if (ch === "," && depth === 0) {
-        parts.push(current);
-        current = "";
-        continue;
-      }
-    }
-
-    current += ch;
-  }
-  parts.push(current);
-  return parts;
 }
 
 export default class BasesBridgePlugin extends Plugin {
@@ -1084,16 +1065,6 @@ export default class BasesBridgePlugin extends Plugin {
     };
   }
 
-  private async ensureEngineForBase(baseId: string): Promise<void> {
-    if (!this.settings.engineEnabled) return;
-    const key = ensureBaseExt(baseId);
-    const snap = ENGINE_CACHE.get(key);
-    if (snap && Date.now() - snap.ts <= ENGINE_CACHE_TTL_MS) return;
-    if (snap) ENGINE_CACHE.delete(key);
-
-    this.maybeRegisterHeadlessView();
-  }
-
   private invalidateEngineCache(baseId?: string): void {
     if (baseId) {
       ENGINE_CACHE.delete(ensureBaseExt(baseId));
@@ -1312,142 +1283,10 @@ export default class BasesBridgePlugin extends Plugin {
       return fm[trimmed.slice("note.".length)];
     }
 
-    if (trimmed.startsWith("formula.")) {
-      return this.evalFormula(file, trimmed.slice("formula.".length), schema);
-    }
+    // Formula values are computed only by Obsidian's engine (query route).
+    if (trimmed.startsWith("formula.")) return undefined;
 
     return fm[trimmed];
-  }
-
-  private evalFormula(
-    file: TFile,
-    formulaKey: string,
-    schema?: BaseSchemaResponse,
-  ): any {
-    if (!schema?.formulas || typeof schema.formulas !== "object")
-      return undefined;
-    const expr = (schema.formulas as any)[formulaKey];
-    if (typeof expr !== "string") return undefined;
-    return this.evalFormulaExpression(file, expr, schema);
-  }
-
-  private isTruthyValue(value: any): boolean {
-    return (
-      value === true ||
-      (typeof value === "string" && value.trim().length > 0) ||
-      (typeof value === "number" && Number.isFinite(value)) ||
-      (Array.isArray(value) && value.length > 0) ||
-      (!!value && typeof value === "object" && Object.keys(value).length > 0)
-    );
-  }
-
-  private getEngineRowPath(row: any): string | undefined {
-    const candidates = [row?.file?.path, row?.path, row?.filePath];
-    for (const candidate of candidates) {
-      if (typeof candidate === "string" && candidate.trim().length > 0) {
-        return candidate.replace(/\\/g, "/");
-      }
-    }
-    return undefined;
-  }
-
-  /**
-   * Évalue un sous-ensemble “safe” de formules Bases.
-   * Objectif : améliorer le mode fallback quand l’engine est désactivé.
-   */
-  private evalFormulaExpression(
-    file: TFile,
-    expr: string,
-    schema?: BaseSchemaResponse,
-  ): any {
-    const raw = String(expr ?? "").trim();
-    if (!raw) return undefined;
-
-    // Literals
-    if (raw === "null") return null;
-    if (/^(true|false)$/i.test(raw)) return /^true$/i.test(raw);
-    if (/^-?\d+(?:\.\d+)?$/.test(raw)) return Number(raw);
-    if (
-      (raw.startsWith('"') && raw.endsWith('"')) ||
-      (raw.startsWith("'") && raw.endsWith("'"))
-    ) {
-      return stripQuotes(raw);
-    }
-
-    // Direct refs
-    if (
-      raw.startsWith("file.") ||
-      raw.startsWith("note.") ||
-      raw.startsWith("formula.")
-    ) {
-      return this.getValueForRef(file, raw, schema);
-    }
-    if (/^[\p{L}\p{N}_-]+$/u.test(raw)) {
-      return this.getValueForRef(file, raw, schema);
-    }
-
-    // join(list(x))
-    const joinListMatch = raw.match(
-      /^join\s*\(\s*list\s*\(\s*([^\)]+)\s*\)\s*\)\s*$/s,
-    );
-    if (joinListMatch) {
-      const ref = String(joinListMatch[1] ?? "").trim();
-      const v = this.getValueForRef(file, ref, schema);
-      const arr = Array.isArray(v)
-        ? v
-        : v === undefined || v === null
-          ? []
-          : [v];
-      return arr.map((x) => String(x)).join(", ");
-    }
-
-    // list(x)
-    const listMatch = raw.match(/^list\s*\(\s*([^\)]+)\s*\)\s*$/s);
-    if (listMatch) {
-      const ref = String(listMatch[1] ?? "").trim();
-      const v = this.getValueForRef(file, ref, schema);
-      if (v === undefined || v === null) return [];
-      return Array.isArray(v) ? v : [v];
-    }
-
-    // if(a, b, c)
-    const ifMatch = raw.match(/^if\((.*)\)$/s);
-    if (ifMatch) {
-      const args = splitTopLevelCommas(String(ifMatch[1] ?? "")).map((x) =>
-        x.trim(),
-      );
-      if (args.length >= 3) {
-        const condExpr = args[0]!;
-        const thenExpr = args[1]!;
-        const elseExpr = args.slice(2).join(",").trim();
-
-        let condVal = this.evalFormulaExpression(file, condExpr, schema);
-        if (condVal === undefined) {
-          const condRes = this.evaluateStatement(file, condExpr, schema);
-          condVal = condRes.ok;
-        }
-
-        return this.isTruthyValue(condVal)
-          ? this.evalFormulaExpression(file, thenExpr, schema)
-          : this.evalFormulaExpression(file, elseExpr, schema);
-      }
-    }
-
-    return undefined;
-  }
-
-  private buildComputed(
-    file: TFile,
-    schema: BaseSchemaResponse,
-  ): Record<string, any> {
-    const computed: Record<string, any> = {};
-    const formulas = schema.formulas ?? {};
-    if (formulas && typeof formulas === "object" && !Array.isArray(formulas)) {
-      for (const key of Object.keys(formulas)) {
-        computed[key] = this.evalFormula(file, key, schema);
-      }
-    }
-    return computed;
   }
 
   private evaluateStatement(
@@ -1686,20 +1525,213 @@ export default class BasesBridgePlugin extends Plugin {
     return { ok: true, warnings: ["Filter non supporté (shape inconnu)."] };
   }
 
+  /**
+   * Note and file properties come from the metadata cache. Formula values only
+   * exist when Obsidian's engine computed them: without `formulaValues` the
+   * formula keys are left out (the caller reports them in `warnings`).
+   */
   private buildRowProps(
     file: TFile,
     schema: BaseSchemaResponse,
+    formulaValues?: Record<string, string | null>,
   ): Record<string, any> {
     const props: Record<string, any> = {};
     for (const p of schema.properties) {
       if (p.kind === "formula") {
-        // Best-effort: évaluer un sous-ensemble de formules (utile sans engine)
-        props[p.key] = this.getValueForRef(file, `formula.${p.key}`, schema);
+        if (formulaValues) props[p.key] = formulaValues[p.key] ?? null;
         continue;
       }
       props[p.key] = this.getValueForRef(file, p.key, schema);
     }
     return props;
+  }
+
+  private sortRows(
+    rows: QueryCandidateRow[],
+    specs: Array<{ prop: string; dir: "asc" | "desc" }>,
+    schema: BaseSchemaResponse,
+  ): void {
+    if (specs.length === 0) return;
+    const valueOf = (row: QueryCandidateRow, prop: string) =>
+      prop.startsWith("formula.")
+        ? row.values?.[prop.slice("formula.".length)]
+        : this.getValueForRef(row.file, prop, schema);
+    rows.sort((a, b) => {
+      for (const { prop, dir } of specs) {
+        const av = valueOf(a, prop);
+        const bv = valueOf(b, prop);
+        const aNum = typeof av === "number" ? av : Number(av);
+        const bNum = typeof bv === "number" ? bv : Number(bv);
+        const bothNum = Number.isFinite(aNum) && Number.isFinite(bNum);
+        let cmp = 0;
+        if (bothNum) cmp = aNum === bNum ? 0 : aNum < bNum ? -1 : 1;
+        else cmp = String(av ?? "").localeCompare(String(bv ?? ""));
+        if (cmp !== 0) return dir === "asc" ? cmp : -cmp;
+      }
+      return 0;
+    });
+  }
+
+  /**
+   * Base query. With `evaluate: true`, Obsidian's engine selects the rows of
+   * the view (global and view filters, sort, limit) and computes every
+   * formula from the same Base bytes as `baseSnapshot`: `source: "engine"`.
+   * Otherwise, or when the engine is unavailable, the Bridge's supported-filter
+   * snapshot selects the rows and no formula value is returned:
+   * `source: "fallback"`, with one warning per formula when evaluation was
+   * requested.
+   */
+  private async handleBaseQuery(req: any, res: any): Promise<void> {
+    const id = normBaseId(req.params?.id);
+    const body: BaseQueryRequest = (req.body ?? {}) as any;
+    const config = await this.readBaseConfig(id);
+    const schema = this.extractSchema(config.id, config.json);
+
+    const viewName = typeof body?.view === "string" ? body.view : undefined;
+    const view = viewName
+      ? schema.views.find((v) => v.name === viewName)
+      : schema.views[0];
+    const rawViews: unknown[] = Array.isArray(config.json.views)
+      ? config.json.views
+      : [];
+    const isViewObject = (v: unknown) =>
+      !!v && typeof v === "object" && !Array.isArray(v);
+    const viewIndex = !view
+      ? -1
+      : viewName
+        ? rawViews.findIndex(
+            (v) => isViewObject(v) && String((v as any).name ?? "") === viewName,
+          )
+        : rawViews.findIndex(isViewObject);
+
+    const limit = clampInt(body?.limit ?? view?.limit ?? 20, 20, 1, 500);
+    const page = clampInt(body?.page ?? 1, 1, 1, 1_000_000);
+    const evaluate = !!body?.evaluate;
+    const formulaNames = schema.formulas ? Object.keys(schema.formulas) : [];
+
+    const warningsSet = new Set<string>();
+    let warningsTruncated = false;
+    const addWarnings = (ws: string[]) => {
+      for (const w of ws) {
+        if (warningsSet.size >= 200) {
+          warningsTruncated = true;
+          return;
+        }
+        warningsSet.add(String(w));
+      }
+    };
+    if (viewName && !view) addWarnings(["Vue introuvable."]);
+    const formulaFilterWarning = (filter: unknown) => {
+      if (filterMentionsFormula(filter)) {
+        addWarnings(["Filtre sur formule non évalué par le Bridge."]);
+      }
+    };
+
+    let source: "engine" | "fallback" = "fallback";
+    let candidates: QueryCandidateRow[] | null = null;
+    if (evaluate) {
+      const engine = await queryBaseViewWithEngine(
+        { app: this.app, parseYaml, stringifyYaml, obsidianVersion: apiVersion },
+        { path: config.id, text: config.yaml, viewIndex },
+      );
+      if (engine.available) {
+        source = "engine";
+        candidates = [];
+        for (const row of engine.rows) {
+          const file = this.app.vault.getAbstractFileByPath(row.path);
+          if (file instanceof TFile) candidates.push({ file, values: row.values });
+          else addWarnings(["Ligne du moteur introuvable dans le coffre."]);
+        }
+      } else {
+        for (const name of formulaNames) {
+          addWarnings([`formula_not_evaluated:${name}:${engine.reason}`]);
+        }
+      }
+    }
+
+    if (!candidates) {
+      // Bridge supported-filter snapshot: global and view filters only.
+      const baseFilter = {
+        and: [schema.filters, view?.filters].filter(Boolean),
+      };
+      formulaFilterWarning(baseFilter);
+      candidates = [];
+      for (const f of this.app.vault.getFiles()) {
+        if (!(f instanceof TFile)) continue;
+        if (f.path.startsWith(".obsidian/") || f.extension === "base") continue;
+        const r = this.evaluateFilter(f, baseFilter, schema);
+        addWarnings(r.warnings);
+        if (r.ok) candidates.push({ file: f });
+      }
+      if (!(Array.isArray(body?.sort) && body.sort.length > 0) && Array.isArray(view?.order)) {
+        const orderSpecs: Array<{ prop: string; dir: "asc" | "desc" }> = [];
+        for (const raw of view.order) {
+          const str = String(raw).trim();
+          const dir: "asc" | "desc" = str.startsWith("-") ? "desc" : "asc";
+          const prop = str.startsWith("-") ? str.slice(1) : str;
+          if (prop) orderSpecs.push({ prop, dir });
+        }
+        this.sortRows(candidates, orderSpecs, schema);
+      }
+      // A view limit hides rows in Obsidian; the Bridge's order may differ
+      // from Obsidian's sort, so say when it decided which rows were kept.
+      if (typeof view?.limit === "number" && candidates.length > view.limit) {
+        candidates = candidates.slice(0, Math.max(0, Math.trunc(view.limit)));
+        addWarnings([`view_limit_applied_with_bridge_order:${view.limit}`]);
+      }
+    }
+
+    if (body?.filter) {
+      formulaFilterWarning(body.filter);
+      candidates = candidates.filter((row) => {
+        const r = this.evaluateFilter(row.file, body.filter, schema);
+        addWarnings(r.warnings);
+        return r.ok;
+      });
+    }
+
+    const sortSpecs: Array<{ prop: string; dir: "asc" | "desc" }> = [];
+    if (Array.isArray(body?.sort)) {
+      for (const s of body.sort) {
+        if (!s || typeof s !== "object") continue;
+        const prop = String((s as any).prop ?? "").trim();
+        if (!prop) continue;
+        const dir =
+          String((s as any).dir ?? "asc").toLowerCase() === "desc"
+            ? "desc"
+            : "asc";
+        sortSpecs.push({ prop, dir });
+      }
+    }
+    if (source === "fallback" && sortSpecs.some((s) => s.prop.startsWith("formula."))) {
+      addWarnings(["Tri sur formule non évalué par le Bridge."]);
+    }
+    this.sortRows(candidates, sortSpecs, schema);
+
+    const total = candidates.length;
+    const start = (page - 1) * limit;
+    const rows: BaseQueryRow[] = candidates
+      .slice(start, start + limit)
+      .map(({ file, values }) => ({
+        file: { path: file.path, name: file.basename },
+        props: this.buildRowProps(file, schema, values),
+        computed: evaluate && values ? { ...values } : undefined,
+      }));
+
+    const warnings = Array.from(warningsSet).sort((a, b) => a.localeCompare(b));
+    if (warningsTruncated) warnings.push("Warnings tronqués (max 200).");
+    const response: BaseQueryResponse = {
+      total,
+      page,
+      rows,
+      evaluate,
+      source,
+      // Proof comes from the same bytes parsed into config.json and, for the
+      // engine, handed to it: not a reread.
+      baseSnapshot: config.snapshot,
+      warnings,
+    };
+    res.json(response);
   }
 
   private functionRegistry = createFunctionRegistry({
@@ -2193,198 +2225,7 @@ export default class BasesBridgePlugin extends Plugin {
           .addRoute(`/bases/:id(*)/schema`)
           .get(withPublicLegacyBaseBoundary(getBaseSchema));
 
-        const queryBase = async (req: any, res: any) => {
-          const id = normBaseId(req.params?.id);
-          await this.ensureEngineForBase(id);
-          const body: BaseQueryRequest = (req.body ?? {}) as any;
-          const config = await this.readBaseConfig(id);
-          const schema = this.extractSchema(config.id, config.json);
-
-          const viewName =
-            typeof body?.view === "string" ? body.view : undefined;
-          const view = viewName
-            ? schema.views.find((v) => v.name === viewName)
-            : schema.views[0];
-          const viewLookupWarning =
-            viewName && !view ? "Vue introuvable." : undefined;
-
-          const limit = clampInt(body?.limit ?? view?.limit ?? 20, 20, 1, 500);
-          const page = clampInt(body?.page ?? 1, 1, 1, 1_000_000);
-
-          const warningsSet = new Set<string>();
-          if (viewLookupWarning) warningsSet.add(viewLookupWarning);
-          let warningsTruncated = false;
-          const addWarnings = (ws: string[]) => {
-            for (const w of ws) {
-              if (warningsSet.size >= 200) {
-                warningsTruncated = true;
-                return;
-              }
-              warningsSet.add(String(w));
-            }
-          };
-          const combinedFilter = {
-            and: [schema.filters, view?.filters, body?.filter].filter(Boolean),
-          };
-
-          const files = this.app.vault
-            .getFiles()
-            .filter(
-              (f) => !f.path.startsWith(".obsidian/") && f.extension !== "base",
-            );
-
-          const matches: TFile[] = [];
-          for (const f of files) {
-            if (!(f instanceof TFile)) continue;
-            const r = this.evaluateFilter(f, combinedFilter, schema);
-            addWarnings(r.warnings);
-            if (r.ok) matches.push(f);
-          }
-
-          const sortSpecs: Array<{ prop: string; dir: "asc" | "desc" }> = [];
-          if (Array.isArray(body?.sort) && body.sort.length > 0) {
-            for (const s of body.sort) {
-              if (!s || typeof s !== "object") continue;
-              const prop = String((s as any).prop ?? "").trim();
-              if (!prop) continue;
-              const dir =
-                String((s as any).dir ?? "asc").toLowerCase() === "desc"
-                  ? "desc"
-                  : "asc";
-              sortSpecs.push({ prop, dir });
-            }
-          } else if (Array.isArray(view?.order)) {
-            for (const raw of view.order) {
-              const str = String(raw);
-              const dir: "asc" | "desc" = str.trim().startsWith("-")
-                ? "desc"
-                : "asc";
-              const prop = str.trim().startsWith("-")
-                ? str.trim().slice(1)
-                : str.trim();
-              if (prop) sortSpecs.push({ prop, dir });
-            }
-          }
-
-          if (sortSpecs.length > 0) {
-            matches.sort((a, b) => {
-              for (const { prop, dir } of sortSpecs) {
-                const av = this.getValueForRef(a, prop, schema);
-                const bv = this.getValueForRef(b, prop, schema);
-                const aNum = typeof av === "number" ? av : Number(av);
-                const bNum = typeof bv === "number" ? bv : Number(bv);
-                const bothNum = Number.isFinite(aNum) && Number.isFinite(bNum);
-                let cmp = 0;
-                if (bothNum) cmp = aNum === bNum ? 0 : aNum < bNum ? -1 : 1;
-                else cmp = String(av ?? "").localeCompare(String(bv ?? ""));
-                if (cmp !== 0) return dir === "asc" ? cmp : -cmp;
-              }
-              return 0;
-            });
-          }
-
-          const total = matches.length;
-          const start = (page - 1) * limit;
-          const slice = matches.slice(start, start + limit);
-
-          const rows: BaseQueryRow[] = slice.map((file) => ({
-            file: { path: file.path, name: file.basename },
-            props: this.buildRowProps(file, schema),
-            computed: body?.evaluate
-              ? this.buildComputed(file, schema)
-              : undefined,
-          }));
-
-          const evaluate = !!body?.evaluate;
-          const shouldEngine = evaluate && this.settings.engineEnabled;
-          let snap = shouldEngine
-            ? ENGINE_CACHE.get(ensureBaseExt(id))
-            : undefined;
-          if (shouldEngine && !snap) {
-            const engineRows: BaseQueryRow[] = matches.map((file) => ({
-              file: { path: file.path, name: file.basename },
-              props: this.buildRowProps(file, schema),
-              computed: this.buildComputed(file, schema),
-            }));
-            snap = {
-              ts: Date.now(),
-              rows: engineRows as any,
-              total: engineRows.length,
-            };
-            ENGINE_CACHE.set(ensureBaseExt(id), snap);
-          }
-          const warnings = Array.from(warningsSet).sort((a, b) =>
-            a.localeCompare(b),
-          );
-          if (warningsTruncated) warnings.push("Warnings tronqués (max 200).");
-
-          if (evaluate && shouldEngine && snap) {
-            const cachedRowsByPath = new Map<string, any>();
-            for (const rawRow of snap.rows ?? []) {
-              const rowPath = this.getEngineRowPath(rawRow);
-              if (!rowPath || cachedRowsByPath.has(rowPath)) continue;
-              cachedRowsByPath.set(rowPath, rawRow);
-            }
-
-            const alignedRows: BaseQueryRow[] = matches.map((file) => {
-              const cached = cachedRowsByPath.get(file.path);
-              if (cached && cached.file && cached.props)
-                return cached as BaseQueryRow;
-              if (cached) {
-                const inferredPath = this.getEngineRowPath(cached) ?? file.path;
-                const inferredName =
-                  typeof cached?.file?.name === "string" &&
-                  cached.file.name.trim().length > 0
-                    ? cached.file.name
-                    : file.basename;
-                return {
-                  file: { path: inferredPath, name: inferredName },
-                  props:
-                    cached?.props && typeof cached.props === "object"
-                      ? cached.props
-                      : this.buildRowProps(file, schema),
-                  computed:
-                    cached?.computed && typeof cached.computed === "object"
-                      ? cached.computed
-                      : this.buildComputed(file, schema),
-                };
-              }
-              return {
-                file: { path: file.path, name: file.basename },
-                props: this.buildRowProps(file, schema),
-                computed: this.buildComputed(file, schema),
-              };
-            });
-
-            const startEngine = (page - 1) * limit;
-            const engineRows = alignedRows.slice(
-              startEngine,
-              startEngine + limit,
-            );
-            const response: BaseQueryResponse = {
-              total: alignedRows.length,
-              page,
-              rows: engineRows as any,
-              evaluate,
-              source: "engine",
-              warnings,
-            };
-            res.json(response);
-            return;
-          }
-
-          const response: BaseQueryResponse = {
-            total,
-            page,
-            rows,
-            evaluate,
-            source: "fallback",
-            // Proof comes from the same bytes parsed into config.json, not a reread.
-            baseSnapshot: config.snapshot,
-            warnings,
-          };
-          res.json(response);
-        };
+        const queryBase = (req: any, res: any) => this.handleBaseQuery(req, res);
 
         api
           .addRoute(`${REST_PREFIX}/bases/:id(*)/query`)
@@ -2559,9 +2400,9 @@ class BridgeSettingsTab extends PluginSettingTab {
     containerEl.createEl("h3", { text: "Bases Bridge – Engine" });
 
     new Setting(containerEl)
-      .setName("Activer l’engine v2 (évaluations natives)")
+      .setName("Monter la vue « Bridge (Headless) »")
       .setDesc(
-        'ON: queries renvoient source:"engine" (cache auto + headless si dispo). OFF: fallback disque.',
+        "Expérimental. Les requêtes avec evaluate calculent les formules avec le moteur d’Obsidian, que ce réglage soit actif ou non.",
       )
       .addToggle((toggle) =>
         toggle

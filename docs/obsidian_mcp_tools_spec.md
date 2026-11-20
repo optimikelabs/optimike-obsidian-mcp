@@ -324,7 +324,11 @@ semantic manifest/vector metadata are cached locally for faster warm refreshes.
 - `bases_list`: list `.base` definitions via Bases Bridge REST or local fallback.
 - `bases_get_schema`: inspect a `.base` schema via REST or local fallback.
 - `bases_query`: query Bases via REST, or simple local fallback filters in
-  headless modes.
+  headless modes. Through the Bases Bridge, `evaluate` (default) lets
+  Obsidian's engine select the view's rows (filters, sort, limit) and compute
+  formulas (`source: "engine"`, values as the engine's text). Without it, or
+  when the engine is unavailable, `source: "fallback"` returns no formula value
+  and one warning per formula.
 - `bases_create`: live REST `.base` create, or guarded YAML create in
   `headless-filesystem`.
 - `bases_upsert_config`: live REST config upsert, or guarded YAML config update
