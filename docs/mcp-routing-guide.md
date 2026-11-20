@@ -109,6 +109,29 @@ Use `obsidian_validate_format` before risky writes or generated content:
 - `kind: canvas` checks JSON Canvas nodes, edges, IDs, node geometry, and edge references.
 - `kind: auto` infers from `filePath` extension.
 
+When Obsidian is open with Atomic Write Bridge 0.10.0 or later, Markdown is
+also checked against the vault, inside Obsidian:
+
+- links and embeds that resolve to no file (`link-unresolved` warning: the note
+  may be created later; `embed-unresolved` error), and links to a heading or
+  block id the target does not have (`link-heading-missing`,
+  `link-block-missing`, errors);
+- callout types: Obsidian's own types plus those defined by the theme and CSS
+  snippets (`data-callout` selectors, partial ones included). An unknown type
+  stays a warning, because Obsidian renders it as a note, with at most three
+  close suggestions. It replaces the fixed-list callout warning, which flagged
+  theme callouts;
+- property values against the types declared in the vault (date, datetime,
+  number, checkbox, list): `property-type-mismatch`, error.
+
+With `content` and a `filePath`, only issues the content adds to the current
+file are reported; with `filePath` alone, the whole file is checked. Vault
+findings carry `line`, `target` (the link, callout type or property name, never
+a property value) and, for a property, `declaredType`. `vaultCheck` says whether
+the check ran (`checked`) or not (`not_checked` with a reason); when it did not,
+the static checks stand and `limitations` says `not checked against the vault`.
+Standard Markdown links (link text in brackets, target in parentheses) are not checked.
+
 For an existing Canvas in live/hybrid mode, prefer
 `obsidian_canvas_patch_plan → apply → status/recover`. The governed compiler
 supports bounded text-node, geometry, node-deletion and edge intentions,

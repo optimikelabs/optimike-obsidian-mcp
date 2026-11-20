@@ -22,6 +22,7 @@ import {
   parseCasRequest,
   parseCanvasCasRequest,
   parseCanvasReadRequest,
+  parseNoteInspectRequest,
   parseNoteLinksRequest,
   parseReadRequest,
   parseDatePreparationRequest,
@@ -32,6 +33,7 @@ import { dateManagementScope, createTemplateDateGuard } from "./dateManagementSc
 import { createDatePreparation, DatePreparationDeferred, DatePreparationError, FILE_STAT_PROVENANCE_CONTRACT_VERSION } from "./datePreparation.js";
 import { createFdmCompletion } from './fdmCompletion.js';
 import { projectNoteLinks } from "./noteLinks.js";
+import { createNoteInspector, NOTE_INSPECT_CONTRACT_VERSION } from "./noteInspect.js";
 import { createNoteCreateRoutes } from "./noteCreateRoutes.js";
 import { createVaultFileCreateRoutes } from "./vaultFileCreateRoutes.js";
 import { createNativeNoteMoveRoutes } from "./nativeNoteMoveRoutes.js";
@@ -306,6 +308,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
   private templateDateGuard!: ReturnType<typeof createTemplateDateGuard>;
   private datePreparation!: ReturnType<typeof createDatePreparation>;
   private fdmCompletion!: ReturnType<typeof createFdmCompletion>;
+  private noteInspector!: ReturnType<typeof createNoteInspector>;
 
   async onload(): Promise<void> {
     const stored = (await this.loadData()) as Partial<PluginData> | null;
@@ -401,6 +404,16 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
     this.register(() => this.datePreparation.dispose());
     this.fdmCompletion = createFdmCompletion(this.app);
     this.register(() => this.fdmCompletion.dispose());
+    this.noteInspector = createNoteInspector({
+      app: this.app as any,
+      styleSheets: () => activeDocument.styleSheets as any,
+      isFile: (value): value is TFile => safeInstanceOf(value, TFile),
+      parseLinktext,
+      parseYaml,
+      resolveSubpath: (cache, subpath) => resolveSubpath(cache as any, subpath),
+    });
+    // Themes and snippets define callout types; rebuild the catalog when CSS changes.
+    this.registerEvent(this.app.workspace.on("css-change", () => this.noteInspector.invalidateCallouts()));
     void this.registerRestExtension();
   }
 
@@ -497,6 +510,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
             datePreparation: { contractVersion: 1, supported: true, fileStatProvenance: { contractVersion: FILE_STAT_PROVENANCE_CONTRACT_VERSION } },
             effectFence: this.effectFence.capability(),
             frontmatterFormat: { contractVersion: 1, supported: typeof (this.app as any).metadataTypeManager?.getAssignedWidget === "function" },
+            noteInspect: { contractVersion: NOTE_INSPECT_CONTRACT_VERSION, supported: true },
             nativeMove: this.nativeMove?.capabilities() ?? { supported: false, enabled: false },
             noteCreate: this.noteCreate?.capabilities() ?? { supported: false, enabled: false },
             baseCreate: this.baseCreate?.capabilities() ?? { supported: false, enabled: false },
@@ -787,6 +801,31 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               notFound ? 404 : 500,
               errorPayload(notFound ? "note_not_found" : "read_error"),
             );
+          }
+        });
+
+      api
+        .addRoute(`${ATOMIC_WRITE_REST_PREFIX}/notes/inspect`)
+        .post(async (req: any, res: any) => {
+          let request: ReturnType<typeof parseNoteInspectRequest>;
+          try {
+            request = parseNoteInspectRequest(req?.body);
+          } catch {
+            sendJson(res, 400, errorPayload("invalid_request"));
+            return;
+          }
+          try {
+            const result = await this.noteInspector.inspect(request);
+            sendJson(res, 200, {
+              ok: true,
+              contractVersion: NOTE_INSPECT_CONTRACT_VERSION,
+              path: request.path ?? null,
+              bindingFingerprint: this.bindingFingerprint,
+              ...result,
+            });
+          } catch {
+            // Never project content or parser diagnostics from a failed inspection.
+            sendJson(res, 500, errorPayload("read_error"));
           }
         });
 

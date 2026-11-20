@@ -128,12 +128,18 @@ function freshName(taken, base) {
 
 /**
  * Builds the candidate Base: the original document plus probe formulas and one
- * probe table view without filters or limit, so the engine evaluates the
- * requested formulas on every row selected by the global filters. Each probe
- * column gets a unique display name because the handler keys rows by display
- * name.
+ * probe table view. Without `baseView` the probe view has no view filters and
+ * no limit, so the engine evaluates the formulas on every row selected by the
+ * global filters. With `baseView`, the probe view keeps that view's filters,
+ * sort and limit, so the engine selects exactly the rows of that view. Each
+ * probe column gets a unique display name because the handler keys rows by
+ * display name.
  */
-export function buildProbeCandidate(doc, formulaNames, { includeCanary = true } = {}) {
+export function buildProbeCandidate(
+  doc,
+  formulaNames,
+  { parseProbes = true, baseView = null } = {},
+) {
   const candidate = clonePlain(doc);
   if (candidate.formulas === undefined || candidate.formulas === null) {
     candidate.formulas = {};
@@ -177,6 +183,7 @@ export function buildProbeCandidate(doc, formulaNames, { includeCanary = true } 
   formulaNames.forEach((name, index) => {
     const expression = candidate.formulas[name];
     addColumn(name, "value", name);
+    if (!parseProbes) return;
     const probe = freshName(taken, `${PROBE_PREFIX}parse_${index}`);
     // Obsidian parses an empty formula as a valid empty node (value null), but
     // `if(false, , ...)` does not parse: probe it with the bare marker instead.
@@ -186,20 +193,24 @@ export function buildProbeCandidate(doc, formulaNames, { includeCanary = true } 
         : `if(false, ${expression}, "${PARSED_MARKER}")`;
     addColumn(probe, "parse", name);
   });
-  if (includeCanary) {
-    const ok = freshName(taken, `${PROBE_PREFIX}canary_ok`);
-    candidate.formulas[ok] = CANARY_OK_FORMULA;
-    addColumn(ok, "canary_ok", null);
-    const bad = freshName(taken, `${PROBE_PREFIX}canary_bad`);
-    candidate.formulas[bad] = CANARY_BAD_FORMULA;
-    addColumn(bad, "canary_bad", null);
-  }
+  const ok = freshName(taken, `${PROBE_PREFIX}canary_ok`);
+  candidate.formulas[ok] = CANARY_OK_FORMULA;
+  addColumn(ok, "canary_ok", null);
+  const bad = freshName(taken, `${PROBE_PREFIX}canary_bad`);
+  candidate.formulas[bad] = CANARY_BAD_FORMULA;
+  addColumn(bad, "canary_bad", null);
 
   const viewNames = new Set(
     candidate.views.map((view) => (view && typeof view === "object" ? view.name : undefined)),
   );
   const viewName = freshName(viewNames, PROBE_VIEW_NAME);
-  candidate.views.push({ type: "table", name: viewName, order });
+  const inherited = {};
+  if (baseView && typeof baseView === "object" && !Array.isArray(baseView)) {
+    for (const [key, value] of Object.entries(clonePlain(baseView))) {
+      if (key !== "name" && key !== "order" && key !== "type") inherited[key] = value;
+    }
+  }
+  candidate.views.push({ ...inherited, type: "table", name: viewName, order });
   return { candidate, columns, viewName };
 }
 
@@ -286,28 +297,6 @@ async function runProbeQuery(engine, path, candidateText, viewName) {
   return rows;
 }
 
-/** Runs a canary-only Base (one row, no filters); true when the engine holds. */
-async function canaryOnlyHolds(engine, path, stringifyYaml) {
-  const canaryOnly = buildProbeCandidate({}, []);
-  canaryOnly.candidate.views[0].limit = 1;
-  let rows;
-  try {
-    rows = await runProbeQuery(
-      engine,
-      path,
-      stringifyYaml(canaryOnly.candidate),
-      canaryOnly.viewName,
-    );
-  } catch {
-    return false;
-  }
-  return canaryHolds(
-    rows,
-    columnKey(canaryOnly.columns, "canary_ok", null),
-    columnKey(canaryOnly.columns, "canary_bad", null),
-  );
-}
-
 function columnKey(columns, kind, target) {
   return columns.find((column) => column.kind === kind && column.target === target)?.display;
 }
@@ -356,15 +345,15 @@ async function evaluateUnlocked(deps, request) {
   }
 }
 
-async function evaluateOrThrow({ app, parseYaml, stringifyYaml, obsidianVersion }, request) {
-  const engine = resolveEngine(app, obsidianVersion);
-  const { path } = request;
+function resolveBaseFile(engine, path) {
   const file = engine.vault.getFileByPath?.(path) ?? engine.vault.getAbstractFileByPath?.(path);
   // The native handler resolves the Base through the vault index, so the file
   // must exist even when a candidate YAML is supplied.
   if (!file || file.extension !== "base") throw new EngineUnavailable("base_not_found");
+  return file;
+}
 
-  const sourceText = request.yaml ?? (await engine.vault.read(file));
+function parseBaseDocument(parseYaml, sourceText) {
   let doc;
   try {
     doc = sourceText.trim() === "" ? {} : parseYaml(sourceText);
@@ -375,10 +364,128 @@ async function evaluateOrThrow({ app, parseYaml, stringifyYaml, obsidianVersion 
   if (typeof doc !== "object" || Array.isArray(doc)) {
     throw new EngineUnavailable("invalid_yaml");
   }
-  const declared =
-    doc.formulas && typeof doc.formulas === "object" && !Array.isArray(doc.formulas)
-      ? doc.formulas
-      : {};
+  return doc;
+}
+
+function declaredFormulas(doc) {
+  return doc.formulas && typeof doc.formulas === "object" && !Array.isArray(doc.formulas)
+    ? doc.formulas
+    : {};
+}
+
+/**
+ * Runs one probe candidate through the engine and proves the engine with the
+ * canaries. When the probe selects no row, the canary runs on a canary-only
+ * Base (no filters, one row) so an empty answer is never unverified.
+ */
+async function runVerifiedProbe(engine, path, stringifyYaml, probe) {
+  let rows;
+  try {
+    rows = await runProbeQuery(engine, path, stringifyYaml(probe.candidate), probe.viewName);
+  } catch (error) {
+    // The native parser throws plain Errors on Base schema errors (bad view,
+    // filters, summaries...). If a canary-only Base still runs, the engine is
+    // fine and the candidate is what Obsidian rejected.
+    if (
+      error instanceof EngineUnavailable &&
+      error.reason === "engine_unavailable" &&
+      (await canaryOnlyHolds(engine, path, stringifyYaml))
+    ) {
+      throw new EngineUnavailable("invalid_yaml");
+    }
+    throw error;
+  }
+  if (rows.length > 0) {
+    const okKey = columnKey(probe.columns, "canary_ok", null);
+    const badKey = columnKey(probe.columns, "canary_bad", null);
+    if (!canaryHolds(rows, okKey, badKey)) throw new EngineUnavailable("canary_failed");
+    return rows;
+  }
+  if (!(await canaryOnlyHolds(engine, path, stringifyYaml))) {
+    throw new EngineUnavailable("canary_failed");
+  }
+  return rows;
+}
+
+/** Runs a canary-only Base (one row, no filters); true when the engine holds. */
+async function canaryOnlyHolds(engine, path, stringifyYaml) {
+  const canaryOnly = buildProbeCandidate({}, []);
+  canaryOnly.candidate.views[0].limit = 1;
+  let rows;
+  try {
+    rows = await runProbeQuery(
+      engine,
+      path,
+      stringifyYaml(canaryOnly.candidate),
+      canaryOnly.viewName,
+    );
+  } catch {
+    return false;
+  }
+  return canaryHolds(
+    rows,
+    columnKey(canaryOnly.columns, "canary_ok", null),
+    columnKey(canaryOnly.columns, "canary_bad", null),
+  );
+}
+
+/**
+ * Selects the rows of one view of a stored Base with Obsidian's engine and
+ * returns every formula value of those rows.
+ *
+ * The engine applies the Base's global filters and the view's filters, sort
+ * and limit. `text` must be the exact stored bytes the caller read, so any
+ * proof derived from them describes what the engine evaluated. `viewIndex`
+ * is the index of the view in `views`; a negative or missing index means no
+ * view (global filters only, no limit).
+ *
+ * Returns { available: true, formulas: string[], rows: [{ path, values }] } or
+ * { available: false, reason }. Values are the engine's text rendering of each
+ * cell, null when empty.
+ */
+export function queryBaseViewWithEngine(deps, { path, text, viewIndex }) {
+  return runExclusive(async () => {
+    try {
+      const engine = resolveEngine(deps.app, deps.obsidianVersion);
+      resolveBaseFile(engine, path);
+      const doc = parseBaseDocument(deps.parseYaml, text);
+      const declared = declaredFormulas(doc);
+      const names = Object.keys(declared);
+      if (names.some((name) => typeof declared[name] !== "string")) {
+        throw new EngineUnavailable("invalid_yaml");
+      }
+      const views = Array.isArray(doc.views) ? doc.views : [];
+      const baseView =
+        Number.isInteger(viewIndex) && viewIndex >= 0 ? (views[viewIndex] ?? null) : null;
+      const probe = buildProbeCandidate(doc, names, { parseProbes: false, baseView });
+      const rows = await runVerifiedProbe(engine, path, deps.stringifyYaml, probe);
+      return {
+        available: true,
+        formulas: names,
+        rows: rows.map((row) => {
+          const values = {};
+          for (const name of names) {
+            const value = row[columnKey(probe.columns, "value", name)];
+            values[name] = isNullValue(value) ? null : value;
+          }
+          return { path: String(row.path ?? ""), values };
+        }),
+      };
+    } catch (error) {
+      return {
+        available: false,
+        reason: error instanceof EngineUnavailable ? error.reason : "engine_unavailable",
+      };
+    }
+  });
+}
+
+async function evaluateOrThrow({ app, parseYaml, stringifyYaml, obsidianVersion }, request) {
+  const engine = resolveEngine(app, obsidianVersion);
+  const { path } = request;
+  const file = resolveBaseFile(engine, path);
+  const doc = parseBaseDocument(parseYaml, request.yaml ?? (await engine.vault.read(file)));
+  const declared = declaredFormulas(doc);
   // Obsidian rejects the whole Base when any formula is not a string, even an
   // unrequested one.
   if (Object.values(declared).some((expression) => typeof expression !== "string")) {
@@ -400,32 +507,7 @@ async function evaluateOrThrow({ app, parseYaml, stringifyYaml, obsidianVersion 
   const probe = buildProbeCandidate(doc, evaluable);
   // Only the canaries need computing: one row is enough.
   if (evaluable.length === 0) probe.candidate.views[probe.candidate.views.length - 1].limit = 1;
-  let rows;
-  try {
-    rows = await runProbeQuery(engine, path, stringifyYaml(probe.candidate), probe.viewName);
-  } catch (error) {
-    // The native parser throws plain Errors on Base schema errors (bad view,
-    // filters, summaries...). If a canary-only Base still runs, the engine is
-    // fine and the candidate is what Obsidian rejected.
-    if (
-      error instanceof EngineUnavailable &&
-      error.reason === "engine_unavailable" &&
-      (await canaryOnlyHolds(engine, path, stringifyYaml))
-    ) {
-      throw new EngineUnavailable("invalid_yaml");
-    }
-    throw error;
-  }
-
-  const okKey = columnKey(probe.columns, "canary_ok", null);
-  const badKey = columnKey(probe.columns, "canary_bad", null);
-  if (rows.length > 0) {
-    if (!canaryHolds(rows, okKey, badKey)) throw new EngineUnavailable("canary_failed");
-  } else if (!(await canaryOnlyHolds(engine, path, stringifyYaml))) {
-    // No row matches the global filters: the engine was proven on any note of
-    // the vault with a canary-only Base (one row, no filters).
-    throw new EngineUnavailable("canary_failed");
-  }
+  const rows = await runVerifiedProbe(engine, path, stringifyYaml, probe);
 
   for (const name of evaluable) {
     formulas[name] = classifyFormula(

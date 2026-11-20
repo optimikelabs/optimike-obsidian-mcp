@@ -98,6 +98,30 @@ Utiliser `obsidian_validate_format` avant une écriture risquée ou du contenu g
 - `kind: canvas` vérifie JSON Canvas, nodes, edges, IDs, géométrie et références d’edges ;
 - `kind: auto` infère depuis l’extension de `filePath`.
 
+Quand Obsidian est ouvert avec Atomic Write Bridge 0.10.0 ou plus récent, le
+Markdown est aussi vérifié dans le coffre, à l’intérieur d’Obsidian :
+
+- liens et embeds qui ne mènent à aucun fichier (`link-unresolved` en
+  avertissement : la note peut être créée plus tard ; `embed-unresolved` en
+  erreur), et liens vers un titre ou un identifiant de bloc absent de la cible
+  (`link-heading-missing`, `link-block-missing`, erreurs) ;
+- types de callout : ceux d’Obsidian et ceux que définissent le thème et les
+  snippets CSS (sélecteurs `data-callout`, partiels compris). Un type inconnu
+  reste un avertissement, car Obsidian l’affiche comme une note, avec au plus
+  trois suggestions proches. Il remplace l’avertissement fondé sur la liste
+  fixe, qui signalait les callouts des thèmes ;
+- valeurs des propriétés selon les types déclarés dans le coffre (date,
+  datetime, nombre, case à cocher, liste) : `property-type-mismatch`, erreur.
+
+Avec `content` et un `filePath`, seuls les problèmes que le contenu ajoute au
+fichier actuel sont signalés ; avec `filePath` seul, tout le fichier est
+vérifié. Les constats du coffre portent `line`, `target` (le lien, le type de
+callout ou le nom de propriété, jamais la valeur d’une propriété) et, pour une
+propriété, `declaredType`. `vaultCheck` indique si la vérification a eu lieu
+(`checked`) ou non (`not_checked` avec une raison) ; sinon, les vérifications
+statiques restent et `limitations` indique `not checked against the vault`.
+Les liens Markdown standard (texte entre crochets, cible entre parenthèses) ne sont pas vérifiés.
+
 Pour un Canvas existant en live/hybrid, préférer
 `obsidian_canvas_patch_plan → apply → status/recover`. Le compilateur gouverné
 borne les intentions, préserve les valeurs inconnues, valide le graphe final et

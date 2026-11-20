@@ -246,7 +246,7 @@ one absent file and never edit an existing Base or Canvas. See
 - Headless tag management edits Markdown text (`tags` frontmatter or inline `#tags`) and can build a cache-backed local tag index.
 - Global tag rename is a filesystem feature: dry-run first, apply only on a copied or dedicated server vault.
 - `obsidian_admin_filesystem` is for explicit admin operations; it should not replace normal read/write tools.
-- `obsidian_validate_format` is a local validator. It improves agent output safety but does not render Obsidian, load plugins, or evaluate exact Bases UI semantics.
+- `obsidian_validate_format` is a local validator. It improves agent output safety but does not render Obsidian, load plugins, or evaluate exact Bases UI semantics. In `live`/`hybrid` with Atomic Write Bridge 0.10.0 or later, Markdown is also checked against the open vault (links, embeds, headings, blocks, callout types, declared property types); headless modes keep the static checks.
 - `obsidian_manage_canvas` is intentionally minimal and filesystem-only: create, add text node, connect nodes, validate.
 - Headless batch frontmatter defaults to dry-run and only supports `set`; protected keys remain blocked by policy.
 - Headless Bases writes edit `.base` files and note frontmatter; they do not evaluate Obsidian views, formulas, or calculated properties.

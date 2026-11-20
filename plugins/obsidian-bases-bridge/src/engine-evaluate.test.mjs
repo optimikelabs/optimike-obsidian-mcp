@@ -6,29 +6,7 @@ import {
   parseEvaluateRequest,
   withOneShotCachedRead,
 } from "./engine-evaluate.mjs";
-
-// Synthetic stand-in for Obsidian's `base:query` CLI handler: it reads the Base
-// through `vault.cachedRead`, keeps rows matching the global `filters` (a list
-// of allowed row names here), applies the view limit and returns rows keyed by
-// column display name, values stringified with null for empty, as Obsidian does.
-// Formula results come from a per-expression table instead of a real parser.
-const PARSE_ERRORS = new Set(['if(file.name == "x", 1', '"unterminated + file.name']);
-
-function evaluateExpression(expression, row, table) {
-  if (expression === '"PARSED"') return "PARSED";
-  const probe = /^if\(false, (.*), "PARSED"\)$/s.exec(expression);
-  // Like Obsidian's parser, an empty argument (`if(false, , ...)`) does not parse.
-  if (probe) return PARSE_ERRORS.has(probe[1]) || probe[1].trim() === "" ? null : "PARSED";
-  if (expression === '"oobb-canary:" + file.name') return `oobb-canary:${row.name}`;
-  if (expression === "oobbCanaryMissingFunction()") {
-    return "unknownFunctionValue" in table
-      ? table.unknownFunctionValue
-      : "Error: Unknown function oobbCanaryMissingFunction.";
-  }
-  if (PARSE_ERRORS.has(expression)) return null;
-  const compute = table[expression];
-  return compute ? compute(row) : null;
-}
+import { fakeBaseQueryHandler } from "./bases-engine-fixture.mjs";
 
 function syntheticApp({ rows, files, table = {}, handlerError, rejectBase } = {}) {
   const store = new Map(Object.entries(files));
@@ -42,30 +20,7 @@ function syntheticApp({ rows, files, table = {}, handlerError, rejectBase } = {}
   vault.read = (file) => Promise.resolve(store.get(file.path));
   vault.getFileByPath = (path) =>
     store.has(path) ? { path, extension: path.split(".").pop() } : null;
-  const handler = async ({ path, view, format }) => {
-    assert.equal(format, "json");
-    if (handlerError) throw handlerError;
-    const file = vault.getFileByPath(path);
-    if (!file) throw `Base file not found: ${path}`;
-    const base = JSON.parse(await vault.cachedRead(file));
-    // Obsidian's Base parser throws a plain Error on a schema error.
-    const rejection = rejectBase?.(base);
-    if (rejection) throw rejection;
-    const config = base.views.find((candidate) => candidate.name === view);
-    let selected = rows.filter((row) => !base.filters || base.filters.includes(row.name));
-    if (config.limit) selected = selected.slice(0, config.limit);
-    return JSON.stringify(
-      selected.map((row) => {
-        const out = { path: row.path };
-        for (const propertyId of config.order) {
-          const display = base.properties?.[propertyId]?.displayName ?? propertyId;
-          const value = evaluateExpression(base.formulas[propertyId.slice(8)], row, table);
-          out[display] = value === "" ? null : value;
-        }
-        return out;
-      }),
-    );
-  };
+  const handler = fakeBaseQueryHandler(vault, { rows, table, handlerError, rejectBase });
   const app = { vault, cli: { handlers: new Map([["base:query", { handler }]]) } };
   return { app, vault, reads, store };
 }
@@ -77,11 +32,11 @@ const deps = (app, obsidianVersion = "1.15.1") => ({
   obsidianVersion,
 });
 
-const ROWS = ["a", "b", "c", "d"].map((name) => ({ name, path: `${name}.md` }));
+const ROWS = ["a", "b", "c", "d"].map((name) => ({ name, path: `Notes/${name}.md` }));
 
 test("classifies each formula on every row with syntax > runtime > all_null > ok", async () => {
   const base = {
-    filters: ["a", "b", "c", "d"],
+    filters: 'file.inFolder("Notes")',
     formulas: {
       fine: "file.name",
       sparse: "note.sparse",
@@ -123,9 +78,9 @@ test("classifies each formula on every row with syntax > runtime > all_null > ok
     errorRows: 3,
     nullRows: 0,
     samples: [
-      { path: "a.md", message: "Error: boom a" },
-      { path: "b.md", message: "Error: boom b" },
-      { path: "c.md", message: "Error: boom c" },
+      { path: "Notes/a.md", message: "Error: boom a" },
+      { path: "Notes/b.md", message: "Error: boom b" },
+      { path: "Notes/c.md", message: "Error: boom c" },
     ],
   });
   // Only the in-memory candidate carried the probes; the stored Base is untouched.
@@ -155,7 +110,7 @@ test("evaluates a candidate YAML and only the requested formulas", async () => {
 });
 
 test("reports not_evaluated without rows once the engine canary holds elsewhere", async () => {
-  const base = { filters: ["nobody"], formulas: { f: 'if(file.name == "x", 1' }, views: [] };
+  const base = { filters: 'file.inFolder("Nowhere")', formulas: { f: 'if(file.name == "x", 1' }, views: [] };
   const { app } = syntheticApp({ rows: ROWS, files: { "X.base": JSON.stringify(base) } });
   const result = await evaluateBaseFormulas(deps(app), parseEvaluateRequest({ path: "X.base" }));
   assert.equal(result.available, true);
