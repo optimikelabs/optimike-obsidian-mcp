@@ -275,8 +275,9 @@ try {
     corpus: sha256(fs.readFileSync(corpusPath)),
   };
   const report = score(canonicalPaths);
-  assert.equal(report.evaluatedRuns, 136);
-  assert.equal(report.strictTraceRuns, 136);
+  // Every canonical trace (cases per profile x two runs) is scored strictly.
+  assert.equal(report.evaluatedRuns, canonical.traces.length);
+  assert.equal(report.strictTraceRuns, canonical.traces.length);
   assert.equal(report.legacyTraceRuns, 0);
   assert.equal(report.scorerSchemaVersion, "tool-routing-score/v2");
   assert.equal(report.scorerVersion, "2.0.0");
