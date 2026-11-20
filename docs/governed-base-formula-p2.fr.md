@@ -74,7 +74,9 @@ un rejeu et par `status` :
   alors comme avant ; il n’est jamais déclaré vérifié.
 
 La vérification n’a lieu qu’au plan. `apply`, `status` et `recover` sont
-inchangés. Syntaxe des formules : <https://help.obsidian.md/bases/syntax> ;
+inchangés. Hors plan, l’outil en lecture seule `bases_check` donne les mêmes
+statuts pour une Base ou pour toutes, et `bases_functions` liste les fonctions
+acceptées par l’Obsidian installé, groupées par type ou détaillées pour un type. Syntaxe des formules : <https://help.obsidian.md/bases/syntax> ;
 fonctions : <https://help.obsidian.md/bases/functions>.
 
 ## Gates d’écriture et migration du legacy

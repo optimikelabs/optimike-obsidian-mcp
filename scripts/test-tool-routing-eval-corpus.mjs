@@ -20,7 +20,7 @@ assert.ok(
   "routing corpus must use the versioned v1 envelope",
 );
 assert.equal(corpusEnvelope.corpusId, "optimike-tool-routing-v1");
-assert.equal(corpus.length, 35, "P6 preserves 31 cases and adds four operational routing cases");
+assert.equal(corpus.length, 37, "P6 preserves 31 cases, adds four operational routing cases and two Bases engine reads");
 
 const ids = new Set();
 for (const testCase of corpus) {

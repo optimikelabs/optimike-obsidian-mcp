@@ -368,6 +368,9 @@ running. A plan that breaks a formula is refused with the engine message; when
 the engine is unavailable the plan proceeds with `engineCheck.status:
 "unverified"` and its reason. See
 [Obsidian engine check](docs/governed-base-formula-p2.md#obsidian-engine-check).
+The read-only `bases_check` (one Base or every Base, at most 100) and
+`bases_functions` (registry of the installed Obsidian) use the same route; they
+are registered in live and hybrid-live modes only.
 
 Deterministic gates:
 

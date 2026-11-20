@@ -28,8 +28,8 @@ registration and tool-profile exposure are separate filters:
 - a hidden tool remains protected by the same runtime/write/security checks;
   visibility is not authorization.
 
-The current cross-runtime registry contains 111 unique names, including three
-optional asset tools. Full live/hybrid registration currently contains 104 names
+The current cross-runtime registry contains 113 unique names, including three
+optional asset tools. Full live/hybrid registration currently contains 106 names
 without them. See
 [Tool Surface Profiles](tool-surface-profiles.md) for exact profile semantics.
 
@@ -330,6 +330,11 @@ semantic manifest/vector metadata are cached locally for faster warm refreshes.
   and sorts on `formula.*` use these values. Without it, or when the engine is
   unavailable, `source: "fallback"` returns no formula value; when `evaluate`
   was requested and the engine is unavailable, one warning per formula says so.
+- `bases_functions`: live only; the Bases formula functions of the installed
+  Obsidian, grouped by receiver type, or the signatures of one type (`on`).
+- `bases_check`: live only; formula health of one Base or of every Base as
+  Obsidian's own engine evaluates it (`ok`, `syntax_error`, `runtime_error`,
+  `all_null`, `not_evaluated`). An unavailable engine is `unverified`.
 - `bases_create`: live REST `.base` create, or guarded YAML create in
   `headless-filesystem`.
 - `bases_upsert_config`: live REST config upsert, or guarded YAML config update

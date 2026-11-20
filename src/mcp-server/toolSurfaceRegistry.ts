@@ -105,6 +105,7 @@ const CANONICAL_UNIQUE_TOOL_NAMES = [
   "bases_list",
   "bases_get_schema",
   "bases_query",
+  "bases_functions",
   "bases_create",
   "bases_upsert_rows",
   "operon_status",
@@ -195,6 +196,7 @@ const DIAGNOSTIC_TOOL_NAMES = [
   "obsidian_runtime_status",
   "obsidian_list_pending_operations",
   "obsidian_validate_format",
+  "bases_check",
   "operon_get_diagnostics",
   "external_runtime_status",
   "external_references_scan",
@@ -496,6 +498,10 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
       },
     ],
   }),
+
+  // Obsidian's own Bases engine through the Bases Bridge: live Desktop only.
+  defineTool("bases_functions", "bases.read", "bases", LIVE_MODES),
+  defineTool("bases_check", "bases.read", "bases", LIVE_MODES),
 
   defineTool(
     "bases_create",

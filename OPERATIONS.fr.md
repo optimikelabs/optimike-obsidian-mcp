@@ -382,6 +382,9 @@ qu’Obsidian tourne. Un plan qui casse une formule est refusé avec le message 
 moteur ; si le moteur est indisponible, le plan continue avec
 `engineCheck.status: "unverified"` et sa raison. Voir
 [Vérification par le moteur d’Obsidian](docs/governed-base-formula-p2.fr.md#vérification-par-le-moteur-dobsidian).
+Les outils en lecture seule `bases_check` (une Base ou toutes, 100 au plus) et
+`bases_functions` (registre de l’Obsidian installé) utilisent la même route ;
+ils ne sont enregistrés qu’en modes live et hybrid-live.
 
 Gates déterministes :
 

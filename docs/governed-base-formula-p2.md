@@ -70,7 +70,9 @@ unchanged by replay and `status`:
   proceeds as before; it is never reported as verified.
 
 The check runs at plan time only. `apply`, `status` and `recover` are
-unchanged. Formula syntax: <https://help.obsidian.md/bases/syntax>; functions:
+unchanged. Outside a plan, the read-only `bases_check` reports the same
+statuses for one Base or every Base, and `bases_functions` lists the functions
+the installed Obsidian accepts, grouped by type or detailed for one type. Formula syntax: <https://help.obsidian.md/bases/syntax>; functions:
 <https://help.obsidian.md/bases/functions>.
 
 ## Write gates and legacy migration
