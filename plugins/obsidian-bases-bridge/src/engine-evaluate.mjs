@@ -178,7 +178,12 @@ export function buildProbeCandidate(doc, formulaNames, { includeCanary = true } 
     const expression = candidate.formulas[name];
     addColumn(name, "value", name);
     const probe = freshName(taken, `${PROBE_PREFIX}parse_${index}`);
-    candidate.formulas[probe] = `if(false, ${expression}, "${PARSED_MARKER}")`;
+    // Obsidian parses an empty formula as a valid empty node (value null), but
+    // `if(false, , ...)` does not parse: probe it with the bare marker instead.
+    candidate.formulas[probe] =
+      expression.trim() === ""
+        ? `"${PARSED_MARKER}"`
+        : `if(false, ${expression}, "${PARSED_MARKER}")`;
     addColumn(probe, "parse", name);
   });
   if (includeCanary) {
@@ -281,6 +286,28 @@ async function runProbeQuery(engine, path, candidateText, viewName) {
   return rows;
 }
 
+/** Runs a canary-only Base (one row, no filters); true when the engine holds. */
+async function canaryOnlyHolds(engine, path, stringifyYaml) {
+  const canaryOnly = buildProbeCandidate({}, []);
+  canaryOnly.candidate.views[0].limit = 1;
+  let rows;
+  try {
+    rows = await runProbeQuery(
+      engine,
+      path,
+      stringifyYaml(canaryOnly.candidate),
+      canaryOnly.viewName,
+    );
+  } catch {
+    return false;
+  }
+  return canaryHolds(
+    rows,
+    columnKey(canaryOnly.columns, "canary_ok", null),
+    columnKey(canaryOnly.columns, "canary_bad", null),
+  );
+}
+
 function columnKey(columns, kind, target) {
   return columns.find((column) => column.kind === kind && column.target === target)?.display;
 }
@@ -352,6 +379,11 @@ async function evaluateOrThrow({ app, parseYaml, stringifyYaml, obsidianVersion 
     doc.formulas && typeof doc.formulas === "object" && !Array.isArray(doc.formulas)
       ? doc.formulas
       : {};
+  // Obsidian rejects the whole Base when any formula is not a string, even an
+  // unrequested one.
+  if (Object.values(declared).some((expression) => typeof expression !== "string")) {
+    throw new EngineUnavailable("invalid_yaml");
+  }
   const requested = request.formulas ?? Object.keys(declared);
   const warnings = [];
   const evaluable = [];
@@ -362,42 +394,37 @@ async function evaluateOrThrow({ app, parseYaml, stringifyYaml, obsidianVersion 
       formulas[name] = { status: "not_evaluated", rows: 0, errorRows: 0, nullRows: 0, samples: [] };
       continue;
     }
-    if (typeof declared[name] !== "string") throw new EngineUnavailable("invalid_yaml");
     evaluable.push(name);
   }
 
   const probe = buildProbeCandidate(doc, evaluable);
-  const rows = await runProbeQuery(
-    engine,
-    path,
-    stringifyYaml(probe.candidate),
-    probe.viewName,
-  );
+  // Only the canaries need computing: one row is enough.
+  if (evaluable.length === 0) probe.candidate.views[probe.candidate.views.length - 1].limit = 1;
+  let rows;
+  try {
+    rows = await runProbeQuery(engine, path, stringifyYaml(probe.candidate), probe.viewName);
+  } catch (error) {
+    // The native parser throws plain Errors on Base schema errors (bad view,
+    // filters, summaries...). If a canary-only Base still runs, the engine is
+    // fine and the candidate is what Obsidian rejected.
+    if (
+      error instanceof EngineUnavailable &&
+      error.reason === "engine_unavailable" &&
+      (await canaryOnlyHolds(engine, path, stringifyYaml))
+    ) {
+      throw new EngineUnavailable("invalid_yaml");
+    }
+    throw error;
+  }
 
   const okKey = columnKey(probe.columns, "canary_ok", null);
   const badKey = columnKey(probe.columns, "canary_bad", null);
   if (rows.length > 0) {
     if (!canaryHolds(rows, okKey, badKey)) throw new EngineUnavailable("canary_failed");
-  } else {
-    // No row matches the global filters: prove the engine on any note of the
-    // vault with a canary-only Base (one row, no filters).
-    const canaryOnly = buildProbeCandidate({}, []);
-    canaryOnly.candidate.views[0].limit = 1;
-    const canaryRows = await runProbeQuery(
-      engine,
-      path,
-      stringifyYaml(canaryOnly.candidate),
-      canaryOnly.viewName,
-    );
-    if (
-      !canaryHolds(
-        canaryRows,
-        columnKey(canaryOnly.columns, "canary_ok", null),
-        columnKey(canaryOnly.columns, "canary_bad", null),
-      )
-    ) {
-      throw new EngineUnavailable("canary_failed");
-    }
+  } else if (!(await canaryOnlyHolds(engine, path, stringifyYaml))) {
+    // No row matches the global filters: the engine was proven on any note of
+    // the vault with a canary-only Base (one row, no filters).
+    throw new EngineUnavailable("canary_failed");
   }
 
   for (const name of evaluable) {

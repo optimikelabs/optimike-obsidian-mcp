@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  EngineRequestError,
   evaluateBaseFormulas,
   parseEvaluateRequest,
   withOneShotCachedRead,
@@ -14,8 +15,10 @@ import {
 const PARSE_ERRORS = new Set(['if(file.name == "x", 1', '"unterminated + file.name']);
 
 function evaluateExpression(expression, row, table) {
+  if (expression === '"PARSED"') return "PARSED";
   const probe = /^if\(false, (.*), "PARSED"\)$/s.exec(expression);
-  if (probe) return PARSE_ERRORS.has(probe[1]) ? null : "PARSED";
+  // Like Obsidian's parser, an empty argument (`if(false, , ...)`) does not parse.
+  if (probe) return PARSE_ERRORS.has(probe[1]) || probe[1].trim() === "" ? null : "PARSED";
   if (expression === '"oobb-canary:" + file.name') return `oobb-canary:${row.name}`;
   if (expression === "oobbCanaryMissingFunction()") {
     return "unknownFunctionValue" in table
@@ -27,7 +30,7 @@ function evaluateExpression(expression, row, table) {
   return compute ? compute(row) : null;
 }
 
-function syntheticApp({ rows, files, table = {}, handlerError } = {}) {
+function syntheticApp({ rows, files, table = {}, handlerError, rejectBase } = {}) {
   const store = new Map(Object.entries(files));
   const reads = [];
   const vault = Object.create({
@@ -45,6 +48,9 @@ function syntheticApp({ rows, files, table = {}, handlerError } = {}) {
     const file = vault.getFileByPath(path);
     if (!file) throw `Base file not found: ${path}`;
     const base = JSON.parse(await vault.cachedRead(file));
+    // Obsidian's Base parser throws a plain Error on a schema error.
+    const rejection = rejectBase?.(base);
+    if (rejection) throw rejection;
     const config = base.views.find((candidate) => candidate.name === view);
     let selected = rows.filter((row) => !base.filters || base.filters.includes(row.name));
     if (config.limit) selected = selected.slice(0, config.limit);
@@ -82,6 +88,7 @@ test("classifies each formula on every row with syntax > runtime > all_null > ok
       broken: 'if(file.name == "x", 1',
       failing: "note.failing",
       empty: "note.missing",
+      blank: "",
     },
     // A view limit must not hide rows from the diagnosis.
     views: [{ type: "table", name: "Main", limit: 1 }],
@@ -108,6 +115,8 @@ test("classifies each formula on every row with syntax > runtime > all_null > ok
   assert.equal(result.formulas.sparse.nullRows, 3);
   assert.equal(result.formulas.broken.status, "syntax_error");
   assert.equal(result.formulas.empty.status, "all_null");
+  // An empty formula parses in Obsidian: empty, not a syntax error.
+  assert.equal(result.formulas.blank.status, "all_null");
   assert.deepEqual(result.formulas.failing, {
     status: "runtime_error",
     rows: 4,
@@ -192,20 +201,40 @@ test("maps each unavailable engine state to its public reason", async () => {
       "X.base",
     ],
     [
+      // The parser rejects the candidate while a canary-only Base still runs.
       "invalid_yaml",
       () =>
         deps(
           syntheticApp({
             rows: ROWS,
             files,
-            handlerError: "Failed to parse base file: bad view",
+            rejectBase: (base) => ("f" in base.formulas ? new Error("Views must have a name") : null),
           }).app,
         ),
       "X.base",
     ],
+    [
+      // Every query fails, the canary included: the engine itself is unusable.
+      "engine_unavailable",
+      () => deps(syntheticApp({ rows: ROWS, files, handlerError: new Error("boom") }).app),
+      "X.base",
+    ],
+    [
+      // A non-string formula breaks the whole Base, even when not requested.
+      "invalid_yaml",
+      () =>
+        deps(
+          syntheticApp({
+            rows: ROWS,
+            files: { "X.base": JSON.stringify({ formulas: { f: "file.name", n: 3 } }) },
+          }).app,
+        ),
+      "X.base",
+      ["f"],
+    ],
   ];
-  for (const [reason, makeDeps, path] of cases) {
-    const result = await evaluateBaseFormulas(makeDeps(), parseEvaluateRequest({ path }));
+  for (const [reason, makeDeps, path, formulas] of cases) {
+    const result = await evaluateBaseFormulas(makeDeps(), parseEvaluateRequest({ path, formulas }));
     assert.deepEqual(result, { available: false, reason, formulas: {} }, reason);
   }
 });
@@ -252,7 +281,7 @@ test("concurrent evaluations never leave an interceptor installed", async () => 
 
 test("rejects malformed requests before touching the engine", () => {
   for (const body of [null, {}, { path: "" }, { path: "X.base", yaml: 1 }, { path: "X.base", formulas: [1] }]) {
-    assert.throws(() => parseEvaluateRequest(body), { name: "Error" });
+    assert.throws(() => parseEvaluateRequest(body), EngineRequestError);
   }
   assert.equal(parseEvaluateRequest({ path: "A\\X.base" }).path, "A/X.base");
 });
