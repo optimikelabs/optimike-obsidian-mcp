@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `bases_formula_patch_plan` and `bases_config_patch_plan` ask Obsidian's own Bases engine, through the Bases Bridge engine route, to evaluate every formula of the Base as stored and as planned before sealing. A plan that turns a formula into a syntax or runtime error is refused with `base_formula_engine_error`: nothing is sealed or written, and `formulaCheck` gives the engine messages, the unknown functions the formula calls, the valid functions for the inferred type and up to three close names. Errors already present do not block; a formula whose values are all empty is a warning. The receipt carries `engineCheck`: `verified` with the Obsidian version, or `unverified` with a reason when Obsidian is closed, the Bridge has no engine route or its canary fails. See [Obsidian engine check](docs/governed-base-formula-p2.md#obsidian-engine-check).
+
 ## [3.21.0] - 2026-11-16
 
 No Bridge change: Atomic Write Bridge 0.9.2, Operon Bridge 0.9.9 and Bases Bridge 1.2.2 ship unchanged in the bundle of this release, so upgrading from 3.20.0 needs no Bridge reinstall. A section search loads the section vectors once per process. See the [English](docs/releases/3.21.0.md) and [French](docs/releases/3.21.0.fr.md) release notes.

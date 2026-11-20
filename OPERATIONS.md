@@ -361,6 +361,13 @@ the Bridge settings, enable **Allow atomic Base CAS** for the pilot; keep
 **Legacy config writes** disabled so `bases_upsert_config` cannot bypass the
 governed path.
 
+Formula and configuration plans are checked by Obsidian's own Bases engine
+before sealing when the Bases Bridge exposes its engine route and Obsidian is
+running. A plan that breaks a formula is refused with the engine message; when
+the engine is unavailable the plan proceeds with `engineCheck.status:
+"unverified"` and its reason. See
+[Obsidian engine check](docs/governed-base-formula-p2.md#obsidian-engine-check).
+
 Deterministic gates:
 
 ```bash

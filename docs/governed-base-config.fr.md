@@ -53,8 +53,17 @@ remplacement atomique sur le SHA-256 exact et la liaison du backend, même grant
 `allowAtomicBaseWrites`. Aucun changement de Bridge. La reprise ne rejoue que le
 plan scellé ; ce n'est pas une annulation.
 
+Avant de sceller, le plan passe la même vérification par le moteur d'Obsidian
+que la famille des formules ([vérification par le moteur](governed-base-formula-p2.fr.md#vérification-par-le-moteur-dobsidian)) :
+chaque formule est évaluée telle qu'enregistrée et telle que prévue, une formule
+nouvellement cassée refuse le plan, et le reçu porte `engineCheck` (`verified`,
+ou `unverified` avec une raison). Supprimer une formule dont une autre dépend
+est détecté ainsi.
+
 Les refus renvoient des codes `base_config_*` fermés et ne renvoient jamais les
-valeurs soumises.
+valeurs soumises. Le refus moteur `base_formula_engine_error` fait exception :
+son `formulaCheck` nomme les formules cassées et cite les messages bornés
+d'Obsidian pour permettre la correction.
 
 ## Tests
 

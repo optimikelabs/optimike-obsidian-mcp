@@ -28,6 +28,12 @@ import {
 import { RestBaseAtomicWriteBackend } from "./operations/restBaseAtomicWriteBackend.js";
 import { BASE_CONFIG_OPERATION_KIND, GovernedBaseConfigRuntime } from "./baseConfigProjectionRuntime.js";
 import { assertWriteAllowed } from "./writePolicy.js";
+import { BaseEngineCheckSchema, type BaseEngineCheck } from "./basesEngineContract.js";
+import {
+  checkBaseFormulasBeforeSealing,
+  restBaseEngine,
+  type BaseEngine,
+} from "./baseFormulaEngineCheck.js";
 
 const OPERATION_KIND = "obsidian.base.formula.patch" as const;
 const PLAN_REF_PREFIX = "obsidian-base-formula-patch:v1:";
@@ -66,6 +72,8 @@ const StoredProjectionSchema = z.object({
   publicIdempotencyKey: z.string().min(1).max(256),
   intentDigest: z.string().regex(SHA256),
   proof: BaseFormulaProofSchema,
+  // Plans sealed before the engine check have no record of it.
+  engineCheck: BaseEngineCheckSchema.optional(),
 });
 
 export const BASE_FORMULA_ATOMIC_PROFILE: AtomicResourceProfile = {
@@ -90,6 +98,8 @@ export type GovernedBaseFormulaReceipt = Omit<
   "idempotencyKey"
 > & {
   idempotencyKey?: string;
+  /** Obsidian engine check made once, before sealing; absent on older plans. */
+  engineCheck?: BaseEngineCheck;
   projection: {
     kind: typeof OPERATION_KIND;
     intentDigest: string;
@@ -166,6 +176,7 @@ function projection(
 ): ObsidianNoteReplaceProjection & {
   kind: typeof OPERATION_KIND;
   proof: BaseFormulaPatchProof;
+  engineCheck?: BaseEngineCheck;
 } {
   const parsed = StoredProjectionSchema.safeParse(plan.projection);
   if (
@@ -185,6 +196,7 @@ function projection(
   return parsed.data as ObsidianNoteReplaceProjection & {
     kind: typeof OPERATION_KIND;
     proof: BaseFormulaPatchProof;
+    engineCheck?: BaseEngineCheck;
   };
 }
 
@@ -198,6 +210,7 @@ function exposed(
   return {
     ...redacted,
     ...(exposePublicKey ? { idempotencyKey: stored.publicIdempotencyKey } : {}),
+    ...(stored.engineCheck ? { engineCheck: stored.engineCheck as BaseEngineCheck } : {}),
     planDigest: operationDigest({
       contractVersion: 1,
       operationKind: OPERATION_KIND,
@@ -246,8 +259,10 @@ export class GovernedBaseFormulaRuntime {
     private readonly journal: ObsidianNoteReplaceJournal,
     private readonly adapter: ObsidianNoteReplaceOperationAdapter,
     heartbeatMs: number,
+    /** Obsidian's Bases engine; absent means every plan is "unverified". */
+    private readonly engine?: BaseEngine,
   ) {
-    this.configPatch = new GovernedBaseConfigRuntime(backend, journal);
+    this.configPatch = new GovernedBaseConfigRuntime(backend, journal, engine);
     this.heartbeat = setInterval(() => {
       try {
         this.journal.renewExecutionLease();
@@ -317,12 +332,19 @@ export class GovernedBaseFormulaRuntime {
       canonical.operations.length,
       compiled.nextYaml.length,
     );
+    // Refuses before sealing when the candidate adds a formula error.
+    const engineCheck = await checkBaseFormulasBeforeSealing(
+      this.engine,
+      input.path,
+      compiled.nextYaml,
+    );
     const storedProjection: ObsidianNoteReplaceProjection = {
       contractVersion: 1,
       kind: OPERATION_KIND,
       publicIdempotencyKey: key,
       intentDigest: canonical.digest,
       proof: compiled.proof as unknown as Record<string, unknown>,
+      engineCheck,
     };
     const child = await this.adapter.plan({
       path: input.path,
@@ -416,6 +438,7 @@ export function createGovernedBaseFormulaRuntime(
         Math.floor(config.obsidianNoteReplaceExecutionLeaseMs / 4),
       ),
     ),
+    restBaseEngine(service),
   );
   process.once("exit", () => runtime.close());
   return runtime;

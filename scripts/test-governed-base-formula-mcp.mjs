@@ -8,6 +8,7 @@ import http from "node:http";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { parse as parseYaml } from "yaml";
 
 const sha256 = (value) =>
   createHash("sha256").update(value, "utf8").digest("hex");
@@ -16,6 +17,40 @@ const bindingFingerprint = sha256("governed-base-mcp-fixture");
 let yaml =
   "formulas:\n  score: old\nviews:\n  - type: table\n    name: Préservée\n";
 let writes = 0;
+
+// Replay of the Bases Bridge engine routes. Statuses follow the live check of
+// 2026-11-20; an older Bridge (engine off) answers 404.
+let engineEnabled = false;
+const ENGINE_RESULTS = new Map([
+  ["fooBar(file.name)", ["runtime_error", 'Error: Unknown function "fooBar"']],
+  ["fooBar(1)", ["runtime_error", 'Error: Unknown function "fooBar"']],
+  ['if(file.name == "x", 1', ["syntax_error", 'Error: Expected ")"']],
+  ["formula.inexistante + 1", ["runtime_error", 'Error: Unknown formula "inexistante"']],
+  ["file.name.round()", ["runtime_error", "Error: round is not a function"]],
+  ["file.name.lowr()", ["runtime_error", "Error: lowr is not a function"]],
+  ["note.champ_inexistant_zz", ["all_null"]],
+]);
+const REGISTRY = [
+  ...["if", "now", "today", "date", "number", "list", "link", "max", "min"].map((name) => ({ name, on: "Global" })),
+  ...["contains", "lower", "upper", "trim", "replace", "split", "startsWith"].map((name) => ({ name, on: "String" })),
+  ...["round", "abs", "ceil", "floor", "toFixed"].map((name) => ({ name, on: "Number" })),
+  ...["isTruthy", "isType", "toString"].map((name) => ({ name, on: "Value" })),
+].map((fn) => ({ ...fn, params: [], doc: "" }));
+
+function engineEvaluate(source) {
+  const formulas = {};
+  for (const [name, expression] of Object.entries(parseYaml(source)?.formulas ?? {})) {
+    const [status, message] = ENGINE_RESULTS.get(String(expression)) ?? ["ok"];
+    formulas[name] = {
+      status,
+      rows: 2,
+      errorRows: message ? 2 : 0,
+      nullRows: status === "all_null" ? 2 : 0,
+      samples: message ? [{ path: "Canary/row.md", message }] : [],
+    };
+  }
+  return { available: true, engine: "obsidian", obsidianVersion: "1.15.1", canary: { ok: true }, formulas, warnings: [] };
+}
 
 function json(res, status, payload) {
   const body = JSON.stringify(payload);
@@ -114,6 +149,21 @@ const server = http.createServer((req, res) => {
       });
       return;
     }
+    if (
+      engineEnabled &&
+      req.method === "POST" &&
+      url.pathname === "/extensions/obsidian-bases-bridge/engine/evaluate"
+    ) {
+      const request = await body(req);
+      return json(res, 200, engineEvaluate(request.yaml ?? yaml));
+    }
+    if (
+      engineEnabled &&
+      req.method === "GET" &&
+      url.pathname === "/extensions/obsidian-bases-bridge/engine/functions"
+    ) {
+      return json(res, 200, { available: true, obsidianVersion: "1.15.1", source: "obsidian-app-bundle", functions: REGISTRY });
+    }
     json(res, 404, { error: "fixture route not found" });
   })().catch((error) => json(res, 500, { error: String(error) }));
 });
@@ -205,6 +255,11 @@ try {
   assert.equal(plannedResult.isError, false);
   const planned = parsed(plannedResult);
   assert.equal(planned.phase, "planned");
+  assert.deepEqual(
+    planned.engineCheck,
+    { status: "unverified", reason: "bridge_route_missing" },
+    "an older Bridge leaves the plan unverified, never verified",
+  );
   assert.equal(writes, 0);
   const pending = parsed(
     await client.callTool({
@@ -244,6 +299,7 @@ try {
   );
   assert.equal(status.outcome, "committed");
   assert.equal(status.idempotencyKey, undefined);
+  assert.deepEqual(status.engineCheck, planned.engineCheck, "the sealed check survives apply");
   assert.equal(
     parsed(
       await client.callTool({
@@ -253,6 +309,79 @@ try {
     ).operations.some((item) => item.planRef === planned.planRef),
     false,
   );
+
+  // Engine available. The Base already has a formula broken before the edit.
+  engineEnabled = true;
+  yaml = 'formulas:\n  score: "new"\n  legacy: fooBar(1)\nviews:\n  - type: table\n    name: Préservée\n';
+  const before = yaml;
+  const pendingCount = async () =>
+    parsed(await client.callTool({ name: "obsidian_list_pending_operations", arguments: { limit: 100 } }))
+      .operations.length;
+  const pendingBefore = await pendingCount();
+  const plan = (tool, operations, idempotencyKey) =>
+    client.callTool({ name: tool, arguments: { path: fixturePath, operations, idempotencyKey } });
+  const refusal = async (tool, expression, key) => {
+    const result = await plan(tool, [{ op: "set_formula", name: "score", expression }], key);
+    assert.equal(result.isError, true, `${expression} must be refused`);
+    const payload = parsed(result);
+    assert.equal(payload.error.code, "VALIDATION_ERROR");
+    assert.equal(payload.error.details.reasonCode, "base_formula_engine_error");
+    assert.match(payload.error.message, /https:\/\/help\.obsidian\.md\/bases\/functions/u);
+    const check = payload.error.details.formulaCheck;
+    assert.equal(check.obsidianVersion, "1.15.1");
+    assert.deepEqual(check.docs, ["https://help.obsidian.md/bases/functions", "https://help.obsidian.md/bases/syntax"]);
+    assert.deepEqual(check.formulas.map((formula) => formula.name), ["score"], "the pre-existing legacy error is not blamed");
+    const [formula] = check.formulas;
+    assert.deepEqual(formula.messages, [ENGINE_RESULTS.get(expression)[1]]);
+    assert.equal(formula.previousStatus, "ok");
+    return formula;
+  };
+
+  const unknownGlobal = await refusal("bases_formula_patch_plan", "fooBar(file.name)", "engine-refuse-1");
+  assert.equal(unknownGlobal.status, "runtime_error");
+  assert.deepEqual(unknownGlobal.unknownFunctions, [{ name: "fooBar", on: "Global", definedOn: [] }]);
+  assert.equal(unknownGlobal.validFunctions.on, "Global");
+  assert.ok(unknownGlobal.validFunctions.names.includes("if"));
+
+  const syntax = await refusal("bases_formula_patch_plan", 'if(file.name == "x", 1', "engine-refuse-2");
+  assert.equal(syntax.status, "syntax_error");
+  assert.deepEqual(syntax.unknownFunctions, [], "if is a known global function");
+
+  const missingFormula = await refusal("bases_formula_patch_plan", "formula.inexistante + 1", "engine-refuse-3");
+  assert.deepEqual(missingFormula.unknownFunctions, []);
+
+  const wrongType = await refusal("bases_formula_patch_plan", "file.name.round()", "engine-refuse-4");
+  assert.deepEqual(wrongType.unknownFunctions, [{ name: "round", on: "String", definedOn: ["Number"] }]);
+  assert.equal(wrongType.validFunctions.on, "String");
+  assert.ok(wrongType.validFunctions.names.includes("lower") && wrongType.validFunctions.names.includes("toString"));
+
+  const nearMiss = await refusal("bases_config_patch_plan", "file.name.lowr()", "engine-refuse-5");
+  assert.deepEqual(nearMiss.suggestions, ["lower"]);
+
+  assert.equal(writes, 1, "a refused plan writes nothing");
+  assert.equal(yaml, before);
+  assert.equal(await pendingCount(), pendingBefore, "a refused plan seals nothing");
+
+  const accepted = { op: "set_formula", name: "score", expression: '"ok " + file.name' };
+  const verified = parsed(await plan("bases_formula_patch_plan", [accepted], "engine-accept-1"));
+  assert.equal(verified.phase, "planned", "a pre-existing engine error does not block");
+  assert.deepEqual(verified.engineCheck, { status: "verified", obsidianVersion: "1.15.1" });
+
+  const allNull = parsed(
+    await plan("bases_config_patch_plan", [{ op: "set_formula", name: "score", expression: "note.champ_inexistant_zz" }], "engine-accept-2"),
+  );
+  assert.equal(allNull.phase, "planned", "all_null is a warning, never a refusal");
+  assert.deepEqual(allNull.engineCheck, {
+    status: "verified",
+    obsidianVersion: "1.15.1",
+    warnings: [{ formula: "score", status: "all_null" }],
+  });
+
+  // A replayed plan reports the check sealed with it, not a fresh one.
+  engineEnabled = false;
+  const replayed = parsed(await plan("bases_formula_patch_plan", [accepted], "engine-accept-1"));
+  assert.equal(replayed.planRef, verified.planRef);
+  assert.deepEqual(replayed.engineCheck, verified.engineCheck);
 } catch (error) {
   throw new Error(
     `${error instanceof Error ? error.stack : String(error)}\nMCP stderr:\n${childStderr}`,

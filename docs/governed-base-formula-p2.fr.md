@@ -48,6 +48,35 @@ bruts avant/après et la préservation de source. Il ne prétend pas prouver la
 validité métier de toute formule dans toute future version d’Obsidian, ni la
 fin des effets UI, index ou plugins.
 
+## Vérification par le moteur d’Obsidian
+
+Avant de sceller, `plan` demande à la route moteur du Bases Bridge d’évaluer
+deux fois toutes les formules de la Base : telle qu’enregistrée et telle que
+prévue. Une formule que la Base prévue fait passer en `syntax_error` ou
+`runtime_error`, et qui n’avait pas déjà ce statut, refuse le plan avec le
+code `base_formula_engine_error` : rien n’est scellé ni écrit. Le champ
+`formulaCheck` du refus donne, par formule, jusqu’à trois messages du moteur,
+les fonctions inconnues appelées (appels `name(` et `.name(` absents du
+registre de fonctions de l’Obsidian installé, avec le type quand il se déduit),
+les fonctions valides pour ce type et jusqu’à trois noms proches. Les erreurs
+déjà présentes dans la Base enregistrée ne bloquent pas. Une formule dont toutes
+les valeurs sont vides (`all_null`) donne un avertissement, jamais un refus.
+
+Le reçu du plan porte `engineCheck`, scellé avec le plan et rendu tel quel par
+un rejeu et par `status` :
+
+- `{ "status": "verified", "obsidianVersion": "…" }`, avec `warnings` pour les
+  formules `all_null` ou `not_evaluated`, quand les deux évaluations ont
+  réussi ;
+- `{ "status": "unverified", "reason": "…" }` sinon : Obsidian fermé, Bridge
+  sans route moteur (`bridge_route_missing`), canary moteur en échec, version
+  d’Obsidian non prise en charge ou réponse inexploitable. Le plan continue
+  alors comme avant ; il n’est jamais déclaré vérifié.
+
+La vérification n’a lieu qu’au plan. `apply`, `status` et `recover` sont
+inchangés. Syntaxe des formules : <https://help.obsidian.md/bases/syntax> ;
+fonctions : <https://help.obsidian.md/bases/functions>.
+
 ## Gates d’écriture et migration du legacy
 
 Les deux interrupteurs Bases Bridge sont désactivés par défaut :
