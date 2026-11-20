@@ -6,7 +6,10 @@ import { build } from "esbuild";
 import { parseNoteInspectRequest } from "./contract.js";
 import {
   createNoteInspector,
+  NOTE_INSPECT_MAX_FINDINGS,
   NOTE_INSPECT_MAX_SUGGESTIONS,
+  suggestCalloutTypes,
+  valueFitsType,
   type NoteInspectApp,
   type StyleSheetLike,
 } from "./noteInspect.js";
@@ -54,6 +57,7 @@ function fixture(options: {
   types?: Record<string, string>;
   typesJson?: string;
   sheets?: StyleSheetLike[];
+  suggest?: typeof suggestCalloutTypes;
 } = {}) {
   const files = options.files ?? {};
   const reads: string[] = [];
@@ -97,6 +101,7 @@ function fixture(options: {
     parseLinktext,
     parseYaml,
     resolveSubpath,
+    ...(options.suggest ? { suggestCalloutTypes: options.suggest } : {}),
   });
   return { inspector, reads, setSheets: (next: StyleSheetLike[]) => (sheets = next) };
 }
@@ -147,6 +152,9 @@ test("valid links, self-anchors and code spans produce no findings", async () =>
   const content = [
     "# Local",
     "Line ^here",
+    "## `config.json`",
+    "## Using `foo`",
+    "[[#config.json]] [[#Using foo]]",
     "[[AGENTS#Rules]] [[AGENTS#^abc|alias]] ![[img.png|200]] [[#Local]] [[#^here]]",
     "`[[Missing in code]]`",
     "```",
@@ -157,6 +165,10 @@ test("valid links, self-anchors and code spans produce no findings", async () =>
   ].join("\n");
   const result = await inspector.inspect({ path: "Notes/Self.md", content, baseline: "current_file" });
   assert.deepEqual(result.findings, []);
+
+  // An inline ```span``` at the start of a line opens no fence: later checks still run.
+  const afterSpan = await inspector.inspect({ content: "```inline``` span\n[[Missing after span]]", baseline: "none" });
+  assert.deepEqual(codes(afterSpan.findings), ["link-unresolved:Missing after span"]);
 });
 
 test("reports only what the candidate introduces compared with the current file", async () => {
@@ -207,6 +219,10 @@ test("callout types come from exact and partial data-callout selectors, nested a
   assert.deepEqual(codes(result.findings), ["unknown-callout:recipy"]);
   assert.deepEqual(result.findings[0].suggestions, ["recipe"]);
   assert.equal(result.coverage.callouts.partialSelectors, true);
+
+  // `|metadata` is not part of the type, and may contain spaces.
+  const withMetadata = await inspector.inspect({ content: "> [!note|left] x\n> [!recipz|right clean] y", baseline: "none" });
+  assert.deepEqual(codes(withMetadata.findings), ["unknown-callout:recipz"]);
 
   // The catalog is cached until Obsidian reports a CSS change.
   setSheets([]);
@@ -264,6 +280,10 @@ test("property values are checked against declared types, from the type manager 
   const none = await fixture().inspector.inspect({ content, baseline: "none" });
   assert.equal(none.coverage.properties.source, "unavailable");
   assert.deepEqual(none.findings, []);
+
+  const date = new Date(Date.UTC(2026, 10, 20));
+  for (const type of ["date", "datetime", "text"]) assert.equal(valueFitsType(type, date), true, type);
+  for (const type of ["multitext", "tags", "aliases", "number", "checkbox"]) assert.equal(valueFitsType(type, date), false, type);
 });
 
 test("request contract: content required, path optional Markdown, baseline closed", () => {
@@ -322,4 +342,32 @@ test("notes/inspect route: strict 400, bounded 200 payload, content-free 500, ad
   const failed = await invoke("POST", "/notes/inspect", { contractVersion: 1, content: "x" });
   assert.equal(failed.code, 500);
   assert.doesNotMatch(JSON.stringify(failed.payload), /SECRET_PARSER_DETAIL/u);
+});
+
+test("callout suggestions run only for returned findings, once per type", async () => {
+  // 375 theme types, as in the reference vault; suggestions scan them all.
+  const theme = sheet(...Array.from({ length: 375 }, (_, index) => `[data-callout="theme-${index}"]`));
+  let suggestionScans = 0;
+  const suggest: typeof suggestCalloutTypes = (catalog, type) => {
+    suggestionScans += 1;
+    return suggestCalloutTypes(catalog, type);
+  };
+  const repeated = Array.from({ length: 500 }, () => "> [!themezz]").join("\n");
+  const { inspector } = fixture({ files: { "Notes/Big.md": { content: repeated } }, sheets: [theme], suggest });
+
+  const unchanged = await inspector.inspect({ path: "Notes/Big.md", content: repeated, baseline: "current_file" });
+  assert.deepEqual(unchanged.findings, []);
+  assert.equal(suggestionScans, 0, "known (baseline) callouts must not be scanned");
+
+  const doubled = await inspector.inspect({ path: "Notes/Big.md", content: `${repeated}\n${repeated}`, baseline: "current_file" });
+  assert.equal(doubled.findings.length, NOTE_INSPECT_MAX_FINDINGS);
+  assert.equal(doubled.coverage.findings.total, 500);
+  assert.equal(suggestionScans, 1, "one scan per type per inspection");
+  assert.deepEqual(doubled.findings[0].suggestions, doubled.findings[99].suggestions);
+
+  suggestionScans = 0;
+  const distinct = Array.from({ length: 150 }, (_, index) => `> [!zz-${index}]`).join("\n");
+  const capped = await inspector.inspect({ content: distinct, baseline: "none" });
+  assert.equal(capped.findings.length, NOTE_INSPECT_MAX_FINDINGS);
+  assert.equal(suggestionScans, NOTE_INSPECT_MAX_FINDINGS, "no scan for findings beyond the cap");
 });

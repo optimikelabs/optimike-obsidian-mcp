@@ -86,6 +86,8 @@ export type NoteInspectDeps = {
   parseLinktext(linktext: string): { path: string; subpath: string };
   parseYaml(yaml: string): unknown;
   resolveSubpath(cache: CacheLike, subpath: string): SubpathResultLike;
+  /** Defaults to `suggestCalloutTypes`; injectable to observe the work done. */
+  suggestCalloutTypes?: typeof suggestCalloutTypes;
 };
 
 export type NoteInspectInput = {
@@ -242,7 +244,10 @@ function validDate(year: string, month: string, day: string, hour = "0", minute 
 export function valueFitsType(type: string, value: unknown): boolean {
   if (value === null || value === undefined || value === "") return true;
   if (Array.isArray(value) && value.length === 0) return true;
-  if (value instanceof Date) return type !== "number" && type !== "checkbox" && !Number.isNaN(value.getTime());
+  if (value instanceof Date) {
+    if (["number", "checkbox", "multitext", "tags", "aliases"].includes(type)) return false;
+    return !Number.isNaN(value.getTime());
+  }
   switch (type) {
     case "number":
       return typeof value === "number" && Number.isFinite(value);
@@ -278,26 +283,37 @@ type Document = {
   blocks: Array<{ id: string; line: number; offset: number; length: number }>;
 };
 
-function maskCode(text: string): string {
-  const lines = text.split("\n");
+function maskFences(text: string): string {
   let fence: { char: string; size: number } | null = null;
-  const masked = lines.map((line) => {
-    const opener = /^ {0,3}(`{3,}|~{3,})/u.exec(line);
-    if (fence) {
-      if (opener && opener[1][0] === fence.char && opener[1].length >= fence.size && line.trim() === opener[1].trim()) {
-        fence = null;
+  return text
+    .split("\n")
+    .map((line) => {
+      const opener = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line.replace(/\r$/u, ""));
+      if (fence) {
+        if (opener && opener[1][0] === fence.char && opener[1].length >= fence.size && !opener[2].trim()) {
+          fence = null;
+        }
+        return " ".repeat(line.length);
       }
-      return " ".repeat(line.length);
-    }
-    if (opener) {
-      fence = { char: opener[1][0], size: opener[1].length };
-      return " ".repeat(line.length);
-    }
-    return line.replace(/(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/gu, (span) => " ".repeat(span.length));
-  });
-  return masked
-    .join("\n")
-    .replace(/%%[\s\S]*?%%/gu, (comment) => comment.replace(/[^\n]/gu, " "));
+      // CommonMark: a backtick fence's info string has no backtick, so ```x``` is an inline span.
+      if (opener && (opener[1][0] === "~" || !opener[2].includes("`"))) {
+        fence = { char: opener[1][0], size: opener[1].length };
+        return " ".repeat(line.length);
+      }
+      return line;
+    })
+    .join("\n");
+}
+
+function maskInlineCode(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => line.replace(/(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/gu, (span) => " ".repeat(span.length)))
+    .join("\n");
+}
+
+function maskComments(text: string): string {
+  return text.replace(/%%[\s\S]*?%%/gu, (comment) => comment.replace(/[^\n]/gu, " "));
 }
 
 function parseDocument(content: string, parseYaml: NoteInspectDeps["parseYaml"]): Document {
@@ -318,15 +334,21 @@ function parseDocument(content: string, parseYaml: NoteInspectDeps["parseYaml"])
   const bodyStartOffset = match ? match[0].length : 0;
   const bodyStartLine = (content.slice(0, bodyStartOffset).match(/\n/gu)?.length ?? 0) + 1;
   const body = content.slice(bodyStartOffset);
-  const masked = maskCode(body);
+  const unfenced = maskFences(body);
+  const masked = maskComments(maskInlineCode(unfenced));
+  const headingLines = maskComments(unfenced).split("\n");
   const headings: Document["headings"] = [];
   const blocks: Document["blocks"] = [];
   let offset = bodyStartOffset;
   masked.split("\n").forEach((line, index) => {
     const lineNumber = bodyStartLine + index;
-    const heading = /^ {0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/u.exec(line.replace(/\r$/u, ""));
+    const heading = /^ {0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/u.exec(headingLines[index].replace(/\r$/u, ""));
     if (heading) {
-      headings.push({ heading: heading[2].trim(), level: heading[1].length, line: lineNumber, offset, length: line.length });
+      const text = heading[2].trim();
+      // Keep inline code text; a link may name the heading with or without its backticks.
+      for (const variant of new Set([text, text.replace(/`+/gu, "")])) {
+        headings.push({ heading: variant, level: heading[1].length, line: lineNumber, offset, length: line.length });
+      }
     }
     const block = /(?:^|\s)\^([A-Za-z0-9-]+)\s*$/u.exec(line);
     if (block) blocks.push({ id: block[1].toLowerCase(), line: lineNumber, offset, length: line.length });
@@ -443,21 +465,13 @@ function analyse(
   }
 
   document.body.split("\n").forEach((line, index) => {
-    const match = /^(?:[ \t]*>[ \t]?)+[ \t]*\[!([^\]\s]+)\]/u.exec(line);
+    const match = /^(?:[ \t]*>[ \t]?)+[ \t]*\[!([^\]|\s]+)(?:\|[^\]]*)?\]/u.exec(line);
     if (!match) return;
     const type = match[1].toLowerCase();
     if (calloutKnown(callouts, type)) return;
-    const suggestions = suggestCalloutTypes(callouts, type);
     checks.push({
       identity: `unknown-callout\0${type}`,
-      finding: {
-        code: "unknown-callout",
-        severity: "warning",
-        location: "body",
-        line: document.bodyStartLine + index,
-        target: type,
-        ...(suggestions.length ? { suggestions } : {}),
-      },
+      finding: { code: "unknown-callout", severity: "warning", location: "body", line: document.bodyStartLine + index, target: type },
     });
   });
 
@@ -520,7 +534,19 @@ export function createNoteInspector(deps: NoteInspectDeps) {
         }
         introduced.push(check.finding);
       }
-      const findings = introduced.slice(0, NOTE_INSPECT_MAX_FINDINGS);
+      // Suggestions scan the whole catalog: only for returned findings, once per type.
+      const catalog = callouts;
+      const suggest = deps.suggestCalloutTypes ?? suggestCalloutTypes;
+      const suggestionsByType = new Map<string, string[]>();
+      const findings = introduced.slice(0, NOTE_INSPECT_MAX_FINDINGS).map((finding) => {
+        if (finding.code !== "unknown-callout") return finding;
+        let suggestions = suggestionsByType.get(finding.target);
+        if (!suggestions) {
+          suggestions = suggest(catalog, finding.target);
+          suggestionsByType.set(finding.target, suggestions);
+        }
+        return suggestions.length ? { ...finding, suggestions: [...suggestions] } : finding;
+      });
       return {
         baseline: baselineContent === null ? "none" : "current_file",
         findings,
