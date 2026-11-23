@@ -6,7 +6,38 @@ on:
   pull_request:
 
 jobs:
+  # LICENSE and NOTICE are read by no test. A change limited to them still
+  # reports the required `runtime` checks (the job runs and its steps are
+  # skipped), because a required check that never starts blocks the merge.
+  # Any other path, an unknown base or a failed diff runs everything.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - id: diff
+        shell: bash
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          code=true
+          files=""
+          if [[ -n "$BASE" && ! "$BASE" =~ ^0+$ ]] && mb=$(git merge-base "$BASE" "$HEAD" 2>/dev/null); then
+            files=$(git diff --name-only "$mb" "$HEAD")
+            if [[ -n "$files" ]] && ! grep -qvxE 'LICENSE|NOTICE' <<<"$files"; then
+              code=false
+            fi
+          fi
+          printf 'Changed files:\n%s\n' "${files:-<unknown>}"
+          echo "code=$code" | tee -a "$GITHUB_OUTPUT"
+
   runtime:
+    needs: changes
     strategy:
       fail-fast: false
       matrix:
@@ -14,44 +45,74 @@ jobs:
         node: [22]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    env:
+      RUN_SUITE: ${{ needs.changes.outputs.code }}
     steps:
-      - uses: actions/checkout@v4
+      - if: env.RUN_SUITE != 'true'
+        run: echo "Only LICENSE or NOTICE changed; runtime suite skipped."
+      - if: env.RUN_SUITE == 'true'
+        uses: actions/checkout@v4
 
         with:
 
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - uses: actions/setup-node@v4
+      - if: env.RUN_SUITE == 'true'
+        uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      - run: npm ci
-      - run: npm run test:log-privacy
-      - run: npm run test:audit-suite
-      - run: npm run test:backend-supervisor
-      - run: node scripts/test-governed-frontmatter-model.mjs
-      - run: npm run test:runtime
-      - run: npm run test:external-roots
-      - run: npm run test:operation-runtime
-      - run: npm run test:governed-performance
-      - run: npm run test:note-links
-      - run: npm run test:format-validation
-      - run: npm run test:native-note-move
-      - run: node scripts/test-governed-canvas-mcp.mjs
-      - run: node scripts/test-governed-canvas-http.mjs
-      - run: node scripts/test-governed-note-replace-mcp.mjs
-      - run: node scripts/test-governed-note-replace-http.mjs
-      - run: npm run test:profiles
-      - run: npm run test:tool-annotations
+      - if: env.RUN_SUITE == 'true'
+        run: npm ci
+      - if: env.RUN_SUITE == 'true'
+        run: npm run test:log-privacy
+      - if: env.RUN_SUITE == 'true'
+        run: npm run test:audit-suite
+      - if: env.RUN_SUITE == 'true'
+        run: npm run test:backend-supervisor
+      - if: env.RUN_SUITE == 'true'
+        run: node scripts/test-governed-frontmatter-model.mjs
+      - if: env.RUN_SUITE == 'true'
+        run: npm run test:runtime
+      - if: env.RUN_SUITE == 'true'
+        run: npm run test:external-roots
+      - if: env.RUN_SUITE == 'true'
+        run: npm run test:operation-runtime
+      - if: env.RUN_SUITE == 'true'
+        run: npm run test:governed-performance
+      - if: env.RUN_SUITE == 'true'
+        run: npm run test:note-links
+      - if: env.RUN_SUITE == 'true'
+        run: npm run test:format-validation
+      - if: env.RUN_SUITE == 'true'
+        run: npm run test:native-note-move
+      - if: env.RUN_SUITE == 'true'
+        run: node scripts/test-governed-canvas-mcp.mjs
+      - if: env.RUN_SUITE == 'true'
+        run: node scripts/test-governed-canvas-http.mjs
+      - if: env.RUN_SUITE == 'true'
+        run: node scripts/test-governed-note-replace-mcp.mjs
+      - if: env.RUN_SUITE == 'true'
+        run: node scripts/test-governed-note-replace-http.mjs
+      - if: env.RUN_SUITE == 'true'
+        run: npm run test:profiles
+      - if: env.RUN_SUITE == 'true'
+        run: npm run test:tool-annotations
       # The hermetic scorer owns its single authoritative rebuild in the P6
       # workflow. Runtime keeps the cross-platform behavioral contracts only.
-      - run: npm run test:tool-routing:fast
-      - run: npm run test:docs
-      - run: node scripts/test-governed-note-doc-contract.mjs
-      - run: npm run test:launchers
-      - if: runner.os == 'Windows'
+      - if: env.RUN_SUITE == 'true'
+        run: npm run test:tool-routing:fast
+      - if: env.RUN_SUITE == 'true'
+        run: npm run test:docs
+      - if: env.RUN_SUITE == 'true'
+        run: node scripts/test-governed-note-doc-contract.mjs
+      - if: env.RUN_SUITE == 'true'
+        run: npm run test:launchers
+      - if: env.RUN_SUITE == 'true' && runner.os == 'Windows'
         run: npm run test:migrations:windows
 
   bridge-privacy:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -84,6 +145,8 @@ jobs:
         run: npm --prefix plugins/obsidian-atomic-write-bridge run check
 
   http-external-handoff:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -104,6 +167,8 @@ jobs:
       - run: npm run test:http-external-handoff
 
   http-multiclient:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -124,6 +189,8 @@ jobs:
       - run: npm run test:http-multiclient
 
   http-backpressure:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -144,6 +211,8 @@ jobs:
       - run: npm run test:http-backpressure
 
   stdio-proxy-reliability:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -164,6 +233,8 @@ jobs:
       - run: npm run test:stdio-proxy-reliability
 
   http-observability:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -184,6 +255,8 @@ jobs:
       - run: npm run test:http-observability
 
   http-headless-multiclient:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -204,6 +277,8 @@ jobs:
       - run: npm run test:http-headless-multiclient
 
   packaging:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
