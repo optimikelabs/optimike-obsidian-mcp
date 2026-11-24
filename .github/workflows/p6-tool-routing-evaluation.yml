@@ -3,10 +3,14 @@ name: P6 Tool Routing Evaluation
 on:
   push:
     branches: [main]
+    paths-ignore: [LICENSE, NOTICE]
   # Tool registration is distributed across the server and feature modules.
   # Running on every PR avoids a fragile path allowlist that could silently
   # omit the authoritative scorer after a new registration site is added.
+  # The ignore list names only the two legal files no test reads; this check
+  # is not required, so skipping it cannot block a merge.
   pull_request:
+    paths-ignore: [LICENSE, NOTICE]
   workflow_dispatch:
 
 permissions:

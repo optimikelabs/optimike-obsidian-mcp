@@ -145,6 +145,9 @@ packaging, and `test:tool-routing` (the scorer's clean-checkout rebuild).
 `.github/workflows/runtime.yml` runs broad cross-platform checks on PRs;
 `mcp-2026-dual-stack.yml` adds its path-selected matrix and gateway gate, and
 `p6-tool-routing-evaluation.yml` owns the authoritative routing scorer run.
+A change limited to `LICENSE` or `NOTICE`, which no test reads, still reports
+the required `runtime` checks with their steps skipped; the other Runtime jobs
+and the P6 scorer do not run for it. Any other path runs everything.
 Choose local checks by impact, then let the existing CI gates finish; broaden
 only for an unresolved cross-component risk. Moving heavy suites to main-only
 CI or changing branch protection requires a separate decision and is outside
