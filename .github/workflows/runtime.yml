@@ -9,7 +9,8 @@ jobs:
   # LICENSE and NOTICE are read by no test. A change limited to them still
   # reports the required `runtime` checks (the job runs and its steps are
   # skipped), because a required check that never starts blocks the merge.
-  # Any other path, an unknown base or a failed diff runs everything.
+  # Any other path, an unknown base, a failed diff or a failed `changes` job
+  # runs everything. Renames are listed under both names.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -28,7 +29,7 @@ jobs:
           code=true
           files=""
           if [[ -n "$BASE" && ! "$BASE" =~ ^0+$ ]] && mb=$(git merge-base "$BASE" "$HEAD" 2>/dev/null); then
-            files=$(git diff --name-only "$mb" "$HEAD")
+            files=$(git diff --no-renames --name-only "$mb" "$HEAD")
             if [[ -n "$files" ]] && ! grep -qvxE 'LICENSE|NOTICE' <<<"$files"; then
               code=false
             fi
@@ -38,6 +39,7 @@ jobs:
 
   runtime:
     needs: changes
+    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
@@ -46,7 +48,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     env:
-      RUN_SUITE: ${{ needs.changes.outputs.code }}
+      RUN_SUITE: ${{ needs.changes.result != 'success' || needs.changes.outputs.code == 'true' }}
     steps:
       - if: env.RUN_SUITE != 'true'
         run: echo "Only LICENSE or NOTICE changed; runtime suite skipped."
@@ -112,7 +114,7 @@ jobs:
 
   bridge-privacy:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     strategy:
       fail-fast: false
       matrix:
@@ -146,7 +148,7 @@ jobs:
 
   http-external-handoff:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     strategy:
       fail-fast: false
       matrix:
@@ -168,7 +170,7 @@ jobs:
 
   http-multiclient:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     strategy:
       fail-fast: false
       matrix:
@@ -190,7 +192,7 @@ jobs:
 
   http-backpressure:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     strategy:
       fail-fast: false
       matrix:
@@ -212,7 +214,7 @@ jobs:
 
   stdio-proxy-reliability:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     strategy:
       fail-fast: false
       matrix:
@@ -234,7 +236,7 @@ jobs:
 
   http-observability:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     strategy:
       fail-fast: false
       matrix:
@@ -256,7 +258,7 @@ jobs:
 
   http-headless-multiclient:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     strategy:
       fail-fast: false
       matrix:
@@ -278,7 +280,7 @@ jobs:
 
   packaging:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
