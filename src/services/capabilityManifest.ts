@@ -14,6 +14,11 @@ import type {
   ToolStaticRequirement,
 } from "../mcp-server/toolSurfaceRegistry.js";
 import { httpAdmissionController } from "../mcp-server/transports/httpBackpressure.js";
+import {
+  APPLY_CONFIRMATION_TOOLS,
+  applyConfirmationMode,
+  type ApplyConfirmationMode,
+} from "../mcp-server/applyConfirmation.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import { requestContextService } from "../utils/index.js";
 import type { ObsidianRestApiService } from "./obsidianRestAPI/service.js";
@@ -171,6 +176,15 @@ export interface CapabilityManifest {
     cancelled: number;
   };
   capabilities: readonly CapabilityManifestEntry[];
+  /**
+   * Opt-in apply confirmation of the serving process (behind the stdio proxy:
+   * the shared backend). "elicit" asks only clients that declare form
+   * elicitation, and only for the listed apply tools.
+   */
+  applyConfirmation: {
+    mode: ApplyConfirmationMode;
+    tools: readonly string[];
+  };
 }
 
 type NormalizedProbe<T> =
@@ -1249,7 +1263,13 @@ export function projectCapabilityManifest(
       ...input.admission,
     },
     capabilities,
+    applyConfirmation: applyConfirmationManifest(),
   };
+}
+
+function applyConfirmationManifest(): CapabilityManifest["applyConfirmation"] {
+  const mode = applyConfirmationMode();
+  return { mode, tools: mode === "elicit" ? [...APPLY_CONFIRMATION_TOOLS] : [] };
 }
 
 function normalizeProbeError<T>(error: unknown): NormalizedProbe<T> {

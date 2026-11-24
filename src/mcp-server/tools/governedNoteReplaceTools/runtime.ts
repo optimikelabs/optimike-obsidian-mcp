@@ -963,6 +963,22 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
     return this.view(this.required(reference));
   }
 
+  /**
+   * Read-only apply preflight for a confirmation question: the current write
+   * policy and the CAS predicate (same backend target, same before bytes).
+   * No journal transition; apply still runs every check and the real CAS.
+   */
+  async applyPreflightMatches(reference: string): Promise<boolean> {
+    const plan = this.required(reference);
+    assertCurrentWritePolicy("apply", plan.path, plan.nextContent);
+    const read = await this.backend.read({ contractVersion: 1, path: plan.path });
+    return (
+      read.path === plan.path &&
+      read.bindingFingerprint === plan.bindingFingerprint &&
+      read.sha256 === plan.beforeSha256
+    );
+  }
+
   plan(input: ObsidianNoteReplacePlanInput): Promise<OperationReceipt> {
     assertCurrentWritePolicy("plan", input.path, input.nextContent);
     return this.backend.withContext(

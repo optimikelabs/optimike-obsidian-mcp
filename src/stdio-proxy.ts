@@ -32,7 +32,15 @@ import {
   READER_CONTEXT_HEADER,
   VAULT_INSTRUCTIONS_MODE_HEADER,
 } from "./mcp-server/transports/httpRequestState.js";
-import { Server, SdkHttpError } from "@modelcontextprotocol/server";
+import {
+  Server,
+  SdkHttpError,
+  isInputRequiredResult,
+} from "@modelcontextprotocol/server";
+import {
+  applyConfirmationMode,
+  applyConfirmationRelay,
+} from "./mcp-server/applyConfirmation.js";
 import {
   Client,
   StreamableHTTPClientTransport,
@@ -1273,6 +1281,8 @@ async function shutdown(signal: string) {
 }
 
 async function start() {
+  // Fail closed on an unknown confirmation mode before serving (dual only).
+  applyConfirmationMode();
   externalRootsService = process.env.MCP_EXTERNAL_ROOTS_FILE
     ? await ExternalRootsService.fromConfigFile(
         process.env.MCP_EXTERNAL_ROOTS_FILE,
@@ -1377,7 +1387,7 @@ async function start() {
       filteredBackendTools(request.params),
     );
 
-    proxyServer.setRequestHandler("tools/call", async (request) => {
+    proxyServer.setRequestHandler("tools/call", async (request, ctx) => {
       // Apply and rollback are local retained endpoints. Their visibility is
       // derivable from the static profile contract, so do not call tools/list
       // before returning their stable unsupported result. This keeps the
@@ -1588,12 +1598,23 @@ async function start() {
         })();
       }
 
+      // Opt-in apply confirmation: declare form elicitation to a 2026-07-28
+      // backend only when this upstream request declares it, and pass an
+      // input_required round back unchanged. This server's SDK seam turns it
+      // into a classic elicitation/create for a 2025-11-25 upstream.
+      const relay = applyConfirmationRelay(proxyServer, ctx);
       try {
         const result = await withBackendRetry(
           "callTool",
-          (client) => client.callTool(backendParams(request.params)),
+          (client) =>
+            relay && client.getProtocolEra() === "modern"
+              ? client.callTool(relay(backendParams(request.params)), {
+                  allowInputRequired: true,
+                })
+              : client.callTool(backendParams(request.params)),
           { replayNetworkFailure: { toolName: request.params.name } },
         );
+        if (isInputRequiredResult(result)) return result;
         return chatgptCompatibleResult(result);
       } catch (error) {
         // Do not imply that a lost response means a failed write, and never

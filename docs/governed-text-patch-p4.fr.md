@@ -57,6 +57,78 @@ timestamp de modification valide dans la fenêtre scellée peut être réconcili
 toute autre dérive du corps ou du frontmatter reste fail-closed. Le cache est
 rafraîchi après un commit prouvé et ne décide jamais du CAS.
 
+## Confirmation facultative de l’apply (élicitation)
+
+Désactivée par défaut. Activée, elle fait demander par `obsidian_text_patch_apply`
+une confirmation native oui/non au client MCP avant d’écrire, à condition que
+le client déclare l’élicitation par formulaire. Tout autre client, et tout autre
+outil, garde le flux habituel : accord dans le chat, puis apply.
+
+L’activer dans chaque processus qui sert le client, avec les deux valeurs :
+
+```text
+MCP_PROTOCOL_MODE=dual
+MCP_APPLY_CONFIRMATION=elicit
+```
+
+`MCP_APPLY_CONFIRMATION` accepte `off` (défaut) ou `elicit` ; toute autre valeur
+fait échouer le démarrage sans la recopier. Le service legacy
+(`MCP_PROTOCOL_MODE=legacy`) ne la lit jamais. Derrière le proxy stdio, le proxy
+et le backend HTTP partagé en ont tous deux besoin : le proxy ne déclare
+l’élicitation au backend que si son propre client amont la déclare, et le
+backend ne demande que s’il est lui-même activé. Un backend lancé par le proxy
+hérite de l’environnement du proxy ; un backend partagé déjà lancé garde le
+sien. `obsidian_runtime_status` indique le mode du processus qui sert dans
+`capabilityManifest.applyConfirmation`.
+
+La question arrive après la vérification de la référence de plan, de la clé
+d’idempotence, de la preuve de projection scellée et de la politique
+d’écriture, puis d’une lecture sans effet qui vérifie que la note a encore ses
+octets initiaux scellés. Elle arrive avant toute transition du journal et tout
+appel Atomic Write. Elle nomme la cible, les types d’opérations, les clés de
+frontmatter modifiées, le `planRef` et un préfixe d’empreinte ; elle ne contient
+jamais le texte scellé. Le formulaire n’a aucun champ : la réponse est
+l’acceptation, le refus ou l’annulation du client. Comme le message nomme un
+seul plan, un hôte qui mémorise un « toujours autoriser » par message
+n’accepte de nouveau que ce même plan.
+
+| Réponse | Résultat |
+| --- | --- |
+| accept | Le plan scellé exact est appliqué sous le CAS habituel ; le reçu ajoute `confirmation: "elicited"` |
+| decline | `apply_confirmation_declined`, rien n’est écrit |
+| cancel | `apply_confirmation_cancelled`, rien n’est écrit |
+| réponse absente, expirée, altérée ou d’un autre plan | `apply_confirmation_invalid`, rien n’est écrit |
+| note modifiée depuis le plan | `apply_confirmation_target_changed`, pas de question, rien n’est écrit |
+
+Les refus sont des erreurs avec `mutationMayHaveApplied: false`, jamais des
+succès. Le plan reste `planned` : l’appliquer de nouveau repose la question.
+Après `apply_confirmation_target_changed`, appeler `status` puis replanifier.
+Un plan déjà commité ou en cours d’application n’est pas redemandé. Sans
+réponse du client, la question expire au bout de dix minutes et rien n’est
+écrit.
+
+`confirmation: "elicited"` signifie que le client a répondu accept. Un hook de
+l’hôte ou une politique d’approbation automatique peut répondre sans rien
+afficher : ce n’est donc pas la preuve qu’une personne a cliqué. La
+confirmation ne remplace jamais le sceau, le CAS ni la politique d’écriture ;
+elle confirme seulement le plan désigné par son empreinte.
+
+En protocole `2026-07-28`, la question est un résultat `input_required` avec un
+`requestState` protégé en intégrité ; en `2025-11-25`, le SDK envoie un
+`elicitation/create` classique. Le proxy stdio relaie les deux : son saut vers
+le backend est toujours en `2026-07-28`, et son propre SDK convertit l’échange
+pour un client amont `2025-11-25`.
+
+Vérification manuelle dans un hôte (coffre de test synthétique uniquement,
+jamais un vrai coffre) :
+
+1. Lancer le proxy avec les deux valeurs ci-dessus et un backend neuf.
+2. Planifier un `append_body` sur une note canari jetable.
+3. L’appliquer : l’hôte affiche la question. Choisir Refuser. Attendu :
+   `apply_confirmation_declined` et une note inchangée.
+4. Appliquer de nouveau le même plan et choisir Accepter. Attendu :
+   `committed`, `confirmation: "elicited"` et exactement le texte scellé ajouté.
+
 ## Outils directs de compatibilité
 
 Quand le quartet P4 complet est disponible, les profils live curatés le

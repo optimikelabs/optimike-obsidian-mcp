@@ -57,6 +57,72 @@ window can be reconciled; every other body or frontmatter drift remains
 fail-closed. Cache data is refreshed after an independently established commit
 and is never CAS evidence.
 
+## Optional apply confirmation (elicitation)
+
+Off by default. When it is on, `obsidian_text_patch_apply` asks the MCP client
+for a native yes/no confirmation before writing, provided the client declares
+form elicitation. Every other client, and every other tool, keeps the usual
+flow: agreement in the chat, then apply.
+
+Enable it in each process that serves the client, with both values:
+
+```text
+MCP_PROTOCOL_MODE=dual
+MCP_APPLY_CONFIRMATION=elicit
+```
+
+`MCP_APPLY_CONFIRMATION` accepts `off` (default) or `elicit`; another value
+fails startup without echoing it. Legacy serving (`MCP_PROTOCOL_MODE=legacy`)
+never reads it. Behind the stdio proxy, both the proxy and the shared HTTP
+backend need it: the proxy declares form elicitation to the backend only when
+its own upstream client declares it, and the backend asks only when it is
+enabled itself. A backend started by the proxy inherits the proxy's
+environment; an already running shared backend keeps its own.
+`obsidian_runtime_status` reports the serving process's mode in
+`capabilityManifest.applyConfirmation`.
+
+The question comes after the plan reference, idempotency key, sealed
+projection proof and write policy are checked, and after a read-only check that
+the note still has its sealed before bytes. It comes before any journal
+transition or Atomic Write call. It names the target, the operation kinds,
+changed frontmatter keys, the `planRef` and a digest prefix; it never contains
+the sealed text. The form has no field: the answer is the client's accept,
+decline or cancel. Because the message names one plan, a host that remembers an
+"always allow" per message only re-accepts that same plan.
+
+| Answer | Result |
+| --- | --- |
+| accept | The exact sealed plan is applied under the usual CAS; the receipt adds `confirmation: "elicited"` |
+| decline | `apply_confirmation_declined`, nothing written |
+| cancel | `apply_confirmation_cancelled`, nothing written |
+| missing, expired, tampered or other-plan answer | `apply_confirmation_invalid`, nothing written |
+| note changed since planning | `apply_confirmation_target_changed`, not asked, nothing written |
+
+Refusals are errors with `mutationMayHaveApplied: false`, never successes. The
+plan stays `planned`: applying it again asks again. After
+`apply_confirmation_target_changed`, call `status` and plan again. A plan that
+is already committed or applying is not asked again. If the client never
+answers, the question expires after ten minutes and nothing is written.
+
+`confirmation: "elicited"` means the client answered accept. A host hook or an
+automatic approval policy can answer without showing anything, so it does not
+prove that a person clicked. The confirmation never replaces the seal, the CAS
+or the write policy; it only confirms the plan named by its digest.
+
+On protocol `2026-07-28` the question is an `input_required` result with an
+integrity-protected `requestState`; on `2025-11-25` the SDK sends a classic
+`elicitation/create`. The stdio proxy relays both: its backend hop is always
+`2026-07-28`, and its own SDK converts the round for a `2025-11-25` upstream.
+
+Manual check in a host (synthetic test vault only, never a real vault):
+
+1. Start the proxy with the two values above and a fresh backend.
+2. Plan an `append_body` on a disposable canary note.
+3. Apply it: the host shows the question. Choose Decline. Expect
+   `apply_confirmation_declined` and an unchanged note.
+4. Apply the same plan again and choose Accept. Expect `committed`,
+   `confirmation: "elicited"` and exactly the sealed text appended.
+
 ## Direct compatibility tools
 
 When the complete P4 quartet is available, curated live profiles prefer it and

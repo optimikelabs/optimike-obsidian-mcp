@@ -252,6 +252,20 @@ La projection durable conserve hashes et plages, jamais les valeurs patchées ni
 le Markdown compilé. Les clés protégées et le write mode courant sont contrôlés
 au planning puis avant chaque effet P0 possible.
 
+## Frontière de la confirmation d’apply
+
+La confirmation facultative de l’apply (`MCP_APPLY_CONFIRMATION=elicit`, voir
+[patches texte gouvernés](docs/governed-text-patch-p4.fr.md)) est une question
+supplémentaire, pas une autorisation. Elle ne remplace jamais le sceau, le CAS,
+la politique d’écriture ni un grant du Bridge, et elle confirme seulement le
+plan désigné par son empreinte. Une acceptation peut venir d’un hook de l’hôte
+ou d’une politique d’approbation automatique : le reçu indique donc
+`confirmation: "elicited"` et ne prétend jamais à une approbation humaine. Un
+refus, une annulation, une expiration, un échec de relais ou un `requestState`
+dont le HMAC ou le lien au plan échoue n’écrit rien et revient en erreur. La
+question porte la cible, les types d’opérations, les noms des clés de
+frontmatter modifiées et la référence du plan, jamais le texte scellé.
+
 ## Contrôles dépendances et release
 
 ```bash

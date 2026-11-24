@@ -119,6 +119,15 @@ class FakeGovernedNoteReplaceRuntime {
     return result;
   }
 
+  async applyPreflightMatches(reference) {
+    const plan = this.required(reference);
+    this.preflightReads = (this.preflightReads ?? 0) + 1;
+    return (
+      sha256(this.content) === plan.beforeSha256 &&
+      plan.bindingFingerprint === this.bindingFingerprint
+    );
+  }
+
   findPlanByIdempotencyKey(key) {
     const plan = this.byKey.get(key);
     return plan && this.view(plan);
@@ -306,7 +315,7 @@ class FakeGovernedNoteReplaceRuntime {
   }
 }
 
-async function startClient(noteRuntime) {
+async function startClient(noteRuntime, capabilities = {}, onElicit) {
   const server = new McpServer({
     name: "governed-text-patch-test",
     version: "1.0.0",
@@ -317,8 +326,9 @@ async function startClient(noteRuntime) {
   await server.connect(serverTransport);
   const client = new Client(
     { name: "governed-text-patch-test-client", version: "1.0.0" },
-    { capabilities: {} },
+    { capabilities },
   );
+  if (onElicit) client.setRequestHandler("elicitation/create", onElicit);
   await client.connect(clientTransport);
   return { client, close: () => client.close().catch(() => undefined) };
 }
@@ -948,6 +958,121 @@ try {
   assert.equal(staleResult.payload.outcome, "conflict");
   assert.equal(fake.content, concurrentCombinedContent);
   assert.equal(fake.successfulWrites, 0);
+  // Opt-in apply confirmation (MCP_APPLY_CONFIRMATION=elicit, dual only).
+  // This in-memory pair negotiates 2025-11-25, so each question travels as a
+  // classic elicitation/create through the SDK shim. The 2026-07-28
+  // input_required round and the stdio proxy relay are covered end to end
+  // by test-apply-confirmation-relay.mjs.
+  const { APPLY_CONFIRMATION_REFUSAL_MESSAGES } = await import("../dist/services/applyConfirmation.js");
+  const asked = [];
+  let answer = { action: "accept", content: {} };
+  const confirming = await startClient(fake, { elicitation: { form: {} } }, async (request) => {
+    asked.push(request.params);
+    return answer;
+  });
+  const savedProtocolMode = process.env.MCP_PROTOCOL_MODE;
+  const savedConfirmation = process.env.MCP_APPLY_CONFIRMATION;
+  const confirmationPlan = async (key) => {
+    const planned = await call(confirming, "obsidian_text_patch_plan", {
+      path: FIXTURE_PATH,
+      operations: [{ op: "append_body", text: "sealed-ok\n" }],
+      idempotencyKey: key,
+    });
+    return { planRef: planned.payload.planRef, idempotencyKey: key };
+  };
+  const assertConfirmationRefusal = (payload, reasonCode, label) => {
+    assert.equal(payload.error?.details?.reasonCode, reasonCode, `${label} reasonCode`);
+    assert.equal(payload.error.message, APPLY_CONFIRMATION_REFUSAL_MESSAGES[reasonCode], `${label} message`);
+    assert.equal(payload.error.details.mutationMayHaveApplied, false, `${label} states no write`);
+  };
+  try {
+    // Catches: legacy serving reading the opt-in (legacy must stay unchanged).
+    delete process.env.MCP_PROTOCOL_MODE;
+    process.env.MCP_APPLY_CONFIRMATION = "elicit";
+    fake.reset();
+    const legacyMode = await confirmationPlan("confirm-legacy-mode");
+    const legacyApplied = await call(confirming, "obsidian_text_patch_apply", legacyMode);
+    assert.equal(legacyApplied.payload.outcome, "committed");
+    assert.equal(legacyApplied.payload.confirmation, undefined);
+    assert.equal(asked.length, 0, "legacy mode never asks");
+
+    // Catches: asking a client that never declared form elicitation; its
+    // flow must stay plan → apply exactly as before.
+    process.env.MCP_PROTOCOL_MODE = "dual";
+    fake.reset();
+    const incapable = await confirmationPlan("confirm-no-capability");
+    const incapableApplied = await call(first, "obsidian_text_patch_apply", incapable);
+    assert.equal(incapableApplied.payload.outcome, "committed");
+    assert.equal(incapableApplied.payload.confirmation, undefined);
+    assert.equal(fake.successfulWrites, 1);
+    assert.equal(asked.length, 0, "no capability, no question");
+    assert.equal(fake.preflightReads ?? 0, 0, "no capability, no extra read");
+
+    // Catches: a declined or dismissed question still writing, being
+    // reported as success, or consuming the plan.
+    fake.reset();
+    const confirmed = await confirmationPlan("confirm-decline-then-accept");
+    for (const [action, reasonCode] of [
+      ["decline", "apply_confirmation_declined"],
+      ["cancel", "apply_confirmation_cancelled"],
+    ]) {
+      answer = { action };
+      const refused = await call(confirming, "obsidian_text_patch_apply", confirmed, true);
+      assertConfirmationRefusal(refused.payload, reasonCode, action);
+      assert.equal(fake.casRequests, 0, `${action} dispatches no CAS`);
+      assert.equal(fake.content, INITIAL, `${action} leaves the note unchanged`);
+      const afterRefusal = await call(confirming, "obsidian_text_patch_status", { planRef: confirmed.planRef });
+      assert.equal(afterRefusal.payload.phase, "planned", `${action} leaves the plan applicable`);
+      assert.equal(afterRefusal.payload.applyAllowed, true);
+    }
+    // The question names the target and this exact plan, not its sealed text.
+    assert.equal(asked.length, 2);
+    assert.equal(asked[0].mode, "form");
+    assert.deepEqual(asked[0].requestedSchema, { type: "object", properties: {} });
+    assert.ok(asked[0].message.includes(FIXTURE_PATH));
+    assert.ok(asked[0].message.includes(confirmed.planRef));
+    assert.ok(asked[0].message.includes("append_body"));
+    assert.equal(asked[0].message.includes("sealed-ok"), false);
+
+    // Catches: an accepted question writing anything but the sealed plan,
+    // writing twice, or the receipt overstating who approved.
+    answer = { action: "accept", content: {} };
+    const accepted = await call(confirming, "obsidian_text_patch_apply", { ...confirmed, responseMode: "compact" });
+    assert.equal(accepted.payload.outcome, "committed");
+    assert.equal(accepted.payload.confirmation, "elicited");
+    assert.equal(fake.casRequests, 1);
+    assert.equal(fake.content, `${INITIAL}sealed-ok\n`);
+    assert.equal(asked.length, 3);
+    // Catches: replaying a committed plan asking (and writing) again.
+    const replayed = await call(confirming, "obsidian_text_patch_apply", confirmed);
+    assert.equal(replayed.payload.outcome, "committed");
+    assert.equal(replayed.payload.confirmation, undefined);
+    assert.equal(asked.length, 3, "a terminal plan is not asked again");
+    assert.equal(fake.casRequests, 1);
+
+    // Catches: asking to confirm a plan whose CAS predicate already fails.
+    fake.reset();
+    const stale = await confirmationPlan("confirm-stale");
+    fake.content = INITIAL.replace("omega", "concurrent");
+    const staleRefusal = await call(confirming, "obsidian_text_patch_apply", stale, true);
+    assertConfirmationRefusal(staleRefusal.payload, "apply_confirmation_target_changed", "stale");
+    assert.equal(asked.length, 3, "a stale plan is not asked");
+    assert.equal(fake.casRequests, 0);
+
+    // Catches: an unknown mode silently disabling the confirmation.
+    process.env.MCP_APPLY_CONFIRMATION = "sometimes";
+    fake.reset();
+    const invalidMode = await confirmationPlan("confirm-invalid-mode");
+    await call(confirming, "obsidian_text_patch_apply", invalidMode, true);
+    assert.equal(fake.casRequests, 0, "an invalid mode fails closed");
+  } finally {
+    if (savedProtocolMode === undefined) delete process.env.MCP_PROTOCOL_MODE;
+    else process.env.MCP_PROTOCOL_MODE = savedProtocolMode;
+    if (savedConfirmation === undefined) delete process.env.MCP_APPLY_CONFIRMATION;
+    else process.env.MCP_APPLY_CONFIRMATION = savedConfirmation;
+    await confirming.close();
+  }
+
   for (const result of observed)
     assert.equal(
       result.includes(SECRET),
@@ -955,7 +1080,7 @@ try {
       "sealed text leaked in MCP response",
     );
   console.log(
-    "PASS: MCP quartet registration, guarded character-limit units, projection proof, no-write planning, exact replay/conflict fencing, body-only rejection, stale and concurrent CAS, lost-response status, exact recovery, empty-body literal replacement, cache authority, and redaction.",
+    "PASS: MCP quartet registration, guarded character-limit units, projection proof, no-write planning, exact replay/conflict fencing, body-only rejection, stale and concurrent CAS, lost-response status, exact recovery, empty-body literal replacement, cache authority, opt-in apply confirmation (legacy/no-capability unchanged, decline/cancel/stale write nothing, accept writes once), and redaction.",
   );
 } finally {
   await second.close();

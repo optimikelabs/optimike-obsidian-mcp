@@ -3,7 +3,11 @@ import {
   governedResponse,
 } from "../../../services/governedResponse.js";
 import { FrontmatterOperationSchema } from "../governedFrontmatterTools/registration.js";
-import { McpServer } from "@modelcontextprotocol/server";
+import { McpServer, type ServerContext } from "@modelcontextprotocol/server";
+import {
+  confirmGovernedApply,
+  type ApplyConfirmationGate,
+} from "../../applyConfirmation.js";
 import { z } from "zod/v3";
 import {
   GOVERNED_MUTATION_TOOL_ANNOTATIONS,
@@ -160,14 +164,35 @@ export async function registerGovernedTextPatchTools(
       inputSchema: mcpSchema(ApplySchema.shape),
       annotations: GOVERNED_MUTATION_TOOL_ANNOTATIONS,
     },
-    async (params: z.infer<typeof ApplySchema>) =>
-      runTool("obsidian_text_patch_apply", params, () =>
-        runtime.apply(
+    async (params: z.infer<typeof ApplySchema>, ctx: ServerContext) => {
+      // Opt-in confirmation, asked after the seal/policy checks and the CAS
+      // preflight, before any effect. Off or unsupported: unchanged flow.
+      let gate: ApplyConfirmationGate;
+      try {
+        gate = await confirmGovernedApply({
+          server: server.server,
+          ctx,
+          toolName: "obsidian_text_patch_apply",
+          loadTarget: () =>
+            runtime.confirmationTarget(params.planRef, params.idempotencyKey),
+        });
+      } catch (error) {
+        return runTool("obsidian_text_patch_apply", params, () =>
+          Promise.reject(error),
+        );
+      }
+      if (gate.kind === "input_required") return gate.result;
+      return runTool("obsidian_text_patch_apply", params, async () => {
+        const receipt = await runtime.apply(
           params.planRef,
           params.idempotencyKey,
           params.completionMode,
-        ),
-      ),
+        );
+        return gate.confirmation
+          ? { ...receipt, confirmation: gate.confirmation }
+          : receipt;
+      });
+    },
   );
   server.registerTool(
     "obsidian_text_patch_status",
