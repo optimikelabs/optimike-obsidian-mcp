@@ -169,6 +169,16 @@ assert.equal(ready.contractVersion, 1);
 assert.equal(ready.capabilities.length, 15);
 assert.equal(ready.summary.ready, 15);
 assert.equal(ready.admission.state, "not-applicable");
+// Catches: the dual-only applyConfirmation field leaking into legacy responses.
+{
+  const saved = process.env.MCP_PROTOCOL_MODE;
+  process.env.MCP_PROTOCOL_MODE = "legacy";
+  process.env.MCP_APPLY_CONFIRMATION = "elicit";
+  assert.equal(Object.hasOwn(projectCapabilityManifest(input()), "applyConfirmation"), false);
+  delete process.env.MCP_APPLY_CONFIRMATION;
+  if (saved === undefined) delete process.env.MCP_PROTOCOL_MODE;
+  else process.env.MCP_PROTOCOL_MODE = saved;
+}
 for (const item of ready.capabilities) {
   assert.equal(item.discoverable, true, item.id);
   assert.equal(item.available, true, item.id);

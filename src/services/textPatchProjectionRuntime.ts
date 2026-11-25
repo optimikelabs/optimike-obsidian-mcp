@@ -25,6 +25,7 @@ import {
 } from "./operations/contract.js";
 import { assertWriteAllowed, type WriteOperation } from "./writePolicy.js";
 import { DatePreparationPlanFailure, frontmatterAssessment } from "./obsidianFrontmatterFormat.js";
+import type { ApplyConfirmationTarget } from "./applyConfirmation.js";
 
 const OPERATION_KIND = "obsidian.text.patch" as const;
 const PUBLIC_PLAN_REF_PREFIX = "obsidian-text-patch:v1:";
@@ -521,6 +522,50 @@ export class GovernedTextPatchRuntime {
       this.noteRuntime.inspect(child.planRef),
       true,
     );
+  }
+
+  /**
+   * The apply checks (reference, key binding, sealed projection proof, write
+   * policy) without any effect, plus a content-free summary for the
+   * confirmation question. apply() repeats every check.
+   */
+  async confirmationTarget(
+    reference: string,
+    idempotencyKey: string,
+  ): Promise<ApplyConfirmationTarget> {
+    const publicKey = normalizedPublicKey(idempotencyKey);
+    const childPlanRef = childReference(reference);
+    const before = this.noteRuntime.inspect(childPlanRef);
+    const projection = storedProjection(before, publicKey);
+    assertDomainWritePolicy("apply", before, projection);
+    const receipt = projectedReceipt(
+      await this.noteRuntime.status(childPlanRef),
+      this.noteRuntime.inspect(childPlanRef),
+      false,
+    );
+    const kinds = [
+      ...new Set(projection.proof.authorizedRanges.map((range) => range.op)),
+    ];
+    const changes = [
+      `Body: ${projection.proof.operationCount} operation(s) (${kinds.join(", ")}).`,
+      ...(projection.frontmatterProof
+        ? [
+            `Frontmatter keys: ${projection.frontmatterProof.changedKeys.join(", ")}.`,
+          ]
+        : []),
+      ...(before.frontmatterFormat?.normalization.applied
+        ? ["Existing frontmatter is normalized to the native format."]
+        : []),
+    ];
+    return {
+      planRef: receipt.planRef,
+      planDigest: receipt.planDigest,
+      target: before.path,
+      changes,
+      pending: before.status === "planned",
+      beforeStateMatches: () =>
+        this.noteRuntime.applyPreflightMatches(childPlanRef),
+    };
   }
 
   async status(reference: string): Promise<TextPatchProjectionReceipt> {

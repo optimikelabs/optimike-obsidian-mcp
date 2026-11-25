@@ -243,6 +243,19 @@ The durable projection stores hashes and ranges, not patched values or compiled
 Markdown. Protected keys and the current write mode are checked at planning and
 before every possible P0 effect.
 
+## Apply confirmation boundary
+
+The opt-in apply confirmation (`MCP_APPLY_CONFIRMATION=elicit`, see
+[governed text patches](docs/governed-text-patch-p4.md)) is an extra question,
+not an authorization. It never replaces the seal, the CAS, the write policy or
+a Bridge grant, and it only confirms the plan named by its digest. An accept
+can come from a host hook or an automatic approval policy, so the receipt says
+`confirmation: "elicited"` and never claims human approval. Decline, cancel,
+expiry, a relay failure or a `requestState` that fails its HMAC or plan
+binding writes nothing and is reported as an error. The question carries the
+target, operation kinds, changed frontmatter key names and the plan reference,
+never the sealed text.
+
 ## Dependency and release checks
 
 Run:

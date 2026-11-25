@@ -27,6 +27,7 @@ import {
 import type { StdioServerHandle } from "@modelcontextprotocol/server/stdio";
 import { serveDualStdio } from "./transports/dualStdio.js";
 import { mcpProtocolMode } from "./protocolMode.js";
+import { applyConfirmationMode } from "./applyConfirmation.js";
 import { dump, load } from "js-yaml";
 import { randomBytes, randomUUID } from "node:crypto";
 import path from "node:path";
@@ -2081,6 +2082,8 @@ async function startTransport(
   governedCanvasRuntime: GovernedCanvasRuntime | undefined,
 ): Promise<McpServer | StdioServerHandle | ServerType | void> {
   const protocolMode = mcpProtocolMode();
+  // Fail closed at startup on an unknown confirmation mode (dual only).
+  applyConfirmationMode();
   const transportType = config.mcpTransportType;
   const context = requestContextService.createRequestContext({
     operation: "startTransport",

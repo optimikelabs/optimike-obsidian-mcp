@@ -16,6 +16,11 @@ import {
 import { NATIVE_MOVE_PUBLIC_REASON_CODES, isNativeMoveHint } from "../../services/nativeNoteMoveRefusals.js";
 import { isDatePreparationCheck } from "../../services/datePreparationProvenance.js";
 import {
+  APPLY_CONFIRMATION_REFUSAL_CODES,
+  APPLY_CONFIRMATION_REFUSAL_MESSAGES,
+  isApplyConfirmationRefusalCode,
+} from "../../services/applyConfirmation.js";
+import {
   OPERON_REFUSAL_CODES, OPERON_REFUSAL_MESSAGES, isOperonRefusalCode,
 } from "../../services/operon/refusalCodes.js";
 import {
@@ -252,6 +257,7 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   ...NATIVE_MOVE_PUBLIC_REASON_CODES,
   ...OPERON_REFUSAL_CODES,
   ...TEXT_PATCH_REFUSAL_CODES,
+  ...APPLY_CONFIRMATION_REFUSAL_CODES,
   "atomic_bridge_version_unsupported",
   "base_config_filter_invalid",
   "base_config_last_view",
@@ -727,6 +733,7 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
   if (reasonCode === "operon_recovery_blocked_by_path_scope")
     return "Operon recovery is disabled by policy while OPERON_MUTATION_ALLOWED_PATH_PREFIXES is set; this is a refusal, not an empty list, and retrying will not change it. Do not replay the original mutation or relax the allowlist. Keep any known recoveryRef, inspect the affected task with authorized reads, and ask the vault owner to review it.";
   if (isOperonRefusalCode(reasonCode)) return OPERON_REFUSAL_MESSAGES[reasonCode];
+  if (isApplyConfirmationRefusalCode(reasonCode)) return APPLY_CONFIRMATION_REFUSAL_MESSAGES[reasonCode];
   if (code === BaseErrorCode.VALIDATION_ERROR && isTextPatchRefusalCode(reasonCode))
     return TEXT_PATCH_REFUSAL_MESSAGES[reasonCode];
   if (typeof reasonCode === "string" && NATIVE_MOVE_PUBLIC_REASON_CODES.includes(reasonCode))

@@ -32,7 +32,19 @@ import {
   READER_CONTEXT_HEADER,
   VAULT_INSTRUCTIONS_MODE_HEADER,
 } from "./mcp-server/transports/httpRequestState.js";
-import { Server, SdkHttpError } from "@modelcontextprotocol/server";
+import {
+  Server,
+  SdkHttpError,
+  isInputRequiredResult,
+} from "@modelcontextprotocol/server";
+import {
+  APPLY_CONFIRMATION_TIMEOUT_MS,
+  applyConfirmationMode,
+  applyConfirmationRefusalResult,
+  applyConfirmationRelay,
+  relayableConfirmationQuestion,
+} from "./mcp-server/applyConfirmation.js";
+import { APPLY_CONFIRMATION_INPUT_KEY } from "./services/applyConfirmation.js";
 import {
   Client,
   StreamableHTTPClientTransport,
@@ -1273,6 +1285,8 @@ async function shutdown(signal: string) {
 }
 
 async function start() {
+  // Fail closed on an unknown confirmation mode before serving (dual only).
+  applyConfirmationMode();
   externalRootsService = process.env.MCP_EXTERNAL_ROOTS_FILE
     ? await ExternalRootsService.fromConfigFile(
         process.env.MCP_EXTERNAL_ROOTS_FILE,
@@ -1377,7 +1391,7 @@ async function start() {
       filteredBackendTools(request.params),
     );
 
-    proxyServer.setRequestHandler("tools/call", async (request) => {
+    proxyServer.setRequestHandler("tools/call", async (request, ctx) => {
       // Apply and rollback are local retained endpoints. Their visibility is
       // derivable from the static profile contract, so do not call tools/list
       // before returning their stable unsupported result. This keeps the
@@ -1588,12 +1602,57 @@ async function start() {
         })();
       }
 
-      try {
-        const result = await withBackendRetry(
+      // Opt-in apply confirmation: declare form elicitation to a 2026-07-28
+      // backend only when this upstream request declares it. A 2026-07-28
+      // upstream gets the input_required round unchanged; a 2025-11-25
+      // upstream is asked here with a classic elicitation/create. Answer
+      // material that cannot be carried is refused, never dropped.
+      const relay = applyConfirmationRelay(proxyServer, ctx);
+      const refuse = (code: "apply_confirmation_invalid" | "apply_confirmation_unavailable") =>
+        applyConfirmationRefusalResult(code, request.params.name, request.params.arguments);
+      if (relay.kind === "refuse") return refuse("apply_confirmation_invalid");
+      const relaying =
+        relay.kind === "relay" && (await ensureBackendConnected()).era === "modern";
+      if (relay.kind === "relay" && !relaying && relay.answering) {
+        return refuse("apply_confirmation_invalid");
+      }
+      const callBackend = (params: typeof request.params) =>
+        withBackendRetry(
           "callTool",
-          (client) => client.callTool(backendParams(request.params)),
+          (client) =>
+            relaying
+              ? client.callTool(params, { allowInputRequired: true })
+              : client.callTool(params),
           { replayNetworkFailure: { toolName: request.params.name } },
         );
+      try {
+        const base = backendParams(request.params);
+        let result = await callBackend(
+          relay.kind === "relay" && relaying ? relay.params(base) : base,
+        );
+        if (isInputRequiredResult(result)) {
+          if (relay.kind !== "relay" || relay.upstreamModern) return result;
+          // 2025-11-25 upstream: one question, answered in this request.
+          const question = relayableConfirmationQuestion(result);
+          if (!question) return refuse("apply_confirmation_unavailable");
+          let answer;
+          try {
+            answer = await ctx.mcpReq.elicitInput(question, {
+              timeout: APPLY_CONFIRMATION_TIMEOUT_MS,
+            });
+          } catch {
+            return refuse("apply_confirmation_unavailable");
+          }
+          result = await callBackend(
+            relay.params(base, {
+              inputResponses: { [APPLY_CONFIRMATION_INPUT_KEY]: answer },
+              requestState: result.requestState,
+            }),
+          );
+          if (isInputRequiredResult(result)) {
+            return refuse("apply_confirmation_unavailable");
+          }
+        }
         return chatgptCompatibleResult(result);
       } catch (error) {
         // Do not imply that a lost response means a failed write, and never

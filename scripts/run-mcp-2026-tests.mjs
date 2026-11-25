@@ -23,6 +23,7 @@ const modern = [
   "test-mcp-2026-backpressure.mjs",
   "test-mcp-2026-proxy.mjs",
   "test-mcp-2026-governed-loss.mjs",
+  "test-mcp-2026-apply-confirmation.mjs",
 ];
 const jobs = [];
 // These are separately required repository gates, never counted as local PASS.
