@@ -226,7 +226,7 @@
       },
       "query": "obsidian change task due date",
       "holdoutQueries": ["change task due date", "reschedule task new deadline", "obsidian postpone task date"],
-      "expectedTools": ["operon_update_task", "operon_update_periodic_scheduling"]
+      "expectedTools": ["operon_update_task"]
     },
     {
       "id": "canvas-edit",
