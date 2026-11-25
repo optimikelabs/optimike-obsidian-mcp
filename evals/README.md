@@ -205,6 +205,11 @@ node scripts/run-tool-discovery-eval.mjs --client=codex --runs=3 --out=<dir outs
   Catalogues and their `instructions` reach the measured model verbatim and
   reports keep its raw reply: review and redact a capture before a paid run,
   and keep captures and reports outside the repository.
+  The harness refuses `--decoys` with `--client=codex`: Codex code mode keeps
+  its own `exec_command`, its read-only sandbox still reads host files outside
+  the work directory, and decoy catalogues are untrusted text that reaches the
+  model verbatim. Claude Code runs get `ToolSearch` as their only built-in
+  tool. Competing-server numbers are Claude Code only.
 - No client can execute a server tool: the replay refuses the call. Every
   attempt, in any run including failed ones, is counted: `refusedCalls` is the
   number of calls the replay servers refused (from their logs), and

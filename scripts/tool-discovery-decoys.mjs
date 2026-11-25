@@ -115,6 +115,7 @@ export function loadDecoys(
   const codexNames = new Set();
   const wholeReplyAliases = new Map();
   const decoySurface = [];
+  // Canonical client names first, for every decoy tool...
   for (const { server, tools } of servers) {
     for (const tool of tools) {
       const full = `mcp__${server}__${tool.name}`;
@@ -124,12 +125,20 @@ export function loadDecoys(
       aliases.set(full, full);
       aliases.set(codex, full);
       aliases.set(`mcp__${codex}`, full);
-      // A bare one-word name (`read`, `query`) is an ordinary word inside a
-      // reply; it counts only as the whole reply (see wholeReplyAliases).
-      const unique = bareCount.get(tool.name) === 1 && !fixtureNames.has(tool.name);
-      if (unique && /[_-]/u.test(tool.name)) aliases.set(tool.name, full);
-      if (unique) wholeReplyAliases.set(tool.name, full);
       decoySurface.push({ ...tool, name: full, server, bareName: tool.name });
+    }
+  }
+  // ...then bare names, only where the key is free: a bare `foo__send` must
+  // not hide the client name of server foo's tool `send`. A bare one-word
+  // name (`read`, `query`) is an ordinary word inside a reply; it counts only
+  // as the whole reply (see wholeReplyAliases).
+  for (const { server, tools } of servers) {
+    for (const tool of tools) {
+      const full = `mcp__${server}__${tool.name}`;
+      const unique = bareCount.get(tool.name) === 1 && !fixtureNames.has(tool.name);
+      if (!unique || aliases.has(tool.name)) continue;
+      if (/[_-]/u.test(tool.name)) aliases.set(tool.name, full);
+      wholeReplyAliases.set(tool.name, full);
     }
   }
   const isDecoy = (name) => writes.has(name);

@@ -85,6 +85,15 @@ function parseArgs(argv) {
   if (!["claude-sim", "claude", "codex"].includes(args.client)) {
     throw new Error("--client must be claude-sim, claude or codex.");
   }
+  if (args.client === "codex" && args.decoys) {
+    // Codex code mode keeps its own exec_command, and its read-only sandbox
+    // still reads host files outside the work directory. Decoy catalogues are
+    // third-party text that reaches the model verbatim, so a decoy instruction
+    // could steer it to read a real file. No fence is proven on Windows.
+    throw new Error(
+      "--decoys is not supported with --client=codex: Codex code mode can read host files, and decoy catalogues are untrusted text.",
+    );
+  }
   if (!["vault", "none"].includes(args.context)) {
     throw new Error("--context must be vault or none.");
   }
@@ -480,6 +489,10 @@ async function runClaudeCase(testCase, launch, configPath, options) {
     "",
     "--permission-mode",
     "dontAsk",
+    // ToolSearch is the only built-in tool the model gets: no file, shell or
+    // web tool exists in the measured session, whatever a catalogue says.
+    "--tools",
+    "ToolSearch",
     "--allowedTools",
     "ToolSearch",
     "--max-turns",
@@ -506,6 +519,7 @@ async function runClaudeCase(testCase, launch, configPath, options) {
   let finalText = "";
   let model;
   let mcpStatus;
+  let builtinTools;
   for (const line of result.stdout.split(/\r?\n/u)) {
     if (!line.trim()) continue;
     let event;
@@ -516,6 +530,8 @@ async function runClaudeCase(testCase, launch, configPath, options) {
     }
     if (event.type === "system" && event.subtype === "init") {
       model = event.model;
+      // Evidence that the session held no file, shell or web tool.
+      builtinTools = (event.tools ?? []).filter((name) => !String(name).startsWith("mcp__"));
       // A fixture absent from init was never connected.
       mcpStatus =
         event.mcp_servers?.find((server) => server.name === SERVER_NAME)?.status ?? "absent";
@@ -566,6 +582,7 @@ async function runClaudeCase(testCase, launch, configPath, options) {
     searches,
     otherCalls,
     mcpStatus,
+    builtinTools,
     finalText: finalText.slice(0, 400),
     finalAnswer: namedTool(
       finalText,
@@ -703,6 +720,11 @@ function summarizeRows(allRows) {
       : {}),
     // Over every run, failed or deviated ones included: no attempt is dropped.
     otherToolCalls: allRows.filter((row) => row.otherCalls?.length).length,
+    ...(allRows.some((row) => row.builtinTools)
+      ? {
+          clientBuiltinTools: [...new Set(allRows.flatMap((row) => row.builtinTools ?? []))].sort(),
+        }
+      : {}),
     refusedCalls: allRows.reduce((total, row) => total + (row.refusedCalls?.length ?? 0), 0),
     failedRuns: allRows.filter((row) => row.error).length,
     fixtureUnavailableRuns: unavailable.length,
@@ -808,6 +830,7 @@ async function main() {
             ...options,
             decoyLaunches: decoyLaunches("isolation"),
             decoyCodexNames: decoys?.codexNames,
+            isolationRefusals: () => refusedFor("isolation"),
           },
           fixtureKnown,
         );
@@ -1189,16 +1212,34 @@ const CODEX_ISOLATION_PROMPT = [
  */
 async function assertCodexIsolation(launch, workDir, options, fixtureTools) {
   const run = await runCodex(CODEX_ISOLATION_PROMPT, launch, workDir, options);
-  const printed = run.cells.map((cell) => cell.output).join("\n");
+  const verdict = codexIsolationVerdict({
+    printed: run.cells.map((cell) => cell.output).join("\n"),
+    run,
+    fixtureTools,
+    decoyNames: options.decoyCodexNames,
+    // The replay logs are the ground truth: a call made from a code cell is
+    // not a top-level item of the session record.
+    refusedCalls: options.isolationRefusals?.() ?? [],
+  });
+  if (!verdict.ok) {
+    throw Object.assign(new Error(verdict.error), { evidence: verdict.evidence });
+  }
+  return verdict.evidence;
+}
+
+/** Pure verdict of the Codex isolation check, exported for its test. */
+export function codexIsolationVerdict({ printed, run, fixtureTools, decoyNames: decoyNameSet, refusedCalls }) {
   const match = printed.match(/\[[\s\S]*\]/u);
   if (!match) {
-    throw Object.assign(new Error("Codex isolation check: no ALL_TOOLS listing in the session record."), {
-      evidence: { rolloutFound: run.rolloutFound, cells: run.cells.length, exitCode: run.exitCode },
-    });
+    return {
+      ok: false,
+      error: "Codex isolation check: no ALL_TOOLS listing in the session record.",
+      evidence: { rolloutFound: run.rolloutFound, cells: run.cells.length, exitCode: run.exitCode, refusedCalls },
+    };
   }
   const names = JSON.parse(match[0]);
   const fixtureNames = names.filter((name) => fixtureTools.has(codexToolName(name)));
-  const decoyNames = options.decoyCodexNames ?? new Set();
+  const decoyNames = decoyNameSet ?? new Set();
   const isDecoy = (name) => decoyNames.has(name.replace(/^mcp__/u, ""));
   const decoysShown = new Set(names.filter(isDecoy).map((name) => name.replace(/^mcp__/u, "")));
   const decoysMissing = [...decoyNames].filter((name) => !decoysShown.has(name));
@@ -1214,16 +1255,15 @@ async function assertCodexIsolation(launch, workDir, options, fixtureTools) {
     ...(decoyNames.size ? { decoyTools: decoysShown.size, decoysMissing } : {}),
     fixtureNameSample: fixtureNames.slice(0, 3),
     nestedToolCalls: run.otherCalls,
+    refusedCalls,
   };
-  if (
-    foreign.length > 0 ||
-    fixtureNames.length !== fixtureTools.size ||
-    decoysMissing.length > 0 ||
-    run.otherCalls.length > 0
-  ) {
-    throw Object.assign(new Error("Codex isolation check failed."), { evidence });
-  }
-  return evidence;
+  const ok =
+    foreign.length === 0 &&
+    fixtureNames.length === fixtureTools.size &&
+    decoysMissing.length === 0 &&
+    run.otherCalls.length === 0 &&
+    refusedCalls.length === 0;
+  return ok ? { ok, evidence } : { ok, error: "Codex isolation check failed.", evidence };
 }
 
 function codexPrompt(testCase, competing = false, context = "vault") {
