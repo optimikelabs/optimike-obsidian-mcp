@@ -1091,7 +1091,9 @@ function codexArgs(launch, workDir, options) {
     `${prefix}.required=true`,
   ];
   for (const { server, launch: decoy } of options.decoyLaunches ?? []) {
-    const key = `mcp_servers.${JSON.stringify(server)}`;
+    // Codex reads a quoted key part literally (quotes included in the name).
+    if (!/^[A-Za-z0-9_-]+$/u.test(server)) throw new Error(`Decoy server name ${server} is not a bare TOML key.`);
+    const key = `mcp_servers.${server}`;
     args.push(
       "-c",
       `${key}.command=${JSON.stringify(decoy.command)}`,
