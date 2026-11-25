@@ -1,6 +1,6 @@
 # Configuration for your installation
 
-Install the MCP and the Bridge bundle of the same release together: MCP 3.22.x ships Atomic Write Bridge 0.10.0, Operon Bridge 0.9.9 and Bases Bridge 1.3.0; Atomic Write Bridge 0.9.0 or later is required for governed Base and Canvas creation, 0.9.2 or later to date an undated note before a plan, and 0.10.0 or later to check Markdown against the vault; Bases Bridge 1.3.0 or later lets Obsidian's engine check Base formulas. See [Bridge Bundle, Upgrade and Rollback](bridge-packaging.md) and the [release notes](releases/).
+Install the MCP and the Bridge bundle of the same release together: MCP 3.23.x ships Atomic Write Bridge 0.10.0, Operon Bridge 0.9.9 and Bases Bridge 1.3.0; Atomic Write Bridge 0.9.0 or later is required for governed Base and Canvas creation, 0.9.2 or later to date an undated note before a plan, and 0.10.0 or later to check Markdown against the vault; Bases Bridge 1.3.0 or later lets Obsidian's engine check Base formulas. See [Bridge Bundle, Upgrade and Rollback](bridge-packaging.md) and the [release notes](releases/).
 
 The `operational` profile prefers governed writes; `full` retains compatibility tools. Select a profile for your clients and workflows. Permissions remain independent of catalog selection.
 
