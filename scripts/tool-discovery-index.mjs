@@ -16,6 +16,9 @@
  *   whole word in the description (first 4096 chars) +2
  * Tools scoring 0 are dropped. The client's deferred-tool list is sorted by
  * name and its sort is stable, so ties come out in name order. Top 5 by default.
+ *
+ * Several servers: give each tool its own `server` (the client's server key)
+ * and `bareName`; ties then sort by the full `mcp__<server>__<tool>` name.
  */
 
 export const CLAUDE_CODE_SEARCH_VERSION = "2.1.331";
@@ -55,12 +58,13 @@ export function rankToolsClaudeCode(tools, query, { serverName, maxResults = 5 }
   }
   const scoredTerms = required.length > 0 ? [...required, ...optional] : terms;
   const patterns = new Map(scoredTerms.map((term) => [term, new RegExp(`\\b${escapeRegExp(term)}\\b`, "u")]));
+  const sortKey = (tool) => (tool.server ? `mcp__${tool.server}__${tool.bareName ?? tool.name}` : tool.name);
   const ordered = [...tools].sort((left, right) =>
-    left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
+    sortKey(left) < sortKey(right) ? -1 : sortKey(left) > sortKey(right) ? 1 : 0,
   );
   const documents = ordered.map((tool) => ({
     name: tool.name,
-    parsed: parsedName(serverName, tool.name),
+    parsed: parsedName(tool.server ?? serverName, tool.bareName ?? tool.name),
     description: (tool.description ?? "").slice(0, MAX_TEXT_CHARACTERS).toLowerCase(),
     hint: (searchHintOf(tool) ?? "").slice(0, MAX_TEXT_CHARACTERS).toLowerCase(),
   }));

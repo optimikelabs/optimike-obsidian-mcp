@@ -14,6 +14,11 @@
  *   node scripts/run-tool-discovery-eval.mjs --client=claude-sim
  *   node scripts/run-tool-discovery-eval.mjs --client=claude --runs=2 --out=<dir>
  *   node scripts/run-tool-discovery-eval.mjs --client=codex --runs=3 --out=<dir>
+ *
+ * --decoys=<dir> adds competing servers next to the fixture: every
+ * <server>.json there ({serverName, tools, instructions?}) is served by its own
+ * replay server, which refuses and logs every call like the fixture. Keep
+ * captured third-party catalogues outside the repository.
  */
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -37,6 +42,7 @@ import {
   measureToolsList,
   operatingSystemEnvironment,
 } from "./measure-tool-profile-schemas.mjs";
+import { loadDecoys } from "./tool-discovery-decoys.mjs";
 import { CLAUDE_CODE_SEARCH_VERSION, rankToolsClaudeCode, searchHintOf } from "./tool-discovery-index.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -57,6 +63,7 @@ function parseArgs(argv) {
     model: undefined,
     reasoning: undefined,
     server: DEFAULT_SERVER,
+    decoys: undefined,
   };
   for (const raw of argv) {
     const [key, value] = raw.replace(/^--/u, "").split(/=(.*)/su);
@@ -70,6 +77,7 @@ function parseArgs(argv) {
     else if (key === "model") args.model = value;
     else if (key === "reasoning") args.reasoning = value;
     else if (key === "server") args.server = path.resolve(value);
+    else if (key === "decoys") args.decoys = path.resolve(value);
     else throw new Error(`Unknown argument ${raw}`);
   }
   if (!["claude-sim", "claude", "codex"].includes(args.client)) {
@@ -212,6 +220,7 @@ async function captureCatalog(profile, serverEntry, privateRoot) {
  * captured surface and refuses and logs every tools/call before dispatch.
  */
 function replayFixture(catalog, privateRoot) {
+  mkdirSync(privateRoot, { recursive: true });
   const catalogPath = path.join(privateRoot, "catalog.json");
   const callsDir = path.join(privateRoot, "calls");
   mkdirSync(callsDir, { recursive: true });
@@ -372,7 +381,15 @@ function runProcess(command, args, { cwd, input, env, timeoutMs = 240_000 }) {
   });
 }
 
-function discoveryPrompt(testCase) {
+// With competing servers the prompt no longer says that the only server is the
+// vault: the client must tell the vault apart from the other servers.
+function connectionSentence(competing) {
+  return competing
+    ? "You are connected to several MCP servers; one of them gives access to the user's Obsidian vault."
+    : "You are connected to a user's Obsidian vault through an MCP server.";
+}
+
+function discoveryPrompt(testCase, competing = false) {
   if (testCase.mode !== "request") {
     return [
       "Call your tool search tool exactly once, with exactly this query string and nothing added:",
@@ -384,7 +401,7 @@ function discoveryPrompt(testCase) {
   }
   const request = testCase.request;
   return [
-    "You are connected to a user's Obsidian vault through an MCP server.",
+    connectionSentence(competing),
     "The user asks:",
     "",
     `> ${request}`,
@@ -432,6 +449,12 @@ async function runClaudeCase(testCase, launch, configPath, options) {
           args: launch.args,
           env: launch.env,
         },
+        ...Object.fromEntries(
+          (options.decoyLaunches ?? []).map(({ server, launch: decoy }) => [
+            server,
+            { type: "stdio", command: decoy.command, args: decoy.args, env: decoy.env },
+          ]),
+        ),
       },
     }),
     "utf8",
@@ -466,7 +489,7 @@ async function runClaudeCase(testCase, launch, configPath, options) {
   const started = Date.now();
   const result = await runProcess(claudeCommand(), args, {
     cwd: path.dirname(configPath),
-    input: discoveryPrompt(testCase),
+    input: discoveryPrompt(testCase, Boolean(options.decoyLaunches?.length)),
     env,
   });
   const searches = [];
@@ -486,6 +509,13 @@ async function runClaudeCase(testCase, launch, configPath, options) {
     if (event.type === "system" && event.subtype === "init") {
       model = event.model;
       mcpStatus = event.mcp_servers?.find((server) => server.name === SERVER_NAME)?.status;
+      const decoyServers = new Set((options.decoyLaunches ?? []).map(({ server }) => server));
+      const decoysDown = (event.mcp_servers ?? []).filter(
+        (server) => decoyServers.has(server.name) && server.status !== "connected",
+      );
+      if (mcpStatus === "connected" && decoysDown.length) {
+        mcpStatus = `decoy ${decoysDown.map((server) => server.name).join(",")} not connected`;
+      }
     }
     const content = event.message?.content;
     if (!Array.isArray(content)) {
@@ -523,17 +553,18 @@ async function runClaudeCase(testCase, launch, configPath, options) {
     otherCalls,
     mcpStatus,
     finalText: finalText.slice(0, 400),
-    finalAnswer: namedTool(finalText, options.knownTools),
+    finalAnswer: namedTool(finalText, options.knownTools, options.decoyAliases),
     latencyMs: Date.now() - started,
     stderrTail: result.code === 0 ? undefined : result.stderr.slice(-600),
   };
 }
 
 /** First fixture tool named in a final reply, else the reply's last word. */
-function namedTool(text, knownTools) {
+function namedTool(text, knownTools, aliases = new Map()) {
   for (const match of String(text).matchAll(/[A-Za-z][\w-]*/gu)) {
     const name = codexToolName(stripServerPrefix(match[0]));
     if (knownTools.has(name)) return name;
+    if (aliases.has(name)) return aliases.get(name);
   }
   return String(text).trim().split(/\s+/u).pop() ?? "";
 }
@@ -548,9 +579,10 @@ function claudeCommand() {
 
 // ---------------------------------------------------------------------------
 
-function scoreCase(testCase, ranked) {
+function scoreCase(testCase, ranked, decoys) {
   const top = ranked.slice(0, 3);
   return {
+    ...(decoys ? decoys.rankingScore(testCase, ranked) : {}),
     top1: top[0] !== undefined && testCase.expected.includes(top[0]),
     top3: top.some((name) => testCase.expected.includes(name)),
     riskyAboveExpected: (() => {
@@ -635,6 +667,19 @@ function summarizeRows(allRows) {
           riskyShown: rows.filter((row) => row.riskyShown?.length).length,
         }
       : {}),
+    ...(rows.some((row) => row.score && "foreignFirst" in row.score)
+      ? {
+          foreignFirst: count("foreignFirst"),
+          foreignWriteFirst: count("foreignWriteFirst"),
+          foreignWriteAboveExpected: count("foreignWriteAboveExpected"),
+        }
+      : {}),
+    ...(rows.some((row) => "finalForeign" in row)
+      ? {
+          finalForeign: rows.filter((row) => row.finalForeign).length,
+          finalForeignWrite: rows.filter((row) => row.finalForeignWrite).length,
+        }
+      : {}),
     otherToolCalls: rows.filter((row) => row.otherCalls?.length).length,
     failedRuns: allRows.filter((row) => row.error).length,
     fixtureUnavailableRuns: unavailable.length,
@@ -667,14 +712,28 @@ async function main() {
       characters: toolsListCharacters(tools),
     };
     delete surface.toolNames;
-    const known = new Set(tools.map((tool) => tool.name));
+    const fixtureKnown = new Set(tools.map((tool) => tool.name));
+    const decoys = options.decoys
+      ? loadDecoys(options.decoys, {
+          fixtureServer: SERVER_NAME,
+          fixtureTools: tools,
+          replay: (catalog, server) =>
+            replayFixture(catalog, path.join(privateRoot, "decoys", server)),
+        })
+      : undefined;
+    const known = decoys ? new Set([...fixtureKnown, ...decoys.toolNames]) : fixtureKnown;
+    const rankedSurface = decoys ? decoys.rankingSurface : tools;
     const simulate = (query, maxResults = 5) =>
-      rankToolsClaudeCode(tools, query, { serverName: SERVER_NAME, maxResults }).map(
+      rankToolsClaudeCode(rankedSurface, query, { serverName: SERVER_NAME, maxResults }).map(
         (item) => item.name,
       );
+    const decoyLaunches = (slot) => decoys?.launchesFor(slot) ?? [];
+    const decoyRefusals = (slot) => decoys?.refusedCalls(slot) ?? [];
+    const withFinal = (testCase, finalAnswer) =>
+      decoys ? decoys.finalScore(testCase, finalAnswer) : {};
     for (const testCase of cases) {
       for (const name of [...testCase.expected, ...testCase.risky]) {
-        if (!known.has(name)) {
+        if (!fixtureKnown.has(name)) {
           throw new Error(`${testCase.id}: ${name} is not exposed by ${options.profile}.`);
         }
       }
@@ -692,10 +751,12 @@ async function main() {
         ? { claudeCodeSearchReproduction: CLAUDE_CODE_SEARCH_VERSION }
         : {}),
       reasoning: options.reasoning ?? "client-default",
+      ...(decoys ? { decoys: decoys.summary } : {}),
       startedAt: new Date().toISOString(),
     };
     if (options.client !== "claude-sim") {
       header.replay = await verifyReplay(fixture, surface.toolsListSha256);
+      if (decoys) header.decoyReplay = await decoys.verify(verifyReplay);
     }
     let rows;
     if (options.client === "claude-sim") {
@@ -705,7 +766,7 @@ async function main() {
           caseId: testCase.id,
           runIndex: 0,
           ranked: ranked.slice(0, 5),
-          score: scoreCase(testCase, ranked),
+          score: scoreCase(testCase, ranked, decoys),
         };
       });
     } else if (options.client === "codex") {
@@ -716,8 +777,12 @@ async function main() {
         header.codexIsolation = await assertCodexIsolation(
           fixture.launchFor("isolation"),
           workDir,
-          options,
-          known,
+          {
+            ...options,
+            decoyLaunches: decoyLaunches("isolation"),
+            decoyCodexNames: decoys?.codexNames,
+          },
+          fixtureKnown,
         );
         process.stderr.write(`codex isolation: ${JSON.stringify(header.codexIsolation)}\n`);
         const jobs = [];
@@ -726,8 +791,14 @@ async function main() {
         }
         rows = await mapLimit(jobs, options.concurrency, async ({ testCase, runIndex }, slot) => {
           try {
-            const run = await runCodexCase(testCase, fixture.launchFor(slot), workDir, options, known);
-            run.otherCalls.push(...fixture.refusedCalls(slot));
+            const run = await runCodexCase(
+              testCase,
+              fixture.launchFor(slot),
+              workDir,
+              { ...options, decoyLaunches: decoyLaunches(slot), decoyAliases: decoys?.aliases },
+              fixtureKnown,
+            );
+            run.otherCalls.push(...fixture.refusedCalls(slot), ...decoyRefusals(slot));
             const failure =
               run.exitCode !== 0
                 ? `codex exited with ${run.exitCode}`
@@ -745,6 +816,7 @@ async function main() {
               expectedShown: run.shownTools.some((name) => testCase.expected.includes(name)),
               riskyShown: run.shownTools.filter((name) => testCase.risky.includes(name)),
               finalCorrect: testCase.expected.includes(run.finalAnswer),
+              ...withFinal(testCase, run.finalAnswer),
             };
           } catch (error) {
             return { caseId: testCase.id, runIndex, error: String(error?.message ?? error) };
@@ -773,8 +845,10 @@ async function main() {
             const run = await runClaudeCase(testCase, fixture.launchFor(slot), configPath, {
               ...options,
               knownTools: known,
+              decoyLaunches: decoyLaunches(slot),
+              decoyAliases: decoys?.aliases,
             });
-            run.otherCalls.push(...fixture.refusedCalls(slot));
+            run.otherCalls.push(...fixture.refusedCalls(slot), ...decoyRefusals(slot));
             const failure =
               run.exitCode !== 0
                 ? `claude exited with ${run.exitCode}`
@@ -810,10 +884,11 @@ async function main() {
               runIndex,
               ...run,
               ranked: ranked.slice(0, 5),
-              score: first ? scoreCase(testCase, ranked) : null,
+              score: first ? scoreCase(testCase, ranked, decoys) : null,
               ...(queryDeviated ? { queryDeviated } : {}),
               anySearchTop3: anyFound,
               finalCorrect: testCase.expected.includes(run.finalAnswer),
+              ...withFinal(testCase, run.finalAnswer),
             };
           } catch (error) {
             return { caseId: testCase.id, runIndex, error: String(error?.message ?? error) };
@@ -1006,6 +1081,21 @@ function codexArgs(launch, workDir, options) {
     "-c",
     `${prefix}.required=true`,
   ];
+  for (const { server, launch: decoy } of options.decoyLaunches ?? []) {
+    const key = `mcp_servers.${JSON.stringify(server)}`;
+    args.push(
+      "-c",
+      `${key}.command=${JSON.stringify(decoy.command)}`,
+      "-c",
+      `${key}.args=${JSON.stringify(decoy.args)}`,
+      "-c",
+      `${key}.env=${tomlInlineTable(decoy.env)}`,
+      "-c",
+      `${key}.startup_timeout_sec=60`,
+      "-c",
+      `${key}.required=true`,
+    );
+  }
   if (options.model) args.push("-m", options.model);
   if (options.reasoning) {
     args.push("-c", `model_reasoning_effort=${JSON.stringify(options.reasoning)}`);
@@ -1067,26 +1157,36 @@ async function assertCodexIsolation(launch, workDir, options, fixtureTools) {
   }
   const names = JSON.parse(match[0]);
   const fixtureNames = names.filter((name) => fixtureTools.has(codexToolName(name)));
+  const decoyNames = options.decoyCodexNames ?? new Set();
+  const isDecoy = (name) => decoyNames.has(name.replace(/^mcp__/u, ""));
+  const decoysShown = names.filter(isDecoy);
   const foreign = names.filter(
-    (name) => !CODEX_BUILTIN_TOOLS.has(name) && !fixtureTools.has(codexToolName(name)),
+    (name) =>
+      !CODEX_BUILTIN_TOOLS.has(name) && !fixtureTools.has(codexToolName(name)) && !isDecoy(name),
   );
   const evidence = {
     visibleTools: names.length,
     fixtureTools: fixtureNames.length,
     builtinTools: names.filter((name) => CODEX_BUILTIN_TOOLS.has(name)),
     foreignTools: foreign,
+    ...(decoyNames.size ? { decoyTools: decoysShown.length } : {}),
     fixtureNameSample: fixtureNames.slice(0, 3),
     nestedToolCalls: run.otherCalls,
   };
-  if (foreign.length > 0 || fixtureNames.length !== fixtureTools.size || run.otherCalls.length > 0) {
+  if (
+    foreign.length > 0 ||
+    fixtureNames.length !== fixtureTools.size ||
+    decoysShown.length !== decoyNames.size ||
+    run.otherCalls.length > 0
+  ) {
     throw Object.assign(new Error("Codex isolation check failed."), { evidence });
   }
   return evidence;
 }
 
-function codexPrompt(testCase) {
+function codexPrompt(testCase, competing = false) {
   return [
-    "You are connected to a user's Obsidian vault through an MCP server.",
+    connectionSentence(competing),
     "The user asks:",
     "",
     `> ${testCase.request}`,
@@ -1128,7 +1228,8 @@ function codexCellToolCalls(cells) {
 }
 
 async function runCodexCase(testCase, launch, workDir, options, fixtureTools) {
-  const run = await runCodex(codexPrompt(testCase), launch, workDir, options);
+  const competing = Boolean(options.decoyLaunches?.length);
+  const run = await runCodex(codexPrompt(testCase, competing), launch, workDir, options);
   return {
     exitCode: run.exitCode,
     model: options.model ?? "codex-default",
@@ -1137,7 +1238,7 @@ async function runCodexCase(testCase, launch, workDir, options, fixtureTools) {
     shownTools: codexShownTools(run.cells, fixtureTools),
     otherCalls: [...run.otherCalls, ...codexCellToolCalls(run.cells)],
     finalText: run.finalText.slice(0, 400),
-    finalAnswer: namedTool(run.finalText, fixtureTools),
+    finalAnswer: namedTool(run.finalText, fixtureTools, options.decoyAliases),
     latencyMs: run.latencyMs,
     stderrTail: run.stderrTail,
   };

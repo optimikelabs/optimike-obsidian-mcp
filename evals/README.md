@@ -186,6 +186,19 @@ node scripts/run-tool-discovery-eval.mjs --client=codex --runs=3 --out=<dir outs
   records the model's code cells, the fixture tools they printed and the tool
   it names, then deletes its session record. Code mode has no ranking to score:
   report its variability across runs, not a top-3 rate.
+- `--decoys=<dir>` measures discovery next to competing servers. Each
+  `<server>.json` there (`{serverName, tools, instructions?}`, for example a
+  captured `tools/list` of another MCP server the user runs) is served by its
+  own replay server, which refuses and logs every call like the fixture; the
+  reproduction ranks all servers together, with ties in full
+  `mcp__<server>__<tool>` order. Decoy tools are reported by that full name.
+  The report adds `foreignFirst`, `foreignWriteFirst` (a decoy tool that
+  writes, by its annotations or else its name, ranks first),
+  `foreignWriteAboveExpected` (one ranks in the top 3 above the expected tool)
+  and, for real clients, `finalForeign` / `finalForeignWrite`. With decoys the
+  request prompt says the client is connected to several servers, one of them
+  the user's Obsidian vault. Keep captured third-party catalogues outside the
+  repository.
 - No client can execute a server tool: the replay refuses the call, and any
   attempt is counted in `otherToolCalls`. Run artifacts stay outside the
   repository and paid model calls stay out of CI.
