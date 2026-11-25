@@ -21,7 +21,9 @@ const InputSchema = z
       .describe("Maximum number of pending operations to return."),
     cursor: z
       .string()
-      .regex(/^[A-Za-z0-9_-]{1,2048}$/u)
+      // RE2-based clients cannot compile a counted repetition above 1000.
+      .regex(/^[A-Za-z0-9_-]+$/u)
+      .refine((cursor) => cursor.length <= 2048, "Cursor must be at most 2048 characters.")
       .optional()
       .describe("Opaque cursor returned by the previous page."),
     operationKind: OperationKindSchema.optional().describe("Restrict to one operation kind."),
