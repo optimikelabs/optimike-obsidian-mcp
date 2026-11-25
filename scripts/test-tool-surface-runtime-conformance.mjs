@@ -6,7 +6,50 @@ import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { compileToolNames } from "../dist/mcp-server/toolSurfaceRegistry.js";
+import {
+  compileToolNames,
+  getToolSurfaceEntry,
+} from "../dist/mcp-server/toolSurfaceRegistry.js";
+import {
+  TOOL_SEARCH_HINT_META_KEY,
+  TOOL_SEARCH_HINTS,
+} from "../dist/mcp-server/toolSearchHints.js";
+
+// Claude Code ToolSearch does not drop these words, so a hint containing one
+// would lift every hinted tool for any query that contains it: function words
+// and words true of the whole vault surface.
+const HINT_FUNCTION_WORDS = new Set(
+  [
+    "a an and are as at be by for from in into is it its my of on or the this to with",
+    "content file files markdown note notes vault",
+  ]
+    .join(" ")
+    .split(" "),
+);
+const HINT_MAX_LENGTH = 100;
+
+for (const [name, hint] of Object.entries(TOOL_SEARCH_HINTS)) {
+  assert.ok(hint.length > 0 && hint.length <= HINT_MAX_LENGTH, `${name}: hint length`);
+  const words = hint.toLowerCase().split(/[^a-z0-9]+/u).filter(Boolean);
+  assert.deepEqual(
+    words.filter((word) => HINT_FUNCTION_WORDS.has(word)),
+    [],
+    `${name}: hint has function words`,
+  );
+  // The client already scores a query word found inside a name part.
+  const nameParts = ["obsidian", ...name.split("_")];
+  assert.deepEqual(
+    words.filter((word) => nameParts.some((part) => part.includes(word))),
+    [],
+    `${name}: hint repeats words of the tool name`,
+  );
+  // A renamed or removed tool must not leave a hint behind.
+  const entry = getToolSurfaceEntry(name);
+  assert.ok(entry, `${name}: search hint for a tool missing from the registry`);
+  const role = entry.lifecycleRole;
+  assert.ok(role === undefined || role === "plan", `${name}: hint the plan, not its ${role} step`);
+}
+const hintedSeen = new Set();
 
 const MODES = [
   "live",
@@ -102,8 +145,16 @@ async function listToolsForMode(registrationMode) {
 
   try {
     await client.connect(transport);
-    const tools = await client.listTools();
-    return tools.tools.map((tool) => tool.name).sort((a, b) => a.localeCompare(b));
+    const { tools } = await client.listTools();
+    for (const tool of tools) {
+      assert.equal(
+        tool._meta?.[TOOL_SEARCH_HINT_META_KEY],
+        TOOL_SEARCH_HINTS[tool.name],
+        `${registrationMode}: ${tool.name} search hint`,
+      );
+      if (TOOL_SEARCH_HINTS[tool.name]) hintedSeen.add(tool.name);
+    }
+    return tools.map((tool) => tool.name).sort((a, b) => a.localeCompare(b));
   } finally {
     await client.close().catch(() => undefined);
     if (fakeRest) {
@@ -125,3 +176,4 @@ for (const registrationMode of MODES) {
 }
 
 console.log("PASS: runtime tools/list matches the canonical registry in every registration mode");
+console.log(`PASS: ${hintedSeen.size} search hints served as _meta["${TOOL_SEARCH_HINT_META_KEY}"]`);
