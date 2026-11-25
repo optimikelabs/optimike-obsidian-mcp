@@ -1,7 +1,7 @@
 {
   "schemaVersion": "tool-discovery-corpus/v1",
   "corpusId": "optimike-tool-discovery-v1",
-  "description": "Search-based tool discovery cases. A client that defers MCP tool definitions searches by keywords; each intent passes when an expected tool is in the top 3 search results. Requests are user phrasings (English and French); query is a keyword search issued verbatim. riskyTools are broader or ungoverned neighbours that must not outrank the expected tool. holdoutQueries were written by a separate agent from the intent text alone, without tool names, descriptions or search hints, and serve as an out-of-sample check of search-hint and description edits.",
+  "description": "Search-based tool discovery cases. A client that defers MCP tool definitions searches by keywords; each intent passes when an expected tool is in the top 3 search results. Requests are user phrasings (English and French); query is a keyword search issued verbatim. riskyTools are broader or ungoverned neighbours that must not outrank the expected tool. holdoutQueries were written by a separate agent from the intent text alone, without tool names, descriptions or search hints, and serve as an out-of-sample check of search-hint and description edits. observedQueries are keyword searches a real Claude Code session issued with other MCP servers connected (2026-11-25), where another server's tool that writes ranked first; they guard against a regression next to competing servers (see evals/README.md, --decoys).",
   "profile": "operational",
   "intents": [
     {
@@ -42,6 +42,7 @@
       },
       "query": "obsidian find notes about a fuzzy concept by meaning",
       "holdoutQueries": ["semantic search notes by meaning", "find related notes concept embedding", "similarity search vault topic"],
+      "observedQueries": ["search notes by meaning"],
       "expectedTools": ["smart_semantic_search"]
     },
     {
@@ -95,6 +96,7 @@
       },
       "query": "obsidian create new note",
       "holdoutQueries": ["create new note", "make note file with content", "obsidian add new markdown note"],
+      "observedQueries": ["add a note"],
       "expectedTools": ["obsidian_note_create_plan"]
     },
     {
@@ -125,6 +127,7 @@
       },
       "query": "obsidian delete note",
       "holdoutQueries": ["delete note", "remove note file", "trash note from vault"],
+      "observedQueries": ["delete note"],
       "expectedTools": ["obsidian_note_delete_plan"]
     },
     {
@@ -196,6 +199,7 @@
       },
       "query": "obsidian mark a task done",
       "holdoutQueries": ["mark task done", "complete task checkbox", "obsidian close finish task"],
+      "observedQueries": ["update task status done"],
       "expectedTools": ["operon_transition_task"]
     },
     {
@@ -206,6 +210,7 @@
       },
       "query": "obsidian create a task with due date",
       "holdoutQueries": ["create task due date", "add new task with deadline", "obsidian make todo scheduled"],
+      "observedQueries": ["create task"],
       "expectedTools": ["operon_create_task", "operon_create_periodic_task"]
     },
     {
@@ -216,6 +221,7 @@
       },
       "query": "obsidian list tasks due this week",
       "holdoutQueries": ["list tasks due this week", "upcoming tasks by date range", "obsidian show todos deadline week"],
+      "observedQueries": ["list tasks due today"],
       "expectedTools": ["operon_query_tasks", "operon_find_tasks", "operon_list_tasks"]
     },
     {

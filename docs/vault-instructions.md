@@ -153,7 +153,7 @@ Example refusal:
 
 ## Server instructions
 
-When the mode is not `off` and the vault root has an instruction file, the MCP `instructions` returned at initialization tell the agent to read the root file and those of the parent folders of any path it writes, and, in `enforce`, that writes are refused until then. They point to the files and never include their content. The stdio proxy relays them to its client. The root check is cached for 60 seconds; instructions already received by a client are not updated. If the vault cannot be read when the client connects (Obsidian not started yet), that connection gets no instructions; its write results still carry `vaultInstructions`.
+The MCP `instructions` returned at initialization always open with one sentence about finding this server's tools by search (see [Tool Surface Profiles](tool-surface-profiles.md)). When the mode is not `off` and the vault root has an instruction file, a paragraph follows that tells the agent to read the root file and those of the parent folders of any path it writes, and, in `enforce`, that writes are refused until then. They point to the files and never include their content. The stdio proxy relays them to its client. The root check is cached for 60 seconds; instructions already received by a client are not updated. If the vault cannot be read when the client connects (Obsidian not started yet), that connection gets no paragraph about instruction files; its write results still carry `vaultInstructions`.
 
 ## Limits
 
