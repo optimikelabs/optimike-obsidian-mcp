@@ -356,7 +356,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_update_task",
     {
       description:
-        "Update exactly one ordinary Operon mutation group: description, managed fields/tags, or one unmanaged file property. Do not use this tool for dateScheduled (use operon_update_periodic_scheduling), relationships (use operon_set_relationships), or recurrence fields (use operon_update_recurrence). expectedRevision and idempotencyKey are mandatory; dryRun defaults to true. Use one idempotencyKey for the dry-run and a new one for the apply; reusing the dry-run key returns idempotency_key_reused.",
+        "Change the due date (dateDue, deadline) or other fields of an existing Operon task. Update exactly one ordinary Operon mutation group: description, managed fields/tags, or one unmanaged file property. Do not use this tool for dateScheduled (use operon_update_periodic_scheduling), relationships (use operon_set_relationships), or recurrence fields (use operon_update_recurrence). expectedRevision and idempotencyKey are mandatory; dryRun defaults to true. Use one idempotencyKey for the dry-run and a new one for the apply; reusing the dry-run key returns idempotency_key_reused.",
       inputSchema: mcpSchema(OperonUpdateTaskSchema.shape),
       annotations: MUTATION_ANNOTATIONS,
     },
@@ -417,7 +417,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_update_recurrence",
     {
       description:
-        "Set or explicitly clear an Operon recurrence rule and its official temporal fields, except dateScheduled, for this-task or this-and-following. dateScheduled is reserved for operon_update_periodic_scheduling. This apply is reserved for full write policy; expectedRevision and idempotencyKey are mandatory; dryRun defaults to true. Use one idempotencyKey for the dry-run and a new one for the apply; reusing the dry-run key returns idempotency_key_reused.",
+        "Set or explicitly clear the recurrence rule for a repeating Operon task or a task that should repeat. Update the rule and its official temporal fields, except dateScheduled, for this-task or this-and-following. dateScheduled is reserved for operon_update_periodic_scheduling. This apply is reserved for full write policy; expectedRevision and idempotencyKey are mandatory; dryRun defaults to true. Use one idempotencyKey for the dry-run and a new one for the apply; reusing the dry-run key returns idempotency_key_reused.",
       inputSchema: mcpSchema(OperonUpdateRecurrenceSchema.shape),
       annotations: MUTATION_ANNOTATIONS,
     },
