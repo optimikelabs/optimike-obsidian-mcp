@@ -136,8 +136,12 @@ Mécanismes clients optionnels :
   instructions du serveur commencent par une phrase qui demande au client de
   mettre le mot `obsidian` dans ses recherches d’outils : à côté d’autres
   serveurs dont les outils portent les mêmes verbes (`add_note`, `update_task`),
-  ce mot classe les outils de ce serveur en tête, tant que le nom configuré du
-  serveur ou celui des outils le contient ;
+  ce mot peut faire passer les outils de ce serveur devant les leurs. Il
+  correspond au nom configuré du serveur (y garder `obsidian`, comme dans le nom
+  documenté `optimike-obsidian-mcp-stdio`) et aux noms d’outils `obsidian_*` ;
+  sous un autre nom de serveur, `operon_*`, `bases_*` et `smart_semantic_search`
+  ne le reprennent pas, et un serveur concurrent dont le nom contient
+  `obsidian` en profite aussi ;
 - Hermes Agent : filtres include/exclude ;
 - OpenClaw : `toolFilter.include` / `toolFilter.exclude`.
 

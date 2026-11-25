@@ -143,8 +143,12 @@ Optional client mechanisms include:
   their name lacks, which other clients ignore. The server instructions open
   with one sentence asking the client to include the word `obsidian` in its
   tool searches: next to other servers whose tools share the same verbs
-  (`add_note`, `update_task`), that word ranks this server's tools first, as
-  long as the configured server name or the tool names contain it;
+  (`add_note`, `update_task`), that word can lift this server's tools above
+  theirs. It matches through the configured server name (keep `obsidian` in it,
+  as in the documented `optimike-obsidian-mcp-stdio`) and through the
+  `obsidian_*` tool names; under another server name, `operon_*`, `bases_*`
+  and `smart_semantic_search` do not match it, and a competing server whose
+  own name contains `obsidian` gains from it too;
 - Hermes Agent: include/exclude filters;
 - OpenClaw: `toolFilter.include` / `toolFilter.exclude`.
 
