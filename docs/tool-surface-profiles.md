@@ -147,7 +147,8 @@ Optional client mechanisms include:
   theirs. It matches through the configured server name (keep `obsidian` in it,
   as in the documented `optimike-obsidian-mcp-stdio`) and through the
   `obsidian_*` tool names; under another server name, `operon_*`, `bases_*`
-  and `smart_semantic_search` do not match it, and a competing server whose
+  and `smart_semantic_search` get no name match on it (at most a description
+  match, worth far less), and a competing server whose
   own name contains `obsidian` gains from it too;
 - Hermes Agent: include/exclude filters;
 - OpenClaw: `toolFilter.include` / `toolFilter.exclude`.

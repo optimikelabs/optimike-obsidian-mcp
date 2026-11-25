@@ -69,7 +69,8 @@ export const TOOL_SEARCH_HINTS: Readonly<Record<string, string>> = {
  * keyword search. Other servers a user connects can own the same verbs
  * (`add_note`, `update_task`), and their name match outranks any hint here.
  * The word obsidian is in this server's documented name and in most tool
- * names, so a search that carries it ranks these tools first.
+ * names, so a search that carries it can lift these tools above theirs; it
+ * does not guarantee first place.
  */
 export const TOOL_SEARCH_INSTRUCTION =
   "Tools for the user's Obsidian vault: notes, Operon tasks, Bases and canvases. " +
