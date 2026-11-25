@@ -124,7 +124,16 @@ registerOperationCockpitTool(server, [first, second]);
 try {
   await server.connect(serverTransport);
   await client.connect(clientTransport);
-  const list = (args) => client.callTool({ name: "obsidian_list_pending_operations", arguments: args });
+  const name = "obsidian_list_pending_operations";
+  const listed = (await client.listTools()).tools.find((tool) => tool.name === name);
+  const pattern = listed?.inputSchema.properties.cursor.pattern;
+  assert.equal(typeof pattern, "string");
+  // Regression for the Go regexp counting limit observed in Antigravity 1.5.12.
+  for (const [, minimum, maximum] of pattern.matchAll(/\{(\d+)(?:,(\d*))?\}/gu)) {
+    assert.ok(Number(minimum) <= 1000 && (!maximum || Number(maximum) <= 1000),
+      `Published cursor pattern exceeds the client's counted repetition limit: ${pattern}`);
+  }
+  const list = (args) => client.callTool({ name, arguments: args });
   const firstPage = JSON.parse((await list({ limit: 1 })).content[0].text);
   const decoded = Buffer.from(firstPage.nextCursor, "base64url").toString("utf8");
   // JSON trailing space preserves the cursor payload while exercising the size boundary.
