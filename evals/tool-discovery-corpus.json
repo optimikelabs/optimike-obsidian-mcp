@@ -1,0 +1,272 @@
+{
+  "schemaVersion": "tool-discovery-corpus/v1",
+  "corpusId": "optimike-tool-discovery-v1",
+  "description": "Search-based tool discovery cases. A client that defers MCP tool definitions searches by keywords; each intent passes when an expected tool is in the top 3 search results. Requests are user phrasings (English and French); query is a keyword search issued verbatim. riskyTools are broader or ungoverned neighbours that must not outrank the expected tool. holdoutQueries were written by a separate agent from the intent text alone, without tool names, descriptions or search hints, and serve as an out-of-sample check of search-hint and description edits.",
+  "profile": "operational",
+  "intents": [
+    {
+      "id": "read-note",
+      "requests": {
+        "en": "Show me what my note Projects/Roadmap.md says.",
+        "fr": "Montre-moi le contenu de ma note Projets/Feuille de route.md."
+      },
+      "query": "obsidian read note content",
+      "holdoutQueries": ["read note content", "obsidian get note text by path", "fetch markdown file body"],
+      "expectedTools": ["obsidian_read_note"]
+    },
+    {
+      "id": "list-folder",
+      "requests": {
+        "en": "Which notes are in my Journal folder?",
+        "fr": "Quelles notes y a-t-il dans mon dossier Journal ?"
+      },
+      "query": "obsidian list notes in folder",
+      "holdoutQueries": ["list notes in folder", "directory contents browse files", "obsidian enumerate folder children"],
+      "expectedTools": ["obsidian_list_notes"]
+    },
+    {
+      "id": "exact-search",
+      "requests": {
+        "en": "Find every note that contains the exact phrase \"North Star\".",
+        "fr": "Trouve toutes les notes qui contiennent exactement l'expression « étoile polaire »."
+      },
+      "query": "obsidian search notes containing exact text",
+      "holdoutQueries": ["search notes exact phrase", "full text keyword match vault", "grep literal string notes"],
+      "expectedTools": ["obsidian_global_search"]
+    },
+    {
+      "id": "semantic-search",
+      "requests": {
+        "en": "Find my notes about resilience by meaning, even if they never use that word.",
+        "fr": "Retrouve mes notes qui parlent de résilience par le sens, même si elles n'emploient pas ce mot."
+      },
+      "query": "obsidian find notes about a fuzzy concept by meaning",
+      "holdoutQueries": ["semantic search notes by meaning", "find related notes concept embedding", "similarity search vault topic"],
+      "expectedTools": ["smart_semantic_search"]
+    },
+    {
+      "id": "edit-paragraph",
+      "requests": {
+        "en": "Replace one paragraph in my existing note Meetings/Kickoff.md with this corrected text.",
+        "fr": "Remplace un paragraphe de ma note existante Réunions/Lancement.md par ce texte corrigé."
+      },
+      "query": "obsidian replace a paragraph in an existing note",
+      "holdoutQueries": ["replace paragraph in note", "patch text section existing note", "edit part of note content"],
+      "expectedTools": ["obsidian_text_patch_plan"],
+      "riskyTools": ["obsidian_note_replace_plan"]
+    },
+    {
+      "id": "append-text",
+      "requests": {
+        "en": "Add a short paragraph at the end of my note Ideas.md without touching the rest.",
+        "fr": "Ajoute un court paragraphe à la fin de ma note Idées.md sans toucher au reste."
+      },
+      "query": "obsidian append text to existing note",
+      "holdoutQueries": ["append text to note", "add paragraph end of note", "obsidian insert content at bottom"],
+      "expectedTools": ["obsidian_text_patch_plan"],
+      "riskyTools": ["obsidian_note_replace_plan"]
+    },
+    {
+      "id": "frontmatter-change",
+      "requests": {
+        "en": "Change the status property of my note Project Atlas.md to done.",
+        "fr": "Passe la propriété status de ma note Projet Atlas.md à terminé."
+      },
+      "query": "obsidian change a property value in note frontmatter",
+      "holdoutQueries": ["update frontmatter property", "set yaml property value note", "modify note metadata field"],
+      "expectedTools": ["obsidian_frontmatter_patch_plan"],
+      "riskyTools": ["obsidian_note_replace_plan"]
+    },
+    {
+      "id": "frontmatter-read",
+      "requests": {
+        "en": "What is the value of the status property in my note Project Atlas.md?",
+        "fr": "Quelle est la valeur de la propriété status dans ma note Projet Atlas.md ?"
+      },
+      "query": "obsidian read frontmatter property value",
+      "holdoutQueries": ["read frontmatter property", "get yaml metadata note", "obsidian note properties value lookup"],
+      "expectedTools": ["obsidian_get_frontmatter", "obsidian_read_note"]
+    },
+    {
+      "id": "create-note",
+      "requests": {
+        "en": "Create a new note called Weekly Review.md with this content.",
+        "fr": "Crée une nouvelle note Revue hebdo.md avec ce contenu."
+      },
+      "query": "obsidian create new note",
+      "holdoutQueries": ["create new note", "make note file with content", "obsidian add new markdown note"],
+      "expectedTools": ["obsidian_note_create_plan"]
+    },
+    {
+      "id": "rewrite-note",
+      "requests": {
+        "en": "Rewrite my whole note Draft.md with this new version of the full text.",
+        "fr": "Réécris entièrement ma note Brouillon.md avec cette nouvelle version complète."
+      },
+      "query": "obsidian replace whole note content",
+      "holdoutQueries": ["replace entire note content", "overwrite whole note text", "rewrite full note new version"],
+      "expectedTools": ["obsidian_note_replace_plan"]
+    },
+    {
+      "id": "move-note",
+      "requests": {
+        "en": "Move my note Draft.md into the Archive folder.",
+        "fr": "Déplace ma note Brouillon.md dans le dossier Archives."
+      },
+      "query": "obsidian move or rename note",
+      "holdoutQueries": ["move note to folder", "relocate rename note path", "obsidian move file another directory"],
+      "expectedTools": ["obsidian_note_move_plan"]
+    },
+    {
+      "id": "delete-note",
+      "requests": {
+        "en": "Delete my note Old idea.md.",
+        "fr": "Supprime ma note Vieille idée.md."
+      },
+      "query": "obsidian delete note",
+      "holdoutQueries": ["delete note", "remove note file", "trash note from vault"],
+      "expectedTools": ["obsidian_note_delete_plan"]
+    },
+    {
+      "id": "backlinks",
+      "requests": {
+        "en": "Which notes link to my note Atlas.md?",
+        "fr": "Quelles notes renvoient vers ma note Atlas.md ?"
+      },
+      "query": "obsidian backlinks notes linking to a note",
+      "holdoutQueries": ["find backlinks to note", "notes linking to note", "obsidian incoming links references"],
+      "expectedTools": ["obsidian_note_links"]
+    },
+    {
+      "id": "bases-query",
+      "requests": {
+        "en": "Show the books rated 5 in my Books.base.",
+        "fr": "Affiche les livres notés 5 dans ma base Livres.base."
+      },
+      "query": "obsidian query base rows with filter",
+      "holdoutQueries": ["query base rows filter", "show base database view results", "obsidian bases filtered records"],
+      "expectedTools": ["bases_query"]
+    },
+    {
+      "id": "bases-view",
+      "requests": {
+        "en": "Add a table view sorted by due date to my Projects.base.",
+        "fr": "Ajoute une vue tableau triée par échéance à ma base Projets.base."
+      },
+      "query": "obsidian add a view to a base",
+      "holdoutQueries": ["add view to base", "create new base view table", "obsidian bases append view config"],
+      "expectedTools": ["bases_config_patch_plan"]
+    },
+    {
+      "id": "bases-formula",
+      "requests": {
+        "en": "Add a formula to Projects.base that computes the days left before the deadline.",
+        "fr": "Ajoute à Projets.base une formule qui calcule les jours restants avant l'échéance."
+      },
+      "query": "obsidian add formula to base",
+      "holdoutQueries": ["add formula to base", "computed property base column", "obsidian bases define formula"],
+      "expectedTools": ["bases_formula_patch_plan", "bases_config_patch_plan"]
+    },
+    {
+      "id": "bases-row",
+      "requests": {
+        "en": "In my Books.base, set the rating of Dune to 5.",
+        "fr": "Dans ma base Livres.base, mets la note de Dune à 5."
+      },
+      "query": "obsidian update a property of one row in a base",
+      "holdoutQueries": ["update base row property", "edit cell value base record", "change one property in base row"],
+      "expectedTools": ["bases_rows_patch_plan", "obsidian_frontmatter_patch_plan"],
+      "riskyTools": ["bases_upsert_rows"]
+    },
+    {
+      "id": "bases-create",
+      "requests": {
+        "en": "Create a new Base that lists all my notes tagged book.",
+        "fr": "Crée une nouvelle Base qui liste toutes mes notes taguées livre."
+      },
+      "query": "obsidian create new base",
+      "holdoutQueries": ["create new base", "make database base file", "obsidian bases new config"],
+      "expectedTools": ["bases_create_plan"]
+    },
+    {
+      "id": "task-done",
+      "requests": {
+        "en": "Mark my task \"Call the bank\" as done.",
+        "fr": "Marque ma tâche « Appeler la banque » comme terminée."
+      },
+      "query": "obsidian mark a task done",
+      "holdoutQueries": ["mark task done", "complete task checkbox", "obsidian close finish task"],
+      "expectedTools": ["operon_transition_task"]
+    },
+    {
+      "id": "task-create",
+      "requests": {
+        "en": "Add a task \"Renew passport\" due next Friday.",
+        "fr": "Ajoute une tâche « Renouveler le passeport » pour vendredi prochain."
+      },
+      "query": "obsidian create a task with due date",
+      "holdoutQueries": ["create task due date", "add new task with deadline", "obsidian make todo scheduled"],
+      "expectedTools": ["operon_create_task", "operon_create_periodic_task"]
+    },
+    {
+      "id": "task-list",
+      "requests": {
+        "en": "Which of my tasks are due this week?",
+        "fr": "Quelles sont mes tâches à échéance cette semaine ?"
+      },
+      "query": "obsidian list tasks due this week",
+      "holdoutQueries": ["list tasks due this week", "upcoming tasks by date range", "obsidian show todos deadline week"],
+      "expectedTools": ["operon_query_tasks", "operon_find_tasks", "operon_list_tasks"]
+    },
+    {
+      "id": "task-reschedule",
+      "requests": {
+        "en": "Change the due date of my task \"Renew passport\" to Monday.",
+        "fr": "Change l'échéance de ma tâche « Renouveler le passeport » à lundi."
+      },
+      "query": "obsidian change task due date",
+      "holdoutQueries": ["change task due date", "reschedule task new deadline", "obsidian postpone task date"],
+      "expectedTools": ["operon_update_task", "operon_update_periodic_scheduling"]
+    },
+    {
+      "id": "canvas-edit",
+      "requests": {
+        "en": "Add a card linked to the Ideas node in my Brainstorm.canvas.",
+        "fr": "Ajoute une carte reliée au nœud Idées dans mon Brainstorm.canvas."
+      },
+      "query": "obsidian add node to canvas",
+      "holdoutQueries": ["add card to canvas", "insert node into canvas", "obsidian canvas append note card"],
+      "expectedTools": ["obsidian_canvas_patch_plan"]
+    },
+    {
+      "id": "canvas-create",
+      "requests": {
+        "en": "Create a new canvas board for my project map.",
+        "fr": "Crée un nouveau canvas pour la carte de mon projet."
+      },
+      "query": "obsidian create new canvas",
+      "holdoutQueries": ["create new canvas", "make canvas file", "obsidian new blank canvas board"],
+      "expectedTools": ["obsidian_canvas_create_plan"]
+    },
+    {
+      "id": "asset-import",
+      "requests": {
+        "en": "Import this image into my vault so I can embed it in a note.",
+        "fr": "Importe cette image dans mon coffre pour que je puisse l'intégrer à une note."
+      },
+      "query": "obsidian import image attachment into vault",
+      "holdoutQueries": ["import image into vault", "add attachment file asset", "obsidian upload picture to vault"],
+      "expectedTools": ["asset_import_plan"]
+    },
+    {
+      "id": "runtime-health",
+      "requests": {
+        "en": "Is the connection to my Obsidian vault working?",
+        "fr": "Est-ce que la connexion à mon coffre Obsidian fonctionne ?"
+      },
+      "query": "obsidian connection health status",
+      "holdoutQueries": ["check vault connection health", "server status diagnostics", "obsidian connectivity ping runtime"],
+      "expectedTools": ["obsidian_runtime_status"]
+    }
+  ]
+}

@@ -45,7 +45,7 @@ function currentCommit() {
   }).trim();
 }
 
-function isolatedEnv(baseEnvironment, privateRoot, logsRoot, profile) {
+export function isolatedEnv(baseEnvironment, privateRoot, logsRoot, profile) {
   return {
     ...baseEnvironment,
     MCP_TOOL_PROFILE: profile,
@@ -118,7 +118,7 @@ async function listProfile(
   }
 }
 
-function operatingSystemEnvironment() {
+export function operatingSystemEnvironment() {
   const allowedNames = [
     "APPDATA",
     "COMSPEC",
@@ -141,7 +141,7 @@ function operatingSystemEnvironment() {
   );
 }
 
-async function authenticatedStatusServer() {
+export async function authenticatedStatusServer() {
   const server = createServer((request, response) => {
     response.setHeader("content-type", "application/json");
     if (request.method === "GET" && request.url === "/") {

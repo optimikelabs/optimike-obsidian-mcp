@@ -140,6 +140,48 @@ authorized judge may review only supplied cases, v1 traces and scorer output; it
 must return `pass`, `fail`, or `inconclusive` with evidence references. It must not
 infer unrecorded runtime facts or request hidden reasoning.
 
+## Tool discovery (deferred tool search)
+
+Some clients do not put MCP tool definitions in the model context. Claude Code
+gives the model the deferred tool names and a keyword `ToolSearch`; Codex 0.160
+runs in code mode, where the model filters `ALL_TOOLS` (name and description)
+in its own JavaScript. `tool-discovery-corpus.json` measures whether the right
+tool is found that way. Each of its 26 intents has an English and a French user
+request, one keyword `query` issued verbatim, and three `holdoutQueries` written
+by a separate agent from the intent text alone, without tool names,
+descriptions or search hints. An intent passes when an expected tool is in the
+top 3 search results; `riskyTools` must not outrank it.
+
+```text
+npm run build
+node scripts/run-tool-discovery-eval.mjs --client=claude-sim
+node scripts/run-tool-discovery-eval.mjs --client=claude --runs=2 --out=<dir outside the repo>
+node scripts/run-tool-discovery-eval.mjs --client=codex --runs=3 --out=<dir outside the repo>
+```
+
+- `claude-sim` is model-free. `scripts/tool-discovery-index.mjs` reproduces the
+  Claude Code 2.1.331 keyword ranking: per query word, a name part match scores
+  12 (6 if contained), the server or tool name 12 (4 if contained), a whole
+  word of `_meta["anthropic/searchHint"]` 4 and of the description 2; ties are
+  in name order. Stop words are not dropped. `claude` replays every real
+  keyword search through this reproduction and reports the agreements; a
+  disagreement means the client changed and the reproduction must follow.
+- `claude` and `codex` run the real CLI on its stored login against the built
+  server, an empty synthetic vault, a loopback Local REST status fixture,
+  `MCP_WRITE_MODE=readonly` and private state per run. Each run waits for the
+  fixture to connect; a run where it did not is reported apart
+  (`fixtureUnavailableRuns`), not as a miss. `--server=<dist/index.js>` measures
+  another build, such as a baseline worktree.
+- `codex` refuses to measure unless an isolation check proves, from the
+  session's own code-cell output, that `ALL_TOOLS` holds only Codex built-ins
+  and the fixture's tools (no ChatGPT app, plugin or user configuration). It
+  records the model's code cells, the fixture tools they printed and the tool
+  it names, then deletes its session record. Code mode has no ranking to score:
+  report its variability across runs, not a top-3 rate.
+- Neither client may execute a fixture tool; any such call is counted in
+  `otherToolCalls`. Run artifacts stay outside the repository and paid model
+  calls stay out of CI.
+
 ## Focused checks
 
 ```text

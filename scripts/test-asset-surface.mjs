@@ -10,6 +10,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),"optimike-asset-surface-"));
 Object.assign(process.env,{NODE_ENV:"test",OBSIDIAN_RUNTIME_MODE:"live",OBSIDIAN_API_KEY:"fixture-not-a-secret",OBSIDIAN_VAULT:root,MCP_LOG_DIR:path.join(root,"logs"),MCP_WRITE_MODE:"full"});
 const {config}=await import("../dist/config/index.js");
 const {registerAssetImportTools}=await import("../dist/mcp-server/tools/assetImportTools/registration.js");
+const {installToolSearchHints,TOOL_SEARCH_HINTS}=await import("../dist/mcp-server/toolSearchHints.js");
 const {AssetImportOperationAdapter}=await import("../dist/services/assets/assetImportOperation.js");
 const {ObsidianNoteReplaceJournal}=await import("../dist/services/operations/obsidianNoteReplaceJournal.js");
 const {ExternalRootsService}=await import("../dist/services/externalRootsService.js");
@@ -187,12 +188,15 @@ test("asset plan advertises ChatGPT file parameters without model-carried bytes"
  const runtime={status:async()=>({outcome:null})};
  const ingress=new AssetFileIngress(true,["files.example.test"],async()=>({bytes:Buffer.from("unused"),contentType:"image/png"}));
  try {
+  installToolSearchHints(server);
   await registerAssetImportTools(server,runtime,undefined,true,ingress);
   await server.connect(st);await client.connect(ct);
   const plan=(await client.listTools()).tools.find(t=>t.name==="asset_import_plan");
   assert.ok(plan);
   assert.equal(plan.annotations.openWorldHint,true);
   assert.deepEqual(plan._meta?.["openai/fileParams"],["file"]);
+  // The search hint is merged next to the tool's own _meta, not over it.
+  assert.equal(plan._meta?.["anthropic/searchHint"],TOOL_SEARCH_HINTS.asset_import_plan);
   assert.ok(plan.inputSchema.properties.file);
   assert.equal(plan.inputSchema.properties.file.properties.download_url.type,"string");
   assert.deepEqual(plan.inputSchema.properties.file.required.sort(),["download_url","file_id"]);
