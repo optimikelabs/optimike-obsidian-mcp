@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.23.1] - 2026-11-26
+
+No Bridge change: Atomic Write Bridge 0.10.0, Operon Bridge 0.9.9 and Bases Bridge 1.3.0 ship unchanged in the bundle of this release. See the [English](docs/releases/3.23.1.md) and [French](docs/releases/3.23.1.fr.md) release notes.
+
+### Fixed
+
+- `obsidian_list_pending_operations` publishes its `cursor` pattern as `^[A-Za-z0-9_-]+$` instead of `^[A-Za-z0-9_-]{1,2048}$`: Antigravity 1.5.12 could not compile the counted repetition and refused the whole toolbox. The server still enforces the alphabet and the 2048-character limit (#197).
+- `operon_update_task` opens its description with changing the due date or other fields of an existing task, and `operon_update_recurrence` with the rule of a repeating task, for clients that choose tools from names and descriptions; Codex CLI and Codex in T3 went from 0/4 to 4/4 on due-date requests. Only these two descriptions change (#198).
+- The tool discovery eval resolves exact tool names before discovery aliases (#196).
+
 ## [3.23.0] - 2026-11-25
 
 No Bridge change: Atomic Write Bridge 0.10.0, Operon Bridge 0.9.9 and Bases Bridge 1.3.0 ship unchanged in the bundle of this release, so upgrading from 3.22.0 needs no Bridge reinstall. The apply confirmation is off by default. See the [English](docs/releases/3.23.0.md) and [French](docs/releases/3.23.0.fr.md) release notes.
