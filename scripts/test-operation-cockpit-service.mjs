@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport, McpServer } from "@modelcontextprotocol/server";
+import { registerOperationCockpitTool } from "../dist/mcp-server/tools/operationCockpitTools/registration.js";
 import {
   OperationCockpit,
   OPERATION_COCKPIT_CONTRACT_VERSION,
@@ -113,6 +116,32 @@ assert.throws(
 );
 assert.throws(() => cockpit.list({ limit: 101 }), /limit must be/u);
 assert.ok(first.calls.length > 1 && second.calls.length > 1);
+
+const server = new McpServer({ name: "operation-cockpit-fixture", version: "1" });
+const client = new Client({ name: "operation-cockpit-test", version: "1" });
+const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+registerOperationCockpitTool(server, [first, second]);
+try {
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  const list = (args) => client.callTool({ name: "obsidian_list_pending_operations", arguments: args });
+  const firstPage = JSON.parse((await list({ limit: 1 })).content[0].text);
+  const decoded = Buffer.from(firstPage.nextCursor, "base64url").toString("utf8");
+  // JSON trailing space preserves the cursor payload while exercising the size boundary.
+  const atLimit = Buffer.from(decoded.padEnd(1536), "utf8").toString("base64url");
+  const overLimit = Buffer.from(decoded.padEnd(1537), "utf8").toString("base64url");
+  const nextPage = await list({ limit: 1, cursor: atLimit });
+  assert.equal(nextPage.isError, false);
+  assert.equal(JSON.parse(nextPage.content[0].text).operations[0].planRef, collected[1].planRef);
+  for (const invalid of [overLimit, `${atLimit.slice(0, -1)}+`, ""]) {
+    const refusal = await list({ cursor: invalid });
+    assert.equal(refusal.isError, true);
+    assert.match(refusal.content[0].text, /Input validation error/u);
+  }
+} finally {
+  await client.close();
+  await server.close();
+}
 
 console.log(
   "Operation cockpit service passed: global keyset pagination, closed next actions, bounded age, privacy and invalid-input rejection.",
