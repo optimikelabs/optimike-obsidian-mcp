@@ -140,6 +140,83 @@ authorized judge may review only supplied cases, v1 traces and scorer output; it
 must return `pass`, `fail`, or `inconclusive` with evidence references. It must not
 infer unrecorded runtime facts or request hidden reasoning.
 
+## Tool discovery (deferred tool search)
+
+Some clients do not put MCP tool definitions in the model context. Claude Code
+gives the model the deferred tool names and a keyword `ToolSearch`; Codex 0.160
+runs in code mode, where the model filters `ALL_TOOLS` (name and description)
+in its own JavaScript. `tool-discovery-corpus.json` measures whether the right
+tool is found that way. Each of its 26 intents has an English and a French user
+request, one keyword `query` issued verbatim, and three `holdoutQueries` written
+by a separate agent from the intent text alone, without tool names,
+descriptions or search hints. An intent passes when an expected tool is in the
+top 3 search results; `riskyTools` must not outrank it.
+
+```text
+npm run build
+node scripts/run-tool-discovery-eval.mjs --client=claude-sim
+node scripts/run-tool-discovery-eval.mjs --client=claude --runs=2 --out=<dir outside the repo>
+node scripts/run-tool-discovery-eval.mjs --client=codex --runs=3 --out=<dir outside the repo>
+```
+
+- `claude-sim` is model-free. `scripts/tool-discovery-index.mjs` reproduces the
+  Claude Code 2.1.331 keyword ranking: per query word, a name part match scores
+  12 (6 if contained), the server or tool name 12 (4 if contained), a whole
+  word of `_meta["anthropic/searchHint"]` 4 and of the description 2; ties are
+  in name order. Stop words are not dropped. `claude` replays every real
+  keyword search through this reproduction and reports the agreements; a
+  disagreement means the client changed and the reproduction must follow.
+- The harness captures the catalogue (`tools/list`, instructions, server info)
+  once from the built server, against an empty synthetic vault, a loopback Local
+  REST status fixture, `MCP_WRITE_MODE=readonly` and private state, then stops
+  it. `claude` and `codex` run the real CLI on its stored login against
+  `scripts/tool-discovery-replay-server.mjs`, which serves that exact catalogue
+  and refuses and logs every `tools/call` before dispatch; a model-free
+  preflight checks both before any paid run. `--server=<dist/index.js>`
+  measures another build, such as a baseline worktree; the report keeps the
+  harness and measured-build commits apart and refuses a `dist/` older than its
+  `src/`.
+- Runs that exit nonzero, miss their evidence (Claude `init`, Codex session
+  record) or never connect to the fixture are reported apart (`failedRuns`,
+  `fixtureUnavailableRuns`), not as misses. A keyword case counts only when the
+  model sent its query once and verbatim (`queryDeviations` otherwise).
+- `codex` refuses to measure unless an isolation check proves, from the
+  session's own code-cell output, that `ALL_TOOLS` holds only Codex built-ins
+  and the fixture's tools (no ChatGPT app, plugin or user configuration). It
+  records the model's code cells, the fixture tools they printed and the tool
+  it names, then deletes its session record. Code mode has no ranking to score:
+  report its variability across runs, not a top-3 rate.
+- `--decoys=<dir>` measures discovery next to competing servers. Each
+  `<server>.json` there (`{serverName, tools, instructions?}`, for example a
+  captured `tools/list` of another MCP server the user runs) is served by its
+  own replay server, which refuses and logs every call like the fixture; the
+  reproduction ranks all servers together, with ties in full
+  `mcp__<server>__<tool>` order. Decoy tools are reported by that full name.
+  The report adds `foreignFirst`, `foreignWriteFirst` (a decoy tool that
+  writes, by its annotations or else its name, ranks first),
+  `foreignWriteAboveExpected` (one ranks in the top 3 above the expected tool)
+  and, for real clients, `finalForeign` / `finalForeignWrite`. With decoys the
+  request prompt says the client is connected to several servers, one of them
+  the user's Obsidian vault; `--context=none` drops the vault from the prompt,
+  like a client without instructions about where the user's notes and tasks
+  live. A decoy without annotations is classed as writing by its name parts, a
+  presumption the report labels (`writeBasis`). Server names must be bare keys
+  (`A-Z a-z 0-9 _ -`) that stay distinct once a client namespaces them.
+  Catalogues and their `instructions` reach the measured model verbatim and
+  reports keep its raw reply: review and redact a capture before a paid run,
+  and keep captures and reports outside the repository.
+  The harness refuses `--decoys` with `--client=codex`: Codex code mode keeps
+  its own `exec_command`, its read-only sandbox still reads host files outside
+  the work directory, and decoy catalogues are untrusted text that reaches the
+  model verbatim. Claude Code runs get `ToolSearch` as their only built-in
+  tool. Competing-server numbers are Claude Code only.
+- No client can execute a server tool: the replay refuses the call. Every
+  attempt, in any run including failed ones, is counted: `refusedCalls` is the
+  number of calls the replay servers refused (from their logs), and
+  `otherToolCalls` the number of runs with any attempt, refused or seen in the
+  client's own record. Run artifacts stay outside the
+  repository and paid model calls stay out of CI.
+
 ## Focused checks
 
 ```text

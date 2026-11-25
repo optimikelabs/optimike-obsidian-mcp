@@ -179,6 +179,10 @@ uses [`tool-catalog.v1.json`](../evals/tool-catalog.v1.json).
   on the same model/configuration, and preserve exact SHA, corpus and surface
   hashes. Do not present synthetic traces as a real model run. Run artifacts stay
   outside the repository; do not add paid model calls to ordinary CI.
+- For a description or search-hint change aimed at clients with deferred tool
+  search, run the [discovery harness](../evals/README.md#tool-discovery-deferred-tool-search):
+  `--client=claude-sim` against a baseline build first, then the real clients.
+  Report its held-out queries separately from the cases you tuned on.
 
 ## Review contract
 

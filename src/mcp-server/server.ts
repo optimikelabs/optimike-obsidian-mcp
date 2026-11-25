@@ -2,6 +2,7 @@ import { registerAssetImportTools } from "./tools/assetImportTools/registration.
 import { configuredSkillRegistry, installSkillsExtension } from "./resources/skillsExtension.js";
 import { resolveToolProfile } from "./toolProfileRuntime.js";
 import { installLegacyToolCatalog } from "./legacyToolCatalog.js";
+import { installToolSearchHints } from "./toolSearchHints.js";
 /**
  * @fileoverview Main entry point for the MCP (Model Context Protocol) server.
  * This file orchestrates the server's lifecycle:
@@ -1880,6 +1881,7 @@ async function createMcpServerInstance(
     },
   );
   installLegacyToolCatalog(server.server);
+  installToolSearchHints(server);
   installMcpSdkToolErrorPrivacyBoundary(server);
   installMcpToolPublicErrorBoundary(server);
   installVaultInstructionsGate(server, vaultInstructions);
