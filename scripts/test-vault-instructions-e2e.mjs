@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { TOOL_SEARCH_INSTRUCTION } from "../dist/mcp-server/toolSearchHints.js";
 
 const tempRoot = mkdtempSync(path.join(tmpdir(), "optimike-vault-instructions-e2e-"));
 
@@ -109,6 +110,11 @@ try {
   const note = path.join(root, "Projects", "Note.md");
   const server = await start(root, "enforce");
   const instructions = server.client.getInstructions();
+  // The tool-search sentence comes first; the vault rules follow, intact.
+  assert.ok(
+    instructions?.startsWith(`${TOOL_SEARCH_INSTRUCTION}\n\nThis Obsidian vault defines rules for agents`),
+    "server instructions open with the search sentence, then announce the vault rules",
+  );
   assert.match(instructions ?? "", /AGENTS\.md/u, "server instructions announce the vault rules");
   assert.match(instructions, /vault_instructions_unread/u);
   assert.doesNotMatch(instructions, /Read me first/u);
@@ -145,10 +151,10 @@ try {
   assert.equal(second.result.isError, false);
   await server.close();
 
-  // off: unchanged behaviour, no instructions
+  // off: unchanged behaviour, only the tool-search sentence
   const offRoot = vault({ "AGENTS.md": RULES, "Projects/AGENTS.md": LOCAL, "Projects/Note.md": "start\n" });
   const off = await start(offRoot, "off");
-  assert.equal(off.client.getInstructions(), undefined);
+  assert.equal(off.client.getInstructions(), TOOL_SEARCH_INSTRUCTION);
   const offWrite = await off.append("\nfree");
   assert.equal(offWrite.result.isError, false);
   assert.equal(offWrite.json?.vaultInstructions, undefined);
@@ -157,7 +163,7 @@ try {
   // enforce on a vault without any AGENTS.md: unchanged behaviour
   const plainRoot = vault({ "Projects/Note.md": "start\n" });
   const plain = await start(plainRoot, "enforce");
-  assert.equal(plain.client.getInstructions(), undefined);
+  assert.equal(plain.client.getInstructions(), TOOL_SEARCH_INSTRUCTION);
   const plainWrite = await plain.append("\nfree");
   assert.equal(plainWrite.result.isError, false);
   assert.equal(plainWrite.json?.vaultInstructions, undefined);

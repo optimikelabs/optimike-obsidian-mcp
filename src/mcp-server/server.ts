@@ -2,7 +2,10 @@ import { registerAssetImportTools } from "./tools/assetImportTools/registration.
 import { configuredSkillRegistry, installSkillsExtension } from "./resources/skillsExtension.js";
 import { resolveToolProfile } from "./toolProfileRuntime.js";
 import { installLegacyToolCatalog } from "./legacyToolCatalog.js";
-import { installToolSearchHints } from "./toolSearchHints.js";
+import {
+  installToolSearchHints,
+  withToolSearchInstruction,
+} from "./toolSearchHints.js";
 /**
  * @fileoverview Main entry point for the MCP (Model Context Protocol) server.
  * This file orchestrates the server's lifecycle:
@@ -1868,7 +1871,9 @@ async function createMcpServerInstance(
     obsidianService,
     vaultCacheService,
   );
-  const instructions = await vaultInstructionsServerText(vaultInstructions);
+  const instructions = withToolSearchInstruction(
+    await vaultInstructionsServerText(vaultInstructions),
+  );
   const server = new McpServer(
     { name: config.mcpServerName, version: config.mcpServerVersion },
     {

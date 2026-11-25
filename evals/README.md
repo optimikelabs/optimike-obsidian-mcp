@@ -149,8 +149,11 @@ in its own JavaScript. `tool-discovery-corpus.json` measures whether the right
 tool is found that way. Each of its 26 intents has an English and a French user
 request, one keyword `query` issued verbatim, and three `holdoutQueries` written
 by a separate agent from the intent text alone, without tool names,
-descriptions or search hints. An intent passes when an expected tool is in the
-top 3 search results; `riskyTools` must not outrank it.
+descriptions or search hints. Six intents also carry `observedQueries`: keyword
+searches a real Claude Code session issued with other MCP servers connected,
+where another server's tool that writes ranked first; run them with `--decoys`
+to watch that risk. An intent passes when an expected tool is in the top 3
+search results; `riskyTools` must not outrank it.
 
 ```text
 npm run build

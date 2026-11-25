@@ -128,6 +128,17 @@ function loadDiscoveryCases(corpusPath = DEFAULT_CORPUS) {
       expected: intent.expectedTools,
       risky: intent.riskyTools ?? [],
     });
+    for (const [index, query] of (intent.observedQueries ?? []).entries()) {
+      cases.push({
+        id: `${intent.id}.observed-${index + 1}`,
+        intent: intent.id,
+        language: "observed",
+        request: query,
+        mode: "observed",
+        expected: intent.expectedTools,
+        risky: intent.riskyTools ?? [],
+      });
+    }
     for (const [index, query] of (intent.holdoutQueries ?? []).entries()) {
       cases.push({
         id: `${intent.id}.holdout-${index + 1}`,
@@ -665,7 +676,7 @@ function simulationAgrees(real, simulated, known) {
 
 function summarize(rows) {
   const byLanguage = {};
-  for (const language of ["query", "en", "fr", "holdout"]) {
+  for (const language of ["query", "observed", "en", "fr", "holdout"]) {
     const subset = rows.filter((row) => row.caseId.split(".")[1].startsWith(language));
     if (subset.length) byLanguage[language] = summarizeRows(subset);
   }

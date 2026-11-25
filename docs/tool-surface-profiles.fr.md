@@ -132,7 +132,17 @@ Mécanismes clients optionnels :
 - Claude Code : tool search / chargement MCP différé ; une sélection de points
   d’entrée (lectures de notes, de Bases et de canvas, outils gouvernés `*_plan`,
   outils de tâches Operon) porte un court `_meta["anthropic/searchHint"]` avec
-  les mots d’usage absents de leur nom, que les autres clients ignorent ;
+  les mots d’usage absents de leur nom, que les autres clients ignorent. Les
+  instructions du serveur commencent par une phrase qui demande au client de
+  mettre le mot `obsidian` dans ses recherches d’outils : à côté d’autres
+  serveurs dont les outils portent les mêmes verbes (`add_note`, `update_task`),
+  ce mot peut faire passer les outils de ce serveur devant les leurs. Il
+  correspond au nom configuré du serveur (y garder `obsidian`, comme dans le nom
+  documenté `optimike-obsidian-mcp-stdio`) et aux noms d’outils `obsidian_*` ;
+  sous un autre nom de serveur, `operon_*`, `bases_*` et `smart_semantic_search`
+  n’y correspondent plus par leur nom (au mieux par leur description, qui pèse
+  bien moins), et un serveur concurrent dont le nom contient
+  `obsidian` en profite aussi ;
 - Hermes Agent : filtres include/exclude ;
 - OpenClaw : `toolFilter.include` / `toolFilter.exclude`.
 

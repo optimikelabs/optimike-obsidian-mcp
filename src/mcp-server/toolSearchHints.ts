@@ -64,6 +64,27 @@ export const TOOL_SEARCH_HINTS: Readonly<Record<string, string>> = {
   operon_set_relationships: "task parent, subtasks, blocking dependencies",
 };
 
+/**
+ * Opening sentence of the server instructions, for clients that find tools by
+ * keyword search. Other servers a user connects can own the same verbs
+ * (`add_note`, `update_task`), and their name match outranks any hint here.
+ * The word obsidian is in this server's documented name and in most tool
+ * names, so a search that carries it can lift these tools above theirs; it
+ * does not guarantee first place.
+ */
+export const TOOL_SEARCH_INSTRUCTION =
+  "Tools for the user's Obsidian vault: notes, Operon tasks, Bases and canvases. " +
+  "When you search for one of these tools, include the word obsidian in the search query " +
+  '(for example "obsidian add note" or "obsidian mark task done"): ' +
+  "other connected servers may have tools with the same verbs.";
+
+/** Server instructions: the search sentence, then any other instructions. */
+export function withToolSearchInstruction(instructions?: string): string {
+  return instructions
+    ? `${TOOL_SEARCH_INSTRUCTION}\n\n${instructions}`
+    : TOOL_SEARCH_INSTRUCTION;
+}
+
 export function toolSearchHint(name: string): string | undefined {
   return Object.hasOwn(TOOL_SEARCH_HINTS, name)
     ? TOOL_SEARCH_HINTS[name]

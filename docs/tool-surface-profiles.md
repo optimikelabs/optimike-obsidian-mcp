@@ -140,7 +140,16 @@ Optional client mechanisms include:
 - Claude Code: tool search / deferred MCP loading; selected task entry points
   (note, Base and canvas reads and governed `*_plan` tools, Operon task tools)
   carry a short `_meta["anthropic/searchHint"]` with the user's words that
-  their name lacks, which other clients ignore;
+  their name lacks, which other clients ignore. The server instructions open
+  with one sentence asking the client to include the word `obsidian` in its
+  tool searches: next to other servers whose tools share the same verbs
+  (`add_note`, `update_task`), that word can lift this server's tools above
+  theirs. It matches through the configured server name (keep `obsidian` in it,
+  as in the documented `optimike-obsidian-mcp-stdio`) and through the
+  `obsidian_*` tool names; under another server name, `operon_*`, `bases_*`
+  and `smart_semantic_search` get no name match on it (at most a description
+  match, worth far less), and a competing server whose
+  own name contains `obsidian` gains from it too;
 - Hermes Agent: include/exclude filters;
 - OpenClaw: `toolFilter.include` / `toolFilter.exclude`.
 
