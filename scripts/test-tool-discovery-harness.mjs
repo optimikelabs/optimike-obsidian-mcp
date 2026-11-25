@@ -10,7 +10,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { codexIsolationVerdict } from "./run-tool-discovery-eval.mjs";
+import { codexIsolationVerdict, namedTool } from "./run-tool-discovery-eval.mjs";
 import { loadDecoys } from "./tool-discovery-decoys.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -59,6 +59,32 @@ try {
     assert.equal(decoys.finalScore({}, decoys.aliases.get("foo__send")).finalForeignWrite, true);
     assert.equal(decoys.aliases.get("mcp__foo__foo__send"), "mcp__foo__foo__send");
     assert.equal(decoys.finalScore({}, "mcp__foo__foo__send").finalForeignWrite, false);
+    checks++;
+  }
+
+  // A decoy's bare name must not turn an exact fixture reply into a write.
+  {
+    const fixtureName = `mcp__${FIXTURE}__obsidian_read_note`;
+    const { decoys } = load(
+      decoyDir("fixture-reply", {
+        "foreign.json": {
+          serverName: "foreign",
+          tools: [
+            { name: fixtureName, annotations: { readOnlyHint: false } },
+            { name: "query", annotations: { readOnlyHint: true } },
+          ],
+        },
+      }),
+    );
+    const known = new Set(["obsidian_read_note", ...decoys.toolNames]);
+    const resolve = (reply) => namedTool(reply, known, decoys.aliases, decoys.wholeReplyAliases);
+    const fixtureReply = resolve(`\`${fixtureName}\``);
+    assert.equal(fixtureReply, "obsidian_read_note");
+    assert.equal(decoys.finalScore({}, fixtureReply).finalForeignWrite, false);
+    const decoyName = `mcp__foreign__${fixtureName}`;
+    assert.equal(resolve(decoyName), decoyName);
+    assert.equal(decoys.finalScore({}, resolve(decoyName)).finalForeignWrite, true);
+    assert.equal(resolve("query"), "mcp__foreign__query", "an unambiguous bare reply still resolves");
     checks++;
   }
 
