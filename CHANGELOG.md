@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.23.0] - 2026-11-25
+
+No Bridge change: Atomic Write Bridge 0.10.0, Operon Bridge 0.9.9 and Bases Bridge 1.3.0 ship unchanged in the bundle of this release, so upgrading from 3.22.0 needs no Bridge reinstall. The apply confirmation is off by default. See the [English](docs/releases/3.23.0.md) and [French](docs/releases/3.23.0.fr.md) release notes.
+
+### Added
+
+- Search hints for clients that load tools by search (#190, #191): 32 task entry points (note, Base and canvas reads, governed `*_plan` tools, Operon task tools) carry a short `_meta["anthropic/searchHint"]` with the user's words their name lacks, merged next to any existing `_meta`. Hints go on plans, never on apply, status or recover steps. Tool names, descriptions, input schemas, annotations, profiles and capability claims are unchanged; clients that do not know the key ignore it. See [Tool Surface Profiles](docs/tool-surface-profiles.md).
+- The MCP server instructions always open with one sentence asking the client to include the word `obsidian` in its tool searches, because other connected servers may have tools with the same verbs (#192, #194). The vault-instructions paragraph follows unchanged under the same conditions; a client that got no instructions before (mode `off`, or no root instruction file) now gets this sentence alone. See [Server instructions](docs/vault-instructions.md#server-instructions).
+- Opt-in apply confirmation for `obsidian_text_patch_apply` (#188, #189), off by default. With `MCP_PROTOCOL_MODE=dual` and `MCP_APPLY_CONFIRMATION=elicit`, the apply asks the client a yes/no question through form elicitation before any journal transition or Atomic Write call, if the client declares it; the question names the target, operation kinds, changed frontmatter keys and the `planRef`, never the sealed text. Accept applies the exact sealed plan under the usual CAS and the receipt adds `confirmation: "elicited"`. Decline, cancel, an invalid or expired answer, a client or relay error, or a note changed since planning are closed refusals (`apply_confirmation_declined`, `apply_confirmation_cancelled`, `apply_confirmation_invalid`, `apply_confirmation_unavailable`, `apply_confirmation_target_changed`) with `mutationMayHaveApplied: false`; the plan stays `planned`. An unknown `MCP_APPLY_CONFIRMATION` value fails startup; legacy mode never reads it. The stdio proxy relays the question on both protocol generations; behind the proxy both processes need the setting. In dual mode, `capabilityManifest.applyConfirmation` reports `{mode, tools}`. See [Optional apply confirmation](docs/governed-text-patch-p4.md#optional-apply-confirmation-elicitation) and [Security](SECURITY.md#apply-confirmation-boundary).
+- Tool discovery eval (#191): `evals/tool-discovery-corpus.json` and `scripts/run-tool-discovery-eval.mjs` reproduce the Claude Code tool-search ranking without a model and run real Claude Code and isolated Codex sessions against a catalogue-only replay server that refuses every tool call, optionally next to other servers' captured catalogues. See [tool-routing evals](evals/README.md).
+
+### Changed
+
+- The LICENSE header lists the current copyright holder first (#186). CI skips the runtime suites for LICENSE- or NOTICE-only changes; the required `runtime` checks still start and report (#187).
+
 ## [3.22.0] - 2026-11-20
 
 Bases Bridge 1.3.0 and Atomic Write Bridge 0.10.0 ship in the bundle of this release; Operon Bridge 0.9.9 is unchanged. Install the MCP and the Bridge bundle together, Obsidian closed; with older Bridges the new checks answer `unverified` or skip the vault check. See the [English](docs/releases/3.22.0.md) and [French](docs/releases/3.22.0.fr.md) release notes.

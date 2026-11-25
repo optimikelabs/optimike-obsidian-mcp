@@ -215,7 +215,7 @@ Les commandes complètes, états d’échec et gates de release vivent dans
 [Bundle des Bridges, mise à niveau et rollback](docs/bridge-packaging.fr.md).
 
 Mettre à niveau ensemble le MCP et le bundle des Bridges de la même release. Le
-MCP 3.22.x livre Atomic Write Bridge 0.10.0, Operon Bridge 0.9.9 et Bases Bridge
+MCP 3.23.x livre Atomic Write Bridge 0.10.0, Operon Bridge 0.9.9 et Bases Bridge
 1.3.0. Avant de basculer ou de restaurer la paire, vider les opérations en
 attente et les fences de préparation des dates
 ([Clore les opérations incertaines](#clore-les-opérations-incertaines)).

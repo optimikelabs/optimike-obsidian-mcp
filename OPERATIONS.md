@@ -211,7 +211,7 @@ the install receipt; rollback refuses any managed file changed after install.
 The full commands, failure states and release gate are in
 [Bridge Bundle, Upgrade and Rollback](docs/bridge-packaging.md).
 
-Upgrade the MCP and the Bridge bundle of the same release together. MCP 3.22.x
+Upgrade the MCP and the Bridge bundle of the same release together. MCP 3.23.x
 ships Atomic Write Bridge 0.10.0, Operon Bridge 0.9.9 and Bases Bridge 1.3.0.
 Before switching or rolling back the pair, drain pending operations and date
 preparation fences ([Closing uncertain operations](#closing-uncertain-operations)).
