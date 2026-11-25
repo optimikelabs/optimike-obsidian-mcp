@@ -402,6 +402,30 @@ try {
     assert.deepEqual({ cas, content }, beforeProxy);
     await offProxy.close();
 
+    // Catches: a stateless (here wrapped, so SDK-dropped) answer being
+    // forwarded by an enabled proxy as an empty, fresh-looking apply.
+    let askedWrapped = 0;
+    const onProxy = await connectProxy({
+      modern: true,
+      elicit: true,
+      onElicit: async () => {
+        askedWrapped += 1;
+        return { action: "decline" };
+      },
+    });
+    const wrapped = await onProxy.callTool({
+      name: "obsidian_text_patch_apply",
+      arguments: proxyRound,
+      inputResponses: {
+        apply_confirmation: { method: "elicitation/create", result: { action: "decline" } },
+      },
+    });
+    assert.equal(wrapped.isError, true);
+    assert.equal(parse(wrapped).error.details.reasonCode, "apply_confirmation_invalid");
+    assert.equal(askedWrapped, 0, "refused before reaching the backend");
+    assert.deepEqual({ cas, content }, beforeProxy);
+    await onProxy.close();
+
     // Catches: the public manifest disagreeing with what the backend does.
     const status = parse(
       (await call("obsidian_runtime_status", {})).payload.result,

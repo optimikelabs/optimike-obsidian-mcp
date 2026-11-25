@@ -293,6 +293,10 @@ export function applyConfirmationRelay(
   if (!capable) return answering ? { kind: "refuse" } : { kind: "forward" };
   const responses = ctx.mcpReq.inputResponses;
   const echoed = ctx.mcpReq.requestState();
+  // Without its state an answer cannot be bound to a plan, and the SDK may
+  // have dropped malformed entries: forwarding the rest could reach a
+  // backend as a fresh apply.
+  if (answering && typeof echoed !== "string") return { kind: "refuse" };
   return {
     kind: "relay",
     upstreamModern: isModernRequest(ctx),
