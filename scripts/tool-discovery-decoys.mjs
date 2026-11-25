@@ -52,11 +52,21 @@ export function decoyToolWrites(tool) {
   );
 }
 
-export function loadDecoys(directory, { fixtureServer, fixtureTools, replay }) {
+export function loadDecoys(
+  directory,
+  { fixtureServer, fixtureTools, replay, reservedClientNames = [] },
+) {
   const fixtureNames = new Set(fixtureTools.map((tool) => tool.name));
   // Validate every name before anything is written: the server name becomes a
   // private directory, a client config key and a Codex namespace.
   const clientNames = new Map([[codexServerName(fixtureServer), fixtureServer]]);
+  // One client name per tool: no clash with another decoy tool, a fixture tool
+  // or a client built-in (`web__run`), or the isolation check could count one
+  // tool as proof of another.
+  const takenToolNames = new Set([
+    ...reservedClientNames,
+    ...fixtureTools.map((tool) => `${codexServerName(fixtureServer)}__${tool.name}`),
+  ]);
   const catalogs = readdirSync(directory)
     .filter((file) => file.endsWith(".json"))
     .sort()
@@ -78,8 +88,12 @@ export function loadDecoys(directory, { fixtureServer, fixtureTools, replay }) {
       if (toolNames.some((name) => typeof name !== "string" || name === "")) {
         throw new Error(`Decoy ${file}: every tool needs a name.`);
       }
-      if (new Set(toolNames).size !== toolNames.length) {
-        throw new Error(`Decoy ${file}: duplicate tool names.`);
+      for (const name of toolNames) {
+        const clientName = `${codexServerName(server)}__${name}`;
+        if (takenToolNames.has(clientName)) {
+          throw new Error(`Decoy ${file}: tool ${name} collides with another client tool name (${clientName}).`);
+        }
+        takenToolNames.add(clientName);
       }
       return { file, server, catalog };
     });
@@ -107,6 +121,7 @@ export function loadDecoys(directory, { fixtureServer, fixtureTools, replay }) {
       const codex = `${codexServerName(server)}__${tool.name}`;
       writes.set(full, decoyToolWrites(tool));
       codexNames.add(codex);
+      aliases.set(full, full);
       aliases.set(codex, full);
       aliases.set(`mcp__${codex}`, full);
       // A bare one-word name (`read`, `query`) is an ordinary word inside a
@@ -139,7 +154,7 @@ export function loadDecoys(directory, { fixtureServer, fixtureTools, replay }) {
       ...decoySurface,
     ],
     launchesFor: (slot) => servers.map(({ server, fixture }) => ({ server, launch: fixture.launchFor(slot) })),
-    refusedCalls: (slot) =>
+    refusedCallsFor: (slot) =>
       servers.flatMap(({ server, fixture }) =>
         fixture.refusedCalls(slot).map((name) => `mcp__${server}__${name}`),
       ),

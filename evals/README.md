@@ -206,8 +206,10 @@ node scripts/run-tool-discovery-eval.mjs --client=codex --runs=3 --out=<dir outs
   reports keep its raw reply: review and redact a capture before a paid run,
   and keep captures and reports outside the repository.
 - No client can execute a server tool: the replay refuses the call. Every
-  attempt, in any run including failed ones, is counted: `toolCallAttempts`
-  calls in `otherToolCalls` runs. Run artifacts stay outside the
+  attempt, in any run including failed ones, is counted: `refusedCalls` is the
+  number of calls the replay servers refused (from their logs), and
+  `otherToolCalls` the number of runs with any attempt, refused or seen in the
+  client's own record. Run artifacts stay outside the
   repository and paid model calls stay out of CI.
 
 ## Focused checks

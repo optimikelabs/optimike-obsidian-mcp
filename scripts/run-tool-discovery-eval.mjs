@@ -516,7 +516,9 @@ async function runClaudeCase(testCase, launch, configPath, options) {
     }
     if (event.type === "system" && event.subtype === "init") {
       model = event.model;
-      mcpStatus = event.mcp_servers?.find((server) => server.name === SERVER_NAME)?.status;
+      // A fixture absent from init was never connected.
+      mcpStatus =
+        event.mcp_servers?.find((server) => server.name === SERVER_NAME)?.status ?? "absent";
       // A decoy missing from init counts as down: the run would not measure
       // the competition it claims to measure.
       const decoysDown = (options.decoyLaunches ?? [])
@@ -701,7 +703,7 @@ function summarizeRows(allRows) {
       : {}),
     // Over every run, failed or deviated ones included: no attempt is dropped.
     otherToolCalls: allRows.filter((row) => row.otherCalls?.length).length,
-    toolCallAttempts: allRows.reduce((total, row) => total + (row.otherCalls?.length ?? 0), 0),
+    refusedCalls: allRows.reduce((total, row) => total + (row.refusedCalls?.length ?? 0), 0),
     failedRuns: allRows.filter((row) => row.error).length,
     fixtureUnavailableRuns: unavailable.length,
     queryDeviations: deviated.length,
@@ -738,6 +740,7 @@ async function main() {
       ? loadDecoys(options.decoys, {
           fixtureServer: SERVER_NAME,
           fixtureTools: tools,
+          reservedClientNames: [...CODEX_BUILTIN_TOOLS],
           replay: (catalog, server) =>
             replayFixture(catalog, path.join(privateRoot, "decoys", server)),
         })
@@ -749,7 +752,9 @@ async function main() {
         (item) => item.name,
       );
     const decoyLaunches = (slot) => decoys?.launchesFor(slot) ?? [];
-    const decoyRefusals = (slot) => decoys?.refusedCalls(slot) ?? [];
+    // Calls the replay servers refused, read from their logs: the ground truth
+    // that nothing ran. otherCalls also holds attempts seen in the client record.
+    const refusedFor = (slot) => [...fixture.refusedCalls(slot), ...(decoys?.refusedCallsFor(slot) ?? [])];
     const withFinal = (testCase, finalAnswer) =>
       decoys ? decoys.finalScore(testCase, finalAnswer) : {};
     for (const testCase of cases) {
@@ -825,7 +830,10 @@ async function main() {
               },
               fixtureKnown,
             );
-            run.otherCalls.push(...fixture.refusedCalls(slot), ...decoyRefusals(slot));
+            run.refusedCalls = refusedFor(slot);
+            for (const name of run.refusedCalls) {
+              if (!run.otherCalls.includes(name)) run.otherCalls.push(name);
+            }
             const failure =
               run.exitCode !== 0
                 ? `codex exited with ${run.exitCode}`
@@ -876,7 +884,10 @@ async function main() {
               decoyAliases: decoys?.aliases,
               decoyWholeReplyAliases: decoys?.wholeReplyAliases,
             });
-            run.otherCalls.push(...fixture.refusedCalls(slot), ...decoyRefusals(slot));
+            run.refusedCalls = refusedFor(slot);
+            for (const name of run.refusedCalls) {
+              if (!run.otherCalls.includes(name)) run.otherCalls.push(name);
+            }
             const failure =
               run.exitCode !== 0
                 ? `claude exited with ${run.exitCode}`
