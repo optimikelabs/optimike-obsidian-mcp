@@ -64,6 +64,7 @@ function parseArgs(argv) {
     reasoning: undefined,
     server: DEFAULT_SERVER,
     decoys: undefined,
+    context: "vault",
   };
   for (const raw of argv) {
     const [key, value] = raw.replace(/^--/u, "").split(/=(.*)/su);
@@ -78,10 +79,14 @@ function parseArgs(argv) {
     else if (key === "reasoning") args.reasoning = value;
     else if (key === "server") args.server = path.resolve(value);
     else if (key === "decoys") args.decoys = path.resolve(value);
+    else if (key === "context") args.context = value;
     else throw new Error(`Unknown argument ${raw}`);
   }
   if (!["claude-sim", "claude", "codex"].includes(args.client)) {
     throw new Error("--client must be claude-sim, claude or codex.");
+  }
+  if (!["vault", "none"].includes(args.context)) {
+    throw new Error("--context must be vault or none.");
   }
   if (!Number.isInteger(args.runs) || args.runs < 1 || args.runs > 5) {
     throw new Error("--runs must be an integer from 1 to 5.");
@@ -383,13 +388,16 @@ function runProcess(command, args, { cwd, input, env, timeoutMs = 240_000 }) {
 
 // With competing servers the prompt no longer says that the only server is the
 // vault: the client must tell the vault apart from the other servers.
-function connectionSentence(competing) {
+// --context=none drops the vault from the prompt, like a client without
+// instructions about where the user's notes and tasks live.
+function connectionSentence(competing, context = "vault") {
+  if (context === "none") return "You are connected to several MCP servers.";
   return competing
     ? "You are connected to several MCP servers; one of them gives access to the user's Obsidian vault."
     : "You are connected to a user's Obsidian vault through an MCP server.";
 }
 
-function discoveryPrompt(testCase, competing = false) {
+function discoveryPrompt(testCase, competing = false, context = "vault") {
   if (testCase.mode !== "request") {
     return [
       "Call your tool search tool exactly once, with exactly this query string and nothing added:",
@@ -401,7 +409,7 @@ function discoveryPrompt(testCase, competing = false) {
   }
   const request = testCase.request;
   return [
-    connectionSentence(competing),
+    connectionSentence(competing, context),
     "The user asks:",
     "",
     `> ${request}`,
@@ -489,7 +497,7 @@ async function runClaudeCase(testCase, launch, configPath, options) {
   const started = Date.now();
   const result = await runProcess(claudeCommand(), args, {
     cwd: path.dirname(configPath),
-    input: discoveryPrompt(testCase, Boolean(options.decoyLaunches?.length)),
+    input: discoveryPrompt(testCase, Boolean(options.decoyLaunches?.length), options.context),
     env,
   });
   const searches = [];
@@ -751,6 +759,7 @@ async function main() {
         ? { claudeCodeSearchReproduction: CLAUDE_CODE_SEARCH_VERSION }
         : {}),
       reasoning: options.reasoning ?? "client-default",
+      promptContext: options.context,
       ...(decoys ? { decoys: decoys.summary } : {}),
       startedAt: new Date().toISOString(),
     };
@@ -1184,9 +1193,9 @@ async function assertCodexIsolation(launch, workDir, options, fixtureTools) {
   return evidence;
 }
 
-function codexPrompt(testCase, competing = false) {
+function codexPrompt(testCase, competing = false, context = "vault") {
   return [
-    connectionSentence(competing),
+    connectionSentence(competing, context),
     "The user asks:",
     "",
     `> ${testCase.request}`,
@@ -1229,7 +1238,12 @@ function codexCellToolCalls(cells) {
 
 async function runCodexCase(testCase, launch, workDir, options, fixtureTools) {
   const competing = Boolean(options.decoyLaunches?.length);
-  const run = await runCodex(codexPrompt(testCase, competing), launch, workDir, options);
+  const run = await runCodex(
+    codexPrompt(testCase, competing, options.context),
+    launch,
+    workDir,
+    options,
+  );
   return {
     exitCode: run.exitCode,
     model: options.model ?? "codex-default",

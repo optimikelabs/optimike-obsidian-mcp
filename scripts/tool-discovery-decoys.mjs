@@ -74,7 +74,9 @@ export function loadDecoys(directory, { fixtureServer, fixtureTools, replay }) {
       codexNames.add(codex);
       aliases.set(codex, full);
       aliases.set(`mcp__${codex}`, full);
-      if (!fixtureNames.has(tool.name) && bareCount.get(tool.name) === 1) aliases.set(tool.name, full);
+      // A bare one-word name (`read`, `query`) is an ordinary word in a reply.
+      const distinctive = tool.name.includes("_") && bareCount.get(tool.name) === 1;
+      if (distinctive && !fixtureNames.has(tool.name)) aliases.set(tool.name, full);
       decoySurface.push({ ...tool, name: full, server, bareName: tool.name });
     }
   }
