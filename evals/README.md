@@ -197,8 +197,9 @@ node scripts/run-tool-discovery-eval.mjs --client=codex --runs=3 --out=<dir outs
   `foreignWriteAboveExpected` (one ranks in the top 3 above the expected tool)
   and, for real clients, `finalForeign` / `finalForeignWrite`. With decoys the
   request prompt says the client is connected to several servers, one of them
-  the user's Obsidian vault. Keep captured third-party catalogues outside the
-  repository.
+  the user's Obsidian vault; `--context=none` drops the vault from the prompt,
+  like a client without instructions about where the user's notes and tasks
+  live. Keep captured third-party catalogues outside the repository.
 - No client can execute a server tool: the replay refuses the call, and any
   attempt is counted in `otherToolCalls`. Run artifacts stay outside the
   repository and paid model calls stay out of CI.
