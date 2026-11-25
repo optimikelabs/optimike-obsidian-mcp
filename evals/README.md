@@ -166,21 +166,29 @@ node scripts/run-tool-discovery-eval.mjs --client=codex --runs=3 --out=<dir outs
   in name order. Stop words are not dropped. `claude` replays every real
   keyword search through this reproduction and reports the agreements; a
   disagreement means the client changed and the reproduction must follow.
-- `claude` and `codex` run the real CLI on its stored login against the built
-  server, an empty synthetic vault, a loopback Local REST status fixture,
-  `MCP_WRITE_MODE=readonly` and private state per run. Each run waits for the
-  fixture to connect; a run where it did not is reported apart
-  (`fixtureUnavailableRuns`), not as a miss. `--server=<dist/index.js>` measures
-  another build, such as a baseline worktree.
+- The harness captures the catalogue (`tools/list`, instructions, server info)
+  once from the built server, against an empty synthetic vault, a loopback Local
+  REST status fixture, `MCP_WRITE_MODE=readonly` and private state, then stops
+  it. `claude` and `codex` run the real CLI on its stored login against
+  `scripts/tool-discovery-replay-server.mjs`, which serves that exact catalogue
+  and refuses and logs every `tools/call` before dispatch; a model-free
+  preflight checks both before any paid run. `--server=<dist/index.js>`
+  measures another build, such as a baseline worktree; the report keeps the
+  harness and measured-build commits apart and refuses a `dist/` older than its
+  `src/`.
+- Runs that exit nonzero, miss their evidence (Claude `init`, Codex session
+  record) or never connect to the fixture are reported apart (`failedRuns`,
+  `fixtureUnavailableRuns`), not as misses. A keyword case counts only when the
+  model sent its query once and verbatim (`queryDeviations` otherwise).
 - `codex` refuses to measure unless an isolation check proves, from the
   session's own code-cell output, that `ALL_TOOLS` holds only Codex built-ins
   and the fixture's tools (no ChatGPT app, plugin or user configuration). It
   records the model's code cells, the fixture tools they printed and the tool
   it names, then deletes its session record. Code mode has no ranking to score:
   report its variability across runs, not a top-3 rate.
-- Neither client may execute a fixture tool; any such call is counted in
-  `otherToolCalls`. Run artifacts stay outside the repository and paid model
-  calls stay out of CI.
+- No client can execute a server tool: the replay refuses the call, and any
+  attempt is counted in `otherToolCalls`. Run artifacts stay outside the
+  repository and paid model calls stay out of CI.
 
 ## Focused checks
 

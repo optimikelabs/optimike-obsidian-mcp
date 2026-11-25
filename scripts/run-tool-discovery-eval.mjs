@@ -23,6 +23,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
@@ -42,6 +43,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const SERVER_NAME = "optimike-obsidian-mcp-stdio";
 const DEFAULT_CORPUS = path.join(repoRoot, "evals", "tool-discovery-corpus.json");
 const DEFAULT_SERVER = path.join(repoRoot, "dist", "index.js");
+const REPLAY_SERVER = path.join(repoRoot, "scripts", "tool-discovery-replay-server.mjs");
 
 function parseArgs(argv) {
   const args = {
@@ -123,9 +125,12 @@ function loadDiscoveryCases(corpusPath = DEFAULT_CORPUS) {
   };
 }
 
-/** Starts the fixture and returns the server launch spec plus a disposer. */
-async function startServerFixture(profile, serverEntry = DEFAULT_SERVER) {
-  const privateRoot = mkdtempSync(path.join(os.tmpdir(), "optimike-discovery-"));
+/**
+ * Captures the real server's catalogue (tools/list, instructions, server info)
+ * once, against an empty synthetic vault, a loopback Local REST status fixture
+ * and private state, then stops it. Measured clients never reach this server.
+ */
+async function captureCatalog(profile, serverEntry, privateRoot) {
   // The runtime only accepts a logs directory inside its own checkout (ignored).
   const logsParent = path.resolve(path.dirname(serverEntry), "..", "logs", "discovery-eval");
   mkdirSync(logsParent, { recursive: true });
@@ -155,13 +160,10 @@ async function startServerFixture(profile, serverEntry = DEFAULT_SERVER) {
     }),
     "utf8",
   );
+  const state = path.join(privateRoot, "state");
   const statusServer = await authenticatedStatusServer();
-  // Each server process gets its own cache, journals and logs: concurrent
-  // clients must not share runtime state.
-  const launchFor = (slot) => ({
-    command: process.execPath,
-    args: [serverEntry, "--tool-profile", profile],
-    env: isolatedEnv(
+  const env = {
+    ...isolatedEnv(
       {
         ...operatingSystemEnvironment(),
         OBSIDIAN_RUNTIME_MODE: "live",
@@ -176,37 +178,120 @@ async function startServerFixture(profile, serverEntry = DEFAULT_SERVER) {
         MCP_ASSET_FOLDER: "Assets",
         MCP_EXTERNAL_ROOTS_FILE: rootsFile,
       },
-      path.join(privateRoot, "state", String(slot)),
-      path.join(logsRoot, String(slot)),
+      state,
+      logsRoot,
       profile,
     ),
-  });
-  return {
-    privateRoot,
-    launch: launchFor("list"),
-    launchFor,
-    async dispose() {
-      await statusServer.close();
-      rmSync(privateRoot, { recursive: true, force: true });
-      rmSync(logsRoot, { recursive: true, force: true });
-    },
+    LOCALAPPDATA: path.join(state, "local-app-data"),
+    XDG_STATE_HOME: path.join(state, "xdg-state"),
   };
-}
-
-async function listTools(launch) {
+  // cwd is private: the runtime loads a .env from its working directory.
   const transport = new StdioClientTransport({
-    command: launch.command,
-    args: launch.args,
-    cwd: repoRoot,
-    env: launch.env,
+    command: process.execPath,
+    args: [serverEntry, "--tool-profile", profile],
+    cwd: privateRoot,
+    env,
   });
   const client = new Client({ name: "optimike-discovery-eval", version: "1" });
   try {
     await client.connect(transport);
-    return (await client.listTools()).tools;
+    return {
+      serverInfo: client.getServerVersion(),
+      instructions: client.getInstructions(),
+      tools: (await client.listTools()).tools,
+    };
+  } finally {
+    await client.close().catch(() => undefined);
+    await statusServer.close();
+    rmSync(logsRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Measured clients connect to the catalogue-only replay server: it serves the
+ * captured surface and refuses and logs every tools/call before dispatch.
+ */
+function replayFixture(catalog, privateRoot) {
+  const catalogPath = path.join(privateRoot, "catalog.json");
+  const callsDir = path.join(privateRoot, "calls");
+  mkdirSync(callsDir, { recursive: true });
+  writeFileSync(catalogPath, JSON.stringify(catalog), "utf8");
+  const callsPath = (slot) => path.join(callsDir, `${slot}.jsonl`);
+  return {
+    launchFor: (slot) => ({
+      command: process.execPath,
+      args: [REPLAY_SERVER, catalogPath, callsPath(slot)],
+      env: operatingSystemEnvironment(),
+    }),
+    refusedCalls: (slot) => {
+      let text = "";
+      try {
+        text = readFileSync(callsPath(slot), "utf8");
+      } catch {
+        return [];
+      }
+      return text
+        .split(/\r?\n/u)
+        .filter(Boolean)
+        .map((line) => JSON.parse(line).name);
+    },
+  };
+}
+
+/** Model-free preflight: the replay serves the exact surface and refuses calls. */
+async function verifyReplay(fixture, expectedSha256) {
+  const launch = fixture.launchFor("preflight");
+  const client = new Client({ name: "optimike-discovery-preflight", version: "1" });
+  try {
+    await client.connect(new StdioClientTransport({ ...launch, cwd: os.tmpdir() }));
+    const tools = (await client.listTools()).tools;
+    const served = measureToolsList(tools).toolsListSha256;
+    const probe = tools[0].name;
+    const result = await client.callTool({ name: probe, arguments: {} });
+    const refused = result.isError === true && fixture.refusedCalls("preflight").includes(probe);
+    if (served !== expectedSha256 || !refused) {
+      throw new Error(
+        `Replay preflight failed: surface ${served === expectedSha256 ? "matches" : "differs"}, call ${refused ? "refused" : "not refused"}.`,
+      );
+    }
+    return { servedToolsListSha256: served, callRefused: true };
   } finally {
     await client.close().catch(() => undefined);
   }
+}
+
+/** Identity of the measured build, separate from the harness checkout. */
+function serverIdentity(serverEntry) {
+  const root = path.resolve(path.dirname(serverEntry), "..");
+  const newest = (directory) => {
+    let latest = 0;
+    const stack = [directory];
+    while (stack.length) {
+      const current = stack.pop();
+      let entries;
+      try {
+        entries = readdirSync(current, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        const full = path.join(current, entry.name);
+        if (entry.isDirectory()) stack.push(full);
+        else latest = Math.max(latest, statSync(full).mtimeMs);
+      }
+    }
+    return latest;
+  };
+  if (newest(path.join(root, "src")) > newest(path.dirname(serverEntry))) {
+    throw new Error(`${serverEntry} is older than its src/: run npm run build first.`);
+  }
+  const git = (args) =>
+    execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
+  return {
+    entry: path.relative(repoRoot, serverEntry).replaceAll(path.sep, "/"),
+    commit: git(["rev-parse", "HEAD"]),
+    dirtyWorktree: git(["status", "--porcelain"]) !== "",
+  };
 }
 
 function toolsListCharacters(tools) {
@@ -273,10 +358,16 @@ function runProcess(command, args, { cwd, input, env, timeoutMs = 240_000 }) {
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
     });
+    // A spawn error ends the run as a failure (code -1), like a nonzero exit.
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      resolve({ code: -1, stdout, stderr: `${stderr}${error.message}` });
+    });
     child.on("close", (code) => {
       clearTimeout(timer);
       resolve({ code, stdout, stderr });
     });
+    child.stdin.on("error", () => undefined);
     child.stdin.end(input ?? "");
   });
 }
@@ -517,7 +608,10 @@ function summarizeRows(allRows) {
   const unavailable = allRows.filter(
     (row) => row.mcpStatus !== undefined && row.mcpStatus !== "connected",
   );
-  const rows = allRows.filter((row) => !unavailable.includes(row) && !row.error);
+  const deviated = allRows.filter((row) => row.queryDeviated);
+  const rows = allRows.filter(
+    (row) => !unavailable.includes(row) && !row.error && !row.queryDeviated,
+  );
   const total = rows.length;
   const count = (key) => rows.filter((row) => row.score?.[key]).length;
   const checked = rows.flatMap((row) =>
@@ -544,6 +638,7 @@ function summarizeRows(allRows) {
     otherToolCalls: rows.filter((row) => row.otherCalls?.length).length,
     failedRuns: allRows.filter((row) => row.error).length,
     fixtureUnavailableRuns: unavailable.length,
+    queryDeviations: deviated.length,
   };
 }
 
@@ -553,16 +648,19 @@ async function main() {
   const cases = options.cases
     ? allCases.filter((item) => options.cases.has(item.id) || options.cases.has(item.intent))
     : allCases;
-  const sourceCommit = execFileSync("git", ["rev-parse", "HEAD"], {
+  const harnessCommit = execFileSync("git", ["rev-parse", "HEAD"], {
     cwd: repoRoot,
     encoding: "utf8",
   }).trim();
-  const dirty =
+  const harnessDirty =
     execFileSync("git", ["status", "--porcelain"], { cwd: repoRoot, encoding: "utf8" }).trim() !==
     "";
-  const fixture = await startServerFixture(options.profile, options.server);
+  const server = serverIdentity(options.server);
+  const privateRoot = mkdtempSync(path.join(os.tmpdir(), "optimike-discovery-"));
   try {
-    const tools = await listTools(fixture.launch);
+    const catalog = await captureCatalog(options.profile, options.server, privateRoot);
+    const tools = catalog.tools;
+    const fixture = replayFixture(catalog, privateRoot);
     const surface = {
       profile: options.profile,
       ...measureToolsList(tools),
@@ -584,9 +682,8 @@ async function main() {
     const header = {
       schemaVersion: "tool-discovery-run/v1",
       client: options.client,
-      sourceCommit,
-      dirtyWorktree: dirty,
-      server: path.relative(repoRoot, options.server).replaceAll(path.sep, "/"),
+      harness: { commit: harnessCommit, dirtyWorktree: harnessDirty },
+      server,
       corpusSha256,
       surface,
       runs: options.runs,
@@ -597,6 +694,9 @@ async function main() {
       reasoning: options.reasoning ?? "client-default",
       startedAt: new Date().toISOString(),
     };
+    if (options.client !== "claude-sim") {
+      header.replay = await verifyReplay(fixture, surface.toolsListSha256);
+    }
     let rows;
     if (options.client === "claude-sim") {
       rows = cases.map((testCase) => {
@@ -627,6 +727,14 @@ async function main() {
         rows = await mapLimit(jobs, options.concurrency, async ({ testCase, runIndex }, slot) => {
           try {
             const run = await runCodexCase(testCase, fixture.launchFor(slot), workDir, options, known);
+            run.otherCalls.push(...fixture.refusedCalls(slot));
+            const failure =
+              run.exitCode !== 0
+                ? `codex exited with ${run.exitCode}`
+                : run.rolloutFound
+                  ? undefined
+                  : "codex session record missing";
+            if (failure) return { caseId: testCase.id, runIndex, ...run, error: failure };
             process.stderr.write(
               `${testCase.id}#${runIndex}: ${run.cells.length} cell(s), ${run.shownTools.length} shown -> ${run.finalAnswer}\n`,
             );
@@ -666,6 +774,23 @@ async function main() {
               ...options,
               knownTools: known,
             });
+            run.otherCalls.push(...fixture.refusedCalls(slot));
+            const failure =
+              run.exitCode !== 0
+                ? `claude exited with ${run.exitCode}`
+                : run.model
+                  ? undefined
+                  : "claude init event missing";
+            if (failure) return { caseId: testCase.id, runIndex, ...run, error: failure };
+            // A keyword case measures one verbatim query; a rewritten or
+            // repeated search measures the model instead and is reported apart.
+            const queryDeviated =
+              testCase.mode !== "request" &&
+              !(
+                run.searches.length === 1 &&
+                run.searches[0].query?.trim() === testCase.request.trim() &&
+                run.searches[0].results
+              );
             for (const search of run.searches) {
               if (typeof search.query !== "string" || !search.results) continue;
               if (/^select:/iu.test(search.query.trim())) continue;
@@ -686,6 +811,7 @@ async function main() {
               ...run,
               ranked: ranked.slice(0, 5),
               score: first ? scoreCase(testCase, ranked) : null,
+              ...(queryDeviated ? { queryDeviated } : {}),
               anySearchTop3: anyFound,
               finalCorrect: testCase.expected.includes(run.finalAnswer),
             };
@@ -703,14 +829,14 @@ async function main() {
       mkdirSync(options.out, { recursive: true });
       const file = path.join(
         options.out,
-        `${options.client}-${sourceCommit.slice(0, 12)}${dirty ? "-dirty" : ""}-${Date.now()}.json`,
+        `${options.client}-${server.commit.slice(0, 12)}${server.dirtyWorktree ? "-dirty" : ""}-${Date.now()}.json`,
       );
       writeFileSync(file, json, "utf8");
       process.stderr.write(`wrote ${file}\n`);
     }
     process.stdout.write(`${JSON.stringify({ ...header, summary: report.summary }, null, 2)}\n`);
   } finally {
-    await fixture.dispose();
+    rmSync(privateRoot, { recursive: true, force: true });
   }
 }
 

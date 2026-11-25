@@ -129,10 +129,10 @@ Mécanismes clients optionnels :
 
 - Codex : `enabled_tools` / `disabled_tools` ;
 - Gemini CLI : `includeTools` / `excludeTools` ;
-- Claude Code : tool search / chargement MCP différé ; les points d’entrée
-  (outils de lecture et outils gouvernés `*_plan`) portent un court
-  `_meta["anthropic/searchHint"]` avec les mots d’usage absents de leur nom,
-  que les autres clients ignorent ;
+- Claude Code : tool search / chargement MCP différé ; une sélection de points
+  d’entrée (lectures de notes, de Bases et de canvas, outils gouvernés `*_plan`,
+  outils de tâches Operon) porte un court `_meta["anthropic/searchHint"]` avec
+  les mots d’usage absents de leur nom, que les autres clients ignorent ;
 - Hermes Agent : filtres include/exclude ;
 - OpenClaw : `toolFilter.include` / `toolFilter.exclude`.
 
