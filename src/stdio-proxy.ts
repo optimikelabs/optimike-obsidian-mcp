@@ -38,9 +38,13 @@ import {
   isInputRequiredResult,
 } from "@modelcontextprotocol/server";
 import {
+  APPLY_CONFIRMATION_TIMEOUT_MS,
   applyConfirmationMode,
+  applyConfirmationRefusalResult,
   applyConfirmationRelay,
+  relayableConfirmationQuestion,
 } from "./mcp-server/applyConfirmation.js";
+import { APPLY_CONFIRMATION_INPUT_KEY } from "./services/applyConfirmation.js";
 import {
   Client,
   StreamableHTTPClientTransport,
@@ -1599,22 +1603,56 @@ async function start() {
       }
 
       // Opt-in apply confirmation: declare form elicitation to a 2026-07-28
-      // backend only when this upstream request declares it, and pass an
-      // input_required round back unchanged. This server's SDK seam turns it
-      // into a classic elicitation/create for a 2025-11-25 upstream.
+      // backend only when this upstream request declares it. A 2026-07-28
+      // upstream gets the input_required round unchanged; a 2025-11-25
+      // upstream is asked here with a classic elicitation/create. Answer
+      // material that cannot be carried is refused, never dropped.
       const relay = applyConfirmationRelay(proxyServer, ctx);
-      try {
-        const result = await withBackendRetry(
+      const refuse = (code: "apply_confirmation_invalid" | "apply_confirmation_unavailable") =>
+        applyConfirmationRefusalResult(code, request.params.name, request.params.arguments);
+      if (relay.kind === "refuse") return refuse("apply_confirmation_invalid");
+      const relaying =
+        relay.kind === "relay" && (await ensureBackendConnected()).era === "modern";
+      if (relay.kind === "relay" && !relaying && relay.answering) {
+        return refuse("apply_confirmation_invalid");
+      }
+      const callBackend = (params: typeof request.params) =>
+        withBackendRetry(
           "callTool",
           (client) =>
-            relay && client.getProtocolEra() === "modern"
-              ? client.callTool(relay(backendParams(request.params)), {
-                  allowInputRequired: true,
-                })
-              : client.callTool(backendParams(request.params)),
+            relaying
+              ? client.callTool(params, { allowInputRequired: true })
+              : client.callTool(params),
           { replayNetworkFailure: { toolName: request.params.name } },
         );
-        if (isInputRequiredResult(result)) return result;
+      try {
+        const base = backendParams(request.params);
+        let result = await callBackend(
+          relay.kind === "relay" && relaying ? relay.params(base) : base,
+        );
+        if (isInputRequiredResult(result)) {
+          if (relay.kind !== "relay" || relay.upstreamModern) return result;
+          // 2025-11-25 upstream: one question, answered in this request.
+          const question = relayableConfirmationQuestion(result);
+          if (!question) return refuse("apply_confirmation_unavailable");
+          let answer;
+          try {
+            answer = await ctx.mcpReq.elicitInput(question, {
+              timeout: APPLY_CONFIRMATION_TIMEOUT_MS,
+            });
+          } catch {
+            return refuse("apply_confirmation_unavailable");
+          }
+          result = await callBackend(
+            relay.params(base, {
+              inputResponses: { [APPLY_CONFIRMATION_INPUT_KEY]: answer },
+              requestState: result.requestState,
+            }),
+          );
+          if (isInputRequiredResult(result)) {
+            return refuse("apply_confirmation_unavailable");
+          }
+        }
         return chatgptCompatibleResult(result);
       } catch (error) {
         // Do not imply that a lost response means a failed write, and never

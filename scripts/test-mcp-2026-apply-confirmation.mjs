@@ -239,6 +239,26 @@ try {
     await client.close();
   }
 
+  // Catches: a 2025-11-25 host error surfacing as free text, or writing.
+  {
+    const marker = "HOST-ELICITATION-FAILURE-MARKER";
+    const client = await connectProxy({
+      modern: false,
+      elicit: true,
+      onElicit: async () => {
+        throw new Error(marker);
+      },
+    });
+    const sealed = await plan(client, "legacy-relay-error");
+    const before = { cas, content };
+    const failed = await client.callTool({ name: "obsidian_text_patch_apply", arguments: sealed });
+    assert.equal(failed.isError, true);
+    assert.equal(JSON.stringify(failed).includes(marker), false, "no host text");
+    assert.equal(parse(failed).error.details.reasonCode, "apply_confirmation_unavailable");
+    assert.deepEqual({ cas, content }, before);
+    await client.close();
+  }
+
   // Catches: the proxy declaring elicitation for an upstream that never did.
   {
     const client = await connectProxy({ modern: false, elicit: false });
@@ -321,6 +341,67 @@ try {
     assert.equal(committed.outcome, "committed");
     assert.equal(committed.confirmation, "elicited");
     assert.equal(cas, before.cas + 1);
+
+    const refusalOf = async (args, extra) => {
+      const result = (await call("obsidian_text_patch_apply", args, extra)).payload.result;
+      assert.equal(result.isError, true, JSON.stringify(result));
+      return parse(result).error.details.reasonCode;
+    };
+    const decline = { apply_confirmation: { action: "decline" } };
+    // Catches: a decline that drops its capability falling back to the
+    // ordinary apply path and writing.
+    const dropped = await planOverWire("wire-decline-without-capability");
+    const droppedRound = (await call("obsidian_text_patch_apply", dropped)).payload.result;
+    const beforeDropped = { cas, content };
+    assert.equal(
+      await refusalOf(dropped, {
+        _meta: { [prefix + "clientCapabilities"]: {} },
+        inputResponses: decline,
+        requestState: droppedRound.requestState,
+      }),
+      "apply_confirmation_declined",
+    );
+    // Catches: an answer without state opening a new question or writing.
+    assert.equal(
+      await refusalOf(dropped, { inputResponses: accept }),
+      "apply_confirmation_invalid",
+    );
+    assert.deepEqual({ cas, content }, beforeDropped, "no write without a valid answer");
+    // Catches: a late decline of an already applied plan reported as success.
+    const late = await planOverWire("wire-late-decline");
+    const lateFirst = (await call("obsidian_text_patch_apply", late)).payload.result;
+    const lateSecond = (await call("obsidian_text_patch_apply", late)).payload.result;
+    assert.equal(
+      parse((await call("obsidian_text_patch_apply", late, {
+        inputResponses: accept,
+        requestState: lateFirst.requestState,
+      })).payload.result).outcome,
+      "committed",
+    );
+    const afterLate = cas;
+    assert.equal(
+      await refusalOf(late, { inputResponses: decline, requestState: lateSecond.requestState }),
+      "apply_confirmation_declined",
+    );
+    assert.equal(cas, afterLate);
+
+    // Catches: a proxy without its opt-in dropping answer material and
+    // forwarding a fresh call that writes.
+    const proxyRound = await planOverWire("wire-proxy-opt-in-off");
+    const proxyState = (await call("obsidian_text_patch_apply", proxyRound)).payload.result.requestState;
+    const offProxy = await connectProxy({ modern: true, elicit: true, proxyConfirmation: "off" });
+    const beforeProxy = { cas, content };
+    const offResult = await offProxy.callTool({
+      name: "obsidian_text_patch_apply",
+      arguments: proxyRound,
+      inputResponses: decline,
+      requestState: proxyState,
+    });
+    assert.equal(offResult.isError, true);
+    assert.equal(parse(offResult).error.details.reasonCode, "apply_confirmation_invalid");
+    assert.deepEqual({ cas, content }, beforeProxy);
+    await offProxy.close();
+
     // Catches: the public manifest disagreeing with what the backend does.
     const status = parse(
       (await call("obsidian_runtime_status", {})).payload.result,
@@ -332,7 +413,7 @@ try {
   }
 
   console.log(
-    "PASS: opt-in apply confirmation through the real backend and stdio proxy: 2025-11-25 elicitation/create and 2026-07-28 input_required relays, decline writes nothing, accept writes the sealed plan once, no relay without upstream capability or proxy opt-in, forged and cross-plan requestState refused",
+    "PASS: opt-in apply confirmation through the real backend and stdio proxy: 2025-11-25 elicitation/create and 2026-07-28 input_required relays, decline writes nothing, accept writes the sealed plan once, no relay without upstream capability or proxy opt-in, forged, cross-plan, stateless and capability-dropped answers refused, late decline refused, relay errors closed",
   );
 } finally {
   clearTimeout(watchdog);

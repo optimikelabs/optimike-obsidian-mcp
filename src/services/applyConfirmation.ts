@@ -48,6 +48,8 @@ export const APPLY_CONFIRMATION_REFUSAL_MESSAGES = {
     "The confirmation was dismissed without an answer. Nothing was written. The sealed plan is unchanged; applying it again asks again.",
   apply_confirmation_invalid:
     "The confirmation answer was missing, expired or did not match this sealed plan. Nothing was written. Apply the same plan again to be asked again.",
+  apply_confirmation_unavailable:
+    "The confirmation could not be shown or answered (client error, relay error or timeout). Nothing was written. The sealed plan is unchanged; applying it again asks again.",
   apply_confirmation_target_changed:
     "The note changed since planning, so no confirmation was requested and nothing was written. Call the matching status tool, then plan again from the current note.",
 } as const;
@@ -123,7 +125,9 @@ export function applyConfirmationRefusal(
       ? BaseErrorCode.CONFLICT
       : code === "apply_confirmation_invalid"
         ? BaseErrorCode.VALIDATION_ERROR
-        : BaseErrorCode.FORBIDDEN,
+        : code === "apply_confirmation_unavailable"
+          ? BaseErrorCode.SERVICE_UNAVAILABLE
+          : BaseErrorCode.FORBIDDEN,
     APPLY_CONFIRMATION_REFUSAL_MESSAGES[code],
     {
       reason: code,

@@ -968,6 +968,7 @@ try {
   let answer = { action: "accept", content: {} };
   const confirming = await startClient(fake, { elicitation: { form: {} } }, async (request) => {
     asked.push(request.params);
+    if (answer === "throw") throw new Error("HOST-FAILURE-MARKER");
     return answer;
   });
   const savedProtocolMode = process.env.MCP_PROTOCOL_MODE;
@@ -1025,7 +1026,14 @@ try {
       assert.equal(afterRefusal.payload.phase, "planned", `${action} leaves the plan applicable`);
       assert.equal(afterRefusal.payload.applyAllowed, true);
     }
+    // Catches: a host error leaking its free text, writing, or consuming the plan.
+    answer = "throw";
+    const hostFailure = await call(confirming, "obsidian_text_patch_apply", confirmed, true);
+    assertConfirmationRefusal(hostFailure.payload, "apply_confirmation_unavailable", "host error");
+    assert.equal(JSON.stringify(hostFailure.payload).includes("HOST-FAILURE-MARKER"), false);
+    assert.equal(fake.casRequests, 0);
     // The question names the target and this exact plan, not its sealed text.
+    asked.pop();
     assert.equal(asked.length, 2);
     assert.equal(asked[0].mode, "form");
     assert.deepEqual(asked[0].requestedSchema, { type: "object", properties: {} });

@@ -78,8 +78,9 @@ et le backend HTTP partagé en ont tous deux besoin : le proxy ne déclare
 l’élicitation au backend que si son propre client amont la déclare, et le
 backend ne demande que s’il est lui-même activé. Un backend lancé par le proxy
 hérite de l’environnement du proxy ; un backend partagé déjà lancé garde le
-sien. `obsidian_runtime_status` indique le mode du processus qui sert dans
-`capabilityManifest.applyConfirmation`.
+sien. En mode dual, `obsidian_runtime_status` indique le mode du processus qui
+sert dans `capabilityManifest.applyConfirmation` ; les réponses legacy n’ont pas
+ce champ.
 
 La question arrive après la vérification de la référence de plan, de la clé
 d’idempotence, de la preuve de projection scellée et de la politique
@@ -97,15 +98,18 @@ n’accepte de nouveau que ce même plan.
 | accept | Le plan scellé exact est appliqué sous le CAS habituel ; le reçu ajoute `confirmation: "elicited"` |
 | decline | `apply_confirmation_declined`, rien n’est écrit |
 | cancel | `apply_confirmation_cancelled`, rien n’est écrit |
-| réponse absente, expirée, altérée ou d’un autre plan | `apply_confirmation_invalid`, rien n’est écrit |
+| réponse absente, expirée, altérée ou d’un autre plan, ou acceptation sans la capacité déclarée | `apply_confirmation_invalid`, rien n’est écrit |
+| erreur du client, erreur de relais ou délai dépassé | `apply_confirmation_unavailable`, rien n’est écrit |
 | note modifiée depuis le plan | `apply_confirmation_target_changed`, pas de question, rien n’est écrit |
 
 Les refus sont des erreurs avec `mutationMayHaveApplied: false`, jamais des
 succès. Le plan reste `planned` : l’appliquer de nouveau repose la question.
 Après `apply_confirmation_target_changed`, appeler `status` puis replanifier.
-Un plan déjà commité ou en cours d’application n’est pas redemandé. Sans
-réponse du client, la question expire au bout de dix minutes et rien n’est
-écrit.
+Un plan déjà commité ou en cours d’application n’est pas redemandé ; un refus
+tardif pour ce plan reste refusé. Une requête qui porte une réponse n’est
+jamais traitée comme un nouvel apply, même sans la capacité ou quand le saut
+ne peut pas la transporter. Sans réponse du client, la question expire au bout
+de dix minutes et rien n’est écrit.
 
 `confirmation: "elicited"` signifie que le client a répondu accept. Un hook de
 l’hôte ou une politique d’approbation automatique peut répondre sans rien
@@ -114,10 +118,12 @@ confirmation ne remplace jamais le sceau, le CAS ni la politique d’écriture ;
 elle confirme seulement le plan désigné par son empreinte.
 
 En protocole `2026-07-28`, la question est un résultat `input_required` avec un
-`requestState` protégé en intégrité ; en `2025-11-25`, le SDK envoie un
-`elicitation/create` classique. Le proxy stdio relaie les deux : son saut vers
-le backend est toujours en `2026-07-28`, et son propre SDK convertit l’échange
-pour un client amont `2025-11-25`.
+`requestState` protégé en intégrité ; en `2025-11-25`, le serveur envoie un
+`elicitation/create` classique dans le même appel. Le proxy stdio relaie les
+deux : son saut vers le backend est toujours en `2026-07-28` ; il transmet
+l’échange tel quel à un client amont `2026-07-28` et pose lui-même la question
+à un client amont `2025-11-25`. Dans les deux cas, une erreur devient un refus
+fermé, jamais le texte propre de l’hôte.
 
 Vérification manuelle dans un hôte (coffre de test synthétique uniquement,
 jamais un vrai coffre) :

@@ -19,6 +19,7 @@ import {
   applyConfirmationMode,
   type ApplyConfirmationMode,
 } from "../mcp-server/applyConfirmation.js";
+import { mcpProtocolMode } from "../mcp-server/protocolMode.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import { requestContextService } from "../utils/index.js";
 import type { ObsidianRestApiService } from "./obsidianRestAPI/service.js";
@@ -178,10 +179,11 @@ export interface CapabilityManifest {
   capabilities: readonly CapabilityManifestEntry[];
   /**
    * Opt-in apply confirmation of the serving process (behind the stdio proxy:
-   * the shared backend). "elicit" asks only clients that declare form
+   * the shared backend). Present only with MCP_PROTOCOL_MODE=dual, so legacy
+   * responses are unchanged. "elicit" asks only clients that declare form
    * elicitation, and only for the listed apply tools.
    */
-  applyConfirmation: {
+  applyConfirmation?: {
     mode: ApplyConfirmationMode;
     tools: readonly string[];
   };
@@ -1263,11 +1265,13 @@ export function projectCapabilityManifest(
       ...input.admission,
     },
     capabilities,
-    applyConfirmation: applyConfirmationManifest(),
+    ...(mcpProtocolMode() === "dual"
+      ? { applyConfirmation: applyConfirmationManifest() }
+      : {}),
   };
 }
 
-function applyConfirmationManifest(): CapabilityManifest["applyConfirmation"] {
+function applyConfirmationManifest(): NonNullable<CapabilityManifest["applyConfirmation"]> {
   const mode = applyConfirmationMode();
   return { mode, tools: mode === "elicit" ? [...APPLY_CONFIRMATION_TOOLS] : [] };
 }

@@ -78,8 +78,8 @@ backend need it: the proxy declares form elicitation to the backend only when
 its own upstream client declares it, and the backend asks only when it is
 enabled itself. A backend started by the proxy inherits the proxy's
 environment; an already running shared backend keeps its own.
-`obsidian_runtime_status` reports the serving process's mode in
-`capabilityManifest.applyConfirmation`.
+In dual mode, `obsidian_runtime_status` reports the serving process's mode in
+`capabilityManifest.applyConfirmation`; legacy responses do not have the field.
 
 The question comes after the plan reference, idempotency key, sealed
 projection proof and write policy are checked, and after a read-only check that
@@ -95,14 +95,18 @@ decline or cancel. Because the message names one plan, a host that remembers an
 | accept | The exact sealed plan is applied under the usual CAS; the receipt adds `confirmation: "elicited"` |
 | decline | `apply_confirmation_declined`, nothing written |
 | cancel | `apply_confirmation_cancelled`, nothing written |
-| missing, expired, tampered or other-plan answer | `apply_confirmation_invalid`, nothing written |
+| missing, expired, tampered or other-plan answer, or an accept without the declared capability | `apply_confirmation_invalid`, nothing written |
+| client error, relay error or timeout | `apply_confirmation_unavailable`, nothing written |
 | note changed since planning | `apply_confirmation_target_changed`, not asked, nothing written |
 
 Refusals are errors with `mutationMayHaveApplied: false`, never successes. The
 plan stays `planned`: applying it again asks again. After
 `apply_confirmation_target_changed`, call `status` and plan again. A plan that
-is already committed or applying is not asked again. If the client never
-answers, the question expires after ten minutes and nothing is written.
+is already committed or applying is not asked again; a late decline for it is
+still refused. A request that carries an answer is never treated as a fresh
+apply, even without the capability or when the hop cannot carry it. If the
+client never answers, the question expires after ten minutes and nothing is
+written.
 
 `confirmation: "elicited"` means the client answered accept. A host hook or an
 automatic approval policy can answer without showing anything, so it does not
@@ -110,9 +114,11 @@ prove that a person clicked. The confirmation never replaces the seal, the CAS
 or the write policy; it only confirms the plan named by its digest.
 
 On protocol `2026-07-28` the question is an `input_required` result with an
-integrity-protected `requestState`; on `2025-11-25` the SDK sends a classic
-`elicitation/create`. The stdio proxy relays both: its backend hop is always
-`2026-07-28`, and its own SDK converts the round for a `2025-11-25` upstream.
+integrity-protected `requestState`; on `2025-11-25` the server sends a classic
+`elicitation/create` within the same call. The stdio proxy relays both: its
+backend hop is always `2026-07-28`; it passes the round unchanged to a
+`2026-07-28` upstream and asks a `2025-11-25` upstream itself. Errors in either
+case are closed refusals, never the host's own text.
 
 Manual check in a host (synthetic test vault only, never a real vault):
 
