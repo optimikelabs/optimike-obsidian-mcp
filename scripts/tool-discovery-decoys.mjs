@@ -8,7 +8,8 @@
  * and logged before it could reach the real service.
  *
  * Decoy tools are reported by their client name, `mcp__<server>__<tool>`; the
- * fixture's tools keep their bare names.
+ * fixture's tools keep their bare names. A decoy "writes" by its annotations,
+ * else by a presumption from its name parts (`writeBasis` in the summary).
  */
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -28,36 +29,69 @@ const WRITE_PARTS = new Set([
   "upload", "upsert", "void", "write",
 ]);
 
+const SERVER_KEY = /^[A-Za-z0-9_-]{1,64}$/u;
+
 function codexServerName(server) {
   return server.replace(/[^A-Za-z0-9]/gu, "_");
 }
 
-export function decoyToolWrites(tool) {
+function annotatedWrite(tool) {
   const hints = tool.annotations ?? {};
   if (hints.readOnlyHint === true) return false;
   if (hints.readOnlyHint === false || hints.destructiveHint === true) return true;
-  return tool.name
-    .toLowerCase()
-    .split(/[^a-z0-9]+/u)
-    .some((part) => WRITE_PARTS.has(part));
+  return undefined;
+}
+
+export function decoyToolWrites(tool) {
+  return (
+    annotatedWrite(tool) ??
+    tool.name
+      .toLowerCase()
+      .split(/[^a-z0-9]+/u)
+      .some((part) => WRITE_PARTS.has(part))
+  );
 }
 
 export function loadDecoys(directory, { fixtureServer, fixtureTools, replay }) {
   const fixtureNames = new Set(fixtureTools.map((tool) => tool.name));
-  const servers = readdirSync(directory)
+  // Validate every name before anything is written: the server name becomes a
+  // private directory, a client config key and a Codex namespace.
+  const clientNames = new Map([[codexServerName(fixtureServer), fixtureServer]]);
+  const catalogs = readdirSync(directory)
     .filter((file) => file.endsWith(".json"))
     .sort()
     .map((file) => {
       const catalog = JSON.parse(readFileSync(path.join(directory, file), "utf8"));
       const server = catalog.serverName ?? path.basename(file, ".json");
-      if (server === fixtureServer) throw new Error(`Decoy ${file} reuses the fixture server name.`);
-      const served = {
-        serverInfo: catalog.serverInfo ?? { name: server, version: "decoy" },
-        ...(catalog.instructions ? { instructions: catalog.instructions } : {}),
-        tools: catalog.tools,
-      };
-      return { server, tools: catalog.tools, fixture: replay(served, server), served };
+      if (typeof server !== "string" || !SERVER_KEY.test(server)) {
+        throw new Error(`Decoy ${file}: server name must match ${SERVER_KEY}.`);
+      }
+      const clash = clientNames.get(codexServerName(server));
+      if (clash !== undefined) {
+        throw new Error(`Decoy ${file}: server ${server} collides with ${clash} in client tool names.`);
+      }
+      clientNames.set(codexServerName(server), server);
+      if (!Array.isArray(catalog.tools) || catalog.tools.length === 0) {
+        throw new Error(`Decoy ${file}: no tools.`);
+      }
+      const toolNames = catalog.tools.map((tool) => tool.name);
+      if (toolNames.some((name) => typeof name !== "string" || name === "")) {
+        throw new Error(`Decoy ${file}: every tool needs a name.`);
+      }
+      if (new Set(toolNames).size !== toolNames.length) {
+        throw new Error(`Decoy ${file}: duplicate tool names.`);
+      }
+      return { file, server, catalog };
     });
+  const servers = catalogs.map(({ server, catalog }, index) => {
+    const served = {
+      serverInfo: catalog.serverInfo ?? { name: server, version: "decoy" },
+      ...(catalog.instructions ? { instructions: catalog.instructions } : {}),
+      tools: catalog.tools,
+    };
+    // The private directory name is generated, never taken from the catalogue.
+    return { server, tools: catalog.tools, fixture: replay(served, `decoy-${index}`), served };
+  });
   const writes = new Map();
   const aliases = new Map();
   const bareCount = new Map();
@@ -65,6 +99,7 @@ export function loadDecoys(directory, { fixtureServer, fixtureTools, replay }) {
     for (const tool of tools) bareCount.set(tool.name, (bareCount.get(tool.name) ?? 0) + 1);
   }
   const codexNames = new Set();
+  const wholeReplyAliases = new Map();
   const decoySurface = [];
   for (const { server, tools } of servers) {
     for (const tool of tools) {
@@ -74,9 +109,11 @@ export function loadDecoys(directory, { fixtureServer, fixtureTools, replay }) {
       codexNames.add(codex);
       aliases.set(codex, full);
       aliases.set(`mcp__${codex}`, full);
-      // A bare one-word name (`read`, `query`) is an ordinary word in a reply.
-      const distinctive = tool.name.includes("_") && bareCount.get(tool.name) === 1;
-      if (distinctive && !fixtureNames.has(tool.name)) aliases.set(tool.name, full);
+      // A bare one-word name (`read`, `query`) is an ordinary word inside a
+      // reply; it counts only as the whole reply (see wholeReplyAliases).
+      const unique = bareCount.get(tool.name) === 1 && !fixtureNames.has(tool.name);
+      if (unique && /[_-]/u.test(tool.name)) aliases.set(tool.name, full);
+      if (unique) wholeReplyAliases.set(tool.name, full);
       decoySurface.push({ ...tool, name: full, server, bareName: tool.name });
     }
   }
@@ -86,11 +123,17 @@ export function loadDecoys(directory, { fixtureServer, fixtureTools, replay }) {
       server,
       tools: tools.length,
       writeTools: tools.filter(decoyToolWrites).length,
+      writeBasis: tools.every((tool) => annotatedWrite(tool) !== undefined)
+        ? "annotations"
+        : tools.some((tool) => annotatedWrite(tool) !== undefined)
+          ? "annotations, else name"
+          : "name (presumed)",
       characters: JSON.stringify(tools).length,
     })),
     toolNames: new Set(writes.keys()),
     codexNames,
     aliases,
+    wholeReplyAliases,
     rankingSurface: [
       ...fixtureTools.map((tool) => ({ ...tool, server: fixtureServer, bareName: tool.name })),
       ...decoySurface,

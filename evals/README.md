@@ -199,9 +199,15 @@ node scripts/run-tool-discovery-eval.mjs --client=codex --runs=3 --out=<dir outs
   request prompt says the client is connected to several servers, one of them
   the user's Obsidian vault; `--context=none` drops the vault from the prompt,
   like a client without instructions about where the user's notes and tasks
-  live. Keep captured third-party catalogues outside the repository.
-- No client can execute a server tool: the replay refuses the call, and any
-  attempt is counted in `otherToolCalls`. Run artifacts stay outside the
+  live. A decoy without annotations is classed as writing by its name parts, a
+  presumption the report labels (`writeBasis`). Server names must be bare keys
+  (`A-Z a-z 0-9 _ -`) that stay distinct once a client namespaces them.
+  Catalogues and their `instructions` reach the measured model verbatim and
+  reports keep its raw reply: review and redact a capture before a paid run,
+  and keep captures and reports outside the repository.
+- No client can execute a server tool: the replay refuses the call. Every
+  attempt, in any run including failed ones, is counted: `toolCallAttempts`
+  calls in `otherToolCalls` runs. Run artifacts stay outside the
   repository and paid model calls stay out of CI.
 
 ## Focused checks

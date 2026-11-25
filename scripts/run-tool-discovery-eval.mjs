@@ -438,7 +438,7 @@ function claudeSearchResults(content) {
     if (block?.type === "tool_reference") names.push(block.tool_name);
     else if (typeof block?.text === "string" || typeof block === "string") {
       const text = typeof block === "string" ? block : block.text;
-      for (const match of text.matchAll(/mcp__[\w-]+__\w+/gu)) {
+      for (const match of text.matchAll(/mcp__[\w-]+__[\w-]+/gu)) {
         names.push(match[0]);
       }
     }
@@ -517,12 +517,16 @@ async function runClaudeCase(testCase, launch, configPath, options) {
     if (event.type === "system" && event.subtype === "init") {
       model = event.model;
       mcpStatus = event.mcp_servers?.find((server) => server.name === SERVER_NAME)?.status;
-      const decoyServers = new Set((options.decoyLaunches ?? []).map(({ server }) => server));
-      const decoysDown = (event.mcp_servers ?? []).filter(
-        (server) => decoyServers.has(server.name) && server.status !== "connected",
-      );
+      // A decoy missing from init counts as down: the run would not measure
+      // the competition it claims to measure.
+      const decoysDown = (options.decoyLaunches ?? [])
+        .map(({ server }) => server)
+        .filter(
+          (name) =>
+            event.mcp_servers?.find((server) => server.name === name)?.status !== "connected",
+        );
       if (mcpStatus === "connected" && decoysDown.length) {
-        mcpStatus = `decoy ${decoysDown.map((server) => server.name).join(",")} not connected`;
+        mcpStatus = `decoy ${decoysDown.join(",")} not connected`;
       }
     }
     const content = event.message?.content;
@@ -561,14 +565,21 @@ async function runClaudeCase(testCase, launch, configPath, options) {
     otherCalls,
     mcpStatus,
     finalText: finalText.slice(0, 400),
-    finalAnswer: namedTool(finalText, options.knownTools, options.decoyAliases),
+    finalAnswer: namedTool(
+      finalText,
+      options.knownTools,
+      options.decoyAliases,
+      options.decoyWholeReplyAliases,
+    ),
     latencyMs: Date.now() - started,
     stderrTail: result.code === 0 ? undefined : result.stderr.slice(-600),
   };
 }
 
 /** First fixture tool named in a final reply, else the reply's last word. */
-function namedTool(text, knownTools, aliases = new Map()) {
+function namedTool(text, knownTools, aliases = new Map(), wholeReplyAliases = new Map()) {
+  const whole = String(text).trim().replace(/^[`'"]+|[`'".]+$/gu, "");
+  if (wholeReplyAliases.has(whole)) return wholeReplyAliases.get(whole);
   for (const match of String(text).matchAll(/[A-Za-z][\w-]*/gu)) {
     const name = codexToolName(stripServerPrefix(match[0]));
     if (knownTools.has(name)) return name;
@@ -688,7 +699,9 @@ function summarizeRows(allRows) {
           finalForeignWrite: rows.filter((row) => row.finalForeignWrite).length,
         }
       : {}),
-    otherToolCalls: rows.filter((row) => row.otherCalls?.length).length,
+    // Over every run, failed or deviated ones included: no attempt is dropped.
+    otherToolCalls: allRows.filter((row) => row.otherCalls?.length).length,
+    toolCallAttempts: allRows.reduce((total, row) => total + (row.otherCalls?.length ?? 0), 0),
     failedRuns: allRows.filter((row) => row.error).length,
     fixtureUnavailableRuns: unavailable.length,
     queryDeviations: deviated.length,
@@ -804,7 +817,12 @@ async function main() {
               testCase,
               fixture.launchFor(slot),
               workDir,
-              { ...options, decoyLaunches: decoyLaunches(slot), decoyAliases: decoys?.aliases },
+              {
+                ...options,
+                decoyLaunches: decoyLaunches(slot),
+                decoyAliases: decoys?.aliases,
+                decoyWholeReplyAliases: decoys?.wholeReplyAliases,
+              },
               fixtureKnown,
             );
             run.otherCalls.push(...fixture.refusedCalls(slot), ...decoyRefusals(slot));
@@ -856,6 +874,7 @@ async function main() {
               knownTools: known,
               decoyLaunches: decoyLaunches(slot),
               decoyAliases: decoys?.aliases,
+              decoyWholeReplyAliases: decoys?.wholeReplyAliases,
             });
             run.otherCalls.push(...fixture.refusedCalls(slot), ...decoyRefusals(slot));
             const failure =
@@ -1170,7 +1189,8 @@ async function assertCodexIsolation(launch, workDir, options, fixtureTools) {
   const fixtureNames = names.filter((name) => fixtureTools.has(codexToolName(name)));
   const decoyNames = options.decoyCodexNames ?? new Set();
   const isDecoy = (name) => decoyNames.has(name.replace(/^mcp__/u, ""));
-  const decoysShown = names.filter(isDecoy);
+  const decoysShown = new Set(names.filter(isDecoy).map((name) => name.replace(/^mcp__/u, "")));
+  const decoysMissing = [...decoyNames].filter((name) => !decoysShown.has(name));
   const foreign = names.filter(
     (name) =>
       !CODEX_BUILTIN_TOOLS.has(name) && !fixtureTools.has(codexToolName(name)) && !isDecoy(name),
@@ -1180,14 +1200,14 @@ async function assertCodexIsolation(launch, workDir, options, fixtureTools) {
     fixtureTools: fixtureNames.length,
     builtinTools: names.filter((name) => CODEX_BUILTIN_TOOLS.has(name)),
     foreignTools: foreign,
-    ...(decoyNames.size ? { decoyTools: decoysShown.length } : {}),
+    ...(decoyNames.size ? { decoyTools: decoysShown.size, decoysMissing } : {}),
     fixtureNameSample: fixtureNames.slice(0, 3),
     nestedToolCalls: run.otherCalls,
   };
   if (
     foreign.length > 0 ||
     fixtureNames.length !== fixtureTools.size ||
-    decoysShown.length !== decoyNames.size ||
+    decoysMissing.length > 0 ||
     run.otherCalls.length > 0
   ) {
     throw Object.assign(new Error("Codex isolation check failed."), { evidence });
@@ -1254,7 +1274,12 @@ async function runCodexCase(testCase, launch, workDir, options, fixtureTools) {
     shownTools: codexShownTools(run.cells, fixtureTools),
     otherCalls: [...run.otherCalls, ...codexCellToolCalls(run.cells)],
     finalText: run.finalText.slice(0, 400),
-    finalAnswer: namedTool(run.finalText, fixtureTools, options.decoyAliases),
+    finalAnswer: namedTool(
+      run.finalText,
+      fixtureTools,
+      options.decoyAliases,
+      options.decoyWholeReplyAliases,
+    ),
     latencyMs: run.latencyMs,
     stderrTail: run.stderrTail,
   };
