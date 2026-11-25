@@ -606,9 +606,11 @@ async function runClaudeCase(testCase, launch, configPath, options) {
   };
 }
 
-/** First fixture tool named in a final reply, else the reply's last word. */
-function namedTool(text, knownTools, aliases = new Map(), wholeReplyAliases = new Map()) {
+/** Resolve an exact tool reply before scanning its prose for tool names. */
+export function namedTool(text, knownTools, aliases = new Map(), wholeReplyAliases = new Map()) {
   const whole = String(text).trim().replace(/^[`'"]+|[`'".]+$/gu, "");
+  const exact = codexToolName(whole);
+  if (knownTools.has(exact)) return exact;
   if (wholeReplyAliases.has(whole)) return wholeReplyAliases.get(whole);
   for (const match of String(text).matchAll(/[A-Za-z][\w-]*/gu)) {
     const name = codexToolName(stripServerPrefix(match[0]));
