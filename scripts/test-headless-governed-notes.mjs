@@ -2,7 +2,7 @@ import { isolatedStateDirectory } from "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
 import { fork } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, renameSync, watch, writeFileSync } from "node:fs";
+import { existsSync, realpathSync, renameSync, watch, writeFileSync } from "node:fs";
 import fsp, { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
@@ -77,10 +77,13 @@ async function injectAfterFilesystemEffect() {
     };
   }
   if (mode === "revert-plan-other-volume") {
+    // macOS exposes its temporary directory through a symlink. The backend
+    // resolves that alias before checking the journal's device.
+    const removedDirectory = path.join(realpathSync(path.dirname(state)), path.basename(state) + ".removed");
     const originalStat = fsp.lstat;
     fsp.lstat = async (filename, options) => {
       const info = await originalStat(filename, options);
-      return String(filename) === state + ".removed" && options?.bigint ? { dev: info.dev + 1n } : info;
+      return String(filename) === removedDirectory && options?.bigint ? { dev: info.dev + 1n } : info;
     };
   }
   syncBuiltinESMExports();
