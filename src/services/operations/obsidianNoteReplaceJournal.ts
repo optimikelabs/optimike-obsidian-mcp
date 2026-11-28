@@ -74,6 +74,24 @@ export type ObsidianNoteReplacePlan = {
   beforeSha256: string;
   afterSha256: string;
   nextContent: string;
+  filesystem?: {
+    policyDigest: string;
+    beforeContent?: string;
+    projectedSha256?: string;
+    stagedIdentity?: string;
+    stagedSha256?: string;
+    stagedContent?: string;
+    publicationConfirmed?: true;
+    localStage?: true;
+    localStageMode?: "exchange" | "legacy";
+    backupVerified?: true;
+    witnessesCleaned?: true;
+    exchangeRollback?: { identity: string; sha256: string; bytesBase64: string };
+    displacedObservation?: { sha256: string; bytesBase64: string };
+    displacedEditRecoverable?: true;
+    // Private evidence. null means publication was followed by absence.
+    divergentObservation?: { sha256: string; bytesBase64: string } | null;
+  };
   bindingFingerprint: string;
   status: ObsidianNoteReplaceStatus;
   createdAt: string;
@@ -104,6 +122,11 @@ export class ObsidianNoteReplaceConcurrencyError extends Error {
   }
 }
 
+export function displacedFilesystemEdit(plan: ObsidianNoteReplacePlan) {
+  return plan.status === "outcome_unknown" && plan.filesystem?.displacedEditRecoverable
+    ? plan.filesystem.displacedObservation : undefined;
+}
+
 export function noteReplaceIdempotencyConflict(): McpError {
   return new McpError(
     BaseErrorCode.CONFLICT,
@@ -125,6 +148,7 @@ export type ObsidianNoteReplaceJournalOptions = {
 };
 
 export type PendingOperationKind =
+  | "obsidian.operation.revert"
   | "obsidian.note.replace"
   | "obsidian.frontmatter.patch"
   | "obsidian.base.formula.patch"
@@ -703,6 +727,76 @@ export class ObsidianNoteReplaceJournal {
     return updated;
   }
 
+  recordFilesystemStage(operationId: string, attemptId: string, stagedIdentity: string, stagedSha256: string,
+    stagedContent?: string, localStageMode?: "exchange" | "legacy"): void {
+    this.updateFilesystemAttempt(operationId, attemptId, { stagedIdentity, stagedSha256, stagedContent,
+      ...(stagedContent === undefined ? {} : { localStage: true, localStageMode }) });
+  }
+
+  confirmFilesystemPublication(operationId: string, attemptId: string): void {
+    this.updateFilesystemAttempt(operationId, attemptId, { publicationConfirmed: true });
+  }
+
+  recordFilesystemDivergence(operationId: string, observation: { sha256: string; bytesBase64: string } | null,
+    displacedObservation?: { sha256: string; bytesBase64: string }, disposition?: "conflict" | "restore-displaced"): void {
+    this.transitionInternal(operationId, ["applying", "outcome_unknown"], disposition === "conflict" ? "conflict" : "outcome_unknown",
+      "headless_postflight_diverged", undefined, true, undefined, undefined, { divergentObservation: observation, displacedObservation,
+        ...(disposition === "restore-displaced" ? { displacedEditRecoverable: true } : {}) });
+  }
+
+  settleUnpublishedFilesystem(operationId: string, status: "conflict" | "failed", reason = "headless_not_published"): void {
+    this.transitionInternal(operationId, ["applying", "outcome_unknown"], status,
+      reason, undefined, true, undefined);
+  }
+
+  recordFilesystemExchangeRollback(operationId: string, displaced: NonNullable<NonNullable<ObsidianNoteReplacePlan["filesystem"]>["exchangeRollback"]>): void {
+    const row = this.get(operationId);
+    if (!row?.filesystem || !["applying", "outcome_unknown"].includes(row.status)) throw new ObsidianNoteReplaceConcurrencyError();
+    const updated = { ...row, filesystem: { ...row.filesystem, exchangeRollback: displaced } };
+    const result = this.db.prepare("UPDATE obsidian_note_replace_plans SET payload_json = ? WHERE operation_id = ? AND payload_json = ?")
+      .run(JSON.stringify(updated), operationId, JSON.stringify(row));
+    if (Number(result.changes) !== 1) throw new ObsidianNoteReplaceConcurrencyError();
+  }
+
+  interruptedFilesystemReplacements(): string[] {
+    const rows = this.db.prepare(`SELECT operation_id FROM obsidian_note_replace_plans
+      WHERE (status IN ('applying', 'outcome_unknown') OR
+        (status = 'conflict' AND json_type(payload_json, '$.filesystem.divergentObservation') IS NOT NULL))
+        AND json_extract(payload_json, '$.filesystem.localStage') = 1
+        AND COALESCE(json_extract(payload_json, '$.projection.kind'), '') <> 'obsidian.note.create'
+        AND json_type(payload_json, '$.filesystem.witnessesCleaned') IS NULL`).all();
+    return rows.map(row => String(row.operation_id));
+  }
+
+  verifyFilesystemBackup(operationId: string): void {
+    const row = this.get(operationId);
+    if (!row?.filesystem || !["applying", "outcome_unknown"].includes(row.status)) throw new ObsidianNoteReplaceConcurrencyError();
+    const updated = { ...row, filesystem: { ...row.filesystem, backupVerified: true } };
+    const result = this.db.prepare("UPDATE obsidian_note_replace_plans SET payload_json = ? WHERE operation_id = ? AND payload_json = ?")
+      .run(JSON.stringify(updated), operationId, JSON.stringify(row));
+    if (Number(result.changes) !== 1) throw new ObsidianNoteReplaceConcurrencyError();
+  }
+
+  confirmFilesystemWitnessCleanup(operationId: string): void {
+    const row = this.get(operationId);
+    if (!row?.filesystem || row.filesystem.divergentObservation === undefined) throw new ObsidianNoteReplaceConcurrencyError();
+    const updated = { ...row, filesystem: { ...row.filesystem, witnessesCleaned: true } };
+    const result = this.db.prepare("UPDATE obsidian_note_replace_plans SET payload_json = ? WHERE operation_id = ? AND payload_json = ?")
+      .run(JSON.stringify(updated), operationId, JSON.stringify(row));
+    if (Number(result.changes) !== 1) throw new ObsidianNoteReplaceConcurrencyError();
+  }
+
+  private updateFilesystemAttempt(operationId: string, attemptId: string, evidence: Partial<NonNullable<ObsidianNoteReplacePlan["filesystem"]>>): void {
+    const current = this.get(operationId);
+    if (!current?.filesystem || current.status !== "applying" ||
+        current.executionOwner?.attemptId !== attemptId) throw new ObsidianNoteReplaceConcurrencyError();
+    const updated = { ...current, filesystem: { ...current.filesystem, ...evidence } };
+    const result = this.db.prepare(
+      "UPDATE obsidian_note_replace_plans SET payload_json = ? WHERE operation_id = ? AND status = 'applying' AND payload_json = ?",
+    ).run(JSON.stringify(updated), operationId, JSON.stringify(current));
+    if (Number(result.changes) !== 1) throw new ObsidianNoteReplaceConcurrencyError();
+  }
+
   deferSettlement(
     operationId: string,
     expectedExecutionAttemptId: string,
@@ -900,10 +994,14 @@ export class ObsidianNoteReplaceJournal {
     verifiedCommitWithoutOwner: boolean,
     settlementEvidence: ModifiedTimeSettlementEvidence | undefined,
     effectProof?: OperationProof,
+    filesystemUpdate?: Partial<NonNullable<ObsidianNoteReplacePlan["filesystem"]>>,
   ): ObsidianNoteReplacePlan {
     this.maybePurgeTerminalPlans();
     const current = this.get(operationId);
     if (!current || !expected.includes(current.status)) {
+      throw new ObsidianNoteReplaceConcurrencyError();
+    }
+    if (next === "committed" && current.filesystem?.divergentObservation !== undefined) {
       throw new ObsidianNoteReplaceConcurrencyError();
     }
     if (
@@ -953,6 +1051,9 @@ export class ObsidianNoteReplaceJournal {
         ? { modifiedTimeSettlementEvidence: settlementEvidence }
         : {}),
       ...(effectProof ? { effectProof } : {}),
+      ...(current.filesystem ? { filesystem: { ...current.filesystem, ...filesystemUpdate,
+        ...(STABLE_TERMINAL.has(next) && current.filesystem.divergentObservation === undefined && filesystemUpdate?.divergentObservation === undefined && !current.filesystem.exchangeRollback
+          ? { stagedContent: undefined } : {}) } } : {}),
       ...(STABLE_TERMINAL.has(next) ? { nextContent: "" } : {}),
       ...(failure ? { failure } : { failure: undefined }),
     };
@@ -1009,7 +1110,12 @@ export class ObsidianNoteReplaceJournal {
            AND updated_at < ?`,
       )
       .run(cutoff);
-    if (Number(result.changes) > 0 || Number(expired.changes) > 0) {
+    const expiredDivergences = this.db.prepare(`DELETE FROM obsidian_note_replace_plans
+      WHERE status = 'outcome_unknown' AND updated_at < ?
+        AND json_type(payload_json, '$.filesystem.divergentObservation') IS NOT NULL
+        AND (json_extract(payload_json, '$.filesystem.witnessesCleaned') = 1
+          OR json_type(payload_json, '$.filesystem.localStage') IS NULL)`).run(cutoff);
+    if (Number(result.changes) > 0 || Number(expired.changes) > 0 || Number(expiredDivergences.changes) > 0) {
       this.walCheckpointRequired = true;
       this.checkpointSensitiveFrames();
     }

@@ -12,6 +12,7 @@ export const OPERATION_COCKPIT_DEFAULT_LIMIT = 50 as const;
 export const OPERATION_COCKPIT_MAX_LIMIT = 100 as const;
 
 export const OperationKindSchema = z.enum([
+  "obsidian.operation.revert",
   "obsidian.note.replace",
   "obsidian.frontmatter.patch",
   "obsidian.base.formula.patch",
@@ -75,12 +76,14 @@ export type OperationCockpitPage = {
   contractVersion: typeof OPERATION_COCKPIT_CONTRACT_VERSION;
   generatedAt: string;
   operations: OperationCockpitItem[];
+  backend?: { kind: "headless-filesystem" };
   nextCursor?: string;
 };
 
 const PLAN_REF_PREFIXES: Readonly<
   Record<z.infer<typeof OperationKindSchema>, string>
 > = {
+  "obsidian.operation.revert": "obsidian-operation-revert:v1:",
   "obsidian.note.replace": "obsidian-note-replace:v1:",
   "obsidian.frontmatter.patch": "obsidian-frontmatter-patch:v1:",
   "obsidian.base.formula.patch": "obsidian-base-formula-patch:v1:",
@@ -165,6 +168,7 @@ const CLOSABLE_KINDS = new Set<PendingOperationRow["operationKind"]>([
 function publicItem(
   row: PendingOperationRow,
   now: number,
+  filesystem: boolean,
 ): OperationCockpitItem {
   const parsed = PendingRowSchema.safeParse(row);
   if (!parsed.success) {
@@ -188,7 +192,7 @@ function publicItem(
     updatedAt: value.updatedAt,
     ageSeconds,
     nextAction: nextAction(value.status, value.operationKind),
-    closeAllowed: value.status === "outcome_unknown" && CLOSABLE_KINDS.has(value.operationKind),
+    closeAllowed: !filesystem && value.status === "outcome_unknown" && CLOSABLE_KINDS.has(value.operationKind),
   };
 }
 
@@ -196,6 +200,7 @@ export class OperationCockpit {
   constructor(
     private readonly sources: readonly PendingOperationSource[],
     private readonly now: () => number = Date.now,
+    private readonly filesystem = false,
   ) {}
 
   list(input: { limit?: number; cursor?: string; operationKind?: PendingOperationRow["operationKind"]; status?: PendingOperationRow["status"]; minAgeSeconds?: number } = {}): OperationCockpitPage {
@@ -234,8 +239,9 @@ export class OperationCockpit {
       contractVersion: OPERATION_COCKPIT_CONTRACT_VERSION,
       generatedAt,
       operations: visible.map((row) =>
-        publicItem(row, Date.parse(generatedAt)),
+        publicItem(row, Date.parse(generatedAt), this.filesystem),
       ),
+      ...(this.filesystem ? { backend: { kind: "headless-filesystem" as const } } : {}),
       ...(hasMore && visible.length > 0
         ? { nextCursor: encodeCursor(visible.at(-1)!) }
         : {}),

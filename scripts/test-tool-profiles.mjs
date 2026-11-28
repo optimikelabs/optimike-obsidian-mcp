@@ -72,7 +72,7 @@ for (const profile of ["standard", "authoring", "tasks"]) {
       !names.includes("bases_upsert_config"),
       `${profile}/${registrationMode} must keep whole-Base config replacement full-only`,
     );
-    if (registrationMode === "live" || registrationMode === "hybrid-live") {
+    if (["live", "hybrid-live", "headless-guarded", "headless-filesystem"].includes(registrationMode)) {
       assert.ok(
         names.includes("obsidian_list_pending_operations"),
         `${profile}/${registrationMode} lost the readonly operation cockpit`,
@@ -80,7 +80,7 @@ for (const profile of ["standard", "authoring", "tasks"]) {
     } else {
       assert.ok(
         !names.includes("obsidian_list_pending_operations"),
-        `${profile}/${registrationMode} exposed a cockpit without live journals`,
+        `${profile}/${registrationMode} exposed a cockpit without governed note journals`,
       );
     }
     for (const hidden of [
@@ -162,11 +162,11 @@ for (const profile of ["standard", "authoring"]) {
     registrationMode: "headless-guarded",
     availableStaticRequirements: WITH_CACHE,
   });
-  assert.ok(
-    guarded.includes("obsidian_manage_frontmatter"),
-    `${profile}/headless-guarded must keep the direct frontmatter fallback`,
-  );
-  assert.ok(!guarded.includes("obsidian_frontmatter_patch_plan"));
+  assert.ok(!guarded.includes("obsidian_manage_frontmatter"));
+  assert.ok(guarded.includes("obsidian_frontmatter_patch_plan"));
+  assert.ok(guarded.includes("obsidian_note_create_plan"));
+  assert.ok(!guarded.includes("obsidian_note_replace_plan"));
+  assert.ok(!guarded.includes("obsidian_operation_revert_plan"));
 
   for (const governed of [
     "obsidian_text_patch_plan",
@@ -175,6 +175,7 @@ for (const profile of ["standard", "authoring"]) {
     "obsidian_text_patch_recover",
   ]) {
     assert.ok(live.includes(governed), `${profile}/live lost ${governed}`);
+    assert.ok(guarded.includes(governed), `${profile}/headless-guarded lost ${governed}`);
   }
   assert.ok(!live.includes("obsidian_update_note"));
   assert.ok(!live.includes("obsidian_search_replace"));

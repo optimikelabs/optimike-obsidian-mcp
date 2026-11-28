@@ -6,12 +6,12 @@
     "vault-cache",
     "asset-policy"
   ],
-  "toolCount": 113,
+  "toolCount": 116,
   "classificationCounts": {
-    "canonical-unique": 51,
+    "canonical-unique": 50,
     "alias-redundant": 0,
     "compatibility-historical": 1,
-    "governed-operation": 45,
+    "governed-operation": 49,
     "diagnostic": 11,
     "administration": 5
   },
@@ -355,14 +355,23 @@
       "external_runtime_status",
       "external_stat",
       "list_all_tasks",
+      "obsidian_frontmatter_patch_apply",
+      "obsidian_frontmatter_patch_plan",
+      "obsidian_frontmatter_patch_recover",
+      "obsidian_frontmatter_patch_status",
       "obsidian_global_search",
       "obsidian_list_notes",
-      "obsidian_manage_frontmatter",
+      "obsidian_list_pending_operations",
+      "obsidian_note_create_apply",
+      "obsidian_note_create_plan",
+      "obsidian_note_create_status",
       "obsidian_read_note",
       "obsidian_runtime_maintenance",
       "obsidian_runtime_status",
-      "obsidian_search_replace",
-      "obsidian_update_note",
+      "obsidian_text_patch_apply",
+      "obsidian_text_patch_plan",
+      "obsidian_text_patch_recover",
+      "obsidian_text_patch_status",
       "obsidian_validate_format",
       "operon_adopt_task",
       "operon_build_context",
@@ -400,7 +409,6 @@
       "bases_list",
       "bases_query",
       "bases_upsert_config",
-      "bases_upsert_rows",
       "external_handoff",
       "external_list",
       "external_move_apply",
@@ -414,19 +422,34 @@
       "external_stat",
       "list_all_tasks",
       "obsidian_admin_filesystem",
-      "obsidian_batch_frontmatter",
       "obsidian_delete_note",
+      "obsidian_frontmatter_patch_apply",
+      "obsidian_frontmatter_patch_plan",
+      "obsidian_frontmatter_patch_recover",
+      "obsidian_frontmatter_patch_status",
       "obsidian_global_search",
       "obsidian_list_notes",
+      "obsidian_list_pending_operations",
       "obsidian_manage_canvas",
-      "obsidian_manage_frontmatter",
-      "obsidian_manage_tags",
       "obsidian_move_note",
+      "obsidian_note_create_apply",
+      "obsidian_note_create_plan",
+      "obsidian_note_create_status",
+      "obsidian_note_replace_apply",
+      "obsidian_note_replace_plan",
+      "obsidian_note_replace_recover",
+      "obsidian_note_replace_status",
+      "obsidian_operation_revert_apply",
+      "obsidian_operation_revert_plan",
+      "obsidian_operation_revert_recover",
+      "obsidian_operation_revert_status",
       "obsidian_read_note",
       "obsidian_runtime_maintenance",
       "obsidian_runtime_status",
-      "obsidian_search_replace",
-      "obsidian_update_note",
+      "obsidian_text_patch_apply",
+      "obsidian_text_patch_plan",
+      "obsidian_text_patch_recover",
+      "obsidian_text_patch_status",
       "obsidian_validate_format",
       "operon_adopt_task",
       "operon_build_context",
@@ -554,13 +577,22 @@
           "bases_get_schema",
           "bases_list",
           "bases_query",
+          "obsidian_frontmatter_patch_apply",
+          "obsidian_frontmatter_patch_plan",
+          "obsidian_frontmatter_patch_recover",
+          "obsidian_frontmatter_patch_status",
           "obsidian_global_search",
           "obsidian_list_notes",
-          "obsidian_manage_frontmatter",
+          "obsidian_list_pending_operations",
+          "obsidian_note_create_apply",
+          "obsidian_note_create_plan",
+          "obsidian_note_create_status",
           "obsidian_read_note",
           "obsidian_runtime_status",
-          "obsidian_search_replace",
-          "obsidian_update_note",
+          "obsidian_text_patch_apply",
+          "obsidian_text_patch_plan",
+          "obsidian_text_patch_recover",
+          "obsidian_text_patch_status",
           "obsidian_validate_format",
           "smart_semantic_search"
         ],
@@ -568,13 +600,30 @@
           "bases_get_schema",
           "bases_list",
           "bases_query",
+          "obsidian_frontmatter_patch_apply",
+          "obsidian_frontmatter_patch_plan",
+          "obsidian_frontmatter_patch_recover",
+          "obsidian_frontmatter_patch_status",
           "obsidian_global_search",
           "obsidian_list_notes",
-          "obsidian_manage_frontmatter",
+          "obsidian_list_pending_operations",
+          "obsidian_note_create_apply",
+          "obsidian_note_create_plan",
+          "obsidian_note_create_status",
+          "obsidian_note_replace_apply",
+          "obsidian_note_replace_plan",
+          "obsidian_note_replace_recover",
+          "obsidian_note_replace_status",
+          "obsidian_operation_revert_apply",
+          "obsidian_operation_revert_plan",
+          "obsidian_operation_revert_recover",
+          "obsidian_operation_revert_status",
           "obsidian_read_note",
           "obsidian_runtime_status",
-          "obsidian_search_replace",
-          "obsidian_update_note",
+          "obsidian_text_patch_apply",
+          "obsidian_text_patch_plan",
+          "obsidian_text_patch_recover",
+          "obsidian_text_patch_status",
           "obsidian_validate_format",
           "smart_semantic_search"
         ]
@@ -722,13 +771,22 @@
           "bases_get_schema",
           "bases_list",
           "bases_query",
+          "obsidian_frontmatter_patch_apply",
+          "obsidian_frontmatter_patch_plan",
+          "obsidian_frontmatter_patch_recover",
+          "obsidian_frontmatter_patch_status",
           "obsidian_global_search",
           "obsidian_list_notes",
-          "obsidian_manage_frontmatter",
+          "obsidian_list_pending_operations",
+          "obsidian_note_create_apply",
+          "obsidian_note_create_plan",
+          "obsidian_note_create_status",
           "obsidian_read_note",
           "obsidian_runtime_status",
-          "obsidian_search_replace",
-          "obsidian_update_note",
+          "obsidian_text_patch_apply",
+          "obsidian_text_patch_plan",
+          "obsidian_text_patch_recover",
+          "obsidian_text_patch_status",
           "obsidian_validate_format",
           "smart_semantic_search"
         ],
@@ -737,16 +795,31 @@
           "bases_get_schema",
           "bases_list",
           "bases_query",
-          "bases_upsert_rows",
+          "obsidian_frontmatter_patch_apply",
+          "obsidian_frontmatter_patch_plan",
+          "obsidian_frontmatter_patch_recover",
+          "obsidian_frontmatter_patch_status",
           "obsidian_global_search",
           "obsidian_list_notes",
+          "obsidian_list_pending_operations",
           "obsidian_manage_canvas",
-          "obsidian_manage_frontmatter",
-          "obsidian_manage_tags",
+          "obsidian_note_create_apply",
+          "obsidian_note_create_plan",
+          "obsidian_note_create_status",
+          "obsidian_note_replace_apply",
+          "obsidian_note_replace_plan",
+          "obsidian_note_replace_recover",
+          "obsidian_note_replace_status",
+          "obsidian_operation_revert_apply",
+          "obsidian_operation_revert_plan",
+          "obsidian_operation_revert_recover",
+          "obsidian_operation_revert_status",
           "obsidian_read_note",
           "obsidian_runtime_status",
-          "obsidian_search_replace",
-          "obsidian_update_note",
+          "obsidian_text_patch_apply",
+          "obsidian_text_patch_plan",
+          "obsidian_text_patch_recover",
+          "obsidian_text_patch_status",
           "obsidian_validate_format",
           "smart_semantic_search"
         ]
@@ -871,6 +944,7 @@
           "list_all_tasks",
           "obsidian_global_search",
           "obsidian_list_notes",
+          "obsidian_list_pending_operations",
           "obsidian_read_note",
           "obsidian_runtime_status",
           "obsidian_validate_format",
@@ -887,6 +961,7 @@
           "list_all_tasks",
           "obsidian_global_search",
           "obsidian_list_notes",
+          "obsidian_list_pending_operations",
           "obsidian_read_note",
           "obsidian_runtime_status",
           "obsidian_validate_format",
@@ -1243,14 +1318,23 @@
           "external_runtime_status",
           "external_stat",
           "list_all_tasks",
+          "obsidian_frontmatter_patch_apply",
+          "obsidian_frontmatter_patch_plan",
+          "obsidian_frontmatter_patch_recover",
+          "obsidian_frontmatter_patch_status",
           "obsidian_global_search",
           "obsidian_list_notes",
-          "obsidian_manage_frontmatter",
+          "obsidian_list_pending_operations",
+          "obsidian_note_create_apply",
+          "obsidian_note_create_plan",
+          "obsidian_note_create_status",
           "obsidian_read_note",
           "obsidian_runtime_maintenance",
           "obsidian_runtime_status",
-          "obsidian_search_replace",
-          "obsidian_update_note",
+          "obsidian_text_patch_apply",
+          "obsidian_text_patch_plan",
+          "obsidian_text_patch_recover",
+          "obsidian_text_patch_status",
           "obsidian_validate_format",
           "operon_adopt_task",
           "operon_build_context",
@@ -1288,7 +1372,6 @@
           "bases_list",
           "bases_query",
           "bases_upsert_config",
-          "bases_upsert_rows",
           "external_handoff",
           "external_list",
           "external_move_apply",
@@ -1302,19 +1385,34 @@
           "external_stat",
           "list_all_tasks",
           "obsidian_admin_filesystem",
-          "obsidian_batch_frontmatter",
           "obsidian_delete_note",
+          "obsidian_frontmatter_patch_apply",
+          "obsidian_frontmatter_patch_plan",
+          "obsidian_frontmatter_patch_recover",
+          "obsidian_frontmatter_patch_status",
           "obsidian_global_search",
           "obsidian_list_notes",
+          "obsidian_list_pending_operations",
           "obsidian_manage_canvas",
-          "obsidian_manage_frontmatter",
-          "obsidian_manage_tags",
           "obsidian_move_note",
+          "obsidian_note_create_apply",
+          "obsidian_note_create_plan",
+          "obsidian_note_create_status",
+          "obsidian_note_replace_apply",
+          "obsidian_note_replace_plan",
+          "obsidian_note_replace_recover",
+          "obsidian_note_replace_status",
+          "obsidian_operation_revert_apply",
+          "obsidian_operation_revert_plan",
+          "obsidian_operation_revert_recover",
+          "obsidian_operation_revert_status",
           "obsidian_read_note",
           "obsidian_runtime_maintenance",
           "obsidian_runtime_status",
-          "obsidian_search_replace",
-          "obsidian_update_note",
+          "obsidian_text_patch_apply",
+          "obsidian_text_patch_plan",
+          "obsidian_text_patch_recover",
+          "obsidian_text_patch_status",
           "obsidian_validate_format",
           "operon_adopt_task",
           "operon_build_context",
@@ -1680,14 +1778,23 @@
           "external_runtime_status",
           "external_stat",
           "list_all_tasks",
+          "obsidian_frontmatter_patch_apply",
+          "obsidian_frontmatter_patch_plan",
+          "obsidian_frontmatter_patch_recover",
+          "obsidian_frontmatter_patch_status",
           "obsidian_global_search",
           "obsidian_list_notes",
-          "obsidian_manage_frontmatter",
+          "obsidian_list_pending_operations",
+          "obsidian_note_create_apply",
+          "obsidian_note_create_plan",
+          "obsidian_note_create_status",
           "obsidian_read_note",
           "obsidian_runtime_maintenance",
           "obsidian_runtime_status",
-          "obsidian_search_replace",
-          "obsidian_update_note",
+          "obsidian_text_patch_apply",
+          "obsidian_text_patch_plan",
+          "obsidian_text_patch_recover",
+          "obsidian_text_patch_status",
           "obsidian_validate_format",
           "operon_adopt_task",
           "operon_build_context",
@@ -1724,7 +1831,6 @@
           "bases_get_schema",
           "bases_list",
           "bases_query",
-          "bases_upsert_rows",
           "external_handoff",
           "external_list",
           "external_move_apply",
@@ -1738,19 +1844,34 @@
           "external_stat",
           "list_all_tasks",
           "obsidian_admin_filesystem",
-          "obsidian_batch_frontmatter",
           "obsidian_delete_note",
+          "obsidian_frontmatter_patch_apply",
+          "obsidian_frontmatter_patch_plan",
+          "obsidian_frontmatter_patch_recover",
+          "obsidian_frontmatter_patch_status",
           "obsidian_global_search",
           "obsidian_list_notes",
+          "obsidian_list_pending_operations",
           "obsidian_manage_canvas",
-          "obsidian_manage_frontmatter",
-          "obsidian_manage_tags",
           "obsidian_move_note",
+          "obsidian_note_create_apply",
+          "obsidian_note_create_plan",
+          "obsidian_note_create_status",
+          "obsidian_note_replace_apply",
+          "obsidian_note_replace_plan",
+          "obsidian_note_replace_recover",
+          "obsidian_note_replace_status",
+          "obsidian_operation_revert_apply",
+          "obsidian_operation_revert_plan",
+          "obsidian_operation_revert_recover",
+          "obsidian_operation_revert_status",
           "obsidian_read_note",
           "obsidian_runtime_maintenance",
           "obsidian_runtime_status",
-          "obsidian_search_replace",
-          "obsidian_update_note",
+          "obsidian_text_patch_apply",
+          "obsidian_text_patch_plan",
+          "obsidian_text_patch_recover",
+          "obsidian_text_patch_status",
           "obsidian_validate_format",
           "operon_adopt_task",
           "operon_build_context",
@@ -2700,8 +2821,7 @@
       "annotationClass": "destructive",
       "registrationModes": [
         "live",
-        "hybrid-live",
-        "headless-filesystem"
+        "hybrid-live"
       ],
       "profiles": [
         "authoring",
@@ -2711,18 +2831,15 @@
       "profileModes": {
         "authoring": [
           "live",
-          "hybrid-live",
-          "headless-filesystem"
+          "hybrid-live"
         ],
         "full": [
           "live",
-          "hybrid-live",
-          "headless-filesystem"
+          "hybrid-live"
         ],
         "operational": [
           "live",
-          "hybrid-live",
-          "headless-filesystem"
+          "hybrid-live"
         ]
       }
     },
@@ -3233,30 +3350,6 @@
       }
     },
     {
-      "name": "obsidian_batch_frontmatter",
-      "canonicalName": "obsidian_batch_frontmatter",
-      "classification": "canonical-unique",
-      "group": "metadata.direct.batch",
-      "family": "frontmatter-batch",
-      "surfaceClass": "direct",
-      "annotationClass": "destructive",
-      "registrationModes": [
-        "headless-filesystem"
-      ],
-      "profiles": [
-        "full",
-        "operational"
-      ],
-      "profileModes": {
-        "full": [
-          "headless-filesystem"
-        ],
-        "operational": [
-          "headless-filesystem"
-        ]
-      }
-    },
-    {
       "name": "obsidian_canvas_create_apply",
       "canonicalName": "obsidian_canvas_create_apply",
       "classification": "governed-operation",
@@ -3541,7 +3634,9 @@
       "annotationClass": "governed-mutation",
       "registrationModes": [
         "live",
-        "hybrid-live"
+        "hybrid-live",
+        "headless-guarded",
+        "headless-filesystem"
       ],
       "profiles": [
         "standard",
@@ -3552,19 +3647,27 @@
       "profileModes": {
         "standard": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "authoring": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "full": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "operational": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ]
       },
       "lifecycleRole": "apply"
@@ -3579,7 +3682,9 @@
       "annotationClass": "governed-plan",
       "registrationModes": [
         "live",
-        "hybrid-live"
+        "hybrid-live",
+        "headless-guarded",
+        "headless-filesystem"
       ],
       "profiles": [
         "standard",
@@ -3590,19 +3695,27 @@
       "profileModes": {
         "standard": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "authoring": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "full": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "operational": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ]
       },
       "lifecycleRole": "plan"
@@ -3617,7 +3730,9 @@
       "annotationClass": "governed-mutation",
       "registrationModes": [
         "live",
-        "hybrid-live"
+        "hybrid-live",
+        "headless-guarded",
+        "headless-filesystem"
       ],
       "profiles": [
         "standard",
@@ -3628,19 +3743,27 @@
       "profileModes": {
         "standard": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "authoring": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "full": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "operational": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ]
       },
       "lifecycleRole": "recover"
@@ -3655,7 +3778,9 @@
       "annotationClass": "read-only",
       "registrationModes": [
         "live",
-        "hybrid-live"
+        "hybrid-live",
+        "headless-guarded",
+        "headless-filesystem"
       ],
       "profiles": [
         "standard",
@@ -3666,19 +3791,27 @@
       "profileModes": {
         "standard": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "authoring": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "full": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "operational": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ]
       },
       "lifecycleRole": "status"
@@ -3882,7 +4015,9 @@
       "annotationClass": "read-only",
       "registrationModes": [
         "live",
-        "hybrid-live"
+        "hybrid-live",
+        "headless-guarded",
+        "headless-filesystem"
       ],
       "profiles": [
         "standard",
@@ -3894,23 +4029,33 @@
       "profileModes": {
         "standard": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "authoring": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "tasks": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "full": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "operational": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ]
       }
     },
@@ -3969,34 +4114,15 @@
       "annotationClass": "destructive",
       "registrationModes": [
         "live",
-        "hybrid-live",
-        "headless-guarded",
-        "headless-filesystem"
+        "hybrid-live"
       ],
       "profiles": [
-        "standard",
-        "authoring",
-        "full",
-        "operational"
+        "full"
       ],
       "profileModes": {
-        "standard": [
-          "headless-guarded",
-          "headless-filesystem"
-        ],
-        "authoring": [
-          "headless-guarded",
-          "headless-filesystem"
-        ],
         "full": [
           "live",
-          "hybrid-live",
-          "headless-guarded",
-          "headless-filesystem"
-        ],
-        "operational": [
-          "headless-guarded",
-          "headless-filesystem"
+          "hybrid-live"
         ]
       },
       "replacement": {
@@ -4012,10 +4138,7 @@
         "tools": [
           "obsidian_manage_frontmatter"
         ],
-        "modes": [
-          "headless-guarded",
-          "headless-filesystem"
-        ]
+        "modes": []
       }
     },
     {
@@ -4028,8 +4151,7 @@
       "annotationClass": "destructive",
       "registrationModes": [
         "live",
-        "hybrid-live",
-        "headless-filesystem"
+        "hybrid-live"
       ],
       "profiles": [
         "authoring",
@@ -4039,18 +4161,15 @@
       "profileModes": {
         "authoring": [
           "live",
-          "hybrid-live",
-          "headless-filesystem"
+          "hybrid-live"
         ],
         "full": [
           "live",
-          "hybrid-live",
-          "headless-filesystem"
+          "hybrid-live"
         ],
         "operational": [
           "live",
-          "hybrid-live",
-          "headless-filesystem"
+          "hybrid-live"
         ]
       }
     },
@@ -4088,7 +4207,9 @@
       "annotationClass": "governed-mutation",
       "registrationModes": [
         "live",
-        "hybrid-live"
+        "hybrid-live",
+        "headless-guarded",
+        "headless-filesystem"
       ],
       "profiles": [
         "standard",
@@ -4099,19 +4220,27 @@
       "profileModes": {
         "standard": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "authoring": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "full": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "operational": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ]
       },
       "lifecycleRole": "apply"
@@ -4126,7 +4255,9 @@
       "annotationClass": "governed-plan",
       "registrationModes": [
         "live",
-        "hybrid-live"
+        "hybrid-live",
+        "headless-guarded",
+        "headless-filesystem"
       ],
       "profiles": [
         "standard",
@@ -4137,19 +4268,27 @@
       "profileModes": {
         "standard": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "authoring": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "full": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "operational": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ]
       },
       "lifecycleRole": "plan"
@@ -4164,7 +4303,9 @@
       "annotationClass": "read-only",
       "registrationModes": [
         "live",
-        "hybrid-live"
+        "hybrid-live",
+        "headless-guarded",
+        "headless-filesystem"
       ],
       "profiles": [
         "standard",
@@ -4175,19 +4316,27 @@
       "profileModes": {
         "standard": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "authoring": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "full": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "operational": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
         ]
       },
       "lifecycleRole": "status"
@@ -4442,7 +4591,8 @@
       "annotationClass": "governed-mutation",
       "registrationModes": [
         "live",
-        "hybrid-live"
+        "hybrid-live",
+        "headless-filesystem"
       ],
       "profiles": [
         "standard",
@@ -4453,19 +4603,23 @@
       "profileModes": {
         "standard": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "authoring": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "full": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "operational": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ]
       },
       "lifecycleRole": "apply"
@@ -4480,7 +4634,8 @@
       "annotationClass": "governed-plan",
       "registrationModes": [
         "live",
-        "hybrid-live"
+        "hybrid-live",
+        "headless-filesystem"
       ],
       "profiles": [
         "standard",
@@ -4491,19 +4646,23 @@
       "profileModes": {
         "standard": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "authoring": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "full": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "operational": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ]
       },
       "lifecycleRole": "plan"
@@ -4518,7 +4677,8 @@
       "annotationClass": "governed-mutation",
       "registrationModes": [
         "live",
-        "hybrid-live"
+        "hybrid-live",
+        "headless-filesystem"
       ],
       "profiles": [
         "standard",
@@ -4529,19 +4689,23 @@
       "profileModes": {
         "standard": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "authoring": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "full": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "operational": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ]
       },
       "lifecycleRole": "recover"
@@ -4556,7 +4720,8 @@
       "annotationClass": "read-only",
       "registrationModes": [
         "live",
-        "hybrid-live"
+        "hybrid-live",
+        "headless-filesystem"
       ],
       "profiles": [
         "standard",
@@ -4567,19 +4732,23 @@
       "profileModes": {
         "standard": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "authoring": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "full": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "operational": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ]
       },
       "lifecycleRole": "status"
@@ -4610,6 +4779,138 @@
           "hybrid-live"
         ]
       }
+    },
+    {
+      "name": "obsidian_operation_revert_apply",
+      "canonicalName": "obsidian_operation_revert_apply",
+      "classification": "governed-operation",
+      "group": "notes.governed",
+      "family": "operation-revert",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-mutation",
+      "registrationModes": [
+        "headless-filesystem"
+      ],
+      "profiles": [
+        "standard",
+        "authoring",
+        "full",
+        "operational"
+      ],
+      "profileModes": {
+        "standard": [
+          "headless-filesystem"
+        ],
+        "authoring": [
+          "headless-filesystem"
+        ],
+        "full": [
+          "headless-filesystem"
+        ],
+        "operational": [
+          "headless-filesystem"
+        ]
+      },
+      "lifecycleRole": "apply"
+    },
+    {
+      "name": "obsidian_operation_revert_plan",
+      "canonicalName": "obsidian_operation_revert_plan",
+      "classification": "governed-operation",
+      "group": "notes.governed",
+      "family": "operation-revert",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-plan",
+      "registrationModes": [
+        "headless-filesystem"
+      ],
+      "profiles": [
+        "standard",
+        "authoring",
+        "full",
+        "operational"
+      ],
+      "profileModes": {
+        "standard": [
+          "headless-filesystem"
+        ],
+        "authoring": [
+          "headless-filesystem"
+        ],
+        "full": [
+          "headless-filesystem"
+        ],
+        "operational": [
+          "headless-filesystem"
+        ]
+      },
+      "lifecycleRole": "plan"
+    },
+    {
+      "name": "obsidian_operation_revert_recover",
+      "canonicalName": "obsidian_operation_revert_recover",
+      "classification": "governed-operation",
+      "group": "notes.governed",
+      "family": "operation-revert",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-mutation",
+      "registrationModes": [
+        "headless-filesystem"
+      ],
+      "profiles": [
+        "standard",
+        "authoring",
+        "full",
+        "operational"
+      ],
+      "profileModes": {
+        "standard": [
+          "headless-filesystem"
+        ],
+        "authoring": [
+          "headless-filesystem"
+        ],
+        "full": [
+          "headless-filesystem"
+        ],
+        "operational": [
+          "headless-filesystem"
+        ]
+      },
+      "lifecycleRole": "recover"
+    },
+    {
+      "name": "obsidian_operation_revert_status",
+      "canonicalName": "obsidian_operation_revert_status",
+      "classification": "governed-operation",
+      "group": "notes.governed",
+      "family": "operation-revert",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "headless-filesystem"
+      ],
+      "profiles": [
+        "standard",
+        "authoring",
+        "full",
+        "operational"
+      ],
+      "profileModes": {
+        "standard": [
+          "headless-filesystem"
+        ],
+        "authoring": [
+          "headless-filesystem"
+        ],
+        "full": [
+          "headless-filesystem"
+        ],
+        "operational": [
+          "headless-filesystem"
+        ]
+      },
+      "lifecycleRole": "status"
     },
     {
       "name": "obsidian_read_note",
@@ -4792,34 +5093,15 @@
       "annotationClass": "destructive",
       "registrationModes": [
         "live",
-        "hybrid-live",
-        "headless-guarded",
-        "headless-filesystem"
+        "hybrid-live"
       ],
       "profiles": [
-        "standard",
-        "authoring",
-        "full",
-        "operational"
+        "full"
       ],
       "profileModes": {
-        "standard": [
-          "headless-guarded",
-          "headless-filesystem"
-        ],
-        "authoring": [
-          "headless-guarded",
-          "headless-filesystem"
-        ],
         "full": [
           "live",
-          "hybrid-live",
-          "headless-guarded",
-          "headless-filesystem"
-        ],
-        "operational": [
-          "headless-guarded",
-          "headless-filesystem"
+          "hybrid-live"
         ]
       },
       "replacement": {
@@ -4835,10 +5117,7 @@
         "tools": [
           "obsidian_search_replace"
         ],
-        "modes": [
-          "headless-guarded",
-          "headless-filesystem"
-        ]
+        "modes": []
       }
     },
     {
@@ -4849,158 +5128,6 @@
       "family": "text-patch",
       "surfaceClass": "canonical",
       "annotationClass": "governed-mutation",
-      "registrationModes": [
-        "live",
-        "hybrid-live"
-      ],
-      "profiles": [
-        "standard",
-        "authoring",
-        "full",
-        "operational"
-      ],
-      "profileModes": {
-        "standard": [
-          "live",
-          "hybrid-live"
-        ],
-        "authoring": [
-          "live",
-          "hybrid-live"
-        ],
-        "full": [
-          "live",
-          "hybrid-live"
-        ],
-        "operational": [
-          "live",
-          "hybrid-live"
-        ]
-      },
-      "lifecycleRole": "apply"
-    },
-    {
-      "name": "obsidian_text_patch_plan",
-      "canonicalName": "obsidian_text_patch_plan",
-      "classification": "governed-operation",
-      "group": "notes.governed",
-      "family": "text-patch",
-      "surfaceClass": "canonical",
-      "annotationClass": "governed-plan",
-      "registrationModes": [
-        "live",
-        "hybrid-live"
-      ],
-      "profiles": [
-        "standard",
-        "authoring",
-        "full",
-        "operational"
-      ],
-      "profileModes": {
-        "standard": [
-          "live",
-          "hybrid-live"
-        ],
-        "authoring": [
-          "live",
-          "hybrid-live"
-        ],
-        "full": [
-          "live",
-          "hybrid-live"
-        ],
-        "operational": [
-          "live",
-          "hybrid-live"
-        ]
-      },
-      "lifecycleRole": "plan"
-    },
-    {
-      "name": "obsidian_text_patch_recover",
-      "canonicalName": "obsidian_text_patch_recover",
-      "classification": "governed-operation",
-      "group": "notes.governed",
-      "family": "text-patch",
-      "surfaceClass": "canonical",
-      "annotationClass": "governed-mutation",
-      "registrationModes": [
-        "live",
-        "hybrid-live"
-      ],
-      "profiles": [
-        "standard",
-        "authoring",
-        "full",
-        "operational"
-      ],
-      "profileModes": {
-        "standard": [
-          "live",
-          "hybrid-live"
-        ],
-        "authoring": [
-          "live",
-          "hybrid-live"
-        ],
-        "full": [
-          "live",
-          "hybrid-live"
-        ],
-        "operational": [
-          "live",
-          "hybrid-live"
-        ]
-      },
-      "lifecycleRole": "recover"
-    },
-    {
-      "name": "obsidian_text_patch_status",
-      "canonicalName": "obsidian_text_patch_status",
-      "classification": "governed-operation",
-      "group": "notes.governed",
-      "family": "text-patch",
-      "surfaceClass": "canonical",
-      "annotationClass": "read-only",
-      "registrationModes": [
-        "live",
-        "hybrid-live"
-      ],
-      "profiles": [
-        "standard",
-        "authoring",
-        "full",
-        "operational"
-      ],
-      "profileModes": {
-        "standard": [
-          "live",
-          "hybrid-live"
-        ],
-        "authoring": [
-          "live",
-          "hybrid-live"
-        ],
-        "full": [
-          "live",
-          "hybrid-live"
-        ],
-        "operational": [
-          "live",
-          "hybrid-live"
-        ]
-      },
-      "lifecycleRole": "status"
-    },
-    {
-      "name": "obsidian_update_note",
-      "canonicalName": "obsidian_update_note",
-      "classification": "canonical-unique",
-      "group": "notes.direct.common",
-      "family": "notes-core",
-      "surfaceClass": "direct",
-      "annotationClass": "destructive",
       "registrationModes": [
         "live",
         "hybrid-live",
@@ -5015,10 +5142,14 @@
       ],
       "profileModes": {
         "standard": [
+          "live",
+          "hybrid-live",
           "headless-guarded",
           "headless-filesystem"
         ],
         "authoring": [
+          "live",
+          "hybrid-live",
           "headless-guarded",
           "headless-filesystem"
         ],
@@ -5029,8 +5160,177 @@
           "headless-filesystem"
         ],
         "operational": [
+          "live",
+          "hybrid-live",
           "headless-guarded",
           "headless-filesystem"
+        ]
+      },
+      "lifecycleRole": "apply"
+    },
+    {
+      "name": "obsidian_text_patch_plan",
+      "canonicalName": "obsidian_text_patch_plan",
+      "classification": "governed-operation",
+      "group": "notes.governed",
+      "family": "text-patch",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-plan",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": [
+        "standard",
+        "authoring",
+        "full",
+        "operational"
+      ],
+      "profileModes": {
+        "standard": [
+          "live",
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "authoring": [
+          "live",
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "full": [
+          "live",
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
+          "live",
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      },
+      "lifecycleRole": "plan"
+    },
+    {
+      "name": "obsidian_text_patch_recover",
+      "canonicalName": "obsidian_text_patch_recover",
+      "classification": "governed-operation",
+      "group": "notes.governed",
+      "family": "text-patch",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-mutation",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": [
+        "standard",
+        "authoring",
+        "full",
+        "operational"
+      ],
+      "profileModes": {
+        "standard": [
+          "live",
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "authoring": [
+          "live",
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "full": [
+          "live",
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
+          "live",
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      },
+      "lifecycleRole": "recover"
+    },
+    {
+      "name": "obsidian_text_patch_status",
+      "canonicalName": "obsidian_text_patch_status",
+      "classification": "governed-operation",
+      "group": "notes.governed",
+      "family": "text-patch",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": [
+        "standard",
+        "authoring",
+        "full",
+        "operational"
+      ],
+      "profileModes": {
+        "standard": [
+          "live",
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "authoring": [
+          "live",
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "full": [
+          "live",
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
+          "live",
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      },
+      "lifecycleRole": "status"
+    },
+    {
+      "name": "obsidian_update_note",
+      "canonicalName": "obsidian_update_note",
+      "classification": "canonical-unique",
+      "group": "notes.direct.common",
+      "family": "notes-core",
+      "surfaceClass": "direct",
+      "annotationClass": "destructive",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "full"
+      ],
+      "profileModes": {
+        "full": [
+          "live",
+          "hybrid-live"
         ]
       },
       "replacement": {
@@ -5046,10 +5346,7 @@
         "tools": [
           "obsidian_update_note"
         ],
-        "modes": [
-          "headless-guarded",
-          "headless-filesystem"
-        ]
+        "modes": []
       }
     },
     {

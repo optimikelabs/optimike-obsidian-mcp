@@ -340,13 +340,14 @@ const start = async () => {
       obsidianService,
       vaultCacheService,
     );
+    await governedNoteReplaceRuntime?.restoreInterruptedFilesystemReplacements();
     governedBaseFormulaRuntime =
       createGovernedBaseFormulaRuntime(obsidianService);
     governedCanvasRuntime = createGovernedCanvasRuntime(obsidianService);
     logger.info(
       governedNoteReplaceRuntime
         ? "Governed note-replacement runtime is enabled and process-shared."
-        : "Governed note-replacement runtime is unavailable without a shared live Obsidian REST service.",
+        : "Governed note runtime is unavailable in this runtime mode.",
       startupContext,
     );
     logger.info("Shared services instantiated.", startupContext);

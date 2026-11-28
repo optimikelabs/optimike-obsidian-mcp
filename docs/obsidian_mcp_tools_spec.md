@@ -49,11 +49,10 @@ without them. See
 - `headless-readonly`: read/search/tasks/semantic/runtime/format validation and
   local readonly Bases fallback. Operon tools can only serve a previously
   validated stale snapshot.
-- `headless-guarded`: `headless-readonly` plus bounded filesystem writes for
-  note append/prepend, exact search-replace, and frontmatter `set`. Operon remains
-  read-only.
-- `headless-filesystem`: `headless-guarded` plus explicit local filesystem
-  features: tags, admin move/archive/delete, batch frontmatter, minimal Bases
+- `headless-guarded`: `headless-readonly` plus governed text and frontmatter
+  patches, durable note creation and the operations cockpit. Operon remains read-only.
+- `headless-filesystem`: `headless-guarded` plus governed note replacement and
+  revert, admin move/archive/delete, minimal Bases
   writes, and JSON Canvas helpers. Operon remains read-only.
 
 ### Local REST API 5.x contract
@@ -89,11 +88,9 @@ The family is live/hybrid-live only and has no recover or undo operation. Missin
 - `obsidian_list_notes`: list notes and folders, using REST or cache/filesystem.
 - `obsidian_global_search`: text/regex search across cached vault content.
 - `obsidian_update_note`: live REST note update for an explicit `filePath` or
-  the live `activeFile`, or guarded headless append/prepend for an explicit
-  `filePath` in filesystem modes.
+  the live `activeFile`. Prepend inserts below the frontmatter.
 - `obsidian_search_replace`: live REST search/replace for an explicit
-  `filePath` or the live `activeFile`, or guarded exact `filePath`
-  search/replace in headless write modes.
+  `filePath` or the live `activeFile`.
 - `obsidian_delete_note`: live REST delete with no plan or proof (hidden in
   `operational` in favour of the governed `obsidian_note_delete_*` family, see
   [governed note deletion](governed-note-delete.md)); in `headless-filesystem`,
@@ -217,12 +214,9 @@ durable recovery. See [the P3 contract](governed-canvas-p3.md).
 ## Metadata And Tags
 
 - `obsidian_manage_frontmatter`: live frontmatter operations using Local REST
-  API 5.x typed JSON values; in headless guarded modes, supports bounded
-  filesystem `set`.
-- `obsidian_batch_frontmatter`: filesystem batch frontmatter operations with
-  dry-run/default safety.
-- `obsidian_manage_tags`: live tag tool, or filesystem tag add/remove/list,
-  local index/audit, and dry-run rename in `headless-filesystem`.
+  API 5.x typed JSON values.
+- `obsidian_manage_tags`: live tag operations. In headless use governed text
+  and frontmatter patches to edit inline and frontmatter tags.
 
 ## Tasks
 
@@ -344,8 +338,8 @@ semantic manifest/vector metadata are cached locally for faster warm refreshes.
   `headless-filesystem`.
 - `bases_upsert_config`: live REST config upsert, or guarded YAML config update
   in `headless-filesystem`.
-- `bases_upsert_rows`: live REST row upsert, or guarded Markdown frontmatter
-  `set` operations in `headless-filesystem`.
+- `bases_upsert_rows`: live REST row upsert. In headless, edit note properties
+  through `obsidian_frontmatter_patch_plan/apply`.
 
 Local/headless Bases support does not evaluate Obsidian formulas, calculated
 properties, plugin-specific filters, or exact UI view semantics.

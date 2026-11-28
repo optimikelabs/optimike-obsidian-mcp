@@ -243,12 +243,12 @@ function storedProjection(
   }
   const composed = parsed.data;
   if (composed.proof.beforeContentSha256 !== view.beforeSha256 ||
-      (!composed.frontmatterProof && !view.frontmatterFormat?.normalization.applied && composed.proof.nextContentSha256 !== view.afterSha256)) {
+      (!composed.frontmatterProof && !view.frontmatterFormat?.normalization.applied && composed.proof.nextContentSha256 !== (view.projectedSha256 ?? view.afterSha256))) {
     throw new McpError(BaseErrorCode.CONFLICT, "The text patch proof does not match the sealed child.", { reason: "text_patch_composition_invalid" });
   }
   const normalization = view.frontmatterFormat?.normalization;
   if (normalization?.applied && (normalization.sourceSha256 !== composed.proof.nextContentSha256 ||
-      (composed.frontmatterProof ? normalization.afterFrontmatterSha256 !== composed.frontmatterProof.beforeFrontmatterSha256 : normalization.normalizedSha256 !== view.afterSha256))) {
+      (composed.frontmatterProof ? normalization.afterFrontmatterSha256 !== composed.frontmatterProof.beforeFrontmatterSha256 : normalization.normalizedSha256 !== (view.projectedSha256 ?? view.afterSha256)))) {
     throw new McpError(BaseErrorCode.CONFLICT, "The normalized frontmatter proof does not match the sealed text patch.", { reason: "text_patch_normalization_proof_mismatch" });
   }
   if (
@@ -259,7 +259,7 @@ function storedProjection(
         composed.proof.afterBodySha256 ||
         composed.composition.intermediateContentSha256 !==
           composed.proof.nextContentSha256 ||
-        composed.composition.finalContentSha256 !== view.afterSha256 ||
+        composed.composition.finalContentSha256 !== (view.projectedSha256 ?? view.afterSha256) ||
         composed.proof.beforeContentSha256 !== view.beforeSha256))
   )
     throw new McpError(
@@ -425,7 +425,7 @@ export class GovernedTextPatchRuntime {
     let frontmatter;
     let normalized;
     try {
-      compiled = compileTextPatch(source.content, input.operations, path);
+      compiled = compileTextPatch(source.content, input.operations, path, this.noteRuntime.isFilesystem);
       normalized = await this.noteRuntime.inspectFrontmatter(compiled.nextContent, source.bindingFingerprint);
       if (input.frontmatterOperations) {
         assertWriteAllowed({

@@ -7,8 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Governed Markdown body and frontmatter patches, durable note creation and the
+  pending-operation cockpit work without Desktop in both writable headless modes.
+  `headless-filesystem` also supports whole-note replacement and governed revert.
+  Headless plans seal the on-disk hash and configured date policy. Applies use
+  cross-process locking, durable receipts and an on-disk postflight.
+
 ### Fixed
 
+- Replace existing governed notes without a transient absence on compatible
+  Linux and macOS filesystems. Other filesystems fail closed unless an operator
+  explicitly enables the legacy fallback for a vault without bidirectional sync.
+- Require the vault owner's explicit timezone and preserve the modification stamp
+  within the configured interval. Hide remaining direct Markdown editors in
+  headless, including Base row upsert, and insert compatibility prepends below the YAML envelope.
+- Probe atomic exchange on the target filesystem before sealing an existing-note
+  plan. Restore displaced concurrent edits by exchange, or through a sealed
+  revert if automatic restoration cannot be verified. Reconcile exchange witnesses
+  at startup and detect quoted top-level Excalidraw keys.
+- Offer restoration only for verified displaced edits and keep newer on-disk
+  edits in place. Clean empty exchange probes at startup.
+- Preserve the published and observed versions when a headless postflight
+  detects a concurrent external edit. Keep the result uncertain and allow a
+  separately sealed revert against the observed hash in full write mode.
+- Protect headless publication from external edits with a verified displaced
+  file and exclusive linking. Reconcile interrupted staging and creation,
+  retry sharing violations on Windows and share locks by vault.
+- Honor explicit timezone, YAML date types, date change tracking and minimum
+  update intervals in governed headless writes. Route direct search/replace
+  and single-property frontmatter edits to the governed headless tools.
 - Serialize headless filesystem mutations per file within a server process.
   Recheck the content hash or target absence before replacement and discard the
   temporary file on conflict. Reject stale Canvas edits and Canvas or Base

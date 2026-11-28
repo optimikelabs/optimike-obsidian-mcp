@@ -480,6 +480,10 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "semantic_sections_unavailable",
   "atomic_write_creation_property_missing",
   "date_preparation_unverified",
+  "headless_date_policy_unavailable",
+  "headless_atomic_exchange_unavailable",
+  "headless_note_path_spelling",
+  "headless_revert_target_missing",
   "date_preparation_bridge_upgrade_required",
   "date_preparation_fdm_pending",
   "date_preparation_not_started",
@@ -704,6 +708,11 @@ function safeDiagnosticFields(
 }
 
 function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
+  if (reasonCode === "headless_date_policy_unavailable")
+    return "Headless governed writes require supported Frontmatter Date Manager settings and OPTIMIKE_VAULT_TIMEZONE matching the process.";
+  if (reasonCode === "headless_atomic_exchange_unavailable")
+    return "This filesystem cannot atomically exchange an existing note. Use a supported filesystem or the live runtime.";
+  if (reasonCode === "headless_revert_target_missing") return "The note no longer exists.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_tool_arguments")
     return "Invalid tool arguments. See validationIssues for the field and reason.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === BASE_FORMULA_ENGINE_REFUSAL)
