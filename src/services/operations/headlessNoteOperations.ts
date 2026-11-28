@@ -381,9 +381,7 @@ export class HeadlessNoteOperations {
 
   private async withCache(row: HeadlessRow<Snapshot>, files: HeadlessVaultFiles, journal: HeadlessOperationJournal<Snapshot>) {
     if (row.phase !== "committed" && row.phase !== "abandoned") return this.receipt(row);
-    if (row.postflightVerified !== undefined) {
-      return { ...this.receipt(row, row.postflightVerified), cache: "refreshed" };
-    }
+    if (row.postflightVerified !== undefined) return this.receipt(row);
     const plan = row.payload;
     const complete = row.phase === "committed" && this.tryObserve(files, plan).complete;
     let verified = complete && plan.intent.kind === "delete";
@@ -421,6 +419,7 @@ export class HeadlessNoteOperations {
       planRef: PREFIX[intent.kind] + row.id, planDigest: digest, affectedPaths,
       phase: row.phase === "planned" ? "planned" : "terminal",
       outcome: row.phase === "planned" ? null : pending ? "outcome_unknown" : row.phase,
+      ...(row.postflightVerified !== undefined ? { cache: "recorded", postflightSource: "recorded" } as const : {}),
       ...(reason ? { reasonCode: reason } : {}),
       applyAllowed: row.phase === "planned", recoveryAllowed: pending && recoverable,
       abandonAllowed: pending && needsRepair,

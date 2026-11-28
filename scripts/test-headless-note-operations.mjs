@@ -87,6 +87,7 @@ const lifecycle = (kind, role, plan, idempotencyKey) => call(`obsidian_note_${ki
   planRef: plan.planRef, ...(idempotencyKey ? { idempotencyKey } : {}),
 });
 const linkQuery = filePath => call("obsidian_note_links", { filePath });
+const recorded = receipt => ({ ...receipt, cache: "recorded", postflightSource: "recorded" });
 
 try {
   if (process.argv[2] === "--legacy") {
@@ -150,7 +151,7 @@ try {
     const moved = await lifecycle("move", "apply", planned, "first");
     assert.equal(moved.outcome, "committed");
     assert.equal(moved.cache, "refreshed");
-    assert.equal((await lifecycle("move", "apply", planned, "first")).outcome, "committed");
+    assert.deepEqual(await lifecycle("move", "apply", planned, "first"), recorded(moved));
     const expected = (prefix + body).replaceAll("[[Old", "[[New/Target").replaceAll("../Old.md", "New/Target.md");
     assert.equal(await read("Reader/Links.md"), expected + opaque);
     assert.equal(await read("New/Target.md"), "original\n");
@@ -215,7 +216,7 @@ try {
     assert.equal(await read("Trash/Reader/Crash link.md"), "existing trash");
     assert.equal(await read(deletion.trash.path), "[[Crash moved]]");
     await put(deletion.trash.path, "externally changed trash contents");
-    assert.deepEqual(await lifecycle("delete", "status", deletion), trashed);
+    assert.deepEqual(await lifecycle("delete", "status", deletion), recorded(trashed));
     assert.equal((await linkQuery("Reader/Trash backlink.md")).outgoing[0].resolution.status, "unresolved");
 
     await settings({});
@@ -252,7 +253,7 @@ try {
     assert((await read("Reader/Mover references.md")).includes("[[Moved|keep %% private %% label]]"));
     await put("Reader/Moved.md", "new candidate introduced outside the journal");
     await start("dist/index.js");
-    assert.deepEqual(await lifecycle("move", "status", relatives), relocated);
+    assert.deepEqual(await lifecycle("move", "status", relatives), recorded(relocated));
 
     await put("Proof.md", "file for postflight");
     await put("Reader/Proof link.md", "[[Proof]]");
@@ -261,7 +262,7 @@ try {
     const firstProof = await lifecycle("move", "apply", postflight, "verify-postflight");
     assert.equal(firstProof.outcome, "committed");
     assert.equal(firstProof.graph_postflight, "indeterminate");
-    assert.deepEqual(await lifecycle("move", "status", postflight), firstProof);
+    assert.deepEqual(await lifecycle("move", "status", postflight), recorded(firstProof));
 
     await mkdir(at("A"));
     await mkdir(at("C"));

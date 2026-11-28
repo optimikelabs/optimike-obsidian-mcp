@@ -135,8 +135,9 @@ destination inside the vault without a Desktop system-trash adapter.
 [Obsidian Desktop defaults to system trash](https://obsidian.md/help/manage-notes).
 
 Both operations update the affected cache and index paths and re-read the
-filesystem for the postflight receipt. Later status calls return that recorded
-completion evidence. After interruption, call `*_status`.
+filesystem for the postflight receipt. Later status calls return that completion
+evidence with `cache: "recorded"` and `postflightSource: "recorded"`. After
+interruption, call `*_status`.
 Use `*_recover` with the same reference and key when `recoveryAllowed` is true.
 If an external edit prevents recovery, `abandonAllowed` permits
 `*_recover` with `action: "abandon"`. This releases the reservation for manual

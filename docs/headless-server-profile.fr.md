@@ -138,7 +138,8 @@ la corbeille système. [Obsidian Desktop utilise par défaut la corbeille systè
 
 Les deux opérations actualisent les chemins touchés dans le cache et l’index.
 Le reçu de vérification s’appuie sur une relecture. Les appels de statut
-suivants rendent la preuve enregistrée à la fin de l’opération. Après une interruption,
+suivants rendent la preuve de fin d’opération avec `cache: "recorded"` et
+`postflightSource: "recorded"`. Après une interruption,
 appeler `*_status` puis `*_recover` avec la même référence et clé si
 `recoveryAllowed` est vrai. Si une édition externe empêche la reprise,
 `abandonAllowed` permet d’appeler `*_recover` avec `action: "abandon"`.
