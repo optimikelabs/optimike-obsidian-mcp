@@ -408,9 +408,15 @@ export const processObsidianListNotes = async (
 
     // --- Step 2: Format the tree and count entries ---
     const formatContext = { ...context, operation: "formatResponse" };
-    const directoryPath = params.responseMode === "compact"
-      ? cacheListing?.vaultDirectory ?? effectiveDirPath
+    const preserveDirectorySpelling =
+      effectiveDirPath === (normalizeVaultSlashes(dirPath) || "/") &&
+      (!cacheListing || cacheListing.rawDirectory === effectiveDirPath);
+    const rawDirectory = preserveDirectorySpelling
+      ? dirPathForLog
       : cacheListing?.rawDirectory ?? effectiveDirPath;
+    const directoryPath = !preserveDirectorySpelling && params.responseMode === "compact"
+      ? cacheListing?.vaultDirectory ?? effectiveDirPath
+      : rawDirectory;
     if (fileTree.length === 0) {
       logger.debug(
         "Directory is empty or all items were filtered out.",
@@ -428,7 +434,7 @@ export const processObsidianListNotes = async (
 
     const { tree, count } = formatTree(fileTree);
     if (params.responseMode === "compact") {
-      const allEntries = flattenTree(fileTree, cacheListing?.rawDirectory ?? effectiveDirPath);
+      const allEntries = flattenTree(fileTree, rawDirectory);
       const offset = parseCursor(params.cursor);
       const limit = params.limit ?? 100;
       const entries = allEntries.slice(offset, offset + limit);

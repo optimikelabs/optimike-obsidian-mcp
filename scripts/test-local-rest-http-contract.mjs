@@ -25,6 +25,10 @@ const aliasNames = [
   [' Leading.md', '\u00a0Leading.md'],
 ];
 const aliasFiles = aliasNames.map(([name]) => name);
+const collisionName = 'Collision Space.md';
+const collisionDiskName = 'Collision\u00a0Space.md';
+const collisionBody = '# Different physical note';
+const collisionPath = aliasDir + '/' + collisionDiskName;
 const server = createServer(async (req, res) => {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
@@ -37,8 +41,18 @@ const server = createServer(async (req, res) => {
   const vaultPath = decodeURIComponent(req.url ?? '');
   if (req.method === 'GET' && vaultPath.startsWith('/vault/Alias')) {
     const filePath = vaultPath.slice('/vault/'.length);
-    const payload = filePath === aliasDir + '/' ? { files: aliasFiles }
-      : aliasFiles.some(name => filePath === aliasDir + '/' + name) &&
+    if (req.headers.accept === 'text/markdown') {
+      const exactBody = filePath.toLowerCase() === collisionPath.toLowerCase() ? collisionBody
+        : aliasNames.some(([, diskName]) => filePath === aliasDir + '/' + diskName)
+          ? note.content : undefined;
+      if (exactBody !== undefined) {
+        res.writeHead(200, { 'Content-Type': 'text/markdown' }).end(exactBody);
+        return;
+      }
+    }
+    const indexedFiles = [...aliasFiles, collisionName];
+    const payload = filePath === aliasDir + '/' ? { files: indexedFiles }
+      : indexedFiles.some(name => filePath === aliasDir + '/' + name) &&
         req.headers.accept === 'application/vnd.olrapi.note+json'
         ? { ...note, path: filePath } : null;
     res.writeHead(payload ? 200 : 404, { 'Content-Type': 'application/json' })
@@ -61,7 +75,8 @@ const server = createServer(async (req, res) => {
   }
   const payload = req.url === '/' ? {service:'Obsidian Local REST API', ok:'OK',
     authenticated:true, versions:{obsidian:'1.13.1',self:version}, extensions:[]} :
-    req.url === '/vault/' ? {files:['Rich/','Note.md']} : note;
+    req.url === '/vault/' ? {files:['Rich/','Note.md']} :
+    req.url === '/vault/Rich/' ? {files:['Note.md']} : note;
   const send = () => { if (!res.destroyed) res.writeHead(200, {
     'Content-Type':'application/json', 'Content-Location':'Rich/Note.md'
   }).end(JSON.stringify(payload)); };
@@ -82,6 +97,7 @@ Object.assign(process.env, { NO_PROXY:'*', no_proxy:'*',
 });
 const {ObsidianRestApiService} = await import('../dist/services/obsidianRestAPI/service.js');
 const {BaseErrorCode} = await import('../dist/types-global/errors.js');
+const {publicMcpToolErrorPayload} = await import('../dist/utils/internal/errorHandler.js');
 const {processObsidianReadNote} = await import('../dist/mcp-server/tools/obsidianReadNoteTool/logic.js');
 const {processObsidianListNotes, ObsidianListNotesInputSchema} = await import('../dist/mcp-server/tools/obsidianListNotesTool/logic.js');
 const api = new ObsidianRestApiService();
@@ -114,6 +130,12 @@ test('rich paths are encoded per segment and JSON reads use the native media typ
 test('root listing and HEAD metadata stay compatible', async () => {
   assert.deepEqual(await api.listFiles('/', context), ['Rich/','Note.md']);
   assert.deepEqual(await api.getFileMetadata('Note.md', context), {ctime:1000,mtime:2000,size:7});
+  for (const [dirPath, entryPath] of [['/Rich', '/Rich/Note.md'], ['Rich/', 'Rich/Note.md']]) {
+    const listed = await processObsidianListNotes(
+      ObsidianListNotesInputSchema.parse({ dirPath, responseMode: 'compact' }), context, api);
+    assert.equal(listed.directoryPath, dirPath);
+    assert.equal(listed.entries[0].path, entryPath);
+  }
 });
 test('Obsidian JSON reads accept physical Unicode names and the paths returned by list', async () => {
   const read = (filePath, format = 'json') =>
@@ -128,11 +150,32 @@ test('Obsidian JSON reads accept physical Unicode names and the paths returned b
     const physical = await read(aliasDir + '/' + diskName);
     assert.equal(physical.content.path, path);
     assert.equal(Object.hasOwn(physical, 'diskPath'), false);
+    assert.equal(decodeURIComponent(requests.at(-1).url), '/vault/' + aliasDir + '/' + diskName);
+    assert.equal(requests.at(-1).headers.accept, 'text/markdown');
   }
   const byDiskDirectory = await list('Alias\u00a0Folder');
   assert.deepEqual(byDiskDirectory.entries, listed.entries);
   const folded = await read('Alias\u00a0Folder\\wide\u00a0space.md', 'markdown');
   assert.equal(folded.content, note.content);
+  const indexedCollision = aliasDir + '/' + collisionName;
+  assert.equal((await read(indexedCollision)).content.content, note.content);
+  for (const requestedPath of [collisionPath, aliasDir + '/' + collisionDiskName.toLowerCase()]) {
+    await assert.rejects(() => read(requestedPath), error => {
+      const outcome = publicMcpToolErrorPayload(error, {
+        operation: 'alias collision fixture', toolName: 'obsidian_read_note',
+        params: { filePath: requestedPath },
+      });
+      assert.equal(outcome.error.code, BaseErrorCode.CONFLICT);
+      assert.equal(outcome.error.details.reasonCode, 'vault_path_alias_ambiguous');
+      assert.match(outcome.error.message, /alias returned different content/);
+      const serialized = JSON.stringify(outcome);
+      assert.ok(!serialized.includes(collisionBody) && !serialized.includes(note.content));
+      assert.ok(!serialized.includes(requestedPath));
+      return true;
+    });
+  }
+  assert.equal((await read(' Rich/Note.md ')).content.path, note.path);
+  assert.equal(requests.at(-1).url, '/vault/Rich/Note.md');
 });
 test('active JSON read exposes the resolved file through NoteJson', async () => {
   assert.deepEqual(await api.getActiveFile('json', context), note);

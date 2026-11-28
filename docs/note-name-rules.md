@@ -35,6 +35,9 @@ path spelling. This uses forward slashes, a regular space for U+00A0 and U+202F,
 and Unicode NFC. `obsidian_list_notes` also accepts either spelling of an
 unambiguous folder path. See [Obsidian's `normalizePath` API](https://github.com/obsidianmd/obsidian-api/blob/master/obsidian.d.ts#L6471-L6487).
 
+If Local REST returns different content for the exact Markdown path and the
+normalized JSON path, the read returns `CONFLICT` without either note's content.
+
 When served from a filesystem-backed cache, JSON reads and compact listings report the
 vault-relative Obsidian path when it identifies a single entry. If two disk
 paths have the same Obsidian spelling, the results preserve their exact disk

@@ -159,10 +159,32 @@ export const processObsidianReadNote = async (
 
   const shouldRetryNotFound = (err: unknown) =>
     err instanceof McpError && err.code === BaseErrorCode.NOT_FOUND;
-  const vaultPath = toVaultPath(originalFilePath);
+  const requestedFilePath = normalizeVaultSlashes(originalFilePath.replace(/^ +| +$/gu, ""));
+  const vaultPath = toVaultPath(requestedFilePath);
   if (vaultPath.split("/").some((segment) => segment === "." || segment === "..")) {
     throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Expected a vault path without dot segments.");
   }
+
+  const verifyAliasContent = async (
+    exactPath: string,
+    note: NoteJson,
+    readContext: RequestContext,
+  ): Promise<void> => {
+    let exactContent: string | NoteJson;
+    try {
+      exactContent = await obsidianService!.getFileContent(exactPath, "markdown", readContext, "literal");
+    } catch (error) {
+      if (shouldRetryNotFound(error)) return;
+      throw error;
+    }
+    if (exactContent !== note.content) {
+      throw new McpError(
+        BaseErrorCode.CONFLICT,
+        "The requested path and its Obsidian alias returned different content.",
+        { reasonCode: "vault_path_alias_ambiguous" },
+      );
+    }
+  };
 
   const readJson = async (filePath: string, readContext: RequestContext): Promise<NoteJson> => {
     const exact = normalizeVaultSlashes(filePath);
@@ -171,7 +193,9 @@ export const processObsidianReadNote = async (
       return await obsidianService!.getFileContent(exact, "json", readContext, "literal") as NoteJson;
     } catch (error) {
       if (!shouldRetryNotFound(error) || normalized === exact) throw error;
-      return obsidianService!.getFileContent(normalized, "json", readContext, "literal") as Promise<NoteJson>;
+      const note = await obsidianService!.getFileContent(normalized, "json", readContext, "literal") as NoteJson;
+      await verifyAliasContent(exact, note, readContext);
+      return note;
     }
   };
 
@@ -254,7 +278,7 @@ export const processObsidianReadNote = async (
         readContext,
       );
       noteJson = await retryWithDelay(
-        () => readJson(originalFilePath, readContext),
+        () => readJson(requestedFilePath, readContext),
         {
           operationName: "readFileWithRetry",
           context: readContext,
@@ -341,6 +365,9 @@ export const processObsidianReadNote = async (
                 shouldRetry: shouldRetryNotFound,
               },
             );
+            if (requestedFilePath !== vaultPath && requestedFilePath !== effectiveFilePath) {
+              await verifyAliasContent(requestedFilePath, noteJson, fallbackContext);
+            }
             logger.debug(
               `Successfully read file as JSON using fallback path: ${effectiveFilePath}`,
               fallbackContext,

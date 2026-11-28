@@ -31,6 +31,7 @@ export async function getFileContent(
       method: "GET",
       url: `/vault${encodedPath}`,
       headers: { Accept: acceptHeader },
+      ...(format === "markdown" && pathEncoding === "literal" ? { responseType: "text" } : {}),
     },
     context,
     "getFileContent",

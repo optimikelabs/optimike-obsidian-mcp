@@ -622,6 +622,11 @@ async function main() {
       const listed = await call('obsidian_list_notes', {
         dirPath: 'Wide Folder', responseMode: 'compact', recursionDepth: 0,
       });
+      for (const [dirPath, entryPath] of [['/Projects', '/Projects/Headless.md'], ['Projects/', 'Projects/Headless.md']]) {
+        const plain = await call('obsidian_list_notes', { dirPath, responseMode: 'compact' });
+        assert.equal(plain.directoryPath, dirPath);
+        assert.ok(plain.entries.some(entry => entry.path === entryPath));
+      }
       for (const [diskPath, vaultPath] of unicodeNotes) {
         const entry = listed.entries?.find(entry => entry.path === vaultPath);
         assert.ok(entry, `expected a list entry for ${vaultPath}`);

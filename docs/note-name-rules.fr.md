@@ -36,6 +36,9 @@ U+202F par un espace ordinaire et applique la forme Unicode NFC.
 `obsidian_list_notes` accepte aussi les deux graphies d'un dossier sans ambiguïté.
 Voir [l'API `normalizePath` d'Obsidian](https://github.com/obsidianmd/obsidian-api/blob/master/obsidian.d.ts#L6471-L6487).
 
+Si Local REST renvoie des contenus différents pour le chemin Markdown exact et
+le chemin JSON normalisé, la lecture renvoie `CONFLICT` sans le contenu des notes.
+
 Depuis un cache alimenté par le système de fichiers, les lectures JSON et les listes
 compactes renvoient le chemin Obsidian relatif au coffre lorsqu'il identifie une
 seule entrée. Si deux chemins sur disque ont la même graphie dans Obsidian, les
