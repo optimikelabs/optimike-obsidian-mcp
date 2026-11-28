@@ -149,7 +149,7 @@ export interface ObsidianGlobalSearchResponse {
 }
 
 // ====================================================================================
-// Helper Function (findMatchesInContent - for Cache Fallback)
+// Content matching for live and cached notes
 // ====================================================================================
 // Removed lineNumber calculation and return
 function findMatchesInContent(
@@ -167,7 +167,7 @@ function findMatchesInContent(
   try {
     const flags = `g${caseSensitive ? "" : "i"}`;
     regex = useRegex
-      ? new RegExp(query, flags)
+      ? new RegExp(query, `${flags}m`)
       : new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), flags);
   } catch (e) {
     const errorMsg = `[${operation}] Invalid regex pattern.`;

@@ -177,6 +177,9 @@ du mode runtime :
 | `hybrid` API indisponible        | `list_all_tasks`, `obsidian_global_search`, `obsidian_list_notes`, `obsidian_read_note`, `obsidian_runtime_maintenance`, `obsidian_runtime_status`, `obsidian_validate_format`, `query_tasks`, `smart_semantic_search`                                                                                                                                                                                                           |
 | `hybrid` API disponible / `live` | Tools read/search/tasks/runtime/sémantique dont `obsidian_note_links` live-only, plans gouvernés remplacement de note, patch texte, Frontmatter, formules Base et Canvas, suppression gouvernée de note `obsidian_note_delete_plan/apply/status` (`operational` et `full`, voir [suppression gouvernée](governed-note-delete.md)), plus outils REST d’écriture et Bases Bridge : `bases_check`, `bases_create`, `bases_functions`, `bases_get_schema`, `bases_list`, `bases_query`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_delete_note`, `obsidian_manage_frontmatter`, `obsidian_manage_tags`, `obsidian_search_replace`, `obsidian_update_note` |
 
+Avec `useRegex: true`, `obsidian_global_search` traite `^` et `$` comme des
+ancres de début et de fin de ligne, en mode live comme en mode headless.
+
 ## Déplacement natif M3
 
 `obsidian_note_move_plan/apply/status` est live-only, exige une autorisation dédiée du Bridge et le mode d’écriture full, et réutilise le journal du processus. Le résultat du déplacement est séparé de la vérification sémantique bornée. Pas de recover, d’undo ni de transaction globale du graphe. [Contrat et qualification Pilot2 restante](native-note-move-m3.md).
