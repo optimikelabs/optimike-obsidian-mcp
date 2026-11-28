@@ -502,6 +502,39 @@ Le chargement décrit ici s’applique à `SMART_ENV_DIR`.
 
 Mesure locale du 16 novembre 2026 (pas un engagement de service) : un coffre de 6 889 notes avec 44 924 vecteurs de sections de 640 dimensions. Premier chargement à froid des notes et des sections : 7,7 à 8,2 s (notes seules : 5,5 s). Chargement depuis le store partagé dans un nouveau processus : 0,45 à 0,56 s pour les sections, après 0,7 à 0,9 s pour les notes. Classement des sections : 50 à 85 ms par requête, en plus de l’embedding de la requête. Les sections ajoutent environ 123 Mo de mémoire résidente (110 Mo de vecteurs, 13 à 15 Mo de références).
 
+## Services Sync et index sémantique headless
+
+Planifiez une passe Sync à instance unique et gardez le producteur d’index au
+premier plan sous son superviseur. Les deux services et le lecteur MCP
+utilisent le même coffre. Placez le reçu, l’index et le cache SQLite partagé
+hors du coffre. Réglez séparément `OBSIDIAN_CACHE_REFRESH_INTERVAL_MIN` si
+les lectures de notes doivent refléter les changements plus vite.
+
+Sous Linux, utilisez les [unités et le timer systemd utilisateur](OPERATIONS.md#systemd-user-units).
+Renseignez votre fichier d’environnement avec les chemins absolus vers les
+scripts installés, le point d’entrée JS du CLI Obsidian, le coffre et les
+répertoires d’état, ainsi que les paramètres de l’encodeur. Exécutez
+`ob sync-setup` sous le compte de service avant d’activer le timer.
+Le producteur redémarre en cas d’échec. Un arrêt normal attend la fin de la
+publication en cours.
+
+Sous Windows, créez deux tâches dans le Planificateur de tâches. Utilisez le
+chemin absolu de `node.exe` comme programme. Dans les arguments, reprenez le
+chemin absolu du script installé et les options des exemples systemd, en
+plaçant chaque chemin entre guillemets. Utilisez le compte qui possède le cache
+dédié et a configuré Obsidian Headless. Pour Sync, déclenchez toutes les
+minutes. Pour le producteur, déclenchez au démarrage, réessayez en cas d’échec
+et désactivez la durée maximale d’exécution. Sélectionnez **Ne pas démarrer une
+nouvelle instance** pour les deux tâches. En premier plan, Ctrl+C attend la fin
+de l’itération du producteur. Un arrêt forcé peut laisser son verrou. Suivez la
+[procédure de reprise](docs/semantic-index-producer.fr.md#publication-et-reprise).
+
+Configurez le lecteur MCP avec `OBSIDIAN_SYNC_HEARTBEAT_FILE`,
+`SMART_ENV_GENERATION_POINTER` pointant vers `CURRENT`,
+`SMART_ENV_QUERY_FINGERPRINT` et l’encodeur de requête correspondant. Voir le
+[profil serveur](docs/headless-server-profile.fr.md#preuve-de-synchronisation-amont)
+et le [mode service du producteur](docs/semantic-index-producer.fr.md#mode-service).
+
 ## Mode dégradé
 
 Si Obsidian REST n’est plus joignable mais que le cache partagé est chaud, le backend peut encore servir des opérations de lecture seule pour :

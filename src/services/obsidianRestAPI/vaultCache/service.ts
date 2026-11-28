@@ -11,6 +11,7 @@ import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "../../../config/index.js";
+import { isSyncConflictPath } from "../../upstreamSyncEvidence.js";
 import {
   createVaultExclusionMatcher,
   isVaultPathExcluded,
@@ -323,6 +324,10 @@ export class VaultCacheService {
       newest = newest === null ? mtime : Math.max(newest, mtime);
     }
     return newest;
+  }
+
+  public getSyncConflictFiles(): string[] {
+    return [...this.metadataCache.keys()].map(normalizeVaultRelativePath).filter(isSyncConflictPath).sort();
   }
 
   public getStats(): Record<string, unknown> {

@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `smart_semantic_search` can read a published external Smart Env v3 generation selected by `SMART_ENV_GENERATION_POINTER`. Searches switch on the next request, keep notes and sections in the same generation, and report the generation ID. See the [publication contract](docs/semantic-vector-cache-encoding.md#external-smart-env-v3-generations).
-- Headless note reads, listings, and global search report cache provenance and flag requests that overlap a refresh. Runtime status reports the newest indexed Markdown modification time and explicitly marks upstream synchronization as unknown.
+- Headless note reads, listings, search and status distinguish local cache freshness from upstream Sync evidence. An optional heartbeat records the last successful pull, exposes stalled or failed sync, and can guard filesystem writes. Authenticated status lists indexed Sync conflict files.
+- The standalone semantic index producer has a polling service mode with incremental embeddings, an exclusive producer lock, retry backoff and atomic publication. External semantic search and runtime status expose the generation, build time and observed pending changes.
 
 ## [3.23.1] - 2026-11-26
 

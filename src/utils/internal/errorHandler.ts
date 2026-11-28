@@ -474,6 +474,7 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "yaml_tag_unsupported",
 
   "semantic_index_unavailable",
+  "upstream_sync_write_blocked",
   "semantic_embedder_configuration_invalid",
   "semantic_query_embedding_failed",
   "semantic_query_vector_invalid",
@@ -704,6 +705,8 @@ function safeDiagnosticFields(
 }
 
 function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
+  if (reasonCode === "upstream_sync_write_blocked")
+    return "Headless write blocked. Verify a recent successful upstream Sync pull, then retry.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_tool_arguments")
     return "Invalid tool arguments. See validationIssues for the field and reason.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === BASE_FORMULA_ENGINE_REFUSAL)

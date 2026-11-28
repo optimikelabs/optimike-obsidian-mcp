@@ -15,6 +15,7 @@ import {
   getExternalQueryEmbedder,
   resolveExternalSemanticGeneration,
 } from "../../../services/externalSemanticGeneration.js";
+import { readSemanticIndexObservation, semanticIndexBuiltAt } from "../../../services/semanticIndexStatus.js";
 import {
   getSemanticCacheService,
   type SemanticSectionSnapshot,
@@ -71,6 +72,9 @@ const SECTION_SNIPPET_MAX_CHARS = 1200;
 
 const Out = z.object({
   generation_id: z.string().optional(),
+  indexGeneration: z.string().optional(),
+  indexBuiltAt: z.string().nullable().optional(),
+  staleNotes: z.number().int().nonnegative().nullable().optional(),
   model: z.string().optional(),
   dim: z.number().optional(),
   query_provider: z.string().optional(),
@@ -381,6 +385,7 @@ async function performSearch(input: InType): Promise<OutType> {
   } = getEnv();
 
   const generation = await semanticStage("semantic_index_unavailable", resolveExternalSemanticGeneration);
+  const initialObservation = generation && await readSemanticIndexObservation(generation);
   const indexDirectory = generation?.directory ?? SMART_ENV_DIR;
   if (!indexDirectory) {
     throw new Error("SMART_ENV_DIR is not set");
@@ -616,11 +621,17 @@ async function performSearch(input: InType): Promise<OutType> {
     });
   }
   timings.snippets = elapsedSince(snippetsStartedAt);
+  const currentObservation = generation && await readSemanticIndexObservation(generation);
   timings.total = elapsedSince(startedAt);
   recordSemanticSearch(selection.embed, dimension, true, undefined, generation?.cacheKey);
 
   return {
     generation_id: generation?.id,
+    ...(generation && {
+      indexGeneration: generation.id,
+      indexBuiltAt: semanticIndexBuiltAt(generation),
+      staleNotes: (currentObservation ?? initialObservation)?.pendingChanges ?? null,
+    }),
     model,
     dim: dimension,
     query_provider: selection.provider,

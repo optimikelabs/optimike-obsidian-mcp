@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { appendFileSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, symlink, unlink, watch, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -40,6 +40,7 @@ async function fixture(t) {
   let beforeEncode;
   let transformRow = row => row;
   let refuseBatch = () => false;
+  let serviceBusy = false;
   const server = createServer(async (req, res) => {
     res.setHeader("content-type", "application/json");
     try {
@@ -62,6 +63,10 @@ async function fixture(t) {
         const callback = beforeEncode;
         beforeEncode = undefined;
         await callback();
+      }
+      if (serviceBusy) {
+        res.statusCode = 503;
+        return res.end(JSON.stringify({ error: "busy" }));
       }
       if (refuseBatch(items)) {
         res.statusCode = 400;
@@ -129,8 +134,69 @@ async function fixture(t) {
     beforeEncode(callback) { beforeEncode = callback; },
     transformRow(callback) { transformRow = callback; },
     refuseBatch(callback) { refuseBatch = callback; },
+    setBusy(value) { serviceBusy = value; },
   };
 }
+
+test("service polls changes, backs off, and atomically replaces the generation under the producer lock", async t => {
+  const f = await fixture(t);
+  await f.put("Edit.md", "# A\n\nOriginal.\n# B\n\nKept.\n");
+  await f.put("Remove.md", note("Removed."));
+  await f.put("Move.md", note("Moved."));
+  const first = await f.run();
+  const service = f.start("service", "--allow-deletions", "--poll-ms", "50", "--debounce-ms", "50");
+  const state = async () => JSON.parse(await readFile(path.join(f.index, "SERVICE.json"), "utf8")
+    .catch(error => { if (error.code !== "ENOENT") throw error; return "null"; }));
+  async function until(predicate) {
+    const events = watch(f.index, { signal: AbortSignal.timeout(15_000) });
+    try {
+      const status = await state();
+      if (status && predicate(status)) return status;
+      for await (const { filename } of events) {
+        if (filename && filename !== "SERVICE.json") continue;
+        const next = await state();
+        if (next && predicate(next)) return next;
+      }
+    } finally {
+      await events.return();
+    }
+    assert.fail("Service observation never matched: " + JSON.stringify(await state()));
+  }
+  const release = Promise.withResolvers();
+  try {
+    await until(status => status.pendingChanges === 0 && status.generation === first.generation);
+    const unchangedRequests = f.requests.length;
+    await f.fail(/already has a producer lock/u);
+    assert.equal(f.requests.length, unchangedRequests, "an unchanged poll encodes nothing");
+    f.setBusy(true);
+    await f.put("Edit.md", "# A\n\nEdited.\n# B\n\nKept.\n");
+    await unlink(path.join(f.vault, "Remove.md"));
+    await rename(path.join(f.vault, "Move.md"), path.join(f.vault, "Moved.md"));
+    const backedOff = await until(status => status.lastError === "embedding_busy");
+    assert.equal(backedOff.pendingChanges, 4);
+    assert.ok(backedOff.retryAt > backedOff.observedAt, "a busy response schedules a later build, independently of the next poll");
+    assert.equal(await f.current(), first.generation, "a busy embedder must leave CURRENT intact");
+    const attempts = f.requests.length;
+    const arrived = Promise.withResolvers();
+    f.beforeEncode(async () => { arrived.resolve(); await release.promise; });
+    f.setBusy(false);
+    await Promise.race([arrived.promise, service.result.then(result => assert.fail(result.stderr || "Service exited early"))]);
+    assert.equal(await f.current(), first.generation, "readers see the old generation during embedding");
+    release.resolve();
+    const published = await until(status => status.generation !== first.generation && status.pendingChanges === 0);
+    assert.equal(await f.current(), published.generation);
+    assert.equal(published.lastError, null);
+    assert.deepEqual((await f.load(published.generation)).notes.map(row => row.notePath).sort(), ["Edit.md", "Moved.md"]);
+    assert.deepEqual((await f.load(first.generation)).notes.map(row => row.notePath).sort(), ["Edit.md", "Move.md", "Remove.md"]);
+    assert.ok(f.requests.slice(attempts).every(row => !row.input.includes("Kept.") || row.entity_kind === "source"),
+      "unchanged sections reuse their existing vectors");
+    assert.equal((await f.manifest(published.generation)).coverage.indexedNotes, 2);
+  } finally {
+    release.resolve();
+    service.child.kill("SIGKILL");
+    await service.result;
+  }
+});
 
 test("first build sends exact note/block inputs and the Smart Env reader resolves vectors and line hashes", async t => {
   const f = await fixture(t);

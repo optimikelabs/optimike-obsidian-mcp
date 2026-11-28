@@ -12,6 +12,9 @@ import {
 } from "./httpProtection.js";
 import { httpErrorHandler } from "./httpErrorHandler.js";
 import { getHttpRequestState } from "./httpRequestState.js";
+import { readUpstreamSync, type UpstreamSyncEvidence } from "../../services/upstreamSyncEvidence.js";
+import { externalSemanticGenerationConfigured } from "../../services/externalSemanticGeneration.js";
+import { readSemanticIndexStatus } from "../../services/semanticIndexStatus.js";
 
 export type ReadinessState = "ready" | "degraded" | "critical";
 export type ResponseProvenance =
@@ -36,7 +39,7 @@ export type HealthSnapshot = {
   timestamp: string;
   processStartedAt: string;
   runtimeMode: string;
-  provenance: {
+  provenance: Partial<UpstreamSyncEvidence> & {
     source: ResponseProvenance;
     origin: "obsidian_api" | "filesystem" | "cache" | "snapshot" | "unknown";
     observedAt: string | null;
@@ -45,7 +48,6 @@ export type HealthSnapshot = {
     freshnessKnown: boolean;
     readSource?: "filesystem";
     freshnessScope?: "local-cache";
-    upstreamSync?: "unknown";
   };
   dependencies: {
     obsidianDesktop: HealthDependency;
@@ -648,13 +650,21 @@ export function createHttpObservability(options: HealthOptions = {}) {
       endpoint: "/mcp",
     });
 
-  const readinessHandler = (c: Context) => {
+  const observedSnapshot = async () => {
     const snapshot = healthSnapshot();
+    if (snapshot.runtimeMode.startsWith("headless-")) {
+      Object.assign(snapshot.provenance, await readUpstreamSync());
+    }
+    return snapshot;
+  };
+
+  const readinessHandler = async (c: Context) => {
+    const snapshot = await observedSnapshot();
     return snapshot.ready ? c.json(snapshot, 200) : c.json(snapshot, 503);
   };
 
-  const statusHandler = (c: Context) => {
-    const snapshot = healthSnapshot();
+  const statusHandler = async (c: Context) => {
+    const snapshot = await observedSnapshot();
     const controls = {
       sessions: options.getSessionStats?.() ?? null,
       admission: httpAdmissionController.getSnapshot(),
@@ -663,7 +673,14 @@ export function createHttpObservability(options: HealthOptions = {}) {
         clientIdentities: authenticatedIdentityLimiter.getStats(),
       },
     };
-    return c.json({ ...snapshot, controls });
+    return c.json({
+      ...snapshot,
+      ...(snapshot.runtimeMode.startsWith("headless-") && {
+        syncConflictFiles: options.vaultCacheService?.getSyncConflictFiles() ?? [],
+      }),
+      ...(externalSemanticGenerationConfigured() && { semanticIndex: await readSemanticIndexStatus() }),
+      controls,
+    });
   };
 
   return {

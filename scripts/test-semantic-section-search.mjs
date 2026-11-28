@@ -65,6 +65,13 @@ const publishPointer = async (contents) => {
 };
 const publish = (id) => publishPointer(id + "\n");
 const generationRoot = path.join(root, "generations");
+const builtAt = "2026-01-01T12:00:00.000Z";
+async function reportService(generation, pendingChanges) {
+  const observedAt = Date.now();
+  await writeFile(path.join(root, "SERVICE.json"), JSON.stringify({
+    version: 1, generation, pendingChanges, lastError: null, observedAt, validUntil: observedAt + 300_000,
+  }));
+}
 async function writeGeneration(id, records, notes, sections) {
   const directory = path.join(generationRoot, id);
   await cp(source, directory, { recursive: true });
@@ -75,7 +82,7 @@ async function writeGeneration(id, records, notes, sections) {
     return { count: rows.length, sha256: createHash("sha256").update(bytes).digest("hex") };
   };
   await writeFile(path.join(directory, "generation.json"), JSON.stringify({
-    generation: id, model: { ...model, dimensions: model.dims }, fingerprint,
+    generation: id, builtAt, model: { ...model, dimensions: model.dims }, fingerprint,
     vectors: {
       encoding: "float32le",
       notes: await writeVectors("smart_sources", notes),
@@ -181,6 +188,7 @@ const runtimeStatus = async () => {
   const status = JSON.parse(response.content[0].text);
   return {
     cache: status.semanticCache,
+    index: status.semanticIndex,
     capability: status.capabilityManifest.capabilities.find(({ id }) => id === "semantic-search"),
   };
 };
@@ -290,13 +298,22 @@ try {
   assert.equal(warmA.value.generation_id, "a", "the pointer takes precedence over a warm legacy cache");
   assert.equal(warmA.value.results[0].path, "Other/Beta.md");
   assert.equal((await runtimeStatus()).cache.generationId, "a");
+  assert.equal(warmA.value.staleNotes, null);
+  await reportService("a", 2);
+  assert.deepEqual((await runtimeStatus()).index, {
+    generation: "a", builtAt, pendingChanges: 2, lastError: null,
+    coverage: { indexedNotes: 2, indexedSections: 2, candidateNotes: null },
+  });
 
   beforeEmbedReply = async () => {
     beforeEmbedReply = undefined;
     await publish("b");
+    await reportService("b", 0);
   };
   const inFlightA = await search({ granularity: "both" });
   assert.deepEqual(inFlightA.value.results, warmA.value.results, "a swap during the request cannot change its results");
+  assert.deepEqual([inFlightA.value.indexGeneration, inFlightA.value.indexBuiltAt, inFlightA.value.staleNotes],
+    ["a", builtAt, 2], "results and freshness remain pinned to A across publication");
   const beforeB = await runtimeStatus();
   assert.equal(beforeB.cache.source, "external");
   assert.equal(beforeB.cache.generationId, "b");
@@ -305,6 +322,7 @@ try {
     "B cannot reuse A's successful live encoder observation");
   const b = await search({ granularity: "both" });
   assert.equal(b.value.generation_id, "b");
+  assert.deepEqual([b.value.indexGeneration, b.value.indexBuiltAt, b.value.staleNotes], ["b", builtAt, 0]);
   assert.deepEqual(
     b.value.results.map(({ path, kind, score }) => [path, kind, score]),
     [["Notes/Alpha.md", "note", 1], ["Notes/Alpha.md", "section", 1]],

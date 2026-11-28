@@ -12,6 +12,7 @@ import {
   sourceLine, syncDirectory, validateGeneration, vectorFiles, writeSynced,
 } from "./semantic-index/generation.mjs";
 import { inventory, parserRevision, readSourceParts, resolveRoots, sha256, verifySources } from "./semantic-index/vault.mjs";
+import { runIndexService } from "./semantic-index/service.mjs";
 
 const help = `Usage: optimike-semantic-index --vault DIR --index DIR --endpoint ORIGIN
        --model ID --revision REV --model-sha256 SHA256 [--rebuild]
@@ -19,6 +20,9 @@ const help = `Usage: optimike-semantic-index --vault DIR --index DIR --endpoint 
        [--min-note-chars N] [--min-block-chars N]
        [--max-deletion-percent 10] [--max-deletions 50]
        [--allow-deletions]
+
+       optimike-semantic-index service <same options, except --rebuild>
+       [--poll-ms 15000] [--debounce-ms 5000]
 
        optimike-semantic-index bootstrap --from-smart-env DIR --vault DIR
        --index DIR --endpoint ORIGIN --model ID --revision REV
@@ -199,6 +203,7 @@ async function build(options, vault, index, client, smartEnv) {
     version: 1,
     generation: id,
     createdAt: new Date().toISOString(),
+    inventoryStamps: Object.fromEntries([...scan.files, ...scan.unsafePaths]),
     ...profile,
     chunking,
     vaultBinding: scan.binding,
@@ -231,7 +236,7 @@ async function build(options, vault, index, client, smartEnv) {
       if (options["verify-only"]) console.log(JSON.stringify(bootstrap.report));
       throw error;
     }
-    if (options["verify-only"]) return bootstrap.report;
+    if (options["verify-only"]) return { receipt: bootstrap.report };
     imported = bootstrap.rows;
     const { source, modelMatched, verification, sectionSelection } = bootstrap.report;
     manifest.bootstrap = {
@@ -249,6 +254,9 @@ async function build(options, vault, index, client, smartEnv) {
     const deletions = activePaths.filter(relative => !manifest.sources[relative] && !belowMinimum.has(relative)).length;
     guardDeletions(deletions, "not publishable");
     requireNotes(manifest.stats.notes);
+    manifest.builtAt = new Date().toISOString();
+    manifest.coverage = { indexedNotes: manifest.stats.notes, candidateNotes: scan.files.size + scan.unsafePaths.size,
+      indexedSections: manifest.stats.sections };
     await sealGeneration(staging, manifest);
     const persisted = await readManifest(staging, id);
     if (persisted.vectors.notes.sha256 !== digests.notes || persisted.vectors.sections.sha256 !== digests.sections) {
@@ -274,7 +282,10 @@ async function build(options, vault, index, client, smartEnv) {
       console.error("CURRENT was replaced, but syncing its directory failed:", error.code);
       process.exitCode = 1;
     }
-    return { generation: id, ...manifest.stats, deletions, skipped: manifest.skipped };
+    return {
+      publication: { directory: target, manifest },
+      receipt: { generation: id, ...manifest.stats, deletions, skipped: manifest.skipped },
+    };
   } finally {
     // Leave any sealed generation intact. Readers may still hold a previous CURRENT.
     await rm(staging, { recursive: true, force: true });
@@ -301,6 +312,8 @@ async function main() {
     "verify-only": { type: "boolean" },
     "max-samples": { type: "string" },
     "allow-selection-mismatch": { type: "boolean" },
+    "poll-ms": { type: "string" },
+    "debounce-ms": { type: "string" },
     "exclude-path": { type: "string", multiple: true, default: [] },
     "exclude-heading": { type: "string", multiple: true, default: [] },
   } });
@@ -309,10 +322,21 @@ async function main() {
     return;
   }
   const bootstrap = positionals.length === 1 && positionals[0] === "bootstrap";
+  const service = positionals.length === 1 && positionals[0] === "service";
   if (bootstrap ? !options["from-smart-env"]?.trim() || options.rebuild
-    : positionals.length || options["from-smart-env"] !== undefined || options["verify-only"] ||
+    : (!service && positionals.length) || (service && options.rebuild) ||
+      options["from-smart-env"] !== undefined || options["verify-only"] ||
       options["allow-selection-mismatch"]) {
     throw Error("Invalid bootstrap options. Run with --help");
+  }
+  for (const [name, fallback, minimum] of [["poll-ms", "15000", 50], ["debounce-ms", "5000", 0]]) {
+    const raw = options[name];
+    if (!service && raw !== undefined) throw Error(`--${name} requires service mode`);
+    const value = Number(raw ?? fallback);
+    if (!/^\d+$/u.test(raw ?? fallback) || value < minimum || value > 300_000) {
+      throw Error(`--${name} must be an integer from ${minimum} to 300000`);
+    }
+    options[name] = value;
   }
   if (options["max-samples"] !== undefined && (!bootstrap || !/^\d{2,3}$/u.test(options["max-samples"]) ||
       Number(options["max-samples"]) < 20 || Number(options["max-samples"]) > maxSampleLimit)) {
@@ -370,7 +394,26 @@ async function main() {
     if (!(await lstat(generations)).isDirectory() || await realpath(generations) !== generations) {
       throw Error("Generations path must be a regular directory under the index root");
     }
-    console.log(JSON.stringify(await build(options, vault, index, client, smartEnv)));
+    if (service) {
+      const controller = new AbortController();
+      const stop = () => controller.abort();
+      process.on("SIGINT", stop);
+      process.on("SIGTERM", stop);
+      try {
+        await runIndexService({
+          index, active: await readActiveGeneration(index),
+          scan: active => inventory(vault, options["exclude-path"],
+            exclusionMatcher(active?.manifest.chunking.smartEnvSelection)),
+          build: async () => (await build(options, vault, index, client)).publication,
+          pollMs: options["poll-ms"], debounceMs: options["debounce-ms"], signal: controller.signal,
+        });
+      } finally {
+        process.off("SIGINT", stop);
+        process.off("SIGTERM", stop);
+      }
+    } else {
+      console.log(JSON.stringify((await build(options, vault, index, client, smartEnv)).receipt));
+    }
   } finally {
     await lock.close();
     await unlink(lockPath);
@@ -379,6 +422,6 @@ async function main() {
 
 main().catch(error => {
   // Filesystem errors include local paths. Emit only their code.
-  console.error("Semantic index producer:", error.code ?? error.message);
+  console.error("Semantic index producer:", error.code?.startsWith("EMBEDDING_") ? error.message : error.code ?? error.message);
   process.exitCode = 1;
 });

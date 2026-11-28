@@ -2,6 +2,7 @@ import { config } from "../../config/index.js";
 import type { VaultCacheService } from "../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { publicMcpToolErrorPayload } from "../../utils/internal/errorHandler.js";
+import { readUpstreamSync } from "../../services/upstreamSyncEvidence.js";
 
 export async function noteReadResult(
   read: () => Promise<object>,
@@ -36,7 +37,7 @@ export async function noteReadResult(
       ...payload,
       provenance: {
         source: "filesystem",
-        upstreamSync: "unknown",
+        ...await readUpstreamSync(),
         lastRefreshAt: after.lastRefreshAt,
         lastSuccessfulRefreshStartedAt: after.lastSuccessfulRefreshStartedAt,
         refreshOrigin: after.refreshOrigin,

@@ -125,6 +125,35 @@ bootstrap mode. Verification-only uses the producer lock and can create the inde
 It does not encode the remaining rows or publish a generation.
 The queued counts are measured before the encoder can refuse an item for length.
 
+## Service mode
+
+Run `optimike-semantic-index service` with the same vault, index, encoding and
+selection options as a one-shot build. An existing bootstrap generation can
+seed the service. The service polls Markdown inventory every 15 seconds by
+default (`--poll-ms`) and waits for changes to settle (`--debounce-ms`, 5 seconds
+by default). It holds the same exclusive lock as one-shot and bootstrap builds.
+Unchanged polls do not contact the embedder. Builds reuse exact input hashes,
+keep the existing deletion guard, and publish through the same atomic pointer.
+Rename counts as one removed path and one added path. Breadcrumb changes can
+require new vectors. After busy or failed requests the producer retries with
+exponential backoff capped at five minutes while continuing to observe changes
+between attempts. An encoding profile change still requires an offline
+`--rebuild` before restarting the service.
+
+`SERVICE.json` records an expiring inventory observation against the exact
+published generation. MCP runtime status and authenticated `/statusz` expose
+`semanticIndex.generation`, `builtAt`, `pendingChanges`, `lastError` and
+`coverage` (indexed notes, indexed sections and candidate notes in producer
+scope). For a compatible external generation, `smart_semantic_search` still
+returns `generation_id` and adds `indexGeneration`, `indexBuiltAt` and
+`staleNotes`. The count reflects additions, changes and removals in the most
+recent valid poll for the generation used by that request. It can lag recent
+disk writes. An unavailable or expired observation yields `null`, including
+during a long build or when there is no service. Intentional selection and
+encoder skips are reflected in coverage and producer receipts.
+
+See [service deployment](../OPERATIONS.md#headless-sync-and-semantic-services).
+
 ## Publication and recovery
 
 - `<index>/CURRENT` contains the active generation ID and a newline.

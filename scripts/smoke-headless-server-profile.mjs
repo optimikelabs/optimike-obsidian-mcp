@@ -158,7 +158,11 @@ async function main() {
     if (status.writePolicy?.mode !== "readonly") {
       throw new Error(`Unexpected write policy: ${status.writePolicy?.mode}`);
     }
-    assert.equal(status.headlessRead?.upstreamSync, "unknown");
+    if (process.env.OBSIDIAN_SYNC_HEARTBEAT_FILE) {
+      assert.equal(status.headlessRead?.evidenceSource, "heartbeat-file");
+    } else {
+      assert.equal(status.headlessRead?.upstreamSync, "unknown");
+    }
 
     const list = jsonOf(
       await withTimeout(

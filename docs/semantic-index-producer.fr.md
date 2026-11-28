@@ -130,6 +130,36 @@ producteur et peut créer le dossier d’index. Il n’encode pas les autres lig
 et ne publie aucune génération.
 Le décompte des lignes à encoder précède les éventuels refus pour longueur.
 
+## Mode service
+
+Lancez `optimike-semantic-index service` avec les mêmes options de coffre,
+d’index, d’encodage et de sélection que pour une construction ponctuelle.
+Le service peut repartir d’une génération amorcée depuis Smart Connections.
+Il observe les fichiers Markdown toutes les 15 secondes (`--poll-ms`) et
+attend que les changements se stabilisent (`--debounce-ms`, 5 secondes par
+défaut). Il utilise le même verrou exclusif que les constructions ponctuelles
+et l’amorçage. Il ne contacte l’encodeur qu’en cas de construction et réutilise
+les vecteurs dont l’entrée est identique. Il conserve le seuil de suppression
+et la publication atomique. Un renommage compte pour un retrait et un ajout.
+Le nouveau chemin peut modifier l’entrée encodée. Après un refus de charge
+ou une panne, les tentatives s’espacent jusqu’à cinq minutes. Si le profil
+d’encodage change, exécutez `--rebuild` hors service avant de redémarrer.
+
+`SERVICE.json` associe une observation à durée limitée à la génération publiée.
+Le statut runtime MCP et `/statusz` authentifié exposent
+`semanticIndex.generation`, `builtAt`, `pendingChanges`, `lastError` et
+`coverage` (notes et sections indexées, notes candidates dans le périmètre
+du producteur). Pour une génération externe compatible,
+`smart_semantic_search` conserve `generation_id` et ajoute
+`indexGeneration`, `indexBuiltAt` et `staleNotes`. Ce nombre cumule les
+ajouts, modifications et suppressions au dernier relevé valide de la génération
+utilisée par la requête. Il peut manquer les écritures intervenues depuis.
+Sans relevé valide, notamment pendant une construction longue ou en l’absence
+du service, il vaut `null`. La couverture et les reçus du producteur reflètent
+les exclusions de sélection et les refus d’encodage.
+
+Voir le [déploiement des services](../OPERATIONS.fr.md#services-sync-et-index-sémantique-headless).
+
 ## Publication et reprise
 
 - `<index>/CURRENT` contient l’identifiant de la génération active et un retour

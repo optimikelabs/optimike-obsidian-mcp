@@ -27,7 +27,7 @@ export function bitnetClient(endpoint, modelId, revision, modelSha256) {
       redirect: "error",
     }).catch(error => {
       const failure = error.name === "TimeoutError" ? "timed out" : "request failed";
-      throw Error(`BitNet ${route} ${failure}`);
+      throw Object.assign(Error(`BitNet ${route} ${failure}`), { code: "EMBEDDING_FAILED" });
     });
     if (!response.ok) {
       // The bridge rejects an oversized JSON body or a worker context refusal
@@ -40,7 +40,9 @@ export function bitnetClient(endpoint, modelId, revision, modelSha256) {
         throw Error(`BitNet ${route} returned HTTP 400`);
       }
       await response.body?.cancel();
-      throw Error(`BitNet ${route} returned HTTP ${response.status}`);
+      throw Object.assign(Error(`BitNet ${route} returned HTTP ${response.status}`), {
+        code: [429, 503].includes(response.status) ? "EMBEDDING_BUSY" : "EMBEDDING_FAILED",
+      });
     }
     return response.json().catch(() => { throw Error(`Invalid BitNet ${route} response`); });
   }

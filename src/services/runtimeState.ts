@@ -17,6 +17,8 @@ import { getWritePolicyStatus } from "./writePolicy.js";
 import { attestVaultFilesystemTarget } from "./externalReferences/backendVaultAdapter.js";
 import { inspectAssetPolicy } from "./assets/assetPolicyDiscovery.js";
 import type { VaultCacheService } from "./obsidianRestAPI/vaultCache/index.js";
+import { isSyncConflictPath, readUpstreamSync, unknownUpstreamSync, upstreamSyncSchema, type UpstreamSyncEvidence } from "./upstreamSyncEvidence.js";
+import { collectSemanticIndexStatus, publicSemanticIndexSchema } from "./semanticIndexStatus.js";
 
 const PROCESS_STARTED_AT_MS = Math.round(Date.now() - process.uptime() * 1000);
 
@@ -204,9 +206,9 @@ type PublicRuntimeStatus = {
   ok: boolean;
   transport: string;
   runtimeMode: string;
-  headlessRead?: {
+  headlessRead?: UpstreamSyncEvidence & {
     source: "filesystem";
-    upstreamSync: "unknown";
+    syncConflictFiles: string[];
     refreshOrigin?: "startup-snapshot" | "process-refresh";
     lastSuccessfulRefreshStartedAt: number | null;
     refreshing: boolean;
@@ -239,6 +241,7 @@ type PublicRuntimeStatus = {
   };
   sharedCache: PublicSharedCacheStatus;
   semanticCache: PublicSemanticCacheStatus;
+  semanticIndex?: Awaited<ReturnType<typeof collectSemanticIndexStatus>>;
   degradedMode: {
     readOnlyToolCount: number;
     writeToolsRequireApi: boolean;
@@ -532,7 +535,11 @@ export function projectPublicRuntimeStatus(
     ...(runtimeMode.startsWith("headless-") ? {
       headlessRead: {
         source: "filesystem" as const,
-        upstreamSync: "unknown" as const,
+        ...upstreamSyncSchema.catch(unknownUpstreamSync).parse(headlessRead),
+        syncConflictFiles: Array.isArray(headlessRead.syncConflictFiles)
+          ? headlessRead.syncConflictFiles.filter((entry): entry is string =>
+            typeof entry === "string" && isSyncConflictPath(entry))
+          : [],
         refreshOrigin: allowedValue(headlessRead.refreshOrigin, [
           "startup-snapshot",
           "process-refresh",
@@ -580,6 +587,7 @@ export function projectPublicRuntimeStatus(
     },
     sharedCache: projectPublicSharedCacheStatus(value.sharedCache),
     semanticCache: projectPublicSemanticCacheStatus(value.semanticCache),
+    semanticIndex: publicSemanticIndexSchema.optional().catch(undefined).parse(value.semanticIndex),
     degradedMode: {
       readOnlyToolCount: readOnlyTools.length,
       writeToolsRequireApi: booleanOr(degradedMode.writeToolsRequireApi),
@@ -701,6 +709,7 @@ export async function collectRuntimeStatus(
 ): Promise<Record<string, unknown> & { externalGeneration?: ExternalSemanticGeneration }> {
   const semanticStatus = await collectSemanticCacheStatus();
   const headless = config.obsidianRuntimeMode.startsWith("headless-");
+  const upstreamSync = headless ? await readUpstreamSync() : undefined;
   const refresh = headless ? vaultCacheService?.getRefreshEvidence() : undefined;
   const sharedDb = readDbCounts();
   const integrity =
@@ -716,6 +725,8 @@ export async function collectRuntimeStatus(
     runtime: collectRuntimeFingerprint(),
     ...(headless ? {
       headlessRead: {
+        ...upstreamSync,
+        syncConflictFiles: vaultCacheService?.getSyncConflictFiles() ?? [],
         refreshing: refresh?.refreshing ?? false,
         refreshOrigin: refresh?.refreshOrigin,
         lastSuccessfulRefreshStartedAt: refresh?.lastSuccessfulRefreshStartedAt ?? null,
@@ -732,6 +743,9 @@ export async function collectRuntimeStatus(
       integrity,
     },
     ...semanticStatus,
+    ...(externalSemanticGenerationConfigured() ? {
+      semanticIndex: await collectSemanticIndexStatus(semanticStatus.externalGeneration),
+    } : {}),
     degradedMode: {
       readOnlyWhenRestUnavailable: [
         "obsidian_read_note",

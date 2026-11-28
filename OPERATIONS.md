@@ -484,6 +484,81 @@ The loading behavior below applies to `SMART_ENV_DIR`.
 
 Local measurement on 16 November 2026 (not an SLA): a vault of 6,889 notes holding 44,924 section vectors of 640 dimensions. First cold load of notes and sections: 7.7 to 8.2 s (notes alone: 5.5 s). Load from the shared store in a new process: 0.45 to 0.56 s for sections, after 0.7 to 0.9 s for notes. Section ranking: 50 to 85 ms per query, besides the query embedding. Sections add about 123 MB of resident memory (110 MB of vectors, 13 to 15 MB of references).
 
+## Headless Sync and semantic services
+
+Use two jobs on the server. Schedule the Sync wrapper as a single-instance
+one-shot job and keep the index producer in the foreground under its supervisor.
+Use the same vault path for both jobs and the MCP reader. Place the heartbeat,
+index and shared SQLite cache outside that vault. If clients need note reads to
+reflect changes sooner, tune `OBSIDIAN_CACHE_REFRESH_INTERVAL_MIN` separately.
+
+### systemd user units
+
+Provide the paths and encoder settings in your own user environment file.
+`SYNC_WRAPPER` is the absolute path to `scripts/obsidian-sync-heartbeat.mjs`
+in the installed package, `OB_CLI` is the installed Obsidian Headless JavaScript
+entry point declared by its package's `bin`, and `INDEX_CLI` is the absolute
+path to `scripts/semantic-index-producer.mjs`. Set `VAULT`, `SYNC_HEARTBEAT`,
+`INDEX`, `EMBED_ENDPOINT`, `EMBED_MODEL`, `EMBED_REVISION`, and
+`EMBED_MODEL_SHA256` for this instance. Put the destination directories in
+place and provision Obsidian authentication under the same account.
+
+```ini
+# optimike-sync.service
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/optimike/headless.env
+ExecStart=node ${SYNC_WRAPPER} --ob-cli ${OB_CLI} --vault ${VAULT} --heartbeat ${SYNC_HEARTBEAT}
+```
+
+```ini
+# optimike-sync.timer
+[Timer]
+OnBootSec=30s
+OnUnitInactiveSec=60s
+
+[Install]
+WantedBy=timers.target
+```
+
+```ini
+# optimike-semantic.service
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/optimike/headless.env
+ExecStart=node ${INDEX_CLI} service --vault ${VAULT} --index ${INDEX} --endpoint ${EMBED_ENDPOINT} --model ${EMBED_MODEL} --revision ${EMBED_REVISION} --model-sha256 ${EMBED_MODEL_SHA256}
+Restart=on-failure
+RestartSec=15s
+# Give an in-flight build time to finish on a routine stop.
+TimeoutStopSec=infinity
+
+[Install]
+WantedBy=default.target
+```
+
+Enable `optimike-sync.timer` and `optimike-semantic.service` under that user's
+systemd manager. Set the MCP environment independently, with
+`OBSIDIAN_SYNC_HEARTBEAT_FILE`, `SMART_ENV_GENERATION_POINTER` targeting the
+index's `CURRENT`, and the matching `SMART_ENV_QUERY_FINGERPRINT` and query
+encoder settings. For shutdown after an abnormal kill, follow the producer's
+[lock recovery procedure](docs/semantic-index-producer.md#publication-and-recovery).
+
+### Windows Task Scheduler
+
+Use an absolute path to `node.exe` in each action. Supply the absolute
+package-script path and the same arguments as the systemd commands, quoting
+each path value in the action's argument field. Run both tasks as the account
+that owns the dedicated cache and has set up Obsidian Headless. For Sync, use
+a repeating trigger every minute and **Do not start a new instance**. For the
+producer, use an at-startup trigger, restart on failure, **Do not start a new
+instance**, and disable the execution-time limit. Let an interactive foreground
+producer stop with Ctrl+C. Task Scheduler's forced stop may leave its lock, which
+uses the same recovery procedure.
+
+See the [headless profile](docs/headless-server-profile.md#upstream-sync-evidence)
+for upstream states and the [producer guide](docs/semantic-index-producer.md#service-mode)
+for index freshness.
+
 ## Degraded Mode
 
 If Obsidian REST is unavailable but the shared cache is warm, the backend can still serve read-only operations for:

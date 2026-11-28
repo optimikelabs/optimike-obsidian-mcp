@@ -7,12 +7,19 @@ import { readSmartEnvV3, smartBlockVectorFile, smartModelFingerprint } from "./s
 
 const generationIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
 const fingerprintPattern = /^mf_[a-z0-9]+$/u;
+const count = z.number().int().nonnegative().safe();
+const isoTime = z.string().datetime({ precision: 3 }).refine(
+  value => Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value,
+);
 const vectorFile = z.object({
   count: z.number().int().nonnegative().safe(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/u),
 });
 const manifestSchema = z.object({
   generation: z.string().regex(generationIdPattern),
+  createdAt: isoTime.optional().catch(undefined),
+  builtAt: isoTime.optional().catch(undefined),
+  coverage: z.object({ indexedNotes: count, indexedSections: count, candidateNotes: count }).optional().catch(undefined),
   model: z.object({
     provider_key: z.enum(["ollama", "openai", "transformers", "xenova"]),
     model_key: z.string().trim().min(1),

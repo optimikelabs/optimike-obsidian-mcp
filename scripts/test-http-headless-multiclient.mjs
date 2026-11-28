@@ -22,6 +22,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const jwtSecret =
   "headless-multiclient-test-secret-must-be-at-least-32-characters";
 const newestMarkdownMtime = 1_700_000_001;
+const conflictNote = "Projects/Pilot (Conflicted copy FixtureDevice 202501010800).md";
+const nearMatch = "Projects/Pilot (Conflicted copy FixtureDevice sometime).md";
 
 async function hashDirectory(root) {
   const hash = createHash("sha256");
@@ -264,7 +266,12 @@ async function createPilotVault(sandbox) {
     ].join("\n"),
     "utf8",
   );
+  for (const file of [conflictNote, nearMatch]) {
+    await writeFile(path.join(vaultPath, file), "Conflict-name fixture");
+  }
   for (const [file, mtime] of [
+    [conflictNote, newestMarkdownMtime - 2],
+    [nearMatch, newestMarkdownMtime - 2],
     ["Reference.md", newestMarkdownMtime - 1],
     ["Projects/Pilot.md", newestMarkdownMtime],
     ["Pilot.base", newestMarkdownMtime + 1],
@@ -316,6 +323,7 @@ async function startBackend(sandbox, vaultPath) {
       OBSIDIAN_RUNTIME_MODE: "headless-readonly",
       OBSIDIAN_VAULT: vaultPath,
       OBSIDIAN_CACHE_SOURCE: "filesystem",
+      OBSIDIAN_SYNC_HEARTBEAT_FILE: path.join(sandbox, "sync-heartbeat.json"),
       OBSIDIAN_SHARED_CACHE_DB_PATH: cachePath,
       OBSIDIAN_ENABLE_CACHE: "true",
       MCP_WRITE_MODE: "readonly",
@@ -462,6 +470,9 @@ try {
   assert.equal(readinessBody.provenance.readSource, "filesystem");
   assert.equal(readinessBody.provenance.freshnessScope, "local-cache");
   assert.equal(readinessBody.provenance.upstreamSync, "unknown");
+  assert.equal(readinessBody.provenance.lastSuccessfulPullAt, null);
+  assert.equal(readinessBody.provenance.evidenceSource, "heartbeat-file");
+  assert.equal(JSON.stringify(readinessBody).includes(conflictNote), false);
   assert.equal(readinessBody.capabilities.liveObsidianReads, false);
   assert.equal(readinessBody.capabilities.filesystemReads, true);
   assert.equal(readinessBody.capabilities.mutations, false);
@@ -471,6 +482,7 @@ try {
   assert.equal(statusBody.runtimeMode, "headless-readonly");
   assert.equal(statusBody.provenance.source, "filesystem");
   assert.equal(statusBody.provenance.upstreamSync, "unknown");
+  assert.deepEqual(statusBody.syncConflictFiles, [conflictNote]);
   assert.equal(statusBody.capabilities.mutations, false);
   const serializedStatus = JSON.stringify(statusBody);
   for (const secret of [tokenA, tokenB, monitorToken, jwtSecret, vaultPath]) {
@@ -569,6 +581,14 @@ try {
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
   );
 
+  const pullAt = new Date().toISOString();
+  await writeFile(path.join(sandbox, "sync-heartbeat.json"), JSON.stringify({
+    version: 1, heartbeatAt: pullAt, state: "ok",
+    lastSuccessfulPull: { startedAt: pullAt, completedAt: pullAt },
+  }));
+  const currentReadiness = await fetch(new URL("/readyz", backend.baseUrl)).then(response => response.json());
+  assert.equal(currentReadiness.provenance.upstreamSync, "current");
+  assert.equal((await status(backend.baseUrl, monitorToken)).provenance.lastSuccessfulPullAt, pullAt);
   const runtime = await callTool(
     clientB,
     backend.baseUrl,
@@ -576,10 +596,14 @@ try {
   );
   assertToolIncludes(runtime, "headless-readonly", "runtime status");
   const runtimeStatus = JSON.parse(toolText(runtime));
-  const { lastSuccessfulRefreshStartedAt, ...headlessRead } = runtimeStatus.headlessRead;
+  const { lastSuccessfulRefreshStartedAt, lagSecondsUpperBound, ...headlessRead } = runtimeStatus.headlessRead;
+  assert.ok(Number.isInteger(lagSecondsUpperBound) && lagSecondsUpperBound >= 0);
   assert.deepEqual(headlessRead, {
     source: "filesystem",
-    upstreamSync: "unknown",
+    upstreamSync: "current",
+    lastSuccessfulPullAt: pullAt,
+    evidenceSource: "heartbeat-file",
+    syncConflictFiles: [conflictNote],
     refreshOrigin: "process-refresh",
     refreshing: false,
     newestFileMtimeMs: newestMarkdownMtime * 1000,
@@ -616,9 +640,13 @@ try {
   );
   assertToolIncludes(search, "Projects/Pilot.md", "global search");
   for (const result of [notes, note, search]) {
-    assert.deepEqual(JSON.parse(toolText(result)).provenance, {
+    const { lagSecondsUpperBound: lag, ...provenance } = JSON.parse(toolText(result)).provenance;
+    assert.ok(Number.isInteger(lag) && lag >= 0);
+    assert.deepEqual(provenance, {
       source: readinessBody.provenance.readSource,
-      upstreamSync: "unknown",
+      upstreamSync: "current",
+      lastSuccessfulPullAt: pullAt,
+      evidenceSource: "heartbeat-file",
       lastRefreshAt: runtimeStatus.sharedCache.lastRefreshAt,
       lastSuccessfulRefreshStartedAt,
       refreshOrigin: "process-refresh",
