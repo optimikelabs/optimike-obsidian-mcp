@@ -2,53 +2,19 @@
 
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
-import ignore from "ignore";
-
-const DEFAULT_PATTERNS = [
-  ".obsidian/**",
-  ".trash/**",
-  ".git/**",
-  ".tmp/**",
-  "tmp/**",
-  "node_modules/**",
-  "**/.obsidian/**",
-  "**/.trash/**",
-  "**/.git/**",
-  "**/.tmp/**",
-  "**/tmp/**",
-  "**/node_modules/**",
-  "**/screenshots/**",
-  "**/*screenshots*/**",
-  "**/coverage/**",
-  "**/dist/**",
-  "**/build/**",
-  "**/.cache/**",
-  "**/__pycache__/**",
-  "**/*.sqlite",
-  "**/*.sqlite-*",
-  "**/*.db",
-  "**/*.log",
-];
-
-function parsePatterns(value = "") {
-  return [
-    ...DEFAULT_PATTERNS,
-    ...value
-      .split(/[\n,]/u)
-      .map((item) => item.trim().replace(/\\/gu, "/").replace(/^\/+/u, ""))
-      .filter(Boolean),
-  ];
-}
+import {
+  createVaultExclusionMatcher,
+  isVaultPathExcluded,
+  normalizeVaultRelativePath,
+  parseVaultExcludePatterns,
+} from "../dist/services/vaultExclusions.js";
 
 async function walk(root, directory, matcher, counters, samples) {
   const entries = await readdir(directory, { withFileTypes: true });
   for (const entry of entries) {
     const absolutePath = path.join(directory, entry.name);
-    const relativePath = path
-      .relative(root, absolutePath)
-      .replace(/\\/gu, "/")
-      .replace(/^\/+/u, "");
-    const excluded = matcher.ignores(relativePath);
+    const relativePath = normalizeVaultRelativePath(path.relative(root, absolutePath));
+    const excluded = isVaultPathExcluded(relativePath, matcher, entry.isDirectory());
     if (excluded) {
       counters.excluded += 1;
       if (samples.excluded.length < 20) samples.excluded.push(relativePath);
@@ -86,8 +52,8 @@ async function main() {
     throw new Error(`Vault path is not a directory: ${resolvedVault}`);
   }
 
-  const patterns = parsePatterns(process.env.OBSIDIAN_VAULT_EXCLUDE_PATTERNS);
-  const matcher = ignore().add(patterns);
+  const patterns = parseVaultExcludePatterns(process.env.OBSIDIAN_VAULT_EXCLUDE_PATTERNS);
+  const matcher = createVaultExclusionMatcher(patterns);
   const counters = {
     files: 0,
     markdown: 0,

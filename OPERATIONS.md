@@ -88,11 +88,13 @@ For real-vault validation, keep `OBSIDIAN_SHARED_CACHE_DB_PATH` outside the sync
 
 The server has a built-in exclusion policy for filesystem-backed runtime scans. It skips operational noise and unsafe validation material before indexing:
 
-- `.obsidian`, `.trash`, `.git`
-- `.tmp`, `tmp`, `node_modules`
+- Dot-prefixed files and directories at any depth, including `.obsidian`, `.trash`, `.git`, and `.tmp`
+- `tmp` and `node_modules`
 - screenshot folders, build/cache folders, SQLite/DB files, and log files
 
-Add local rules with `OBSIDIAN_VAULT_EXCLUDE_PATTERNS`, using comma- or newline-separated gitignore-style patterns. Example:
+Hidden Markdown is omitted from headless note listings, searches, and reads by path. On startup, the shared cache removes previously indexed rows that the current policy excludes. This follows the default visibility of the [Obsidian Vault API](https://docs.obsidian.md/Plugins/Vault).
+
+Add local rules with `OBSIDIAN_VAULT_EXCLUDE_PATTERNS`, using comma- or newline-separated gitignore-style patterns. A `!` rule can explicitly include a hidden path, for example `!.private/Shared.md`. Build the server before running the exclusion checker from a fresh checkout.
 
 ```bash
 OBSIDIAN_VAULT_EXCLUDE_PATTERNS="tmp/**,**/tmp/**,Efforts/Archives/**"
