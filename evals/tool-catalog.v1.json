@@ -771,7 +771,7 @@
       }
     },
     "tasks": {
-      "description": "Task-focused work: note context, Markdown Tasks compatibility, the complete Operon MCP contract when the Desktop Bridge is configured, and only the snapshot-safe Operon read subset in non-live runtimes.",
+      "description": "Task-focused work: note context, Markdown Tasks compatibility, the complete Operon MCP contract when the Desktop Bridge is configured, and read-only Operon tools over the synchronized vault in headless modes.",
       "modes": {
         "live": [
           "list_all_tasks",
@@ -878,9 +878,12 @@
           "obsidian_read_note",
           "obsidian_runtime_status",
           "obsidian_validate_format",
+          "operon_find_tasks",
           "operon_get_configuration",
+          "operon_get_relationships",
           "operon_get_task",
           "operon_list_tasks",
+          "operon_query_saved_filter",
           "operon_query_tasks",
           "operon_status",
           "operon_validate",
@@ -896,9 +899,12 @@
           "obsidian_read_note",
           "obsidian_runtime_status",
           "obsidian_validate_format",
+          "operon_find_tasks",
           "operon_get_configuration",
+          "operon_get_relationships",
           "operon_get_task",
           "operon_list_tasks",
+          "operon_query_saved_filter",
           "operon_query_tasks",
           "operon_status",
           "operon_validate",
@@ -914,9 +920,12 @@
           "obsidian_read_note",
           "obsidian_runtime_status",
           "obsidian_validate_format",
+          "operon_find_tasks",
           "operon_get_configuration",
+          "operon_get_relationships",
           "operon_get_task",
           "operon_list_tasks",
+          "operon_query_saved_filter",
           "operon_query_tasks",
           "operon_status",
           "operon_validate",
@@ -5458,7 +5467,10 @@
       "profileModes": {
         "tasks": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "full": [
           "live",
@@ -5594,7 +5606,10 @@
       "profileModes": {
         "tasks": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "full": [
           "live",
@@ -5822,7 +5837,10 @@
       "profileModes": {
         "tasks": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "full": [
           "live",

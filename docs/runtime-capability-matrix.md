@@ -47,6 +47,7 @@ Optimike MCP 3.9.0 adds these capabilities after ordered local qualification. In
 | List/read/search                   | REST/cache              | REST/cache                              | Cache/filesystem         | Cache/filesystem        | Cache/filesystem                 | Cache/filesystem                                                          |
 | Native semantic note links          | Yes, public MetadataCache | Yes while Desktop API is live           | No                       | No                      | No                               | No                                                                        |
 | Tasks list/query                   | Cache/filesystem        | Cache/filesystem                        | Cache/filesystem         | Cache/filesystem        | Cache/filesystem                 | Cache/filesystem                                                          |
+| Operon task reads                  | Desktop Bridge          | Desktop Bridge                          | Validated snapshot       | Markdown + plugin data  | Markdown + plugin data           | Markdown + plugin data                                                    |
 | Smart semantic search              | `.smart-env` / `CURRENT` + embedder | `.smart-env` / `CURRENT` + compatible embedder      | `.smart-env` / `CURRENT` + embedder  | `.smart-env` / `CURRENT` + embedder | `.smart-env` / `CURRENT` + embedder          | `.smart-env` / `CURRENT` + embedder                                                   |
 | Runtime status/maintenance         | Yes                     | Yes                                     | Yes                      | Yes                     | Yes                              | Yes                                                                       |
 | Pending governed-operation cockpit | Yes                     | Yes                                     | No                       | No                      | No                               | No                                                                        |
@@ -112,9 +113,9 @@ Every mode also registers the 25 Operon contract tools:
 `operon_update_task`, `operon_transition_task`, `operon_set_relationships`,
 `operon_update_recurrence`, `operon_convert_task`,
 `operon_relocate_task`, `operon_list_pending_recoveries`, and
-`operon_recover_mutation`. In non-live modes they remain limited to validated
-read-only snapshots; mutation calls fail closed. Registration does not imply
-runtime availability: official Operon `3.9.3` retains saved-filter evaluation,
+`operon_recover_mutation`.
+
+In headless modes, the `tasks`, `operational` and `full` profiles offer [filesystem Operon reads](headless-server-profile.md#operon-without-desktop). The degraded hybrid runtime can still serve its previous validated snapshot. Operon mutations require the live Bridge. Registration does not imply runtime availability: official Operon `3.9.3` retains saved-filter evaluation,
 adoption and Daily/Weekly workflows after their exact grants. A non-denied
 future release is not forced into read-only mode solely because its product
 version is unknown: the Bridge admits each mutation only after Developer API V1

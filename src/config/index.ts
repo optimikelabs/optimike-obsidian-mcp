@@ -272,6 +272,11 @@ const EnvSchema = z
       .positive()
       .default(25),
     MCP_PROTECTED_FRONTMATTER_KEYS: z.string().default("création,modification"),
+    OPERON_TIMEZONE: z.string().trim().optional().refine(value => {
+      if (!value) return true;
+      try { new Intl.DateTimeFormat("en", { timeZone: value }); return true; }
+      catch { return false; }
+    }, "OPERON_TIMEZONE must be a recognized time zone"),
     OPERON_MUTATIONS_ENABLED: z
       .string()
       .transform((val) => val.toLowerCase() === "true")
@@ -551,6 +556,7 @@ export const config = {
   oauthJwksUri: env.OAUTH_JWKS_URI,
   obsidianApiKey: env.OBSIDIAN_API_KEY,
   obsidianRuntimeMode: env.OBSIDIAN_RUNTIME_MODE,
+  operonTimeZone: env.OPERON_TIMEZONE || undefined,
   obsidianBaseUrl: env.OBSIDIAN_BASE_URL,
   obsidianVerifySsl: env.OBSIDIAN_VERIFY_SSL,
   obsidianCacheRefreshIntervalMin: env.OBSIDIAN_CACHE_REFRESH_INTERVAL_MIN,

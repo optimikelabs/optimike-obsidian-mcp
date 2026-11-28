@@ -465,37 +465,8 @@ try {
     );
   }
 
-  for (const snapshotSafe of [
-    "operon_status",
-    "operon_get_configuration",
-    "operon_list_tasks",
-    "operon_get_task",
-    "operon_query_tasks",
-    "operon_validate",
-  ]) {
-    assert.ok(
-      tasksNames.includes(snapshotSafe),
-      `headless tasks lost ${snapshotSafe}`,
-    );
-  }
-  for (const liveOnly of [
-    "operon_query_saved_filter",
-    "operon_get_diagnostics",
-    "operon_find_tasks",
-    "operon_resolve_task",
-    "operon_get_relationships",
-    "operon_build_context",
-    "operon_get_timer_state",
-    "operon_create_task",
-    "operon_update_task",
-    "operon_transition_task",
-    "operon_list_pending_recoveries",
-    "operon_recover_mutation",
-  ]) {
-    assert.ok(
-      !tasksNames.includes(liveOnly),
-      `headless tasks exposed ${liveOnly}`,
-    );
+  for (const tool of tasksList.result.tools.filter((tool) => tool.name.startsWith("operon_"))) {
+    assert.equal(tool.annotations?.readOnlyHint, true, tool.name);
   }
 
   const mismatchPost = await protocolRequest({

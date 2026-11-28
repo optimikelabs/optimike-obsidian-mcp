@@ -329,6 +329,15 @@ export class VaultFileService {
     }
   }
 
+  async readBirthtime(filePath: string, context: RequestContext): Promise<number | undefined> {
+    const absolutePath = this.resolveVaultPath(filePath, context);
+    await this.assertRealPathInsideVault(absolutePath, context);
+    const { birthtimeMs, ctimeMs } = await stat(absolutePath);
+    // Node can expose inode change time as birthtime on filesystems without it.
+    if (process.platform !== "win32" && birthtimeMs === ctimeMs) return undefined;
+    return birthtimeMs > 0 ? Math.round(birthtimeMs) : undefined;
+  }
+
   async read(
     filePath: string,
     context: RequestContext,

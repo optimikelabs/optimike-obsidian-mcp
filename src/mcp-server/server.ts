@@ -1907,7 +1907,7 @@ async function createMcpServerInstance(
       const registry = await configuredSkillRegistry(externalRootsService, resolveToolProfile(), servingContext);
       if (registry) installSkillsExtension(server.server, registry, { deferResourceRead: true });
     }
-    registerToolRoutingResource(server);
+    registerToolRoutingResource(server, isHeadlessReadonly || isHeadlessGuarded || isHeadlessFilesystem);
 
     // Register read/cache-friendly tools first. In headless-readonly, the REST
     // service is intentionally absent and these tools must use the shared cache.
