@@ -1,13 +1,18 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod/v3";
-import type { NoteDeleteOperationAdapter } from "../../../services/operations/noteDeleteOperationAdapter.js";
 import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
 import {
   GOVERNED_PLAN_TOOL_ANNOTATIONS,
   GOVERNED_MUTATION_TOOL_ANNOTATIONS,
   READ_ONLY_TOOL_ANNOTATIONS,
 } from "../../toolAnnotations.js";
-import { mcpSchema } from "../../mcpSchema.js";
+import { mcpSchema, mcpSchemaWithPublicValidation } from "../../mcpSchema.js";
+
+const HEADLESS_DESCRIPTIONS = {
+  plan: "Seal deletion to the vault trash. Inspect incomingLinks and explicitly acknowledge backlinks with a new plan if required. Requires MCP_WRITE_MODE=full.",
+  apply: "Move the exact sealed file into the vault trash only after rechecking its content and backlinks. Reuse the plan key.",
+  status: "Read the recorded headless deletion and its completion evidence. If interrupted, check the original path and the exact trash destination.",
+};
 
 const Plan = z
   .object({
@@ -60,13 +65,18 @@ async function run(toolName: string, operation: () => Promise<unknown>) {
 }
 export function registerNoteDeleteTools(
   server: McpServer,
-  runtime: NoteDeleteOperationAdapter | undefined,
+  runtime: {
+    plan: (input: z.infer<typeof Plan>) => Promise<unknown>;
+    apply: (ref: string, key: string) => Promise<unknown>;
+    status: (ref: string) => Promise<unknown>;
+    recover?: (ref: string, key: string, action?: "resume" | "abandon") => Promise<unknown>;
+  } | undefined,
 ): void {
   if (!runtime) return;
   server.registerTool(
     "obsidian_note_delete_plan",
     {
-      description:
+      description: runtime.recover ? HEADLESS_DESCRIPTIONS.plan :
         "Seal the deletion of one Markdown note without deleting it: its exact content hash, size, incoming links and the vault's trash preference. The note is later moved to Obsidian's trash by the Atomic Write Bridge, never deleted outright; a permanent-deletion preference is refused. Requires MCP_WRITE_MODE=full and the independent note-deletion Bridge grant. A note that other notes link to is refused unless acknowledgeBacklinks=true.",
       inputSchema: mcpSchema(Plan.shape),
       annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,
@@ -77,9 +87,9 @@ export function registerNoteDeleteTools(
   server.registerTool(
     "obsidian_note_delete_apply",
     {
-      description:
+      description: runtime.recover ? HEADLESS_DESCRIPTIONS.apply :
         "Dispatch only the exact sealed deletion once, after the Bridge re-reads the note and refuses if its content or incoming links changed since the plan. Reuse the idempotencyKey of the plan. After a lost reply call obsidian_note_delete_status; never replan to retry an uncertain effect. committed means the note left its path through the trash call; postflight.status verified means an exact new copy was observed in the vault trash.",
-      inputSchema: mcpSchema(Apply.shape),
+      inputSchema: runtime.recover ? mcpSchemaWithPublicValidation(Apply.shape) : mcpSchema(Apply.shape),
       annotations: GOVERNED_MUTATION_TOOL_ANNOTATIONS,
     },
     (params) =>
@@ -91,9 +101,9 @@ export function registerNoteDeleteTools(
   server.registerTool(
     "obsidian_note_delete_status",
     {
-      description:
+      description: runtime.recover ? HEADLESS_DESCRIPTIONS.status :
         "Read and reconcile the durable deletion outcome and observe postflight without deleting anything. postflight.status: verified (absent from its path and an exact new copy in the vault trash), path_absent_only (absent; a system trash cannot be observed), pending, failed or indeterminate. A backend restart can leave an unacknowledged deletion unknown; no recover or undo tool exists, restore from the trash in Obsidian.",
-      inputSchema: mcpSchema(Status.shape),
+      inputSchema: runtime.recover ? mcpSchemaWithPublicValidation(Status.shape) : mcpSchema(Status.shape),
       annotations: READ_ONLY_TOOL_ANNOTATIONS,
     },
     (params) =>
@@ -101,4 +111,20 @@ export function registerNoteDeleteTools(
         runtime.status(Status.parse(params).planRef),
       ),
   );
+  if (runtime.recover) {
+    const recover = runtime.recover;
+    const Recovery = Apply.extend({ action: z.enum(["resume", "abandon"]).optional() });
+    server.registerTool(
+      "obsidian_note_delete_recover",
+      {
+        description: "Resume the same headless plan when recoveryAllowed, or use action=abandon when abandonAllowed to release the reservation for manual repair. Reuse the original idempotency key.",
+        inputSchema: mcpSchemaWithPublicValidation(Recovery.shape),
+        annotations: GOVERNED_MUTATION_TOOL_ANNOTATIONS,
+      },
+      (params) => run("obsidian_note_delete_recover", () => {
+        const p = Recovery.parse(params);
+        return recover(p.planRef, p.idempotencyKey, p.action);
+      }),
+    );
+  }
 }

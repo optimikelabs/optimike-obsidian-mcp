@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { InMemoryTransport, McpServer } from "@modelcontextprotocol/server";
 import { Client } from "@modelcontextprotocol/client";
 import { z } from "zod/v3";
-import { mcpSchema } from "../dist/mcp-server/mcpSchema.js";
+import { mcpSchema, mcpSchemaWithPublicValidation } from "../dist/mcp-server/mcpSchema.js";
 
 process.env.OBSIDIAN_RUNTIME_MODE = "hybrid";
 process.env.OBSIDIAN_VAULT = process.cwd();
@@ -131,6 +131,15 @@ server.registerTool(
     content: [{ type: "text", text: "validated" }],
   }),
 );
+let publicValidationDispatches = 0;
+server.registerTool(
+  "validates_public_input",
+  { inputSchema: mcpSchemaWithPublicValidation({ expected: z.literal("expected") }) },
+  async () => {
+    publicValidationDispatches++;
+    return { content: [{ type: "text", text: "validated" }] };
+  },
+);
 server.registerTool("voluntary_error", {}, async () => ({
   content: [{ type: "text", text: "voluntary client feedback" }],
   isError: true,
@@ -235,6 +244,19 @@ try {
     }),
     "input validation error",
   );
+  const invalid = await client.callTool({
+    name: "validates_public_input",
+    arguments: { expected: callerMarker },
+  });
+  assert.equal(invalid.isError, true);
+  assert.equal(publicValidationDispatches, 0);
+  assert(!text(invalid).includes(callerMarker));
+  const publicError = JSON.parse(text(invalid)).error;
+  assert.equal(publicError.code, "VALIDATION_ERROR");
+  assert.equal(publicError.details.reasonCode, "invalid_tool_arguments");
+  assert.deepEqual(publicError.details.validationIssues, [
+    { path: "expected", message: "Invalid value for this field." },
+  ]);
   assertBoundaryResult(
     await client.callTool({ name: `unknown_${callerMarker}`, arguments: {} }),
     "unknown tool error",

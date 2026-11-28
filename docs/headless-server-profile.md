@@ -24,7 +24,7 @@ Tune the filesystem link index with `OBSIDIAN_LINK_LARGE_NOTE_BYTES` (default 26
 - The filesystem backend reads the shared cache, which may contain Markdown refreshed through Local REST. After a REST update it reindexes changed rows by content hash without reopening vault notes. A change to the vault root or exclusion scope requires a new filesystem inventory.
 - Keep MCP cache outside the synchronized vault.
 - Use vault exclusions for operational noise, but do not rely on them to stop Obsidian Sync downloads.
-- Do not claim Desktop parity. Move/delete, frontmatter or inline tags, batch frontmatter, minimal Bases writes, format validation, and minimal Canvas helpers exist as bounded filesystem/local features, not as Obsidian Desktop behavior.
+- Do not claim Desktop parity. Frontmatter or inline tags, batch frontmatter, minimal Bases writes, format validation, and minimal Canvas helpers exist as bounded filesystem/local features, not as Obsidian Desktop behavior.
 
 ## Environment
 
@@ -95,7 +95,7 @@ The snapshot is not a full backup strategy, but it gives a fast local rollback p
 
 Only after the `headless-guarded` step, switch a copied or dedicated vault to `OBSIDIAN_RUNTIME_MODE=headless-filesystem`.
 
-1. For move/delete, require `expectedHash` or `expectedMtime`.
+1. Use the governed move and trash tools below. The compatibility tools require `expectedHash` or `expectedMtime`.
 2. For tags, limit the contract to Markdown text: YAML frontmatter `tags`, inline `#tags`, and cache-backed local index.
 3. For batch frontmatter, keep dry-run as the default and allow only `set`.
 4. For Bases, limit the contract to `.base` YAML files and Markdown frontmatter properties.
@@ -103,6 +103,69 @@ Only after the `headless-guarded` step, switch a copied or dedicated vault to `O
 6. Validate with `npm run smoke:headless-filesystem`.
 
 Never use this phase to edit existing production notes until the server profile has its own rollback and monitoring story.
+
+### Governed move and trash
+
+In `headless-filesystem` with the filesystem cache and `MCP_WRITE_MODE=full`, call
+`obsidian_note_move_plan` with exact source and destination paths and an idempotency key.
+The plan inspects indexed Markdown links and attachment embeds. It preserves
+the syntax and labels of existing links, including YAML scalars, and adjusts
+resolved links in a moved note when they would otherwise lose their target.
+It refuses a move that would retarget another note's resolved link. The preview
+is capped. More than 100 notes requiring rewrites or 100 backlink sources for
+a deletion return `headless_backlink_limit`. The separate safety scan can
+inspect up to 1,000 candidate notes, including links to the destination name.
+Above that, it returns `headless_backlink_inspection_limit`.
+Plans use the same sections as the filesystem link index. If an incomplete
+source could affect the paths in the plan, the plan returns
+`headless_link_coverage_incomplete`. Moves with `alwaysUpdateLinks: false`
+can still proceed.
+The plan probes exclusive hard-link publication
+before admission. Apply with the original key. A stale plan returns
+`headless_plan_stale`.
+
+`app.json` controls link updates through `alwaysUpdateLinks` and paths through
+`newLinkFormat`. `useMarkdownLinks` concerns newly generated links. Headless
+moves keep existing wikilinks and Markdown links in their original syntax.
+See [Obsidian's Files and links settings](https://obsidian.md/help/settings#files-and-links).
+
+Call `obsidian_note_delete_plan` to inspect incoming links. Submit a new plan
+with `acknowledgeBacklinks: true` after examining nonempty backlinks.
+The original file moves to a free path under `.trash` by default. The MCP also
+accepts `trashFolder` or `trashFolderPath` as local folder overrides.
+Explicit `trashOption: "system"` and `trashOption: "none"` are refused.
+When the setting is absent, the MCP uses vault trash to provide a restorable
+destination inside the vault without a Desktop system-trash adapter.
+[Obsidian Desktop defaults to system trash](https://obsidian.md/help/manage-notes).
+
+Both operations update the affected cache and index paths and re-read the
+filesystem for the postflight receipt. Later status calls return that completion
+evidence with `cache: "recorded"` and `postflightSource: "recorded"`. After
+interruption, call `*_status`.
+Use `*_recover` with the same reference and key when `recoveryAllowed` is true.
+If an external edit prevents recovery, `abandonAllowed` permits
+`*_recover` with `action: "abandon"`. This releases the reservation for manual
+repair. The receipt retains `nextAction: "manual_repair"` and includes
+`repairProofs` with paths, SHA-256 hashes and inverse edits. The inverse ranges
+are UTF-16 offsets into the rewritten file and are ordered from the end to the
+start of the file. Compare the current hash with `afterSha256` before using
+the inverse edits. The private journal retains the original text
+(`headless_file_operations.payload.rewrites`).
+An attempt with no published file effect releases the reservation and reports
+a conflict. Recovery or abandonment cleans the operation's addressable staging files.
+
+The same-filesystem hard-link probe uses its own temporary files and can return
+`hard_links_unsupported`. One background startup sweep checks for leftovers.
+Recovery checks the vault root and folders on paths recorded in the plan.
+A legacy probe with a single link is preserved. Status lists such paths under
+`probeCleanup.orphanedLegacyProbes` for manual review.
+Each replacement is atomic. Other file writers remain outside these locks, and
+several replacements can be visible partway through. The workflow is scoped to
+a copied or dedicated vault. See the [ADR](adr/ADR-External-Reference-Integrity.md#vault-only-moves)
+for its distinction from external-document relocation.
+
+`operational` prefers these tools. The `full` profile also retains the older
+direct move and delete tools, whose hash/mtime checks apply to a single file.
 
 ## Server Go/No-Go
 

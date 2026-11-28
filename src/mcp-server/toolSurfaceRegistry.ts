@@ -163,9 +163,11 @@ const GOVERNED_OPERATION_TOOL_NAMES = [
   "obsidian_note_move_plan",
   "obsidian_note_move_apply",
   "obsidian_note_move_status",
+  "obsidian_note_move_recover",
   "obsidian_note_delete_plan",
   "obsidian_note_delete_apply",
   "obsidian_note_delete_status",
+  "obsidian_note_delete_recover",
   "obsidian_note_replace_plan",
   "obsidian_note_replace_apply",
   "obsidian_note_replace_status",
@@ -325,7 +327,8 @@ function defineTool(
 }
 
 /** Recovery is a domain contract, not a mandatory synthetic fourth tool. */
-export function governedLifecycleRoles(family: string): readonly GovernedLifecycleRole[] {
+export function governedLifecycleRoles(family: string, headlessFilesystem = false): readonly GovernedLifecycleRole[] {
+  if (headlessFilesystem && (family === "note-move" || family === "note-delete")) return ["plan", "apply", "status", "recover"];
   return ["note-move", "note-delete", "note-create", "base-create", "canvas-create", "base-rows", "asset-import"].includes(family)
     ? ["plan", "apply", "status"]
     : ["plan", "apply", "status", "recover"];
@@ -336,11 +339,15 @@ function governedFamily(
   group: ToolGroupId,
   family: string,
 ): readonly ToolSurfaceEntry[] {
-  return governedLifecycleRoles(family).map((role) =>
-    defineTool(`${prefix}_${role}`, group, family, LIVE_MODES, {
+  const headlessFileOperation = family === "note-move" || family === "note-delete";
+  const roles = governedLifecycleRoles(family, headlessFileOperation);
+  return roles.map((role) =>
+    defineTool(`${prefix}_${role}`, group, family,
+      !headlessFileOperation ? LIVE_MODES : role === "recover" ? FILESYSTEM_ONLY : LIVE_OR_FILESYSTEM_MODES, {
       annotationClass: role === "plan" ? "governed-plan"
         : role === "status" ? "read-only" : "governed-mutation",
       lifecycleRole: role,
+      ...(headlessFileOperation ? { availabilityRules: [{ modes: FILESYSTEM_ONLY, requires: ["vault-cache"] }] } : {}),
     }),
   );
 }
@@ -436,7 +443,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "notes.direct.admin",
     "notes-admin",
     FILESYSTEM_ONLY,
-    { surfaceClass: "direct", annotationClass: "destructive" },
+    { surfaceClass: "direct", annotationClass: "destructive", preferredAlternativeFamily: "note-move" },
   ),
 
   ...governedFamily("bases_rows_patch", "bases.governed", "base-rows"),

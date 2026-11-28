@@ -40,6 +40,8 @@ import { registerOperonTools } from "../operonTools/index.js";
 import { registerOperationCloseTool, registerOperationCockpitTool } from "../operationCockpitTools/index.js";
 import type { PendingOperationSource } from "../../../services/operationCockpit.js";
 import { mcpSchema } from "../../mcpSchema.js";
+import { config } from "../../../config/index.js";
+import { HeadlessNoteOperations } from "../../../services/operations/headlessNoteOperations.js";
 
 const MaintenanceInputSchema = z.object({
   action: z
@@ -80,6 +82,9 @@ export async function registerRuntimeTools(
 ): Promise<void> {
   const profile = resolveToolProfile();
   const registrationMode = resolveToolRegistrationMode(obsidianService);
+  const headless = registrationMode === "headless-filesystem" && vaultCacheService && config.obsidianVaultPath
+    ? new HeadlessNoteOperations(config.obsidianVaultPath, config.obsidianNoteReplaceJournalPath, vaultCacheService)
+    : undefined;
   server.registerTool(
     "obsidian_runtime_status",
     {
@@ -165,8 +170,18 @@ export async function registerRuntimeTools(
   registerOperationCloseTool(server, governedNoteReplaceRuntime);
 
   await registerGovernedNoteReplaceTools(server, governedNoteReplaceRuntime);
-  registerNativeNoteMoveTools(server, governedNoteReplaceRuntime?.nativeMove);
-  registerNoteDeleteTools(server, governedNoteReplaceRuntime?.noteDelete);
+  registerNativeNoteMoveTools(server, headless ? {
+    plan: input => headless.planMove(input),
+    apply: (ref, key) => headless.apply("move", ref, key),
+    status: ref => headless.status("move", ref),
+    recover: (ref, key, action) => headless.recover("move", ref, key, action),
+  } : governedNoteReplaceRuntime?.nativeMove);
+  registerNoteDeleteTools(server, headless ? {
+    plan: input => headless.planDelete(input),
+    apply: (ref, key) => headless.apply("delete", ref, key),
+    status: ref => headless.status("delete", ref),
+    recover: (ref, key, action) => headless.recover("delete", ref, key, action),
+  } : governedNoteReplaceRuntime?.noteDelete);
   registerNoteCreateTools(server, governedNoteReplaceRuntime?.noteCreate);
   registerVaultFileCreateTools(server, [governedNoteReplaceRuntime?.baseCreate, governedNoteReplaceRuntime?.canvasCreate]);
   registerBaseRowsPatchTools(
