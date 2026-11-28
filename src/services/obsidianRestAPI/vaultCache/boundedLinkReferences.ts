@@ -1,10 +1,12 @@
-import { extractMarkdownLinkReferences, type MarkdownLinkReference } from "./markdownLinkReferences.js";
+import { beginsBlockComment, extractMarkdownLinkReferences, markdownHtmlSpans, type MarkdownLinkReference } from "./markdownLinkReferences.js";
+import type { LinkSourceLimitReason } from "../../headlessLinkCoverage.js";
 
 export type LinkExtractionOptions = {
   largeNoteBytes: number;
   sectionBytes: number;
   maxReferences: number;
   batchBytes: number;
+  parseTimeoutMs?: number;
 };
 
 export const LARGE_LINK_SOURCE_BYTES = 256 * 1024;
@@ -14,12 +16,15 @@ export const defaultLinkExtraction: LinkExtractionOptions = {
   sectionBytes: 64 * 1024,
   maxReferences: 8192,
   batchBytes: 256 * 1024,
+  parseTimeoutMs: 10_000,
 };
 
-type Boundary = { offset: number; bytes: number; line: number };
+type Boundary = { offset: number; bytes: number; line: number; listPrefix?: string };
 type Region = { start: Boundary; end: Boundary; omit?: boolean };
 type LinkSection = { start: Boundary; end: Boundary; safe: boolean };
-export type BoundedLinkExtraction = { references: MarkdownLinkReference[]; complete: boolean };
+export type BoundedLinkExtraction = { references: MarkdownLinkReference[] } & (
+  { complete: true; limitReason?: never } | { complete: false; limitReason: LinkSourceLimitReason }
+);
 
 const fenceLine = /^[ \t>]*(?:(?:[-+*]|\d+[.)])[ \t]+)?(`{3,}|~{3,})(.*)$/u;
 const rawHtml = [
@@ -103,27 +108,51 @@ function* boundaryTokens(line: string) {
     const offset = match.index;
     while (literals[cursor] && literals[cursor].index + literals[cursor][0].length <= offset) cursor++;
     const literal = literals[cursor];
-    if (literal && literal.index <= offset) continue;
+    const inLiteral = !!literal && literal.index <= offset;
     const token = match[0];
     if (token === "%%") {
-      if (line[offset - 1] !== "\\") yield { token, offset };
-    } else if (token.length <= 2) {
+      if (line[offset - 1] !== "\\") yield { token, offset, inLiteral };
+    } else if (!inLiteral && token.length <= 2) {
       if (!escapedAt(line, offset)) yield { token, offset };
     }
   }
+}
+
+/** Ask the same Markdown parser about HTML in paragraphs containing a
+ * comment delimiter. Avoid parsing the entire note just to classify HTML. */
+function* htmlSpans(content: string, budget: number) {
+  let start = startOfSource;
+  let end = start;
+  function* spans() {
+    if (end.bytes - start.bytes > budget) return;
+    const paragraph = content.slice(start.offset, end.offset);
+    if (!paragraph.includes("<") || !paragraph.includes("%%")) return;
+    for (const span of markdownHtmlSpans(paragraph)) {
+      yield { start: start.offset + span.start, end: start.offset + span.end };
+    }
+  }
+  for (const line of lines(content)) {
+    if (/^[ \t]*$/u.test(line.text)) {
+      yield* spans();
+      start = line.end;
+    }
+    end = line.end;
+  }
+  yield* spans();
 }
 
 function protectedRegions(content: string, hardLimit: number) {
   const regions: Region[] = [];
   const hasDelimiters = content.includes("%%") || content.includes("$");
   const code = inlineCode(content, hardLimit);
+  const htmlTokens = htmlSpans(content, hardLimit);
   let inline = hasDelimiters && content.includes("`") ? code.next().value : undefined;
-  let complete = true;
+  let htmlToken = content.includes("%%") && content.includes("<") ? htmlTokens.next().value : undefined;
   let previousBlank = true;
   let fence: { start: Boundary; marker: string; topLevel: boolean } | undefined;
   let html: { start: Boundary; close: RegExp } | undefined;
   let frontmatter = /^\uFEFF?---(?:\r\n?|\n)/u.test(content);
-  let comment: Boundary | undefined;
+  let comment: { start: Boundary; offset: number } | undefined;
   let formula: { start: Boundary; width: number } | undefined;
   let last = startOfSource;
   for (const { start, end, text } of lines(content)) {
@@ -153,11 +182,6 @@ function protectedRegions(content: string, hardLimit: number) {
       }
       continue;
     }
-    if (comment && start.bytes - comment.bytes >= hardLimit) {
-      regions.push({ start: comment, end: start });
-      comment = undefined;
-      complete = false;
-    }
     if (!comment) {
       if (marker && (marker[1][0] !== "`" || !marker[2].includes("`"))) {
         fence = { start, marker: marker[1], topLevel: afterBlank && text.startsWith(marker[1]) };
@@ -170,40 +194,47 @@ function protectedRegions(content: string, hardLimit: number) {
       }
     }
     if (!hasDelimiters) continue;
-    for (const { token, offset } of boundaryTokens(text)) {
+    for (const marker of boundaryTokens(text)) {
+      const { token, offset } = marker;
       const absolute = start.offset + offset;
+      if (comment && token === "%%") {
+        regions.push({ start: comment.start, end });
+        comment = undefined;
+        continue;
+      }
       while (inline && inline[1] <= absolute) inline = code.next().value;
       if (inline && inline[0] <= absolute) continue;
       if (token === "%%") {
-        if (comment) {
-          regions.push({ start: comment, end });
-          comment = undefined;
-        } else {
-          comment = start;
+        while (htmlToken && htmlToken.end <= absolute) htmlToken = htmlTokens.next().value;
+        if (!marker.inLiteral && (!htmlToken || htmlToken.start > absolute) && beginsBlockComment(text.slice(0, offset))) {
+          comment = { start, offset: absolute };
         }
         continue;
       }
-      if (comment) continue;
       const width = token.length;
       const usableClose = width === 2 || (/\S/u.test(text[offset - 1] ?? "") && !/\d/u.test(text[offset + width] ?? ""));
       if (formula?.width === width && usableClose) {
         if (width === 2) regions.push({ start: formula.start, end });
         formula = undefined;
-      } else if (!formula && (width === 2 || /\S/u.test(text[offset + width] ?? ""))) {
+        // A comment opener inside a paired formula is literal.
+        comment = undefined;
+      } else if (!comment && !formula && (width === 2 || /\S/u.test(text[offset + width] ?? ""))) {
         formula = { start, width };
       }
     }
     if (formula?.width === 1) formula = undefined;
   }
-  const unclosed = frontmatter ? startOfSource : fence?.start ?? html?.start ?? comment;
+  // Cutting inside an unclosed comment would let a later section reparse its
+  // hidden tail as Markdown. Truncating at the opener preserves prefix offsets.
+  const unclosed = frontmatter ? startOfSource : fence?.start ?? html?.start;
   if (unclosed) {
     regions.push({ start: unclosed, end: last, omit: fence?.topLevel && last.bytes - unclosed.bytes > hardLimit });
   }
   regions.sort((a, b) => a.start.offset - b.start.offset || b.end.offset - a.end.offset);
-  return { regions, complete };
+  return { regions, visibleEnd: comment?.offset };
 }
 
-function* sections(content: string, sectionSize: number, hardLimit: number, regions: Region[]): IterableIterator<LinkSection> {
+function* sections(content: string, sectionSize: number, hardLimit: number, regions: Region[], recoverLists: boolean): IterableIterator<LinkSection> {
   let start = startOfSource;
   let prior: Boundary | undefined;
   let safe: Boundary | undefined;
@@ -212,8 +243,15 @@ function* sections(content: string, sectionSize: number, hardLimit: number, regi
   let skippedUntil = 0;
   let previousBlank = true;
   let end = start;
+  let listMarker: string | undefined;
   for (const line of lines(content)) {
     const at = line.start;
+    if (recoverLists) {
+      const marker = /^(?: {0,3})([-+*]|\d{1,9}[.)])([ \t]+)\S/u.exec(line.text);
+      if (marker) listMarker = marker[0].slice(0, -1) + "x\n";
+      else if (listMarker && /^(?: {4}|\t)/u.test(line.text)) at.listPrefix = listMarker;
+      else if (/^\S/u.test(line.text)) listMarker = undefined;
+    }
     end = line.end;
     const afterBlank = previousBlank;
     previousBlank = /^[ \t]*$/u.test(line.text);
@@ -256,27 +294,30 @@ function* sections(content: string, sectionSize: number, hardLimit: number, regi
 export function extractBoundedLinkSource(
   content: string,
   { sectionBytes, maxReferences }: LinkExtractionOptions = defaultLinkExtraction,
+  recoverLists = false,
 ): BoundedLinkExtraction {
   const references: MarkdownLinkReference[] = [];
   const hardLimit = 4 * sectionBytes;
   const protectedSource = protectedRegions(content, hardLimit);
-  let complete = protectedSource.complete;
+  let complete = true;
+  if (protectedSource.visibleEnd !== undefined) content = content.slice(0, protectedSource.visibleEnd);
   let sectionCount = 0;
-  for (const { start, end, safe } of sections(content, sectionBytes, hardLimit, protectedSource.regions)) {
+  for (const { start, end, safe } of sections(content, sectionBytes, hardLimit, protectedSource.regions, recoverLists)) {
     sectionCount++;
     const wikiOnly = end.bytes - start.bytes > hardLimit;
     if (!safe || wikiOnly) complete = false;
-    const parsed = extractMarkdownLinkReferences(content.slice(start.offset, end.offset), {
+    const prefix = wikiOnly ? "" : start.listPrefix ?? "";
+    const parsed = extractMarkdownLinkReferences(prefix + content.slice(start.offset, end.offset), {
       readFrontmatter: start.offset === 0 && !wikiOnly,
       wikiOnly,
       maxReferences: maxReferences - references.length + 1,
     });
     for (const reference of parsed) {
-      if (references.length === maxReferences) return { references, complete: false };
+      if (references.length === maxReferences) return { references, complete: false, limitReason: "cap" };
       if (reference.position) {
         for (const point of [reference.position.start, reference.position.end]) {
-          point.offset += start.offset;
-          point.line += start.line;
+          point.offset += start.offset - prefix.length;
+          point.line += start.line - Number(!!prefix);
         }
       }
       references.push(reference);
@@ -284,7 +325,7 @@ export function extractBoundedLinkSource(
   }
   // Reference-style Markdown may depend on a definition in another section.
   if (sectionCount > 1 && /^ {0,3}\[[^\]\r\n]+\]:/mu.test(content)) complete = false;
-  return { references, complete };
+  return complete ? { references, complete: true } : { references, complete: false, limitReason: "region" };
 }
 
 export function extractLargeLinkSource(content: string): MarkdownLinkReference[] {

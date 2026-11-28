@@ -20,6 +20,9 @@ export const ObsidianNoteLinksInputSchema = z.object({
       message: "filePath must identify a Markdown note.",
     })
     .describe("Vault-relative Markdown note path."),
+  requireComplete: z.boolean().optional().describe(
+    "For filesystem reads, refuse when a limited source could affect the result.",
+  ),
   limit: z
     .number()
     .int()
@@ -44,7 +47,7 @@ export async function processObsidianNoteLinks(
 ): Promise<NoteLinksResponse | FilesystemNoteLinksResponse> {
   const parsed = ObsidianNoteLinksInputSchema.parse(input);
   if (!obsidianService) {
-    if (vaultCache) return vaultCache.readFilesystemNoteLinks(parsed.filePath, parsed.limit, context);
+    if (vaultCache) return vaultCache.readFilesystemNoteLinks(parsed.filePath, parsed.limit, context, parsed.requireComplete);
     throw new McpError(
       BaseErrorCode.SERVICE_UNAVAILABLE,
       "Note links require Obsidian Desktop or the shared filesystem cache.",

@@ -66,9 +66,10 @@ const freePort = () =>
   });
 
 const spawned = [];
-function supervise(port, options = {}) {
-  const state = path.join(work, `state-${port}`);
-  const markers = path.join(work, `markers-${port}`);
+function supervise(scenario, port, options = {}) {
+  // The OS can give a later scenario the same ephemeral port.
+  const state = path.join(scenario, "state");
+  const markers = path.join(scenario, "markers");
   mkdirSync(markers, { recursive: true });
   const args = [
     "-NoProfile",
@@ -131,15 +132,16 @@ function stopStartedBackends(run) {
 try {
   // 1. A backend that is not running is started and answers /healthz.
   {
+    const scenario = path.join(work, "missing-and-healthy");
     const port = await freePort();
-    const run = supervise(port);
+    const run = supervise(scenario, port);
     assert.equal(run.status, 0, run.stderr + run.log());
     assert.equal(run.starts().length, 1, "one start");
     assert.ok(await healthy(port), "backend answers after the start");
     assert.match(run.log(), /starting backend/u);
     assert.match(run.log(), /backend healthy after start/u);
     // 2. A healthy backend is left alone (no second start).
-    const again = supervise(port);
+    const again = supervise(scenario, port);
     assert.equal(again.status, 0);
     assert.equal(again.starts().length, 1, "healthy backend is not restarted");
     assert.doesNotMatch(
@@ -154,15 +156,16 @@ try {
 
   // 3. A single failed probe does not restart (threshold 2); the second does.
   {
+    const scenario = path.join(work, "consecutive-failures");
     const port = await freePort();
-    const first = supervise(port, { threshold: 2 });
+    const first = supervise(scenario, port, { threshold: 2 });
     assert.equal(first.status, 0);
     assert.equal(
       first.starts().length,
       0,
       "one failure is below the threshold",
     );
-    const second = supervise(port, { threshold: 2 });
+    const second = supervise(scenario, port, { threshold: 2 });
     assert.equal(second.status, 0, second.stderr + second.log());
     assert.equal(
       second.starts().length,
@@ -175,13 +178,14 @@ try {
 
   // 4. A process that holds the port but fails /healthz is never touched.
   {
+    const scenario = path.join(work, "port-already-held");
     const port = await freePort();
     const intruder = http.createServer((request, response) => {
       response.statusCode = 500;
       response.end("down");
     });
     await new Promise((resolve) => intruder.listen(port, "127.0.0.1", resolve));
-    const run = supervise(port);
+    const run = supervise(scenario, port);
     assert.equal(run.status, 2, run.stderr + run.log());
     assert.equal(run.starts().length, 0);
     assert.match(run.log(), /not touching it/u);
@@ -194,8 +198,9 @@ try {
 
   // 5. The restart budget stops a crash loop.
   {
+    const scenario = path.join(work, "restart-budget");
     const port = await freePort();
-    const state = path.join(work, `state-${port}`);
+    const state = path.join(scenario, "state");
     mkdirSync(state, { recursive: true });
     const now = Math.floor(Date.now() / 1000);
     writeFileSync(
@@ -207,7 +212,7 @@ try {
         down: true,
       }),
     );
-    const run = supervise(port, { extra: ["-MaxRestartsPerHour", "3"] });
+    const run = supervise(scenario, port, { extra: ["-MaxRestartsPerHour", "3"] });
     assert.equal(run.status, 3, run.stderr + run.log());
     assert.equal(run.starts().length, 0);
     assert.match(run.log(), /restart budget exhausted/u);
@@ -216,8 +221,9 @@ try {
 
   // 6. Empty logs of old launches are removed; non-empty ones are kept.
   {
+    const scenario = path.join(work, "empty-logs");
     const port = await freePort();
-    const state = path.join(work, `state-${port}`);
+    const state = path.join(scenario, "state");
     mkdirSync(state, { recursive: true });
     const empty = path.join(state, "backend-20200101-000000.stdout.log");
     const kept = path.join(state, "backend-20200101-000000.stderr.log");
@@ -228,7 +234,7 @@ try {
       const { utimesSync } = await import("node:fs");
       utimesSync(file, old, old);
     }
-    const run = supervise(port, { extra: ["-DryRun"] });
+    const run = supervise(scenario, port, { extra: ["-DryRun"] });
     assert.equal(run.status, 0, run.stderr + run.log());
     assert.ok(!existsSync(empty), "empty process log removed");
     assert.ok(existsSync(kept), "non-empty process log kept");

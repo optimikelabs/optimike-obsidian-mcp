@@ -225,6 +225,7 @@ export type NoteLinkObservation = {
     | { status: "resolved"; targetPath: string; ambiguous?: true }
     | { status: "unresolved" };
   subpathValidation: NoteSubpathValidation;
+  confidence?: "uncertain";
   provenance:
     | "metadataCache.links"
     | "metadataCache.embeds"
@@ -270,8 +271,7 @@ export type FilesystemNoteLinksResponse = NoteLinksProjection & {
     reason: "bounded_large_note_extraction";
     sourceComplete: boolean;
     backlinksComplete: boolean;
-    limitedSourceCount: number;
-  };
+  } & import("../headlessLinkCoverage.js").LimitedLinkSources;
   cache: {
     available: true;
     consistency: "best_effort_non_atomic_snapshot";
@@ -293,8 +293,8 @@ export type FilesystemNoteLinksResponse = NoteLinksProjection & {
 
 export type NoteLinksProjection = {
   outgoing: NoteLinkObservation[];
-  unresolved: Array<{ linkText: string; count: number }>;
-  backlinks: Array<{ sourcePath: string; count: number }>;
+  unresolved: Array<{ linkText: string; count: number; confidence?: "uncertain" }>;
+  backlinks: Array<{ sourcePath: string; count: number; confidence?: "uncertain" }>;
   coverage: {
     outgoing: {
       available: boolean;

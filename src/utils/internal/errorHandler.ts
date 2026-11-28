@@ -14,6 +14,10 @@ import {
   NOTE_NAME_REASON_CODES, checkNoteName, isNoteNameHint, isNoteNameReasonCode,
 } from "../../services/noteNameRules.js";
 import { NATIVE_MOVE_PUBLIC_REASON_CODES, isNativeMoveHint } from "../../services/nativeNoteMoveRefusals.js";
+import {
+  HEADLESS_LINK_COVERAGE_INCOMPLETE, isLimitedLinkSourcePath, isLinkSourceLimitReason, LIMITED_LINK_SOURCE_LIMIT,
+  type LimitedLinkSource, type LimitedLinkSources,
+} from "../../services/headlessLinkCoverage.js";
 import { isDatePreparationCheck } from "../../services/datePreparationProvenance.js";
 import {
   APPLY_CONFIRMATION_REFUSAL_CODES,
@@ -246,7 +250,7 @@ const SAFE_ERROR_DETAIL_FIELDS = new Set([
   "outcome",
 ]);
 
-type SafeDetailValue = string | number | boolean | PublicToolInputIssues | PublicFormulaCheck;
+type SafeDetailValue = string | number | boolean | PublicToolInputIssues | PublicFormulaCheck | LimitedLinkSource[];
 
 const CALLER_DERIVED_PUBLIC_FIELDS = new Set(["suggestedPath", "suggestedName"]);
 
@@ -256,6 +260,7 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "headless_link_cache_refreshing",
   "headless_link_cache_events_pending",
   "headless_link_cache_uncertain",
+  HEADLESS_LINK_COVERAGE_INCOMPLETE,
   BASE_FORMULA_ENGINE_REFUSAL,
   ...NOTE_NAME_REASON_CODES,
   ...NATIVE_MOVE_PUBLIC_REASON_CODES,
@@ -704,10 +709,36 @@ function safeDiagnosticFields(
     }
     safe[field] = value;
   }
+  if (allowedFields === SAFE_ERROR_DETAIL_FIELDS && safe.reasonCode === HEADLESS_LINK_COVERAGE_INCOMPLETE) {
+    Object.assign(safe, safeLimitedLinkSources(source));
+  }
   return safe;
 }
 
+function safeLimitedLinkSources(source: Record<string, unknown>): LimitedLinkSources | undefined {
+  const count = readOwnDataProperty(source, "limitedSourceCount");
+  const entries = readOwnDataProperty(source, "limitedSources");
+  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) return;
+  const limitedSources: LimitedLinkSource[] = [];
+  try {
+    if (!Array.isArray(entries)) return;
+    const length = readOwnDataProperty(entries, "length");
+    if (typeof length !== "number") return;
+    for (let i = 0; i < Math.min(length, count, LIMITED_LINK_SOURCE_LIMIT); i++) {
+      const entry = readOwnDataProperty(entries, String(i));
+      const path = readOwnDataProperty(entry, "path");
+      const reason = readOwnDataProperty(entry, "reason");
+      if (isLimitedLinkSourcePath(path) && isLinkSourceLimitReason(reason)) limitedSources.push({ path, reason });
+    }
+  } catch {
+    return;
+  }
+  return { limitedSourceCount: count, limitedSources };
+}
+
 function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
+  if (reasonCode === HEADLESS_LINK_COVERAGE_INCOMPLETE)
+    return "The operation requires complete link coverage. Inspect the limited sources before retrying.";
   if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "headless_link_index_building")
     return "The headless link index is building. Retry obsidian_note_links later.";
   if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "headless_link_cache_refreshing")
@@ -1129,7 +1160,7 @@ export class ErrorHandler {
     // Caller-derived suggestions go to the caller only, never to the log sink.
     logPayload.errorDetails = Object.fromEntries(
       Object.entries(finalError.details ?? {}).filter(
-        ([key]) => !CALLER_DERIVED_PUBLIC_FIELDS.has(key),
+        ([key]) => key !== "limitedSources" && !CALLER_DERIVED_PUBLIC_FIELDS.has(key),
       ),
     );
 
