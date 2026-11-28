@@ -1,5 +1,6 @@
 import "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -124,6 +125,7 @@ test("headless read reports the start of a cold scan that missed a concurrent ed
     assert.equal(result.isError, false);
     const payload = JSON.parse(result.content[0].text);
     assert.equal(payload.content, "filesystem fixture");
+    assert.equal(payload.sha256, createHash("sha256").update(payload.content, "utf8").digest("hex"));
     const completed = await status();
     assert.equal(completed.sharedCache.lastRefreshAt, scanFinishedAt);
     assert.equal(completed.headlessRead.lastSuccessfulRefreshStartedAt, scanStartedAt);
@@ -156,7 +158,7 @@ test("headless read reports the start of a cold scan that missed a concurrent ed
   }
 });
 
-test("live note reads preserve the existing response body", async (t) => {
+test("live note reads include the content digest without headless provenance", async (t) => {
   const previousMode = config.obsidianRuntimeMode;
   config.obsidianRuntimeMode = "live";
   try {
@@ -166,7 +168,10 @@ test("live note reads preserve the existing response body", async (t) => {
       arguments: { filePath: "Note.md" },
     });
     assert.equal(result.isError, false);
-    assert.deepEqual(JSON.parse(result.content[0].text), { content });
+    assert.deepEqual(JSON.parse(result.content[0].text), {
+      content,
+      sha256: createHash("sha256").update(content, "utf8").digest("hex"),
+    });
     const status = projectPublicRuntimeStatus(await collectRuntimeStatus(cache));
     assert.equal("headlessRead" in status, false);
   } finally {
