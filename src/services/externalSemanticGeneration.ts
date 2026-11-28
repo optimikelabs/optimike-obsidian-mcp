@@ -53,7 +53,10 @@ export async function resolveExternalSemanticGeneration(): Promise<ExternalSeman
   if (!pointerStat.isFile() || pointerStat.size > 128n)
     throw new Error("Invalid semantic generation pointer");
   // Read the pointer once. Everything else is relative to the captured ID.
-  const id = (await fs.readFile(pointer, "utf8")).trim();
+  const [line = "", tail, extra] = (await fs.readFile(pointer, "utf8")).split("\n");
+  if (tail !== "" || extra !== undefined)
+    throw new Error("Semantic generation pointer must contain one terminated line");
+  const id = line.replace(/^\uFEFF/u, "").replace(/\r$/u, "");
   if (!generationIdPattern.test(id) || /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/iu.test(id))
     throw new Error("Invalid semantic generation ID");
   const directory = path.join(pointerDir, "generations", id);

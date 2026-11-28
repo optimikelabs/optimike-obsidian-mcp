@@ -59,10 +59,11 @@ const model = { provider_key: "ollama", model_key: "fixture-embed", dims: 4 };
 const fingerprint = `mf_${smartTextHash(
   JSON.stringify({ provider_key: "ollama", model_key: "fixture-embed", dimensions: 4, max_tokens: 0 }),
 )}`;
-const publish = async (id) => {
-  await writeFile(pointer + ".next", id + "\n", "utf8");
+const publishPointer = async (contents) => {
+  await writeFile(pointer + ".next", contents, "utf8");
   await rename(pointer + ".next", pointer);
 };
+const publish = (id) => publishPointer(id + "\n");
 const generationRoot = path.join(root, "generations");
 async function writeGeneration(id, records, notes, sections) {
   const directory = path.join(generationRoot, id);
@@ -279,7 +280,7 @@ try {
   const generationB = await writeGeneration("b", [
     record("Notes/Alpha.md", alpha, 0, ["#keep"], { "#Alpha##Target": block(alpha, 7, 9, 0) }),
   ], [[1, 0, 0, 0]], [[1, 0, 0, 0]]);
-  await publish("a");
+  await publishPointer("\uFEFFa\r\n");
   Object.assign(process.env, {
     SMART_ENV_GENERATION_POINTER: pointer,
     SMART_ENV_QUERY_FINGERPRINT: fingerprint,
@@ -322,6 +323,15 @@ try {
   process.env.SMART_ENV_QUERY_FINGERPRINT = "mf_wrong";
   assert.equal((await search({})).isError, true, "the registry must match the operator-pinned fingerprint");
   process.env.SMART_ENV_QUERY_FINGERPRINT = fingerprint;
+  await publishPointer("a");
+  assert.equal((await search({})).isError, true,
+    "a torn pointer cannot select an existing generation through an unterminated prefix");
+  const invalidPointerStatus = await runtimeStatus();
+  assert.equal(invalidPointerStatus.capability.reasonCode, "semantic_index_unavailable");
+  assert.equal(invalidPointerStatus.capability.nextAction, "check_semantic_publication",
+    "an invalid external pointer calls for checking publication, since refreshing cannot repair it");
+  await publishPointer("a\n\n");
+  assert.equal((await search({})).isError, true, "the pointer must contain exactly one line");
   await publish("../a");
   assert.equal((await search({})).isError, true, "an invalid pointer cannot fall back to the last generation or legacy index");
   await publish("missing");

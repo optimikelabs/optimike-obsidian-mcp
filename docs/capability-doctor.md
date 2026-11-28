@@ -41,8 +41,11 @@ Note replacement, body text patch, Frontmatter, Canvas and Base lifecycles, and 
 Semantic search is usable only when its index runtime and query embedder are
 enabled and a bounded live probe loads at least one valid vector from the
 current source. `semantic_query_embedding_disabled` reports an intentionally
-disabled `ENABLE_QUERY_EMBEDDING` switch, while `semantic_index_unavailable`
-and `refresh_semantic_index` cover a missing, empty, malformed or stale index.
+disabled `ENABLE_QUERY_EMBEDDING` switch. `semantic_index_unavailable` recommends
+`refresh_semantic_index` for the `SMART_ENV_DIR` mode. With an
+[external generation](semantic-vector-cache-encoding.md#external-smart-env-v3-generations),
+it recommends `check_semantic_publication`. Verify the pointer and the complete,
+compatible generation it names, then retry the search.
 A probe that exceeds its 2.5 s deadline reports `semantic_probe_timed_out`
 with `retry_capability_probe`. `semantic_embedder_unavailable` and
 `configure_query_embedder` separately report a query provider that cannot be

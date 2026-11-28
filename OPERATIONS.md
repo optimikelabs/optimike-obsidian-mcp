@@ -501,6 +501,9 @@ At startup, the backend prewarms semantic search by loading the semantic snapsho
 Optional [external generations](docs/semantic-vector-cache-encoding.md#external-smart-env-v3-generations)
 use the pointer and generation identity for cache freshness. A cold source
 load validates both vector files, including during notes-only search or prewarm.
+Use one semantic mode per shared SQLite cache. Give external-pointer and
+`SMART_ENV_DIR` backends separate `OBSIDIAN_SHARED_CACHE_DB_PATH` values to
+avoid repeated cold reads as their snapshots replace each other.
 
 The [standalone semantic index producer](docs/semantic-index-producer.md) builds
 Smart Environment v3 generations outside the vault without Obsidian Desktop.
