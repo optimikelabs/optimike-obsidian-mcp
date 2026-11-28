@@ -254,7 +254,7 @@ type BasePublicErrorDescriptor = {
   code: string;
   reasonCode: string;
   status: "blocked" | "conflict" | "not_found" | "rejected";
-  retryable: false;
+  retryable: boolean;
   message: string;
 };
 
@@ -317,6 +317,27 @@ const BASE_PUBLIC_ERRORS: Record<string, BasePublicErrorDescriptor> = {
     status: "rejected",
     retryable: false,
     message: "The Base could not be read.",
+  },
+  base_query_selection_unavailable: {
+    code: "base_query_selection_unavailable",
+    reasonCode: "base_query_selection_unavailable",
+    status: "rejected",
+    retryable: false,
+    message: "Obsidian's Bases engine could not select the requested rows.",
+  },
+  base_query_row_disappeared: {
+    code: "base_query_row_disappeared",
+    reasonCode: "base_query_row_disappeared",
+    status: "rejected",
+    retryable: true,
+    message: "A selected Base row is no longer available. Run the query again.",
+  },
+  base_view_not_found: {
+    code: "base_view_not_found",
+    reasonCode: "base_view_not_found",
+    status: "not_found",
+    retryable: false,
+    message: "The requested Base view was not found.",
   },
   forbidden_key: {
     code: "forbidden_key",
@@ -1601,15 +1622,15 @@ export default class BasesBridgePlugin extends Plugin {
   }
 
   /**
-   * Base query. With `evaluate: true`, Obsidian's engine selects the rows of
-   * the view (global and view filters, sort, limit) and computes every
-   * formula from the same Base bytes as `baseSnapshot`: `source: "engine"`.
-   * Otherwise, or when the engine is unavailable, the Bridge's supported-filter
-   * snapshot selects the rows and no formula value is returned:
-   * `source: "fallback"`, with one warning per formula when evaluation was
-   * requested.
+   * Public queries use the same native row selection in both evaluate modes.
+   * The qualified route can explicitly request a supported-filter snapshot
+   * for the governed Base row reader.
    */
-  private async handleBaseQuery(req: any, res: any): Promise<void> {
+  private async handleBaseQuery(
+    req: any,
+    res: any,
+    supportedFilterSnapshot = false,
+  ): Promise<void> {
     const id = normBaseId(req.params?.id);
     const body: BaseQueryRequest = (req.body ?? {}) as any;
     const config = await this.readBaseConfig(id);
@@ -1648,46 +1669,43 @@ export default class BasesBridgePlugin extends Plugin {
         warningsSet.add(String(w));
       }
     };
-    if (viewName && !view) addWarnings(["Vue introuvable."]);
+    if (viewName && !view) {
+      sendJson(res, 404, atomicError("base_view_not_found"));
+      return;
+    }
     const formulaFilterWarning = (filter: unknown) => {
       if (filterMentionsFormula(filter)) {
         addWarnings(["Filtre sur formule non évalué par le Bridge."]);
       }
     };
 
-    let source: "engine" | "fallback" = "fallback";
-    let candidates: QueryCandidateRow[] | null = null;
+    const source = supportedFilterSnapshot ? "fallback" : "engine";
+    let candidates: QueryCandidateRow[] = [];
     const engineDeps = { app: this.app, parseYaml, stringifyYaml, obsidianVersion: apiVersion };
-    if (evaluate) {
-      // The engine first selects the rows without computing formulas; values
-      // are computed below, only for the rows that need them.
+    if (!supportedFilterSnapshot) {
       const engine = await selectBaseViewRowsWithEngine(engineDeps, {
         path: config.id,
         text: config.yaml,
         viewIndex,
       });
-      if (engine.available) {
-        source = "engine";
-        candidates = [];
-        for (const rowPath of engine.paths) {
-          const file = this.app.vault.getAbstractFileByPath(rowPath);
-          if (file instanceof TFile) candidates.push({ file });
-          else addWarnings(["Ligne du moteur introuvable dans le coffre."]);
-        }
-      } else {
-        for (const name of formulaNames) {
-          addWarnings([`formula_not_evaluated:${name}:${engine.reason}`]);
-        }
+      if (!engine.available) {
+        sendJson(res, 503, atomicError("base_query_selection_unavailable"));
+        return;
       }
-    }
-
-    if (!candidates) {
+      for (const rowPath of engine.paths) {
+        const file = this.app.vault.getAbstractFileByPath(rowPath);
+        if (!(file instanceof TFile)) {
+          sendJson(res, 503, atomicError("base_query_row_disappeared"));
+          return;
+        }
+        candidates.push({ file });
+      }
+    } else {
       // Bridge supported-filter snapshot: global and view filters only.
       const baseFilter = {
         and: [schema.filters, view?.filters].filter(Boolean),
       };
       formulaFilterWarning(baseFilter);
-      candidates = [];
       for (const f of this.app.vault.getFiles()) {
         if (!(f instanceof TFile)) continue;
         if (f.path.startsWith(".obsidian/") || f.extension === "base") continue;
@@ -1727,40 +1745,42 @@ export default class BasesBridgePlugin extends Plugin {
       }
     }
 
-    // Computes the formula values of the given rows with the engine. When the
-    // engine fails midway, the query falls back: no formula value is returned.
+    // Value computation can fail after native selection has succeeded. Keep
+    // the selection's provenance and report the unavailable columns separately.
     const fillValues = async (rows: QueryCandidateRow[]) => {
-      if (source !== "engine" || formulaNames.length === 0) return;
+      if (source !== "engine" || formulaNames.length === 0) return true;
       const missing = rows.filter((row) => !row.values);
-      if (missing.length === 0) return;
+      if (missing.length === 0) return true;
       const result = await evaluateRowsWithEngine(engineDeps, {
         path: config.id,
         text: config.yaml,
         paths: missing.map((row) => row.file.path),
       });
       if (!result.available) {
-        source = "fallback";
-        for (const row of candidates ?? []) delete row.values;
         for (const name of formulaNames) {
           addWarnings([`formula_not_evaluated:${name}:${result.reason}`]);
         }
-        return;
+        return false;
       }
       for (const row of missing) {
         row.values = result.values.get(row.file.path) ?? Object.fromEntries(formulaNames.map((name) => [name, null]));
       }
+      return true;
     };
 
     // A request filter or sort on a formula needs the values of every row.
     const needsAllValues =
       (!!body?.filter && filterMentionsFormula(body.filter)) ||
       sortSpecs.some((s) => s.prop.startsWith("formula."));
-    let formulaValuesMissing = false;
+    let skipFormulas = source === "fallback";
     if (needsAllValues && source === "engine" && formulaNames.length > 0) {
       if (candidates.length <= ENGINE_MAX_FORMULA_FILTER_ROWS) {
-        await fillValues(candidates);
+        if (!(await fillValues(candidates))) {
+          sendJson(res, 503, atomicError("base_query_selection_unavailable"));
+          return;
+        }
       } else {
-        formulaValuesMissing = true;
+        skipFormulas = true;
         // Computing every row would block Obsidian for seconds: the formula
         // part of the request filter or sort is not evaluated, and says so.
         addWarnings([
@@ -1771,7 +1791,6 @@ export default class BasesBridgePlugin extends Plugin {
 
     // Without formula values (fallback, or past the row cap), formula
     // predicates and sorts are skipped rather than run on missing values.
-    const skipFormulas = source === "fallback" || formulaValuesMissing;
     if (body?.filter) {
       if (source === "fallback") formulaFilterWarning(body.filter);
       const filter = skipFormulas ? withoutFormulaPredicates(body.filter) : body.filter;
@@ -1794,11 +1813,11 @@ export default class BasesBridgePlugin extends Plugin {
     const total = candidates.length;
     const start = (page - 1) * limit;
     const pageRows = candidates.slice(start, start + limit);
-    await fillValues(pageRows);
+    if (evaluate) await fillValues(pageRows);
     const rows: BaseQueryRow[] = pageRows
       .map(({ file, values }) => ({
         file: { path: file.path, name: file.basename },
-        props: this.buildRowProps(file, schema, values),
+        props: this.buildRowProps(file, schema, evaluate ? values : undefined),
         computed: evaluate && values ? { ...values } : undefined,
       }));
 
@@ -2313,7 +2332,13 @@ export default class BasesBridgePlugin extends Plugin {
 
         api
           .addRoute(`${REST_PREFIX}/bases/:id(*)/query`)
-          .post(withPublicLegacyBaseBoundary(queryBase));
+          .post(withPublicLegacyBaseBoundary((req, res) =>
+            this.handleBaseQuery(
+              req,
+              res,
+              req.body?.evaluate === false && req.body?.selection === "supported-filter-snapshot",
+            ),
+          ));
         api
           .addRoute(`/bases/:id(*)/query`)
           .post(withPublicLegacyBaseBoundary(queryBase));

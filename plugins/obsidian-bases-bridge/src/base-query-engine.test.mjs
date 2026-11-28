@@ -57,7 +57,13 @@ const TABLE = {
   'file.name + "!"': (row) => `${row.name}!`,
 };
 
-async function queryRoute({ baseText = JSON.stringify(BASE), engine = true, notes = NOTES, table = TABLE } = {}) {
+async function queryRoute({
+  baseText = JSON.stringify(BASE),
+  engine = true,
+  notes = NOTES,
+  table = TABLE,
+  removedAfterSelection,
+} = {}) {
   const { Bridge, TFile } = await loadBridge();
   const files = new Map();
   const add = (path) => {
@@ -81,7 +87,12 @@ async function queryRoute({ baseText = JSON.stringify(BASE), engine = true, note
   });
   const calls = [];
   const rows = notes.map((path) => ({ path, name: path.split("/").pop() }));
-  const handler = fakeBaseQueryHandler(vault, { rows, table, calls });
+  const nativeQuery = fakeBaseQueryHandler(vault, { rows, table, calls });
+  const handler = async (params) => {
+    const result = await nativeQuery(params);
+    if (removedAfterSelection) files.delete(removedAfterSelection);
+    return result;
+  };
   const routes = new Map();
   const api = {
     addRoute(path) {
@@ -119,11 +130,20 @@ async function queryRoute({ baseText = JSON.stringify(BASE), engine = true, note
   };
   plugin.bindingFingerprint = "a".repeat(64);
   await plugin.registerRestExtension();
-  const post = routes.get("/extensions/obsidian-bases-bridge/bases/:id(*)/query").post;
-  return async (body) => {
+  return async (body, { qualified = false } = {}) => {
+    const prefix = qualified ? "/extensions/obsidian-bases-bridge" : "";
+    const post = routes.get(`${prefix}/bases/:id(*)/query`).post;
+    let status = 200;
     let payload;
-    await post({ params: { id: BASE_PATH }, body }, { json: (value) => (payload = value) });
-    return { payload, calls, sha256: createHash("sha256").update(baseText, "utf8").digest("hex") };
+    const res = {
+      status(code) {
+        status = code;
+        return this;
+      },
+      json: (value) => (payload = value),
+    };
+    await post({ params: { id: BASE_PATH }, body }, res);
+    return { status, payload, calls, sha256: createHash("sha256").update(baseText, "utf8").digest("hex") };
   };
 }
 
@@ -148,25 +168,75 @@ test("evaluate returns the engine's rows, view limit and formula values", async 
   assert.equal(calls.length, 2);
 });
 
-test("without the engine, every formula is reported instead of dropped", async () => {
+test("public queries refuse when the engine cannot select rows", async () => {
   const query = await queryRoute({ engine: false });
-  const { payload, sha256 } = await query({ view: "Top", evaluate: true, limit: 50 });
-
-  assert.equal(payload.source, "fallback");
-  assert.equal(payload.total, 2);
-  assert.ok(payload.rows.every((row) => row.computed === undefined && !("label" in row.props)));
-  assert.deepEqual(payload.warnings, [
-    "formula_not_evaluated:label:engine_unavailable",
-    "formula_not_evaluated:shout:engine_unavailable",
-    "view_limit_applied_with_bridge_order:2",
-  ]);
-  assert.equal(payload.baseSnapshot.sha256, sha256);
+  for (const evaluate of [false, true]) {
+    const { status, payload } = await query({ view: "Top", evaluate, limit: 50 });
+    assert.equal(status, 503);
+    assert.equal(payload.error.reasonCode, "base_query_selection_unavailable");
+    assert.equal(payload.rows, undefined);
+  }
 });
 
-test("evaluate:false keeps the Bridge snapshot without calling the engine", async () => {
+test("a selected file that disappears makes the query retryable", async () => {
+  const removedPath = "Notes/b.md";
+  const query = await queryRoute({ removedAfterSelection: removedPath });
+  const { status, payload } = await query({ view: "Top", evaluate: false });
+  assert.equal(status, 503);
+  assert.equal(payload.retryable, true);
+  assert.equal(payload.error.reasonCode, "base_query_row_disappeared");
+  assert.equal(payload.rows, undefined);
+  assert.ok(!JSON.stringify(payload).includes(removedPath));
+});
+
+test("a missing view refuses without echoing the caller value", async () => {
+  const query = await queryRoute();
+  const { status, payload } = await query({ view: "PRIVATE-VIEW-NAME", evaluate: false });
+  assert.equal(status, 404);
+  assert.equal(payload.error.reasonCode, "base_view_not_found");
+  assert.doesNotMatch(JSON.stringify(payload), /PRIVATE-VIEW-NAME/u);
+});
+
+test("evaluate:false preserves engine selection and skips formula column computation", async () => {
+  const config = {
+    ...BASE,
+    filters: 'file.path.endsWith("-open.md")',
+    properties: { "formula.label": { displayName: "Label" } },
+    views: [{ ...BASE.views[0], limit: 1 }],
+  };
+  const { counts, table } = countingTable();
+  const query = await queryRoute({
+    baseText: JSON.stringify(config),
+    notes: ["Notes/a-closed.md", "Other/b-open.md", "Notes/c-open.md", "Notes/d-open.md"],
+    table,
+  });
+  const request = { view: "Top", limit: 50 };
+  const { payload: evaluated } = await query({ ...request, evaluate: true });
+  assert.deepEqual(evaluated.rows.map((row) => row.file.path), ["Notes/c-open.md"]);
+  const computed = { ...counts };
+
+  const { payload: raw, sha256 } = await query({ ...request, evaluate: false }, { qualified: true });
+  assert.deepEqual(raw.rows.map((row) => row.file.path), evaluated.rows.map((row) => row.file.path));
+  assert.equal(raw.total, evaluated.total);
+  assert.equal(raw.source, "engine");
+  assert.equal(raw.evaluate, false);
+  assert.equal(raw.baseSnapshot.sha256, sha256);
+  assert.deepEqual(raw.warnings, []);
+  assert.equal(raw.rows[0].computed, undefined);
+  assert.ok(!("label" in raw.rows[0].props) && !("formula.label" in raw.rows[0].props));
+  assert.deepEqual(counts, computed, "evaluate:false computes no result columns");
+});
+
+test("the governed selection uses the Bridge snapshot without calling the engine", async () => {
   const unlimited = { ...BASE, views: [{ type: "table", name: "All", filters: 'file.inFolder("Notes")' }] };
   const query = await queryRoute({ baseText: JSON.stringify(unlimited) });
-  const { payload, calls, sha256 } = await query({ view: "All", evaluate: false, limit: 500, page: 1 });
+  const { payload, calls, sha256 } = await query({
+    view: "All",
+    evaluate: false,
+    limit: 500,
+    page: 1,
+    selection: "supported-filter-snapshot",
+  }, { qualified: true });
 
   assert.equal(payload.source, "fallback");
   assert.equal(payload.evaluate, false);
@@ -186,11 +256,11 @@ test("request filters and formula column settings use the engine's formula value
     properties: { "formula.label": { displayName: "Label" } },
   };
   const query = await queryRoute({ baseText: JSON.stringify(withSettings) });
-  const { payload } = await query({
+  const request = {
     view: "Top",
-    evaluate: true,
     filter: { and: ['formula.shout == "a.md!"'] },
-  });
+  };
+  const { payload } = await query({ ...request, evaluate: true });
 
   assert.equal(payload.source, "engine");
   assert.deepEqual(
@@ -199,6 +269,12 @@ test("request filters and formula column settings use the engine's formula value
   );
   assert.equal(payload.rows[0].props["formula.label"], "[[a.md]]");
   assert.ok(!payload.warnings.some((warning) => warning.startsWith("Filtre sur formule")));
+
+  const { payload: raw } = await query({ ...request, evaluate: false });
+  assert.equal(raw.total, 1);
+  assert.deepEqual(raw.rows.map((row) => row.file.path), ["Notes/a.md"]);
+  assert.equal(raw.rows[0].computed, undefined);
+  assert.ok(!("formula.label" in raw.rows[0].props));
 });
 
 // 250 notes and a counting formula table: the engine computes a formula only

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Bases Bridge 1.3.2 uses Obsidian's engine to select the same live `bases_query` rows in both `evaluate` modes. `evaluate: false` omits formula result columns, and an unavailable selection returns an explicit error. An unknown view now returns HTTP 404 (`base_view_not_found`). Governed Base row selection explicitly requests its supported-filter snapshot. Update the MCP and Bridge together.
+
 ## [3.23.1] - 2026-11-26
 
 No Bridge change: Atomic Write Bridge 0.10.0, Operon Bridge 0.9.9 and Bases Bridge 1.3.0 ship unchanged in the bundle of this release. See the [English](docs/releases/3.23.1.md) and [French](docs/releases/3.23.1.fr.md) release notes.
