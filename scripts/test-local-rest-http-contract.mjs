@@ -44,7 +44,12 @@ for (const diskName of [...liveNames.map(([, name]) => name).filter(Boolean),
   writeFileSync(path.join(temporary, liveDiskDir, diskName), note.content, 'utf8');
 }
 const ordinaryPaths = ['Note.md', 'Plain Space.md'];
-for (const filename of ordinaryPaths) {
+const missingDir = 'Missing';
+const missingName = 'Only Space.md';
+const mixedName = 'Mixed Wide Space.md';
+const mixedDiskName = 'Mixed\u00a0Wide Space.md';
+const rootFiles = ['Rich/', 'Note.md', liveDir + '/', 'Plain Space.md', missingDir + '/', mixedName];
+for (const filename of [...ordinaryPaths, 'Plain\u00a0Space.md', mixedDiskName]) {
   writeFileSync(path.join(temporary, filename), note.content, 'utf8');
 }
 const server = createServer(async (req, res) => {
@@ -58,7 +63,8 @@ const server = createServer(async (req, res) => {
   }
   const vaultPath = decodeURIComponent(req.url ?? '');
   if (req.method === 'POST' && req.url?.startsWith('/search/simple/')) {
-    const results = [...livePaths, ...ordinaryPaths].map(filename => ({ filename, matches: [], score: 0 }));
+    const results = [...livePaths, ...ordinaryPaths, missingDir + '/' + missingName, mixedName]
+      .map(filename => ({ filename, matches: [], score: 0 }));
     res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(results));
     return;
   }
@@ -106,7 +112,10 @@ const server = createServer(async (req, res) => {
   }
   const payload = req.url === '/' ? {service:'Obsidian Local REST API', ok:'OK',
     authenticated:true, versions:{obsidian:'1.13.1',self:version}, extensions:[]} :
-    req.url === '/vault/' ? {files:['Rich/', 'Note.md', liveDir + '/', 'Plain Space.md']} :
+    req.url === '/vault/' ? {files:rootFiles} :
+    req.url === '/vault/' + missingDir + '/' ? {files:[missingName]} :
+    vaultPath === '/vault/' + missingDir + '/' + missingName ? { ...note, path: missingDir + '/' + missingName } :
+    vaultPath === '/vault/' + mixedName ? { ...note, path: mixedName } :
     req.url === '/vault/Rich/' ? {files:['Note.md']} : note;
   const send = () => { if (!res.destroyed) res.writeHead(200, {
     'Content-Type':'application/json', 'Content-Location':'Rich/Note.md'
@@ -134,6 +143,7 @@ const {processObsidianListNotes, ObsidianListNotesInputSchema} = await import('.
 const {processObsidianGlobalSearch, ObsidianGlobalSearchInputSchemaShape} =
   await import('../dist/mcp-server/tools/obsidianGlobalSearchTool/logic.js');
 const {z} = await import('zod/v3');
+const searchSchema = z.object(ObsidianGlobalSearchInputSchemaShape);
 const api = new ObsidianRestApiService();
 const context = {requestId:'rest-contract', timestamp:new Date(0).toISOString(), operation:'test'};
 
@@ -162,7 +172,7 @@ test('rich paths are encoded per segment and JSON reads use the native media typ
   assert.equal(last.headers.authorization, 'Bearer ' + secret);
 });
 test('root listing and HEAD metadata stay compatible', async () => {
-  assert.deepEqual(await api.listFiles('/', context), ['Rich/','Note.md', liveDir + '/', 'Plain Space.md']);
+  assert.deepEqual(await api.listFiles('/', context), rootFiles);
   assert.deepEqual(await api.getFileMetadata('Note.md', context), {ctime:1000,mtime:2000,size:7});
   for (const [dirPath, entryPath] of [['/Rich', '/Rich/Note.md'], ['Rich/', 'Rich/Note.md']]) {
     const listed = await processObsidianListNotes(
@@ -245,13 +255,46 @@ for (const [query, useRegex] of [['Heading', false], ['Head.ng', true]]) {
   for (const responseMode of ['compact', 'detailed']) {
     test(`live ${responseMode} search resolves disk spelling for ${useRegex ? 'regex' : 'text'}`, async () => {
       const search = await processObsidianGlobalSearch(
-        z.object(ObsidianGlobalSearchInputSchemaShape).parse({ query, useRegex, responseMode }),
+        searchSchema.parse({ query, useRegex, responseMode }),
         context, api);
       assertLiveDiskPaths(search.results);
       assertOrdinaryPaths(search.results);
     });
   }
 }
+
+for (const [label, restPath, diskPath] of [
+  ['keeps a REST result when its local directory is missing', missingDir + '/' + missingName],
+  ['keeps the exact regular-space path when a non-breaking twin exists', 'Plain Space.md'],
+  ['preserves mixed regular and non-breaking spaces on disk', mixedName, mixedDiskName],
+]) {
+  function assertSpelling(entries) {
+    const entry = entries.find(result => result.path === restPath);
+    assert.ok(entry, `expected the REST path ${restPath}`);
+    if (diskPath === undefined) assert.equal(Object.hasOwn(entry, 'diskPath'), false);
+    else assert.equal(entry.diskPath, diskPath);
+  }
+
+  test(`live compact listing ${label}`, async () => {
+    const dirPath = path.posix.dirname(restPath);
+    const listed = await processObsidianListNotes(
+      ObsidianListNotesInputSchema.parse({ dirPath: dirPath === '.' ? '/' : dirPath, recursionDepth: 0 }),
+      context, api);
+    assertSpelling(listed.entries);
+  });
+
+  test(`live text search ${label}`, async () => {
+    const search = await processObsidianGlobalSearch(searchSchema.parse({ query: 'Heading' }), context, api);
+    assertSpelling(search.results);
+  });
+}
+
+test('global search rejects pages larger than 500 result files', () => {
+  assert.equal(searchSchema.parse({ query: 'Heading', pageSize: 500 }).pageSize, 500);
+  const oversized = searchSchema.safeParse({ query: 'Heading', pageSize: 501 });
+  assert.equal(oversized.success, false);
+  assert.deepEqual(oversized.error.issues[0].path, ['pageSize']);
+});
 
 test('active JSON read exposes the resolved file through NoteJson', async () => {
   assert.deepEqual(await api.getActiveFile('json', context), note);

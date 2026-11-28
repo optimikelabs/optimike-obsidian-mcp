@@ -39,14 +39,14 @@ export async function addLiveDiskPaths(
   const directories = new Map<string, Promise<DirectoryNames | undefined>>();
   let canonicalRoot: Promise<string | undefined> | undefined;
 
-  for (const entry of entries) {
+  await Promise.all(entries.map(async (entry) => {
     const relativePath = normalizeVaultSlashes(entry.path);
     const segments = relativePath.split("/");
     // REST usually exposes the non-breaking spaces as regular spaces.
     const firstCandidate = segments.findIndex((segment) => /[ \u00a0\u202f]/u.test(segment));
     if (firstCandidate === -1 || segments.some((segment) =>
       segment === "." || segment === ".." || (process.platform === "win32" && segment.includes(":"))
-    )) continue;
+    )) return;
 
     canonicalRoot ??= realpath(vaultRoot).catch(() => undefined);
     const root = await canonicalRoot;
@@ -65,13 +65,12 @@ export async function addLiveDiskPaths(
       const match = directory?.exact.get(name) ?? directory?.aliases.get(toVaultPath(name));
       const needsDirectory = isDirectory || index < segments.length - 1;
       if (!match || (needsDirectory ? !match.isDirectory() : !match.isFile())) {
-        diskPath = "";
-        break;
+        return;
       }
       diskPath = diskPath ? diskPath + "/" + match.name : match.name;
     }
     if (diskPath !== relativePath && /[\u00a0\u202f]/u.test(diskPath)) {
       entry.diskPath = diskPath + (isDirectory ? "/" : "");
     }
-  }
+  }));
 }

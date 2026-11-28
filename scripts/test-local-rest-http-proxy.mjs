@@ -18,10 +18,10 @@ test('HTTP fixture bypasses hostile ambient proxies', {timeout:30000}, async()=>
   child.stderr.on('data',b=>{if(output.length<32768)output+=b;});
   const timer=setTimeout(()=>child.kill(),20000);
   try {
-    const code=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve);});
+    const code=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('close',resolve);});
     assert.equal(forwarded,0,'a loopback fixture request reached ambient proxy');
     assert.equal(code,0,output);
-    assert.match(output, /^ok \d+ - root listing and HEAD metadata stay compatible$/m,
-      'child must actually execute the HTTP fixture');
+    assert.match(output, /^# tests 37$/m, 'child must execute the full HTTP fixture');
+    assert.match(output, /^# fail 0$/m, 'all child cases must pass under hostile proxies');
   } finally {clearTimeout(timer);proxy.closeAllConnections();await new Promise(resolve=>proxy.close(resolve));}
 });

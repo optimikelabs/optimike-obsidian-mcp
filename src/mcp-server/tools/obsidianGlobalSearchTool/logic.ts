@@ -67,9 +67,10 @@ const ObsidianGlobalSearchInputSchema = z
       .number()
       .int()
       .positive()
+      .max(500)
       .optional()
       .default(50)
-      .describe("Maximum number of result files per page. Defaults to 50."),
+      .describe("Maximum number of result files per page (up to 500). Defaults to 50."),
     page: z
       .number()
       .int()
