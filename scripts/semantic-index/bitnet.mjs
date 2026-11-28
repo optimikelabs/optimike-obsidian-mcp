@@ -30,6 +30,15 @@ export function bitnetClient(endpoint, modelId, revision, modelSha256) {
       throw Error(`BitNet ${route} ${failure}`);
     });
     if (!response.ok) {
+      // The bridge rejects an oversized JSON body or a worker context refusal
+      // with HTTP 400. Keep other HTTP errors fatal, even for a single row.
+      if (response.status === 400 && route.startsWith("/bitnet/embed")) {
+        const { error } = await response.json().catch(() => ({})) ?? {};
+        if (typeof error === "string" && /^(input too large|context limit(?:: \d+ tokens)?)$/u.test(error)) {
+          return null;
+        }
+        throw Error(`BitNet ${route} returned HTTP 400`);
+      }
       await response.body?.cancel();
       throw Error(`BitNet ${route} returned HTTP ${response.status}`);
     }
@@ -88,19 +97,26 @@ export function bitnetClient(endpoint, modelId, revision, modelSha256) {
       const batch = profile.identity.documentDevice === "cuda";
       const payload = await request(batch ? "/bitnet/embed-batch" : "/bitnet/embed",
         batch ? { model: modelId, items } : { model: modelId, ...items[0] });
+      if (payload === null) {
+        if (parts.length === 1) return [null];
+        const middle = Math.floor(parts.length / 2);
+        return [...await this.encode(parts.slice(0, middle), profile),
+          ...await this.encode(parts.slice(middle), profile)];
+      }
       if (payload?.model !== modelId || !Array.isArray(payload.results) ||
           payload.results.length !== parts.length) throw Error("BitNet returned unexpected document results");
       return payload.results.map((row, index) => {
         // The single-document CPU route returns the native worker row. Its
         // device label is added only to the bridge's audit record.
         const device = !batch && row?.device === undefined ? "cpu" : row?.device;
-        if (!row || device !== profile.identity.documentDevice || row.truncated !== false ||
+        if (!row || device !== profile.identity.documentDevice || typeof row.truncated !== "boolean" ||
             !Number.isSafeInteger(row.tokens) || row.tokens < 1 || row.tokens > profile.model.max_tokens ||
             row.prefix_applied === true ||
             (row.input_sha256 !== undefined && row.input_sha256 !== sha256(items[index].input))) {
           throw Error("BitNet returned a truncated or incompatible document encoding");
         }
         validateVector(row.vector, profile.model.dimensions);
+        if (row.truncated) return null;
         const bytes = Buffer.allocUnsafe(row.vector.length * 4);
         row.vector.forEach((value, i) => bytes.writeFloatLE(value, i * 4));
         return bytes;

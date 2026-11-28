@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, open, realpath, rename, rm, unlink } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, realpath, rename, rm, unlink } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { smartTextHash } from "../dist/services/smartEnvV3.js";
@@ -14,6 +14,8 @@ import { inventory, parserRevision, readSource, resolveRoots, sha256, sourcePart
 const help = `Usage: optimike-semantic-index --vault DIR --index DIR --endpoint ORIGIN
        --model ID --revision REV --model-sha256 SHA256 [--rebuild]
        [--exclude-path RELATIVE/PATH]... [--exclude-heading TITLE]...
+       [--min-block-chars 250] [--max-deletion-percent 10] [--max-deletions 50]
+       [--allow-deletions]
 
 Build and publish a Smart Environment v3 document index outside the vault.
 `;
@@ -44,8 +46,8 @@ function previousRows(manifest) {
   return rows;
 }
 
-async function populate(staging, vault, scan, client, manifest, previous) {
-  const { fingerprint, stats, sources, chunking, model } = manifest;
+async function populate(staging, vault, scan, client, manifest, previous, hashes) {
+  const { fingerprint, stats, sources, chunking, model, skipped } = manifest;
   const files = vectorFiles(fingerprint);
   const digests = { notes: createHash("sha256"), sections: createHash("sha256") };
   await withFiles(async openFile => {
@@ -60,13 +62,9 @@ async function populate(staging, vault, scan, client, manifest, previous) {
       sections: await openFile(path.join(previous.directory, files.sections), "r"),
     };
     const batchSize = manifest.identity.documentDevice === "cuda" ? 4 : 1;
-    for (const [relative, expected] of scan.files) {
-      const bytes = await readSource(vault, relative, expected);
-      const { tags, note, blocks } = sourceParts(relative, bytes, chunking.excludedHeadings);
-      const source = { sha256: sha256(bytes), tags, note: null, blocks: Object.create(null) };
-      const parts = [note, ...blocks].map(part => ({
-        ...part, relative, inputSha256: sha256(part.input),
-      }));
+    const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+    const prepare = (entry, part) => ({ ...part, relative: entry.relative, source: entry.source, inputSha256: sha256(part.input) });
+    async function writeParts(parts, kind) {
       for (let start = 0; start < parts.length; start += batchSize) {
         const batch = parts.slice(start, start + batchSize);
         const misses = batch.filter(part => !cached.has(part.inputSha256));
@@ -75,19 +73,52 @@ async function populate(staging, vault, scan, client, manifest, previous) {
         for (const part of batch) {
           const existing = cached.get(part.inputSha256);
           const row = existing ? await readVector(input[existing.kind], existing.row, model.dimensions) : encoded[next++];
-          const kind = part.key ? "sections" : "notes";
+          if (row === null) {
+            skipped.push({ path: part.relative, reason: "document_too_long", ...(part.key && { blockKey: part.key }) });
+            continue;
+          }
           await output[kind].writeFile(row);
           digests[kind].update(row);
           const ref = { row: stats[kind]++, readHash: smartTextHash(part.text), inputSha256: part.inputSha256 };
-          if (part.key) source.blocks[part.key] = { ...ref, lines: part.range };
-          else source.note = ref;
+          if (part.key) part.source.blocks[part.key] = { ...ref, lines: part.range };
+          else part.source.note = ref;
+          stats[existing ? "reused" : "encoded"]++;
         }
-        stats.encoded += misses.length;
-        stats.reused += batch.length - misses.length;
       }
-      sources[relative] = source;
-      await metadata.writeFile(sourceLine(relative, source, fingerprint));
     }
+    // Encode notes across files first, so a refused note never leaves orphan
+    // block rows. Keep only a bounded window of parsed notes in memory.
+    async function writeWindow(entries) {
+      await writeParts(entries.map(entry => prepare(entry, entry.note)), "notes");
+      const accepted = entries.filter(entry => entry.source.note);
+      await writeParts(accepted.flatMap(entry => entry.blocks.map(part => prepare(entry, part))), "sections");
+      for (const { relative, source } of accepted) {
+        sources[relative] = source;
+        await metadata.writeFile(sourceLine(relative, source, fingerprint));
+      }
+    }
+    let window = [];
+    for (const [relative, expected] of scan.files) {
+      const bytes = await readSource(vault, relative, expected);
+      const digest = sha256(bytes);
+      hashes.set(relative, digest);
+      let text;
+      try {
+        text = decoder.decode(bytes);
+      } catch (error) {
+        if (error.code !== "ERR_ENCODING_INVALID_ENCODED_DATA") throw error;
+        skipped.push({ path: relative, reason: "invalid_utf8" });
+        continue;
+      }
+      const { tags, note, blocks } = sourceParts(relative, text, chunking.excludedHeadings, chunking.minBlockChars);
+      const source = { sha256: digest, tags, note: null, blocks: Object.create(null) };
+      window.push({ relative, source, note, blocks });
+      if (window.length === batchSize) {
+        await writeWindow(window);
+        window = [];
+      }
+    }
+    await writeWindow(window);
     await Promise.all([metadata.sync(), output.notes.sync(), output.sections.sync()]);
   });
   return Object.fromEntries(Object.entries(digests).map(([kind, hash]) => [kind, hash.digest("hex")]));
@@ -104,15 +135,27 @@ async function build(options, vault, index, client) {
   if (previous && previous.manifest.vaultBinding !== scan.binding) {
     throw Error("Vault root or volume differs from the active generation");
   }
-  if (!scan.files.size) {
-    throw Error("An external semantic generation requires at least one Markdown note");
+  const skipped = [...scan.unsafePaths.keys()].map(relative => ({ path: relative, reason: "invalid_note_path" }));
+  function requireNotes(count) {
+    if (!count) {
+      const summary = skipped.length ? ` Skipped: ${JSON.stringify(skipped)}` : "";
+      throw Error("An external semantic generation requires at least one Markdown note." + summary);
+    }
+  }
+  requireNotes(scan.files.size);
+  const activePaths = Object.keys(previous?.manifest.sources ?? {});
+  const deletions = activePaths.filter(relative => !scan.files.has(relative) && !scan.unsafePaths.has(relative)).length;
+  if (!options["allow-deletions"] && (deletions > options["max-deletions"] ||
+      deletions * 100 > activePaths.length * options["max-deletion-percent"])) {
+    throw Error(`Deletion limit exceeded (${deletions} of ${activePaths.length} active notes missing). Verify the vault before using --allow-deletions`);
   }
   const chunking = {
-    version: "bitnet-markdown-v1",
+    version: "bitnet-markdown-v2",
     jsbrains: parserRevision,
     notes: "breadcrumb + full Markdown, removing excluded heading lines",
-    sections: "nonempty parser blocks outside frontmatter and excluded heading ranges",
-    overLength: "reject truncated embeddings",
+    sections: "SmartBlock.should_embed selection outside frontmatter and excluded heading ranges",
+    minBlockChars: options["min-block-chars"],
+    overLength: "skip inputs that exceed the BitNet context",
     excludedPaths: [...new Set(options["exclude-path"])].sort(),
     excludedHeadings: [...new Set(options["exclude-heading"])].sort(),
   };
@@ -136,13 +179,16 @@ async function build(options, vault, index, client) {
     fingerprint,
     lockHash,
     sources: Object.create(null),
+    skipped,
     stats: { notes: 0, sections: 0, encoded: 0, reused: 0 },
   };
+  const hashes = new Map();
   const directories = ["smart_sources", "smart_blocks", "embedding_models"];
   await mkdir(staging, { mode: 0o700 });
   try {
     for (const directory of directories) await mkdir(path.join(staging, directory), { mode: 0o700 });
-    const digests = await populate(staging, vault, scan, client, manifest, reusable);
+    const digests = await populate(staging, vault, scan, client, manifest, reusable, hashes);
+    requireNotes(manifest.stats.notes);
     await sealGeneration(staging, manifest);
     const persisted = await readManifest(staging, id);
     if (persisted.vectors.notes.sha256 !== digests.notes || persisted.vectors.sections.sha256 !== digests.sections) {
@@ -158,7 +204,7 @@ async function build(options, vault, index, client) {
     if (sha256(JSON.stringify({ ...await client.profile(), chunking })) !== lockHash) {
       throw Error("BitNet identity changed during build");
     }
-    await verifySources(vault, options["exclude-path"], scan, persisted.sources);
+    await verifySources(vault, options["exclude-path"], scan, hashes);
     try {
       await rename(pending, path.join(index, currentFile));
     } catch (error) {
@@ -170,7 +216,7 @@ async function build(options, vault, index, client) {
       console.error("CURRENT was replaced, but syncing its directory failed:", error.code);
       process.exitCode = 1;
     }
-    return { generation: id, ...manifest.stats };
+    return { generation: id, ...manifest.stats, deletions, skipped: manifest.skipped };
   } finally {
     // Leave any sealed generation intact. Readers may still hold a previous CURRENT.
     await rm(staging, { recursive: true, force: true });
@@ -188,6 +234,10 @@ async function main() {
     revision: { type: "string" },
     "model-sha256": { type: "string" },
     rebuild: { type: "boolean" },
+    "allow-deletions": { type: "boolean" },
+    "max-deletions": { type: "string", default: "50" },
+    "max-deletion-percent": { type: "string", default: "10" },
+    "min-block-chars": { type: "string", default: "250" },
     "exclude-path": { type: "string", multiple: true, default: [] },
     "exclude-heading": { type: "string", multiple: true, default: [] },
   } });
@@ -202,6 +252,14 @@ async function main() {
     throw Error("Exclusions must be vault-relative paths with forward slashes");
   }
   if (options["exclude-heading"].some(title => !title.trim())) throw Error("Heading exclusions must be nonempty");
+  for (const [key, max] of [["max-deletions", Number.MAX_SAFE_INTEGER], ["max-deletion-percent", 100],
+    ["min-block-chars", Number.MAX_SAFE_INTEGER]]) {
+    const value = Number(options[key]);
+    if (!/^\d+$/u.test(options[key]) || !Number.isSafeInteger(value) || value > max) {
+      throw Error(`--${key} must be an integer from 0 to ${max}`);
+    }
+    options[key] = value;
+  }
   const client = bitnetClient(options.endpoint, options.model, options.revision, options["model-sha256"]);
   const { vault, index } = await resolveRoots(options.vault, options.index);
   await mkdir(index, { recursive: true, mode: 0o700 });
@@ -211,7 +269,22 @@ async function main() {
   try {
     lock = await open(lockPath, "wx", 0o600);
   } catch (error) {
-    if (error.code === "EEXIST") throw Error("Index already has a producer lock");
+    if (error.code === "EEXIST") {
+      let owner;
+      try {
+        const info = await lstat(lockPath);
+        if (info.isFile() && info.size <= 256) {
+          const { pid, startedAt } = JSON.parse(await readFile(lockPath, "utf8"));
+          if (Number.isSafeInteger(pid) && pid > 0 && typeof startedAt === "string" &&
+              /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(startedAt)) {
+            owner = ` (PID ${pid}, started ${startedAt})`;
+          }
+        }
+      } catch {
+        // A newly acquired or released lock may have no readable owner yet.
+      }
+      throw Error("Index already has a producer lock" + (owner ?? ""));
+    }
     throw error;
   }
   try {
