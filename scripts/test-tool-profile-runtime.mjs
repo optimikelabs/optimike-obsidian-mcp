@@ -134,7 +134,7 @@ try {
     const { client } = await openClient({ vault });
     try {
       const names = await listedNames(client);
-      assert.equal(names.length, 9, "3.0 default must be standard");
+      assertHeadlessProfileNames(names, "standard");
       assert.ok(names.includes("smart_semantic_search"));
       assert.ok(!names.includes("smart_search"));
       assert.ok(!names.includes("smart-search"));
@@ -152,7 +152,7 @@ try {
     });
     try {
       const names = await listedNames(client);
-      assert.equal(names.length, 9, "CLI standard must override env full");
+      assertHeadlessProfileNames(names, "standard");
       assert.ok(names.includes("smart_semantic_search"));
       assert.ok(!names.includes("smart_search"));
       assert.ok(!names.includes("smart-search"));

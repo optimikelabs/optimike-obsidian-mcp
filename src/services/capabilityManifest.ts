@@ -518,10 +518,12 @@ function vaultReadCapability(
     input.localRest.state === "ready" &&
     input.localRest.value.authenticated === true;
   if (restReady) {
-    return entry(input, "vault-read", true, true, "ready", "none");
+    const result = entry(input, "vault-read", true, true, "ready", "none");
+    if (!input.visibleToolNames.includes("obsidian_get_frontmatter")) return result;
+    return { ...result, preferredTools: [...result.preferredTools, "obsidian_get_frontmatter"] };
   }
   if (input.cacheReady) {
-    return entry(
+    const result = entry(
       input,
       "vault-read",
       true,
@@ -530,6 +532,9 @@ function vaultReadCapability(
       "refresh_vault_cache",
       true,
     );
+    if (!input.registrationMode.startsWith("headless-")) return result;
+    const tools = ["obsidian_get_frontmatter", "obsidian_note_links"];
+    return { ...result, preferredTools: [...result.preferredTools, ...tools.filter((name) => input.visibleToolNames.includes(name))] };
   }
   return entry(
     input,

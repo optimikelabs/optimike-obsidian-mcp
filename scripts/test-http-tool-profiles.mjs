@@ -12,6 +12,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { SignJWT } from "jose";
+import toolCatalog from "../evals/tool-catalog.v1.json" with { type: "json" };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const jwtSecret =
@@ -300,9 +301,14 @@ try {
   const fullNames = toolNames(fullList);
   const legacyNames = toolNames(legacyList);
 
-  assert.equal(standardNames.length, 9);
-  assert.equal(tasksNames.length, 14);
-  assert.equal(fullNames.length, 50);
+  for (const [profile, names] of [["standard", standardNames], ["tasks", tasksNames], ["full", fullNames]]) {
+    assert.deepEqual(names, toolCatalog.profiles[profile].modes["headless-readonly"], `${profile} HTTP catalogue`);
+  }
+  for (const names of [standardNames, tasksNames, fullNames]) {
+    for (const name of ["obsidian_get_frontmatter", "obsidian_note_links"]) {
+      assert.ok(names.includes(name), `headless HTTP profile lost ${name}`);
+    }
+  }
   for (const name of ["operon_set_pinned", "operon_update_tasks"]) {
     assert.ok(fullNames.includes(name));
     assert.ok(!standardNames.includes(name));
@@ -532,7 +538,7 @@ try {
   );
 
   const sameSessionStillWorks = await call(standard, baseUrl, "tools/list");
-  assert.equal(toolNames(sameSessionStillWorks).length, 9);
+  assert.deepEqual(toolNames(sameSessionStillWorks), standardNames);
 
   const unknown = await fetch(new URL("/mcp/nope", baseUrl), {
     method: "POST",

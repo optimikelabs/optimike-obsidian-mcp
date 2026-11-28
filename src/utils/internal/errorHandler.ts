@@ -252,6 +252,10 @@ const CALLER_DERIVED_PUBLIC_FIELDS = new Set(["suggestedPath", "suggestedName"])
 
 const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "invalid_tool_arguments",
+  "headless_link_index_building",
+  "headless_link_cache_refreshing",
+  "headless_link_cache_events_pending",
+  "headless_link_cache_uncertain",
   BASE_FORMULA_ENGINE_REFUSAL,
   ...NOTE_NAME_REASON_CODES,
   ...NATIVE_MOVE_PUBLIC_REASON_CODES,
@@ -704,6 +708,14 @@ function safeDiagnosticFields(
 }
 
 function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
+  if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "headless_link_index_building")
+    return "The headless link index is building. Retry obsidian_note_links later.";
+  if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "headless_link_cache_refreshing")
+    return "The shared note cache is refreshing. Retry obsidian_note_links after the refresh.";
+  if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "headless_link_cache_events_pending")
+    return "The shared note cache is processing pending file events. Retry obsidian_note_links after they settle.";
+  if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "headless_link_cache_uncertain")
+    return "The shared note cache needs a successful refresh. Retry obsidian_note_links after it completes.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_tool_arguments")
     return "Invalid tool arguments. See validationIssues for the field and reason.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === BASE_FORMULA_ENGINE_REFUSAL)

@@ -264,11 +264,7 @@ try {
   });
   assert.equal(batch.status, 400);
   assert.ok(Number.isInteger((await batch.json()).error.code));
-  assert.equal(
-    (await legacy.client.listTools()).tools.length,
-    9,
-    "modern errors do not invalidate a legacy session",
-  );
+  assertHeadlessProfileNames((await legacy.client.listTools()).tools.map(({ name }) => name), "standard");
   assert.equal(
     await readFile(f.root + "/Sentinel.md", "utf8"),
     "# untouched\nDual stack sentinel.\n",

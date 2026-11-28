@@ -127,12 +127,7 @@ export const processObsidianManageFrontmatter = async (
     case "get": {
       const note = await getFileWithRetry(context);
       const frontmatter = note.frontmatter ?? {};
-      const retrievedValue = frontmatter[key];
-      return {
-        success: true,
-        message: `Successfully retrieved key '${key}' from frontmatter.`,
-        value: retrievedValue,
-      };
+      return frontmatterKeyResponse(frontmatter, key);
     }
 
     case "set": {
@@ -213,3 +208,11 @@ export const processObsidianManageFrontmatter = async (
       );
   }
 };
+
+export function frontmatterKeyResponse(frontmatter: Record<string, unknown>, key: string): ObsidianManageFrontmatterResponse {
+  return {
+    success: true,
+    message: `Successfully retrieved key '${key}' from frontmatter.`,
+    value: Object.hasOwn(frontmatter, key) ? frontmatter[key] : undefined,
+  };
+}

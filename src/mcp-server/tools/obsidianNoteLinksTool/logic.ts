@@ -1,8 +1,10 @@
 import { z } from "zod/v3";
 import type {
+  FilesystemNoteLinksResponse,
   NoteLinksResponse,
   ObsidianRestApiService,
 } from "../../../services/obsidianRestAPI/index.js";
+import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import type { RequestContext } from "../../../utils/index.js";
 
@@ -38,15 +40,17 @@ export async function processObsidianNoteLinks(
   input: ObsidianNoteLinksInput,
   context: RequestContext,
   obsidianService: ObsidianRestApiService | undefined,
-): Promise<NoteLinksResponse> {
+  vaultCache?: VaultCacheService,
+): Promise<NoteLinksResponse | FilesystemNoteLinksResponse> {
+  const parsed = ObsidianNoteLinksInputSchema.parse(input);
   if (!obsidianService) {
+    if (vaultCache) return vaultCache.readFilesystemNoteLinks(parsed.filePath, parsed.limit, context);
     throw new McpError(
       BaseErrorCode.SERVICE_UNAVAILABLE,
-      "obsidian_note_links requires a live Obsidian Desktop metadata cache.",
+      "Note links require Obsidian Desktop or the shared filesystem cache.",
       context,
     );
   }
-  const parsed = ObsidianNoteLinksInputSchema.parse(input);
   return obsidianService.readNoteLinks(
     {
       contractVersion: 1,
