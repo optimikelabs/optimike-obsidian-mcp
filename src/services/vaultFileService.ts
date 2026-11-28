@@ -1,5 +1,6 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
+  lstat,
   mkdir,
   readdir,
   readFile,
@@ -32,6 +33,37 @@ export type VaultFileWritePreconditions = {
 };
 
 export type VaultTagLocation = "frontmatter" | "inline" | "both";
+
+// The headless server can instantiate this service more than once per process.
+const fileWriteLocks = new Map<string, Promise<void>>();
+const retryLock = Symbol("retryLock");
+
+function hasFsCode(error: unknown, code: string): boolean {
+  return (error as NodeJS.ErrnoException | undefined)?.code === code;
+}
+
+async function withFileLocks<T>(
+  keys: string[],
+  operation: () => Promise<T>,
+): Promise<T> {
+  const releases: Array<() => void> = [];
+  try {
+    for (const key of keys) {
+      const previous = fileWriteLocks.get(key);
+      let unlock!: () => void;
+      const lock = new Promise<void>((resolve) => { unlock = resolve; });
+      fileWriteLocks.set(key, lock);
+      releases.push(() => {
+        if (fileWriteLocks.get(key) === lock) fileWriteLocks.delete(key);
+        unlock();
+      });
+      await previous;
+    }
+    return await operation();
+  } finally {
+    for (const release of releases.reverse()) release();
+  }
+}
 
 function hashContent(content: string): string {
   return createHash("sha1").update(content).digest("hex");
@@ -171,7 +203,7 @@ export class VaultFileService {
   private async assertRealPathInsideVault(
     absolutePath: string,
     context: RequestContext,
-  ): Promise<void> {
+  ): Promise<string> {
     const [realVaultRoot, realTarget] = await Promise.all([
       realpath(this.vaultRoot),
       realpath(absolutePath),
@@ -184,34 +216,77 @@ export class VaultFileService {
         { ...context, realVaultRoot, realTarget },
       );
     }
+    return realTarget;
   }
 
-  private async assertParentRealPathInsideVault(
+  private async resolveRealPathForWrite(
     absolutePath: string,
     context: RequestContext,
-  ): Promise<void> {
-    let current = path.dirname(absolutePath);
-    while (true) {
-      try {
-        await this.assertRealPathInsideVault(current, context);
-        return;
-      } catch (error) {
-        if (
-          error instanceof McpError &&
-          error.code === BaseErrorCode.VALIDATION_ERROR
-        ) {
-          throw error;
-        }
-        const parent = path.dirname(current);
-        if (parent === current) {
-          throw new McpError(
-            BaseErrorCode.VALIDATION_ERROR,
-            "Unable to verify parent real path inside the vault root.",
-            { ...context, absolutePath },
-          );
-        }
-        current = parent;
+  ): Promise<string> {
+    try {
+      return await this.assertRealPathInsideVault(absolutePath, context);
+    } catch (error) {
+      if (!hasFsCode(error, "ENOENT")) {
+        throw error;
       }
+      if (absolutePath === this.vaultRoot) {
+        throw new McpError(
+          BaseErrorCode.VALIDATION_ERROR,
+          "Unable to verify parent real path inside the vault root.",
+          { ...context, absolutePath },
+        );
+      }
+      const parent = await this.resolveRealPathForWrite(
+        path.dirname(absolutePath),
+        context,
+      );
+      return path.join(parent, path.basename(absolutePath));
+    }
+  }
+
+  private async withLockedFiles<T>(
+    filePaths: string[],
+    context: RequestContext,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const absolutePaths = filePaths.map((file) =>
+      this.resolveVaultPath(file, context),
+    );
+    const getKeys = async () => {
+      const targets = await Promise.all(
+        absolutePaths.map(async (absolutePath) => {
+          const [target, parent] = await Promise.all([
+            this.resolveRealPathForWrite(absolutePath, context),
+            this.resolveRealPathForWrite(path.dirname(absolutePath), context),
+          ]);
+          // A rename replaces the directory entry, even when reads follow a symlink.
+          return [target, path.join(parent, path.basename(absolutePath))];
+        }),
+      );
+      const keys = targets.flat().map((target) =>
+        process.platform === "win32" || process.platform === "darwin"
+          ? target.normalize("NFC").toLowerCase()
+          : target,
+      );
+      // Moves lock both paths in the same order to avoid deadlocks.
+      return [...new Set(keys)].sort();
+    };
+
+    let keys = await getKeys();
+    while (true) {
+      const result = await withFileLocks(keys, async () => {
+        // An earlier mutation can replace a symlink while this caller waits.
+        const currentKeys = await getKeys();
+        if (
+          keys.length !== currentKeys.length ||
+          keys.some((key, index) => key !== currentKeys[index])
+        ) {
+          keys = currentKeys;
+          return retryLock;
+        }
+        return operation();
+      });
+      if (result !== retryLock) return result;
     }
   }
 
@@ -278,14 +353,84 @@ export class VaultFileService {
     content: string,
     context: RequestContext,
   ): Promise<VaultFileReadResult> {
-    const absolutePath = this.resolveVaultPath(filePath, context);
-    await this.assertNewFileName(filePath, absolutePath);
-    await this.assertParentRealPathInsideVault(absolutePath, context);
-    await mkdir(path.dirname(absolutePath), { recursive: true });
-    await this.assertRealPathInsideVault(path.dirname(absolutePath), context);
-    const tempPath = `${absolutePath}.${process.pid}.${Date.now()}.tmp`;
+    return this.withLockedFiles([filePath], context, async () => {
+      const current = await this.readIfPresent(filePath, context);
+      return this.replaceFile(filePath, content, current?.hash, context);
+    });
+  }
+
+  async createIfAbsent(
+    filePath: string,
+    content: string,
+    context: RequestContext,
+  ): Promise<VaultFileReadResult> {
+    return this.withLockedFiles([filePath], context, async () => {
+      await this.assertUnchanged(filePath, undefined, context);
+      return this.replaceFile(filePath, content, undefined, context);
+    });
+  }
+
+  private async readIfPresent(filePath: string, context: RequestContext) {
     try {
-      await writeFile(tempPath, content, "utf8");
+      return await this.read(filePath, context);
+    } catch (error) {
+      if (!hasFsCode(error, "ENOENT")) throw error;
+      return undefined;
+    }
+  }
+
+  private async assertUnchanged(
+    filePath: string,
+    snapshotHash: string | undefined,
+    context: RequestContext,
+  ): Promise<void> {
+    const absolutePath = this.resolveVaultPath(filePath, context);
+    try {
+      if (snapshotHash === undefined) {
+        await lstat(absolutePath);
+      } else {
+        await this.assertRealPathInsideVault(absolutePath, context);
+        const content = await readFile(absolutePath, "utf8");
+        if (hashContent(content) === snapshotHash) return;
+      }
+    } catch (error) {
+      if (hasFsCode(error, "ENOENT")) {
+        if (snapshotHash === undefined) return;
+      } else if (!hasFsCode(error, "EISDIR")) {
+        throw error;
+      }
+    }
+    throw new McpError(
+      BaseErrorCode.CONFLICT,
+      "File changed before the filesystem mutation could be applied.",
+      { ...context, filePath },
+    );
+  }
+
+  private async replaceFile(
+    filePath: string,
+    content: string,
+    snapshotHash: string | undefined,
+    context: RequestContext,
+  ): Promise<VaultFileReadResult> {
+    const absolutePath = this.resolveVaultPath(filePath, context);
+    const parent = path.dirname(absolutePath);
+    await this.resolveRealPathForWrite(parent, context);
+    await this.assertNewFileName(filePath, absolutePath);
+    await mkdir(parent, { recursive: true });
+    await this.assertRealPathInsideVault(parent, context);
+    const tempPath = `${absolutePath}.${randomBytes(8).toString("hex")}.tmp`;
+    try {
+      await writeFile(tempPath, content, { encoding: "utf8", flag: "wx" });
+    } catch (error) {
+      if (!hasFsCode(error, "EEXIST")) await rm(tempPath, { force: true });
+      throw error;
+    }
+    try {
+      // This recheck narrows the race with external writers. Another process
+      // can still change the target between the snapshot check and the rename.
+      await this.assertRealPathInsideVault(parent, context);
+      await this.assertUnchanged(filePath, snapshotHash, context);
       await rename(tempPath, absolutePath);
     } catch (error) {
       await rm(tempPath, { force: true });
@@ -301,16 +446,11 @@ export class VaultFileService {
     context: RequestContext,
     preconditions?: VaultFileWritePreconditions,
   ): Promise<VaultFileReadResult> {
-    let existing = "";
-    try {
-      const current = await this.read(filePath, context);
-      this.assertWritePreconditions(current, preconditions, context);
-      existing = current.content;
-    } catch (error) {
-      if (error instanceof McpError) {
-        throw error;
-      }
-      if (
+    return this.withLockedFiles([filePath], context, async () => {
+      const current = await this.readIfPresent(filePath, context);
+      if (current) {
+        this.assertWritePreconditions(current, preconditions, context);
+      } else if (
         preconditions?.expectedHash ||
         typeof preconditions?.expectedMtime === "number"
       ) {
@@ -320,15 +460,15 @@ export class VaultFileService {
           { ...context, filePath, preconditions },
         );
       }
-      existing = "";
-    }
-    const next =
-      mode === "append"
-        ? `${existing}${content}`
-        : mode === "prepend"
-          ? `${content}${existing}`
-          : content;
-    return this.writeAtomic(filePath, next, context);
+      const existing = current?.content ?? "";
+      const next =
+        mode === "append"
+          ? `${existing}${content}`
+          : mode === "prepend"
+            ? `${content}${existing}`
+            : content;
+      return this.replaceFile(filePath, next, current?.hash, context);
+    });
   }
 
   async searchReplace(
@@ -337,21 +477,23 @@ export class VaultFileService {
     context: RequestContext,
     preconditions?: VaultFileWritePreconditions,
   ): Promise<{ result: VaultFileReadResult; replacementsApplied: number }> {
-    const current = await this.read(filePath, context);
-    this.assertWritePreconditions(current, preconditions, context);
-    let next = current.content;
-    let replacementsApplied = 0;
-    for (const replacement of replacements) {
-      const before = next;
-      next = next.split(replacement.search).join(replacement.replace);
-      if (next !== before) {
-        replacementsApplied++;
+    return this.withLockedFiles([filePath], context, async () => {
+      const current = await this.read(filePath, context);
+      this.assertWritePreconditions(current, preconditions, context);
+      let next = current.content;
+      let replacementsApplied = 0;
+      for (const replacement of replacements) {
+        const before = next;
+        next = next.split(replacement.search).join(replacement.replace);
+        if (next !== before) {
+          replacementsApplied++;
+        }
       }
-    }
-    return {
-      result: await this.writeAtomic(filePath, next, context),
-      replacementsApplied,
-    };
+      return {
+        result: await this.replaceFile(filePath, next, current.hash, context),
+        replacementsApplied,
+      };
+    });
   }
 
   async setFrontmatterKey(
@@ -361,18 +503,21 @@ export class VaultFileService {
     context: RequestContext,
     preconditions?: VaultFileWritePreconditions,
   ): Promise<{ result: VaultFileReadResult; value: unknown }> {
-    const current = await this.read(filePath, context);
-    this.assertWritePreconditions(current, preconditions, context);
-    const { frontmatter, body } = splitFrontmatter(current.content);
-    frontmatter[key] = value;
-    return {
-      result: await this.writeAtomic(
-        filePath,
-        renderWithFrontmatter(frontmatter, body),
-        context,
-      ),
-      value,
-    };
+    return this.withLockedFiles([filePath], context, async () => {
+      const current = await this.read(filePath, context);
+      this.assertWritePreconditions(current, preconditions, context);
+      const { frontmatter, body } = splitFrontmatter(current.content);
+      frontmatter[key] = value;
+      return {
+        result: await this.replaceFile(
+          filePath,
+          renderWithFrontmatter(frontmatter, body),
+          current.hash,
+          context,
+        ),
+        value,
+      };
+    });
   }
 
   async setFrontmatterKeys(
@@ -381,20 +526,23 @@ export class VaultFileService {
     context: RequestContext,
     preconditions?: VaultFileWritePreconditions,
   ): Promise<{ result: VaultFileReadResult; values: Record<string, unknown> }> {
-    const current = await this.read(filePath, context);
-    this.assertWritePreconditions(current, preconditions, context);
-    const { frontmatter, body } = splitFrontmatter(current.content);
-    for (const [key, value] of Object.entries(values)) {
-      frontmatter[key] = value;
-    }
-    return {
-      result: await this.writeAtomic(
-        filePath,
-        renderWithFrontmatter(frontmatter, body),
-        context,
-      ),
-      values,
-    };
+    return this.withLockedFiles([filePath], context, async () => {
+      const current = await this.read(filePath, context);
+      this.assertWritePreconditions(current, preconditions, context);
+      const { frontmatter, body } = splitFrontmatter(current.content);
+      for (const [key, value] of Object.entries(values)) {
+        frontmatter[key] = value;
+      }
+      return {
+        result: await this.replaceFile(
+          filePath,
+          renderWithFrontmatter(frontmatter, body),
+          current.hash,
+          context,
+        ),
+        values,
+      };
+    });
   }
 
   async manageFrontmatterTags(
@@ -404,38 +552,44 @@ export class VaultFileService {
     context: RequestContext,
     preconditions?: VaultFileWritePreconditions,
   ): Promise<{ result?: VaultFileReadResult; currentTags: string[] }> {
-    const current = await this.read(filePath, context);
-    const { frontmatter, body } = splitFrontmatter(current.content);
-    const currentTags = Array.isArray(frontmatter.tags)
-      ? frontmatter.tags.map(String)
-      : [];
-    if (operation === "list") {
-      return { currentTags };
-    }
+    const manage = async () => {
+      const current = await this.read(filePath, context);
+      const { frontmatter, body } = splitFrontmatter(current.content);
+      const currentTags = Array.isArray(frontmatter.tags)
+        ? frontmatter.tags.map(String)
+        : [];
+      if (operation === "list") {
+        return { currentTags };
+      }
 
-    this.assertWritePreconditions(current, preconditions, context);
-    const normalized = tags
-      .map((tag) => tag.replace(/^#+/u, "").trim())
-      .filter(Boolean);
-    const nextTags =
-      operation === "add"
-        ? [...new Set([...currentTags, ...normalized])]
-        : currentTags.filter((tag) => !normalized.includes(tag));
+      this.assertWritePreconditions(current, preconditions, context);
+      const normalized = tags
+        .map((tag) => tag.replace(/^#+/u, "").trim())
+        .filter(Boolean);
+      const nextTags =
+        operation === "add"
+          ? [...new Set([...currentTags, ...normalized])]
+          : currentTags.filter((tag) => !normalized.includes(tag));
 
-    if (nextTags.length > 0) {
-      frontmatter.tags = nextTags;
-    } else {
-      delete frontmatter.tags;
-    }
+      if (nextTags.length > 0) {
+        frontmatter.tags = nextTags;
+      } else {
+        delete frontmatter.tags;
+      }
 
-    return {
-      result: await this.writeAtomic(
-        filePath,
-        renderWithFrontmatter(frontmatter, body),
-        context,
-      ),
-      currentTags: nextTags,
+      return {
+        result: await this.replaceFile(
+          filePath,
+          renderWithFrontmatter(frontmatter, body),
+          current.hash,
+          context,
+        ),
+        currentTags: nextTags,
+      };
     };
+    return operation === "list"
+      ? manage()
+      : this.withLockedFiles([filePath], context, manage);
   }
 
   async manageTags(
@@ -451,69 +605,75 @@ export class VaultFileService {
     inlineTags: string[];
     currentTags: string[];
   }> {
-    const current = await this.read(filePath, context);
-    const { frontmatter, body } = splitFrontmatter(current.content);
-    const currentFrontmatterTags = Array.isArray(frontmatter.tags)
-      ? uniqueTags(frontmatter.tags.map(String))
-      : [];
-    const currentInlineTags = extractMarkdownTags(current.content).inlineTags;
+    const manage = async () => {
+      const current = await this.read(filePath, context);
+      const { frontmatter, body } = splitFrontmatter(current.content);
+      const currentFrontmatterTags = Array.isArray(frontmatter.tags)
+        ? uniqueTags(frontmatter.tags.map(String))
+        : [];
+      const currentInlineTags = extractMarkdownTags(current.content).inlineTags;
 
-    if (operation === "list") {
+      if (operation === "list") {
+        return {
+          frontmatterTags: currentFrontmatterTags,
+          inlineTags: currentInlineTags,
+          currentTags: uniqueTags([
+            ...currentFrontmatterTags,
+            ...currentInlineTags,
+          ]),
+        };
+      }
+
+      this.assertWritePreconditions(current, preconditions, context);
+      const normalized = uniqueTags(tags);
+      let nextFrontmatterTags = currentFrontmatterTags;
+      let nextBody = body;
+
+      if (location === "frontmatter" || location === "both") {
+        nextFrontmatterTags =
+          operation === "add"
+            ? uniqueTags([...currentFrontmatterTags, ...normalized])
+            : currentFrontmatterTags.filter((tag) => !normalized.includes(tag));
+        if (nextFrontmatterTags.length > 0) {
+          frontmatter.tags = nextFrontmatterTags;
+        } else {
+          delete frontmatter.tags;
+        }
+      }
+
+      if (location === "inline" || location === "both") {
+        const currentInlineSet = new Set(currentInlineTags);
+        if (operation === "add") {
+          const missing = normalized.filter((tag) => !currentInlineSet.has(tag));
+          if (missing.length > 0) {
+            nextBody = `${nextBody.trimEnd()}\n\n${missing
+              .map((tag) => `#${tag}`)
+              .join(" ")}\n`;
+          }
+        } else {
+          for (const tag of normalized) {
+            nextBody = removeInlineTag(nextBody, tag);
+          }
+        }
+      }
+
+      const result = await this.replaceFile(
+        filePath,
+        renderWithFrontmatter(frontmatter, nextBody),
+        current.hash,
+        context,
+      );
+      const nextTags = extractMarkdownTags(result.content);
       return {
-        frontmatterTags: currentFrontmatterTags,
-        inlineTags: currentInlineTags,
-        currentTags: uniqueTags([
-          ...currentFrontmatterTags,
-          ...currentInlineTags,
-        ]),
+        result,
+        frontmatterTags: nextTags.frontmatterTags,
+        inlineTags: nextTags.inlineTags,
+        currentTags: nextTags.allTags,
       };
-    }
-
-    this.assertWritePreconditions(current, preconditions, context);
-    const normalized = uniqueTags(tags);
-    let nextFrontmatterTags = currentFrontmatterTags;
-    let nextBody = body;
-
-    if (location === "frontmatter" || location === "both") {
-      nextFrontmatterTags =
-        operation === "add"
-          ? uniqueTags([...currentFrontmatterTags, ...normalized])
-          : currentFrontmatterTags.filter((tag) => !normalized.includes(tag));
-      if (nextFrontmatterTags.length > 0) {
-        frontmatter.tags = nextFrontmatterTags;
-      } else {
-        delete frontmatter.tags;
-      }
-    }
-
-    if (location === "inline" || location === "both") {
-      const currentInlineSet = new Set(currentInlineTags);
-      if (operation === "add") {
-        const missing = normalized.filter((tag) => !currentInlineSet.has(tag));
-        if (missing.length > 0) {
-          nextBody = `${nextBody.trimEnd()}\n\n${missing
-            .map((tag) => `#${tag}`)
-            .join(" ")}\n`;
-        }
-      } else {
-        for (const tag of normalized) {
-          nextBody = removeInlineTag(nextBody, tag);
-        }
-      }
-    }
-
-    const result = await this.writeAtomic(
-      filePath,
-      renderWithFrontmatter(frontmatter, nextBody),
-      context,
-    );
-    const nextTags = extractMarkdownTags(result.content);
-    return {
-      result,
-      frontmatterTags: nextTags.frontmatterTags,
-      inlineTags: nextTags.inlineTags,
-      currentTags: nextTags.allTags,
     };
+    return operation === "list"
+      ? manage()
+      : this.withLockedFiles([filePath], context, manage);
   }
 
   async renameTag(
@@ -527,28 +687,31 @@ export class VaultFileService {
     before: ReturnType<typeof extractMarkdownTags>;
     after: ReturnType<typeof extractMarkdownTags>;
   }> {
-    const current = await this.read(filePath, context);
-    this.assertWritePreconditions(current, preconditions, context);
-    const before = extractMarkdownTags(current.content);
-    const normalizedFrom = normalizeTag(fromTag);
-    const normalizedTo = normalizeTag(toTag);
-    const { frontmatter, body } = splitFrontmatter(current.content);
-    if (Array.isArray(frontmatter.tags)) {
-      frontmatter.tags = uniqueTags(
-        frontmatter.tags
-          .map(String)
-          .map((tag) =>
-            normalizeTag(tag) === normalizedFrom ? normalizedTo : tag,
-          ),
+    return this.withLockedFiles([filePath], context, async () => {
+      const current = await this.read(filePath, context);
+      this.assertWritePreconditions(current, preconditions, context);
+      const before = extractMarkdownTags(current.content);
+      const normalizedFrom = normalizeTag(fromTag);
+      const normalizedTo = normalizeTag(toTag);
+      const { frontmatter, body } = splitFrontmatter(current.content);
+      if (Array.isArray(frontmatter.tags)) {
+        frontmatter.tags = uniqueTags(
+          frontmatter.tags
+            .map(String)
+            .map((tag) =>
+              normalizeTag(tag) === normalizedFrom ? normalizedTo : tag,
+            ),
+        );
+      }
+      const nextBody = replaceInlineTag(body, normalizedFrom, normalizedTo);
+      const result = await this.replaceFile(
+        filePath,
+        renderWithFrontmatter(frontmatter, nextBody),
+        current.hash,
+        context,
       );
-    }
-    const nextBody = replaceInlineTag(body, normalizedFrom, normalizedTo);
-    const result = await this.writeAtomic(
-      filePath,
-      renderWithFrontmatter(frontmatter, nextBody),
-      context,
-    );
-    return { result, before, after: extractMarkdownTags(result.content) };
+      return { result, before, after: extractMarkdownTags(result.content) };
+    });
   }
 
   async moveFile(
@@ -558,38 +721,37 @@ export class VaultFileService {
     preconditions: VaultFileWritePreconditions,
     overwrite = false,
   ): Promise<{ previous: VaultFileReadResult; result: VaultFileReadResult }> {
-    const previous = await this.read(sourcePath, context);
-    this.assertWritePreconditions(previous, preconditions, context);
-    const sourceAbsolutePath = this.resolveVaultPath(sourcePath, context);
-    const targetAbsolutePath = this.resolveVaultPath(targetPath, context);
-    await this.assertRealPathInsideVault(sourceAbsolutePath, context);
-    await this.assertNewFileName(targetPath, targetAbsolutePath);
-    await mkdir(path.dirname(targetAbsolutePath), { recursive: true });
-    await this.assertRealPathInsideVault(
-      path.dirname(targetAbsolutePath),
-      context,
-    );
-
-    if (!overwrite) {
-      try {
-        await stat(targetAbsolutePath);
-        throw new McpError(
-          BaseErrorCode.CONFLICT,
-          "Target file already exists. Pass overwrite=true with a source precondition to replace it.",
-          { ...context, sourcePath, targetPath },
-        );
-      } catch (error) {
-        if (error instanceof McpError) {
-          throw error;
+    return this.withLockedFiles([sourcePath, targetPath], context, async () => {
+      const previous = await this.read(sourcePath, context);
+      this.assertWritePreconditions(previous, preconditions, context);
+      const sourceAbsolutePath = this.resolveVaultPath(sourcePath, context);
+      const targetAbsolutePath = this.resolveVaultPath(targetPath, context);
+      const targetParent = path.dirname(targetAbsolutePath);
+      const target = overwrite
+        ? await this.readIfPresent(targetPath, context)
+        : undefined;
+      if (!overwrite) {
+        try {
+          await lstat(targetAbsolutePath);
+          throw new McpError(
+            BaseErrorCode.CONFLICT,
+            "Target file already exists. Pass overwrite=true with a source precondition to replace it.",
+            { ...context, sourcePath, targetPath },
+          );
+        } catch (error) {
+          if (!hasFsCode(error, "ENOENT")) throw error;
         }
       }
-    }
+      await this.assertNewFileName(targetPath, targetAbsolutePath);
+      await this.resolveRealPathForWrite(targetParent, context);
+      await mkdir(targetParent, { recursive: true });
+      await this.assertRealPathInsideVault(targetParent, context);
 
-    await rename(sourceAbsolutePath, targetAbsolutePath);
-    return {
-      previous,
-      result: await this.read(targetPath, context),
-    };
+      await this.assertUnchanged(targetPath, target?.hash, context);
+      await this.assertUnchanged(sourcePath, previous.hash, context);
+      await rename(sourceAbsolutePath, targetAbsolutePath);
+      return { previous, result: await this.read(targetPath, context) };
+    });
   }
 
   async deleteFile(
@@ -597,11 +759,13 @@ export class VaultFileService {
     context: RequestContext,
     preconditions: VaultFileWritePreconditions,
   ): Promise<VaultFileReadResult> {
-    const current = await this.read(filePath, context);
-    this.assertWritePreconditions(current, preconditions, context);
-    const absolutePath = this.resolveVaultPath(filePath, context);
-    await this.assertRealPathInsideVault(absolutePath, context);
-    await rm(absolutePath, { force: false });
-    return current;
+    return this.withLockedFiles([filePath], context, async () => {
+      const current = await this.read(filePath, context);
+      this.assertWritePreconditions(current, preconditions, context);
+      const absolutePath = this.resolveVaultPath(filePath, context);
+      await this.assertUnchanged(filePath, current.hash, context);
+      await rm(absolutePath, { force: false });
+      return current;
+    });
   }
 }

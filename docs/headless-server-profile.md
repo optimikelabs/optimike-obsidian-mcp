@@ -91,6 +91,9 @@ Only after the `headless-guarded` step, switch a copied or dedicated vault to `O
 5. For Canvas, limit the contract to JSON Canvas structure: create, add text node, connect nodes, validate.
 6. Validate with `npm run smoke:headless-filesystem`.
 
+See [Runtime Modes](../OPERATIONS.md#runtime-modes) for same-file write ordering,
+conflict detection, and the remaining race with other processes.
+
 Never use this phase to edit existing production notes until the server profile has its own rollback and monitoring story.
 
 ## Server Go/No-Go

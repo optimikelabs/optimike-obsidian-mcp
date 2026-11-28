@@ -109,6 +109,19 @@ Cette politique protège le cache Optimike, la recherche, Tasks et le fallback l
 - `headless-guarded` : même surface de lecture headless, plus écritures filesystem bornées pour `obsidian_update_note`, `obsidian_search_replace` et `obsidian_manage_frontmatter`. Les updates de note sont limitées à append/prepend ; overwrite reste bloqué par la politique guarded. Le fallback local Bases en lecture seule est aussi disponible.
 - `headless-filesystem` : même surface que `headless-guarded`, avec des fonctions filesystem explicites pour sandbox ou vault dédié : tags frontmatter/inline, index/audit local des tags, rename en dry-run, opérations admin move/archive/delete avec `expectedHash` ou `expectedMtime`, batch frontmatter avec dry-run, création/config YAML `.base`, rows Bases comme opérations `set` de frontmatter Markdown, et helpers JSON Canvas minimaux.
 
+Le service d’écriture commun à `headless-guarded` et `headless-filesystem`
+exécute successivement les mutations du même fichier résolu dans un même
+processus serveur. Une mise à jour qui modifie le contenu invalide le précédent
+`expectedHash`. Lors d’ajouts concurrents en fin de fichier, le service conserve
+le texte de chaque appel, même sans précondition. Avant de remplacer le fichier,
+le service revérifie le hash du contenu lu ou l’absence de la cible pour une
+création. Les outils Canvas transmettent le hash du Canvas qu’ils ont lu,
+même quand l’appel ne fournit pas `expectedHash`. La création d’un Canvas ou
+d’une Base avec `overwrite=false` exige que la cible soit absente.
+En cas d’écart, il renvoie `CONFLICT` et supprime le fichier temporaire. Un autre
+processus peut encore modifier la cible entre le dernier contrôle et le
+renommage, ce qui exige de coordonner séparément les écritures indépendantes.
+
 Règle opérationnelle : les modes headless signifient Optimike MCP au-dessus d’un vault Markdown synchronisé. Ils ne chargent pas les plugins communautaires Obsidian et ne fournissent pas active file, command palette ou Bases Bridge sans Desktop.
 
 Smokes runtime :
