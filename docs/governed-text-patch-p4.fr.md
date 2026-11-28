@@ -59,11 +59,15 @@ rafraîchi après un commit prouvé et ne décide jamais du CAS.
 
 ## Importer une proposition préparée hors ligne
 
-Avant de travailler hors ligne, relever le chemin relatif au coffre, le SHA-256
-de la note originale exacte (frontmatter et fins de ligne compris) et
-l’empreinte Atomic Write live. La route de statut authentifiée du Bridge
-`GET /extensions/obsidian-atomic-write-bridge/status` expose cette empreinte dans
-`backend.bindingFingerprint`. Le reçu détaillé d’un plan gouverné existant
+Avant de travailler hors ligne, relever le chemin relatif au coffre et le
+`sha256` renvoyé par la lecture authentifiée du Bridge
+`POST /extensions/obsidian-atomic-write-bridge/notes/read` avec
+`contractVersion: 1` et le `path` de la cible. Le hash porte sur le texte lu
+par Obsidian, dont le traitement d’un BOM UTF-8 peut différer du calcul sur les
+octets du fichier. Relever aussi l’empreinte Atomic Write dans le champ
+`bindingFingerprint` de cette lecture ou dans `backend.bindingFingerprint`
+du statut `GET /extensions/obsidian-atomic-write-bridge/status`.
+Le reçu détaillé d’un plan gouverné existant
 indique aussi son empreinte et le hash de son état initial scellé.
 
 Au retour de l’autorité, passer le JSON version 1 directement comme arguments
@@ -96,19 +100,28 @@ Si l’empreinte diffère, réessayer sur l’autorité d’origine.
 | Résultat | Suite |
 | --- | --- |
 | `phase: "planned"` | Relire le reçu. Une fois autorisé, appeler `obsidian_text_patch_apply` avec son `planRef` et la même clé. |
-| `outcome: "conflict"` | La base a changé. La relire et créer une nouvelle proposition avec un nouvel identifiant si le patch est toujours voulu. |
+| `outcome: "conflict"` | La première lecture diffère de la base proposée, ou l’apply du plan scellé a rencontré un conflit. Relire la cible et créer une nouvelle proposition avec un nouvel identifiant si le patch est toujours voulu. |
+| `proposal_changed_during_seal` ou `target_not_found` | Réessayer la même proposition quand la base d’origine ou la cible est disponible. Ces refus ne réservent pas l’identifiant. |
+| `proposal_date_preparation_locked` | Résoudre le verrou d’une préparation de date antérieure avant de réessayer. |
 | `outcome: "committed"` | Le même plan a déjà été appliqué. |
 | `phase: "applying"` ou `outcome: "outcome_unknown"` | Appeler `obsidian_text_patch_status`, puis `obsidian_text_patch_recover` sur la même référence et avec la même clé si nécessaire. |
-| `reason: "expired_with_trace"` ou `"receipt_purged"` | `trace` conserve la référence et le digest d’origine avec l’issue terminale. L’identifiant ne peut plus créer de plan. |
+| `reason: "expired_with_trace"` ou `"receipt_purged"` | Le résultat indique l’issue terminale et fournit la référence et le digest d’origine dans `trace`. L’identifiant conservé empêche une seconde admission jusqu’à la purge. |
 
 Soumettre la même proposition après une réponse perdue retourne le même plan
 avec son état courant. Une modification du patch, de la base, de la cible ou de
 l’empreinte sous le même identifiant est refusée. Une seule transaction SQLite
-enregistre le plan et son association. Après purge du plan, le journal privé
-conserve l’identifiant, le chemin, l’empreinte, les hashes, la clé et l’issue
-pendant toute sa durée de vie. La trace ne contient pas le texte du patch et
-ne restitue pas le reçu complet. L’import et les outils existants apply,
-status et recover utilisent le même journal.
+enregistre le plan et son association. La maintenance du journal purge les
+conflits sans plan après `MCP_OBSIDIAN_PROPOSAL_CONFLICT_RETENTION_DAYS`
+(90 jours par défaut à compter du conflit). Les traces de plans terminaux
+peuvent être purgées après `MCP_OBSIDIAN_PROPOSAL_TRACE_RETENTION_DAYS`
+(365 jours par défaut à compter de l’issue terminale), une fois le reçu du
+plan purgé. Les deux réglages acceptent de 1 à 3 650 jours. Les opérations non
+résolues gardent leur trace tant que leur plan existe. La trace conserve
+l’identifiant, le chemin, l’empreinte, les hashes, la clé et l’issue. Conserver
+le reçu complet à part si nécessaire. Après la purge de la trace, un nouvel
+import doit repasser les vérifications live et l’identifiant d’origine ne
+garantit plus la déduplication. L’import et les outils apply, status et recover
+utilisent le même journal.
 
 ## Confirmation facultative de l’apply (élicitation)
 

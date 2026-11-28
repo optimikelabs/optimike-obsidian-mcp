@@ -16,6 +16,12 @@ export const TEXT_PATCH_REFUSAL_MESSAGES = {
     "The note needs a creation date. Import made no changes. Have the vault owner date the note, then capture a new proposal from the resulting bytes.",
   proposal_date_management_unverified:
     "The live Bridge cannot verify the target's creation-date requirements. Ask the vault owner to check its date integration.",
+  proposal_date_preparation_locked:
+    "A previous date preparation still blocks this target. Resolve that lock before retrying the same proposal.",
+  target_not_found:
+    "The target is missing on the proposal's authority. Retry the same proposal if the target becomes available.",
+  proposal_changed_during_seal:
+    "The note changed while the proposal was being sealed. Retry the same proposal against its original base.",
   task_line_touched:
     "Text patches never create, edit, reorder or extend a Markdown task line (- [ ] …) or an Operon task line. Change tasks with the operon_* tools (for example operon_transition_task to complete one), and patch only the surrounding text.",
   literal_not_found:

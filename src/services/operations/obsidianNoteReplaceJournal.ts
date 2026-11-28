@@ -139,6 +139,8 @@ export type ObsidianNoteReplaceJournalOptions = {
   now?: () => number;
   terminalRetentionMs?: number;
   plannedRetentionMs?: number;
+  proposalConflictRetentionMs?: number;
+  proposalTraceRetentionMs?: number;
   purgeIntervalMs?: number;
   executionLeaseMs?: number;
   executionSweepIntervalMs?: number;
@@ -258,6 +260,8 @@ export class ObsidianNoteReplaceJournal {
   private readonly now: () => number;
   private readonly terminalRetentionMs: number;
   private readonly plannedRetentionMs: number;
+  private readonly proposalConflictRetentionMs: number;
+  private readonly proposalTraceRetentionMs: number;
   private readonly purgeIntervalMs: number;
   private readonly executionLeaseMs: number;
   private readonly executionSweepIntervalMs: number;
@@ -278,6 +282,8 @@ export class ObsidianNoteReplaceJournal {
     this.terminalRetentionMs =
       options.terminalRetentionMs ?? 30 * 24 * 60 * 60 * 1000;
     this.plannedRetentionMs = options.plannedRetentionMs ?? 30 * 24 * 60 * 60 * 1000;
+    this.proposalConflictRetentionMs = options.proposalConflictRetentionMs ?? 90 * 24 * 60 * 60 * 1000;
+    this.proposalTraceRetentionMs = options.proposalTraceRetentionMs ?? 365 * 24 * 60 * 60 * 1000;
     this.purgeIntervalMs = options.purgeIntervalMs ?? 60 * 60 * 1000;
     this.executionLeaseMs = options.executionLeaseMs ?? 30_000;
     this.executionSweepIntervalMs = options.executionSweepIntervalMs ?? 1_000;
@@ -349,17 +355,23 @@ export class ObsidianNoteReplaceJournal {
             plan_ref TEXT,
             plan_digest TEXT,
             terminal_status TEXT,
+            retained_since TEXT,
             CHECK (
               (operation_id IS NULL AND plan_ref IS NULL AND plan_digest IS NULL AND terminal_status IS 'conflict')
               OR (operation_id IS NOT NULL AND plan_ref IS NOT NULL AND plan_digest IS NOT NULL)
             )
-          ) STRICT;
-          CREATE TRIGGER IF NOT EXISTS obsidian_text_patch_proposal_retention
-          BEFORE DELETE ON obsidian_note_replace_plans
+          ) STRICT
+        `);
+        this.ensureProposalRetentionColumn();
+        this.db.exec(`
+          CREATE TRIGGER IF NOT EXISTS obsidian_text_patch_proposal_trace_on_purge
+          AFTER DELETE ON obsidian_note_replace_plans
           BEGIN
-            UPDATE obsidian_text_patch_proposals SET terminal_status = OLD.status
+            UPDATE obsidian_text_patch_proposals
+            SET terminal_status = OLD.status, retained_since = OLD.updated_at
             WHERE operation_id = OLD.operation_id;
           END;
+          DROP TRIGGER IF EXISTS obsidian_text_patch_proposal_retention;
         `);
         this.db.exec(`
           CREATE TABLE IF NOT EXISTS obsidian_note_replace_runtime_leases (
@@ -496,6 +508,11 @@ export class ObsidianNoteReplaceJournal {
   }
 
   getTextPatchProposal(id: string): TextPatchProposalTrace | undefined {
+    this.maybePurgeTerminalPlans();
+    return this.selectTextPatchProposal(id);
+  }
+
+  private selectTextPatchProposal(id: string): TextPatchProposalTrace | undefined {
     return this.db.prepare(`SELECT id, intent_digest AS intentDigest, public_key AS publicIdempotencyKey,
       path, before_sha256 AS beforeSha256, binding_fingerprint AS bindingFingerprint,
       operation_id AS operationId, plan_ref AS planRef, plan_digest AS planDigest,
@@ -521,7 +538,7 @@ export class ObsidianNoteReplaceJournal {
     try {
       // A proposal conflict or expired trace also owns its ID. Never associate
       // an existing ordinary plan, even if a caller used this key before import existed.
-      if (this.getTextPatchProposal(identity.id) || this.selectByIdempotencyKey(input.idempotencyKey)) {
+      if (this.selectTextPatchProposal(identity.id) || this.selectByIdempotencyKey(input.idempotencyKey)) {
         throw noteReplaceIdempotencyConflict();
       }
       const plan = this.insertPlan(input);
@@ -543,11 +560,12 @@ export class ObsidianNoteReplaceJournal {
   ): void {
     this.db.prepare(`INSERT INTO obsidian_text_patch_proposals
       (id, intent_digest, public_key, path, before_sha256, binding_fingerprint,
-       operation_id, plan_ref, plan_digest, terminal_status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`)
+       operation_id, plan_ref, plan_digest, terminal_status, retained_since)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`)
       .run(identity.id, identity.intentDigest, identity.publicIdempotencyKey,
         identity.path, identity.beforeSha256, identity.bindingFingerprint,
-        operationId, reference?.planRef ?? null, reference?.planDigest ?? null, terminalStatus);
+        operationId, reference?.planRef ?? null, reference?.planDigest ?? null, terminalStatus,
+        terminalStatus ? new Date(this.now()).toISOString() : null);
   }
 
   private insertPlan(
@@ -1120,7 +1138,16 @@ export class ObsidianNoteReplaceJournal {
            AND updated_at < ?`,
       )
       .run(cutoff);
-    if (Number(result.changes) > 0 || Number(expired.changes) > 0) {
+    // Older traces had no timestamp. Give them a full window from the first
+    // sweep after upgrade. Live and unresolved plans never enter this sweep.
+    this.db.prepare(`UPDATE obsidian_text_patch_proposals SET retained_since = ?
+      WHERE terminal_status IS NOT NULL AND retained_since IS NULL`).run(expiredAt);
+    const purgedProposals = this.db.prepare(`DELETE FROM obsidian_text_patch_proposals
+      WHERE (operation_id IS NULL AND retained_since < ?)
+         OR (operation_id IS NOT NULL AND retained_since < ?)`)
+      .run(new Date(now - this.proposalConflictRetentionMs).toISOString(),
+        new Date(now - this.proposalTraceRetentionMs).toISOString());
+    if (Number(result.changes) > 0 || Number(expired.changes) > 0 || Number(purgedProposals.changes) > 0) {
       this.walCheckpointRequired = true;
       this.checkpointSensitiveFrames();
     }
@@ -1271,6 +1298,18 @@ export class ObsidianNoteReplaceJournal {
     } catch (error) {
       // Another process may have completed the same additive migration.
       if (!hasEpoch()) throw error;
+    }
+  }
+
+  private ensureProposalRetentionColumn(): void {
+    const hasRetention = () =>
+      (this.db.prepare("PRAGMA table_info(obsidian_text_patch_proposals)").all() as Array<{ name: string }>)
+        .some((column) => column.name === "retained_since");
+    if (hasRetention()) return;
+    try {
+      this.db.exec("ALTER TABLE obsidian_text_patch_proposals ADD COLUMN retained_since TEXT");
+    } catch (error) {
+      if (!hasRetention()) throw error;
     }
   }
 

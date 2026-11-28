@@ -511,12 +511,11 @@ export class GovernedTextPatchRuntime {
     } catch (error) {
       const concurrentWinner = await this.replayProposal(identity);
       if (concurrentWinner) return concurrentWinner;
-      if ((error instanceof McpError && error.details?.reason === "proposal_base_changed") ||
-          await this.noteRuntime.verifyMissingProposalTarget(error, bindingFingerprint)) {
+      if (error instanceof McpError && error.details?.reason === "proposal_base_changed") {
         this.noteRuntime.recordTextPatchProposalConflict(identity);
         return (await this.replayProposal(identity))!;
       }
-      throw error;
+      return this.noteRuntime.rethrowProposalError(error, bindingFingerprint);
     }
   }
 

@@ -791,7 +791,7 @@ export class ObsidianNoteReplaceOperationAdapter
       throw new McpError(
         BaseErrorCode.CONFLICT,
         `The ${this.profile.targetLabel} changed after the domain projection was compiled.`,
-        input.proposalSeal ? { reason: "proposal_base_changed" } : undefined,
+        input.proposalSeal ? { reason: "proposal_changed_during_seal", retryable: true } : undefined,
       );
     }
     if (
