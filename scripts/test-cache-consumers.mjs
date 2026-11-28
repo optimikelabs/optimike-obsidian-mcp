@@ -492,8 +492,10 @@ test('a foreign SQLite writer defers indexing without marking notes as limited',
  } finally {writer.close();}
 }));
 
-test('a stuck parse times out and the next note still gets indexed',{timeout:25_000},()=>linkFixture(async f=>{
- f.write('Poison.md','['.repeat(16_000)+'](Target.md)'+']'.repeat(16_000));
+const nestedBrackets='['.repeat(16_000)+'](Target.md)'+']'.repeat(16_000);
+const pathologicalNote=`${nestedBrackets}\n\n${nestedBrackets}\n\n`.padEnd(80*1024,'[');
+test('the same bounded timeout settles until the 80 KiB note is edited',{timeout:45_000},()=>linkFixture(async f=>{
+ f.write('Poison.md',pathologicalNote);
  f.write('Z.md','[[Target]]');
  await f.cache.buildVaultCache();
  await f.cache.linkIndexRun;
@@ -505,9 +507,41 @@ test('a stuck parse times out and the next note still gets indexed',{timeout:25_
  const target=await f.read();
  assert.deepEqual(target.backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Z.md',count:1}]);
  assert.equal(target.indexCoverage.backlinksComplete,false);
-},{...defaultLinkExtraction,parseTimeoutMs:100}));
 
-test('a timed-out table keeps its links through bounded extraction and can be retried after restart',()=>linkFixture(async f=>{
+ await f.reopen();
+ const row=f.cache.db.prepare("SELECT hash, retry_at FROM markdown_link_files WHERE path='/Poison.md'");
+ const originalHash=row.get().hash;
+ f.cache.db.exec("UPDATE markdown_link_files SET retry_at=0 WHERE path='/Poison.md'");
+ await f.cache.buildVaultCache();
+ await f.cache.linkIndexRun;
+ assert.equal(row.get().hash,originalHash);
+ assert.equal(row.get().retry_at,null);
+ const settled=await f.cache.readFilesystemNoteLinks('Poison.md',20,context);
+ assert.deepEqual(settled.indexCoverage.limitedSources,[{path:'Poison.md',reason:'region'}]);
+ assert.deepEqual(settled.outgoing,[]);
+
+ await f.reopen();
+ await f.cache.buildVaultCache();
+ await f.cache.linkIndexRun;
+ assert.equal(f.cache.markdownLinks.nextRetryTime(),undefined);
+ f.write('Poison.md','[[Target]]');
+ await f.cache.updateFileVerified('Poison.md',context);
+ await f.cache.linkIndexRun;
+ assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Poison.md',count:1},{sourcePath:'Z.md',count:1}]);
+ assert.equal((await f.read()).indexCoverage,undefined);
+},{...defaultLinkExtraction,parseTimeoutMs:100,maxRetryAttempts:3}));
+
+test('the configured cap can settle the 80 KiB note after the first fallback timeout',()=>linkFixture(async f=>{
+ f.write('Poison.md',pathologicalNote);
+ await f.cache.buildVaultCache();
+ await f.cache.linkIndexRun;
+ assert.equal(f.cache.markdownLinks.nextRetryTime(),undefined);
+ const settled=await f.cache.readFilesystemNoteLinks('Poison.md',20,context);
+ assert.deepEqual(settled.indexCoverage.limitedSources,[{path:'Poison.md',reason:'region'}]);
+ assert.deepEqual(settled.outgoing,[]);
+},{...defaultLinkExtraction,parseTimeoutMs:100,maxRetryAttempts:1}));
+
+test('a completed bounded extraction keeps the timed-out table links without a retry',()=>linkFixture(async f=>{
  const rows=4500;
  f.write('Table.md','| a | b |\n|---|---|\n'+'| [[Target]] | [b](Other.md) |\n'.repeat(rows));
  await f.cache.buildVaultCache();
@@ -518,12 +552,11 @@ test('a timed-out table keeps its links through bounded extraction and can be re
  assert.equal(first.indexCoverage.sourceComplete,false);
  await f.reopen();
  const retry=f.cache.db.prepare("SELECT retry_at FROM markdown_link_files WHERE path='/Table.md'");
- assert.ok(retry.get().retry_at>0);
- f.cache.db.exec("UPDATE markdown_link_files SET retry_at=0 WHERE path='/Table.md'");
+ assert.equal(retry.get().retry_at,null);
  await f.cache.buildVaultCache();
  await f.cache.linkIndexRun;
  assert.equal((await read()).coverage.outgoing.total,2*rows);
- assert.ok(retry.get().retry_at>0);
+ assert.equal(f.cache.markdownLinks.nextRetryTime(),undefined);
 },{...defaultLinkExtraction,parseTimeoutMs:100}));
 
 test('a note that exhausts its worker is marked limited and later notes still get backlinks',()=>linkFixture(async f=>{

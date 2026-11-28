@@ -41,7 +41,7 @@ function coverage(total: number, returned: number) {
 
 type LinkCount = { link_path: string; count: number };
 type Target = { path: string; ambiguous?: true };
-const INDEX_REVISION = "v14:";
+const INDEX_REVISION = "v15:";
 const MAX_CANDIDATE_PATHS = 32768;
 export type LinkIndexSource = {
   path: string; hash: string; size: number; attempts: number; bounded?: true;
@@ -56,7 +56,6 @@ type IndexedSource = LinkIndexSource & {
   references: MarkdownLinkReference[];
   possible?: Set<string>;
   possibleAnywhere?: true;
-  retryAttempt?: number;
 };
 
 /** Store unresolved spellings on disk; resolve against the current file set at read time.
@@ -72,7 +71,6 @@ export class MarkdownLinkIndex {
   private readonly limitedSource;
   private readonly unboundedSources;
   private readonly retryTime;
-  private readonly deferRetry;
   private readonly candidatesDelete;
   private readonly candidateInsert;
   private readonly limitedIncoming;
@@ -82,7 +80,7 @@ export class MarkdownLinkIndex {
 
   constructor(private readonly db: DatabaseSync, private readonly options = defaultLinkExtraction, initialize = true) {
     const { largeNoteBytes, sectionBytes, maxReferences } = options;
-    this.revision = `${INDEX_REVISION}${largeNoteBytes}:${sectionBytes}:${maxReferences}:${options.parseTimeoutMs ?? 10_000}:`;
+    this.revision = `${INDEX_REVISION}${largeNoteBytes}:${sectionBytes}:${maxReferences}:${options.parseTimeoutMs ?? 10_000}:${options.maxRetryAttempts ?? 2}:`;
     if (initialize) {
       db.exec(`
       CREATE TABLE IF NOT EXISTS markdown_link_files (
@@ -158,7 +156,8 @@ export class MarkdownLinkIndex {
       ON CONFLICT(path) DO UPDATE SET hash = excluded.hash, complete = excluded.complete,
         possible_anywhere = excluded.possible_anywhere, limit_reason = excluded.limit_reason,
         retry_at = excluded.retry_at, retry_attempt = excluded.retry_attempt
-      WHERE markdown_link_files.hash <> excluded.hash OR markdown_link_files.retry_at IS NOT NULL
+      WHERE markdown_link_files.hash <> excluded.hash
+         OR (markdown_link_files.retry_at IS NOT NULL AND markdown_link_files.retry_attempt = ?)
     `);
     this.refsDelete = db.prepare("DELETE FROM markdown_link_refs WHERE source = ?");
     this.refInsert = db.prepare(`
@@ -195,11 +194,6 @@ export class MarkdownLinkIndex {
     this.retryTime = db.prepare(`
       SELECT min(indexed.retry_at) AS due FROM markdown_link_files AS indexed
       JOIN file_cache AS file USING(path) WHERE indexed.retry_at IS NOT NULL AND indexed.hash = ? || file.hash
-    `);
-    this.deferRetry = db.prepare(`
-      UPDATE markdown_link_files SET retry_at = ?, retry_attempt = ?
-      WHERE path = ? AND hash = ? AND retry_at IS NOT NULL
-        AND EXISTS (SELECT 1 FROM markdown_link_refs WHERE source = markdown_link_files.path)
     `);
     this.limitedIncoming = db.prepare(`
       SELECT refs.source, refs.link_path
@@ -342,9 +336,12 @@ export class MarkdownLinkIndex {
         : size > this.options.largeNoteBytes
           ? extractBoundedLinkSource(content, this.options)
           : { references: extractMarkdownLinkReferences(content), complete: true };
-    const source: IndexedSource = { ...request, ...result };
-    if (skipReason === "timeout" || (bounded && !source.complete))
-      source.retryAttempt = retryAttempt + 1;
+    const source: IndexedSource = { ...request, ...result, attempts: retryAttempt };
+    // Only bounded timeouts schedule a retry. They publish no references,
+    // so a second timeout for the same content hash repeats the same result.
+    if (skipReason === "timeout" && (retryAttempt > 0 || retryAttempt + 1 >= (this.options.maxRetryAttempts ?? 2))) {
+      source.limitReason = "region";
+    }
     if (skipHints) {
       source.possibleAnywhere = true;
     } else if (!source.complete) {
@@ -377,14 +374,13 @@ export class MarkdownLinkIndex {
     }
   }
 
-  private replaceSource({ path: filePath, hash, complete, references, possible, possibleAnywhere, limitReason, retryAttempt, skipReason }: IndexedSource): void {
+  private replaceSource({ path: filePath, hash, complete, references, possible, possibleAnywhere, limitReason, attempts, skipReason }: IndexedSource): void {
     const basename = basenameKey(filePath);
     const indexedHash = this.revision + hash;
-    const retryAt = retryAttempt === undefined ? null : Date.now() + 60_000 * 2 ** Math.min(retryAttempt - 1, 4);
-    if (skipReason && retryAt !== null &&
-        this.deferRetry.run(retryAt, retryAttempt!, filePath, indexedHash).changes) return;
+    const retryAt = limitReason === "timeout" ? Date.now() + 60_000 : null;
+    const retryAttempt = skipReason === "timeout" ? attempts + 1 : 0;
     if (!this.fileUpsert.run(filePath, filePath.toLowerCase(), basename, indexedHash,
-      Number(complete), Number(!!possibleAnywhere), limitReason ?? null, retryAt, retryAttempt ?? 0).changes) return;
+      Number(complete), Number(!!possibleAnywhere), limitReason ?? null, retryAt, retryAttempt, attempts).changes) return;
     this.refsDelete.run(filePath);
     this.candidatesDelete.run(filePath);
     for (const [ordinal, reference] of references.entries()) {
