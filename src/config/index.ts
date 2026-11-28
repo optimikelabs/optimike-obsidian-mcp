@@ -153,6 +153,10 @@ const EnvSchema = z
       .enum(["auto", "rest", "filesystem"])
       .default("auto"),
     OBSIDIAN_CACHE_CONCURRENCY: z.coerce.number().int().positive().default(8),
+    OBSIDIAN_LINK_LARGE_NOTE_BYTES: z.coerce.number().int().min(4096).max(1024 * 1024).default(256 * 1024),
+    OBSIDIAN_LINK_SECTION_BYTES: z.coerce.number().int().min(1024).max(128 * 1024).default(64 * 1024),
+    OBSIDIAN_LINK_MAX_REFERENCES: z.coerce.number().int().positive().max(32768).default(8192),
+    OBSIDIAN_LINK_BATCH_BYTES: z.coerce.number().int().min(4096).max(1024 * 1024).default(256 * 1024),
     OBSIDIAN_VAULT_EXCLUDE_PATTERNS: z.string().optional(),
     OBSIDIAN_SHARED_CACHE_DB_PATH: z.string().optional(),
     OBSIDIAN_CONTENT_HOT_CACHE_LIMIT: z.coerce
@@ -553,6 +557,12 @@ export const config = {
   obsidianApiSearchTimeoutMs: env.OBSIDIAN_API_SEARCH_TIMEOUT_MS,
   obsidianCacheSource: env.OBSIDIAN_CACHE_SOURCE,
   obsidianCacheConcurrency: env.OBSIDIAN_CACHE_CONCURRENCY,
+  obsidianLinkExtraction: {
+    largeNoteBytes: env.OBSIDIAN_LINK_LARGE_NOTE_BYTES,
+    sectionBytes: env.OBSIDIAN_LINK_SECTION_BYTES,
+    maxReferences: env.OBSIDIAN_LINK_MAX_REFERENCES,
+    batchBytes: env.OBSIDIAN_LINK_BATCH_BYTES,
+  },
   obsidianVaultExcludePatterns: parseVaultExcludePatterns(
     env.OBSIDIAN_VAULT_EXCLUDE_PATTERNS,
   ),
