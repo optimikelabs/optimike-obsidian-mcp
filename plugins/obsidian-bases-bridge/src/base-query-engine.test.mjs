@@ -293,13 +293,13 @@ test("request filters and formula column settings use the engine's formula value
 test("property tables compare formula text to numeric and boolean operands", async () => {
   const query = await queryRoute({
     baseText: JSON.stringify({
-      formulas: { done: 'file.name != "b.md"', count: 'if(file.name == "c.md", 7, 5)' },
+      formulas: { done: 'file.name != "b"', count: 'if(file.name == "c", 7, 5)' },
       views: [{ type: "table", name: "All" }],
     }),
     notes: NOTES.slice(0, 3),
     table: {
-      'file.name != "b.md"': (row) => row.name === "b.md" ? "false" : "true",
-      'if(file.name == "c.md", 7, 5)': (row) => row.name === "c.md" ? "7" : "5",
+      'file.name != "b"': (row) => row.name === "b" ? "false" : "true",
+      'if(file.name == "c", 7, 5)': (row) => row.name === "c" ? "7" : "5",
     },
   });
   for (const [filter, path, rendered] of [
