@@ -703,12 +703,14 @@ export class ObsidianRestApiService {
     filePath: string,
     format: "markdown" | "json" = "markdown",
     context: RequestContext,
+    pathEncoding?: "literal",
   ): Promise<string | NoteJson> {
     return vaultMethods.getFileContent(
       this._request.bind(this),
       filePath,
       format,
       context,
+      pathEncoding,
     );
   }
 
@@ -768,8 +770,10 @@ export class ObsidianRestApiService {
    * @param context - Request context.
    * @returns A list of file and directory names.
    */
-  async listFiles(dirPath: string, context: RequestContext): Promise<string[]> {
-    return vaultMethods.listFiles(this._request.bind(this), dirPath, context);
+  async listFiles(
+    dirPath: string, context: RequestContext, pathEncoding?: "literal",
+  ): Promise<string[]> {
+    return vaultMethods.listFiles(this._request.bind(this), dirPath, context, pathEncoding);
   }
 
   /**

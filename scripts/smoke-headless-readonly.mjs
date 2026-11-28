@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import assert from "node:assert/strict";
 import {
   mkdtemp,
   rm,
@@ -66,6 +67,14 @@ function jsonOf(result, label) {
   }
 }
 
+const unicodeNotes = [
+  ['Wide\u00a0Folder/Wide\u00a0Space.md', 'Wide Folder/Wide Space.md'],
+  ['Wide\u00a0Folder/Narrow\u202fSpace.md', 'Wide Folder/Narrow Space.md'],
+  ['Wide\u00a0Folder/Cafe\u0301.md', 'Wide Folder/Caf\u00e9.md'],
+  ['Wide\u00a0Folder/Ordinary.md', 'Wide Folder/Ordinary.md'],
+];
+const collidingNotes = ['Collision Name.md', 'Collision\u00a0Name.md'];
+
 async function createTempVault() {
   const vaultRoot = await mkdtemp(
     path.join(os.tmpdir(), "optimike-headless-vault-"),
@@ -74,6 +83,13 @@ async function createTempVault() {
   await mkdir(path.join(vaultRoot, "Canvases"), { recursive: true });
   await mkdir(path.join(vaultRoot, "tmp", "reports"), { recursive: true });
   await mkdir(path.join(vaultRoot, ".obsidian"), { recursive: true });
+  await mkdir(path.join(vaultRoot, 'Wide\u00a0Folder'));
+  for (const [diskPath] of unicodeNotes) {
+    await writeFile(path.join(vaultRoot, diskPath), '# ' + diskPath, 'utf8');
+  }
+  for (const diskPath of collidingNotes) {
+    await writeFile(path.join(vaultRoot, diskPath), '# ' + diskPath, 'utf8');
+  }
   await writeFile(
     path.join(vaultRoot, "Projects", "Headless.md"),
     [
@@ -596,6 +612,47 @@ async function main() {
       "read note",
     );
     assertTextIncludes(read, "Headless runtime smoke note", "read note");
+
+    if (modeArg === 'headless-readonly') {
+      const call = async (name, args) => {
+        const result = await withTimeout(client.callTool({ name, arguments: args }), name);
+        assert.equal(Boolean(result.isError), false, result.content[0].text);
+        return JSON.parse(result.content[0].text);
+      };
+      const listed = await call('obsidian_list_notes', {
+        dirPath: 'Wide Folder', responseMode: 'compact', recursionDepth: 0,
+      });
+      for (const [dirPath, entryPath] of [['/Projects', '/Projects/Headless.md'], ['Projects/', 'Projects/Headless.md']]) {
+        const plain = await call('obsidian_list_notes', { dirPath, responseMode: 'compact' });
+        assert.equal(plain.directoryPath, dirPath);
+        assert.ok(plain.entries.some(entry => entry.path === entryPath));
+      }
+      for (const [diskPath, vaultPath] of unicodeNotes) {
+        const entry = listed.entries?.find(entry => entry.path === vaultPath);
+        assert.ok(entry, `expected a list entry for ${vaultPath}`);
+        assert.equal(entry.diskPath, diskPath);
+        const fromList = await call('obsidian_read_note', { filePath: entry.path, format: 'json' });
+        assert.equal(fromList.content.path, vaultPath);
+        assert.equal(fromList.content.content, '# ' + diskPath);
+        assert.equal(fromList.diskPath, diskPath);
+        const fromDisk = await call('obsidian_read_note', { filePath: diskPath });
+        assert.equal(fromDisk.content, fromList.content.content);
+        assert.equal(fromDisk.diskPath, diskPath);
+      }
+      const ordinary = await call('obsidian_read_note', { filePath: 'Root.md', format: 'json' });
+      assert.equal(Object.hasOwn(ordinary, 'diskPath'), false);
+      const rootEntries = JSON.parse(list.content[0].text).entries;
+      assert.equal(Object.hasOwn(rootEntries.find(entry => entry.path === 'Root.md'), 'diskPath'), false);
+      for (const diskPath of collidingNotes) {
+        const entry = rootEntries.find(entry => entry.path === diskPath);
+        assert.ok(entry, `expected an exact spelling for colliding note ${diskPath}`);
+        assert.equal(Object.hasOwn(entry, 'diskPath'), false);
+        const exact = await call('obsidian_read_note', { filePath: entry.path, format: 'json' });
+        assert.equal(exact.content.path, diskPath);
+        assert.equal(exact.content.content, '# ' + diskPath);
+        assert.equal(Object.hasOwn(exact, 'diskPath'), false);
+      }
+    }
 
     const markdownValidation = await withTimeout(
       client.callTool({

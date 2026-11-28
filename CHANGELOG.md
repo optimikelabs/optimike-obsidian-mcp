@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `obsidian_read_note` accepts existing paths containing U+00A0, U+202F or decomposed Unicode. `obsidian_list_notes` accepts these folder spellings, and filesystem-backed reads and compact listings include `diskPath` when the physical spelling differs from the returned vault path (#231).
+
 ## [3.23.1] - 2026-11-26
 
 No Bridge change: Atomic Write Bridge 0.10.0, Operon Bridge 0.9.9 and Bases Bridge 1.3.0 ship unchanged in the bundle of this release. See the [English](docs/releases/3.23.1.md) and [French](docs/releases/3.23.1.fr.md) release notes.

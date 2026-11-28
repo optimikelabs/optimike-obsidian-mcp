@@ -10,6 +10,7 @@ import { z } from "zod/v3";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
+import { normalizeVaultSlashes, toVaultPath } from "../../../utils/obsidian/obsidianApiUtils.js";
 import {
   logger,
   RequestContext,
@@ -109,12 +110,15 @@ interface FileTreeNode {
   name: string;
   type: "file" | "directory";
   children: FileTreeNode[];
+  vaultPath?: string;
+  diskPath?: string;
 }
 
 interface CompactFileEntry {
   path: string;
   name: string;
   type: "file" | "directory";
+  diskPath?: string;
 }
 
 /**
@@ -191,10 +195,13 @@ function flattenTree(
       parentPath === "/" || parentPath === ""
         ? cleanName
         : path.posix.join(parentPath, cleanName);
+    const publicPath = node.vaultPath ?? entryPath;
+    const suffix = node.type === "directory" ? "/" : "";
     entries.push({
-      path: node.type === "directory" ? `${entryPath}/` : entryPath,
-      name: node.name,
+      path: publicPath + suffix,
+      name: path.posix.basename(publicPath) + suffix,
       type: node.type,
+      ...(node.diskPath !== undefined ? { diskPath: node.diskPath + suffix } : {}),
     });
     if (node.children.length > 0) {
       entries.push(...flattenTree(node.children, entryPath));
@@ -229,7 +236,7 @@ async function buildFileTree(
 
   let fileNames;
   try {
-    fileNames = await obsidianService.listFiles(dirPath, context);
+    fileNames = await obsidianService.listFiles(dirPath, context, "literal");
   } catch (error) {
     if (error instanceof McpError && error.code === BaseErrorCode.NOT_FOUND) {
       logger.warning(
@@ -324,7 +331,10 @@ export const processObsidianListNotes = async (
   );
 
   try {
-    const effectiveDirPath = dirPath === "" ? "/" : dirPath;
+    const effectiveDirPath = toVaultPath(dirPath) || "/";
+    if (effectiveDirPath.split("/").some((segment) => segment === "." || segment === "..")) {
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Expected a vault path without dot segments.");
+    }
 
     // --- Step 1: Build the file tree recursively with retry for the initial call ---
     const buildTreeContext = {
@@ -335,6 +345,7 @@ export const processObsidianListNotes = async (
       err instanceof McpError && err.code === BaseErrorCode.NOT_FOUND;
 
     let fileTree: FileTreeNode[];
+    let cacheListing: ReturnType<typeof buildFileTreeFromCache> | undefined;
     try {
       if (!obsidianService) {
         if (!vaultCacheService?.isReady()) {
@@ -349,11 +360,12 @@ export const processObsidianListNotes = async (
             { ...buildTreeContext, cacheStats: stats },
           );
         }
-        fileTree = buildFileTreeFromCache(
-          effectiveDirPath,
+        cacheListing = buildFileTreeFromCache(
+          dirPath,
           params,
           vaultCacheService,
         );
+        fileTree = cacheListing.nodes;
       } else {
         fileTree = await retryWithDelay(
           () =>
@@ -383,11 +395,12 @@ export const processObsidianListNotes = async (
           `Falling back to shared cache tree for ${effectiveDirPath}.`,
           { ...buildTreeContext, fallbackMode: "shared-cache" },
         );
-        fileTree = buildFileTreeFromCache(
-          effectiveDirPath,
+        cacheListing = buildFileTreeFromCache(
+          dirPath,
           params,
           vaultCacheService,
         );
+        fileTree = cacheListing.nodes;
       } else {
         throw error;
       }
@@ -395,13 +408,22 @@ export const processObsidianListNotes = async (
 
     // --- Step 2: Format the tree and count entries ---
     const formatContext = { ...context, operation: "formatResponse" };
+    const preserveDirectorySpelling =
+      effectiveDirPath === (normalizeVaultSlashes(dirPath) || "/") &&
+      (!cacheListing || cacheListing.rawDirectory === effectiveDirPath);
+    const rawDirectory = preserveDirectorySpelling
+      ? dirPathForLog
+      : cacheListing?.rawDirectory ?? effectiveDirPath;
+    const directoryPath = !preserveDirectorySpelling && params.responseMode === "compact"
+      ? cacheListing?.vaultDirectory ?? effectiveDirPath
+      : rawDirectory;
     if (fileTree.length === 0) {
       logger.debug(
         "Directory is empty or all items were filtered out.",
         formatContext,
       );
       return {
-        directoryPath: dirPathForLog,
+        directoryPath,
         tree: "(empty or all items filtered)",
         totalEntries: 0,
         count: 0,
@@ -412,14 +434,14 @@ export const processObsidianListNotes = async (
 
     const { tree, count } = formatTree(fileTree);
     if (params.responseMode === "compact") {
-      const allEntries = flattenTree(fileTree, dirPathForLog);
+      const allEntries = flattenTree(fileTree, rawDirectory);
       const offset = parseCursor(params.cursor);
       const limit = params.limit ?? 100;
       const entries = allEntries.slice(offset, offset + limit);
       const nextOffset = offset + entries.length;
       const hasMore = nextOffset < allEntries.length;
       return {
-        directoryPath: dirPathForLog,
+        directoryPath,
         entries,
         totalEntries: allEntries.length,
         count: entries.length,
@@ -432,7 +454,7 @@ export const processObsidianListNotes = async (
 
     // --- Step 3: Construct and return the response ---
     const response: ObsidianListNotesResponse = {
-      directoryPath: dirPathForLog,
+      directoryPath,
       tree: tree.trimEnd(), // Remove trailing newline
       totalEntries: count,
       responseMode: "tree",
@@ -477,24 +499,52 @@ function buildFileTreeFromCache(
   dirPath: string,
   params: ObsidianListNotesInput,
   vaultCacheService: VaultCacheService,
-): FileTreeNode[] {
-  const effectiveDirPath = dirPath === "" ? "/" : dirPath;
-  const normalizedPrefix =
-    effectiveDirPath === "/"
-      ? "/"
-      : path.posix.normalize(
-          effectiveDirPath.startsWith("/") ? effectiveDirPath : `/${effectiveDirPath}`,
-        );
+) {
+  const entries = vaultCacheService.getEntriesByPrefix("/");
+  // Keep exact physical spellings available when several paths share an alias.
+  const files = new Map<string, string | null>();
+  const directories = new Map<string, string | null>();
+  const rawDirectories = new Set<string>();
+  const rememberAlias = (aliases: Map<string, string | null>, rawPath: string) => {
+    const alias = toVaultPath(rawPath);
+    aliases.set(alias, aliases.has(alias) ? null : rawPath);
+  };
+  for (const entry of entries) {
+    const rawPath = entry.path.replace(/^\//u, "");
+    if (params.responseMode === "compact") rememberAlias(files, rawPath);
+    let parent = path.posix.dirname(rawPath);
+    while (parent !== "." && !rawDirectories.has(parent)) {
+      rawDirectories.add(parent);
+      rememberAlias(directories, parent);
+      parent = path.posix.dirname(parent);
+    }
+  }
+
+  const requestedDirectory = normalizeVaultSlashes(dirPath);
+  const rawDirectory = rawDirectories.has(requestedDirectory)
+    ? requestedDirectory
+    : directories.get(toVaultPath(requestedDirectory)) ?? requestedDirectory;
+  const normalizedDirectory = toVaultPath(rawDirectory);
+  const vaultDirectory = directories.get(normalizedDirectory) === rawDirectory
+    ? normalizedDirectory : rawDirectory;
+  const prefix = rawDirectory ? rawDirectory + "/" : "";
+  let filesystemBacked: boolean | undefined;
+  const projectPath = (rawPath: string, aliases: Map<string, string | null>) => {
+    const vaultPath = toVaultPath(rawPath);
+    if (vaultPath === rawPath || aliases.get(vaultPath) !== rawPath) return {};
+    filesystemBacked ??= vaultCacheService.isFilesystemBacked();
+    return { vaultPath, ...(filesystemBacked ? { diskPath: rawPath } : {}) };
+  };
   const regex =
     params.nameRegexFilter && params.nameRegexFilter.trim() !== ""
       ? new RegExp(params.nameRegexFilter)
       : null;
   const root: FileTreeNode[] = [];
-  const entries = vaultCacheService.getEntriesByPrefix(normalizedPrefix);
 
   const getOrCreateDirectory = (
     parent: FileTreeNode[],
     name: string,
+    rawPath: string,
   ): FileTreeNode => {
     const key = `${name}/`;
     const existing = parent.find(
@@ -508,19 +558,16 @@ function buildFileTreeFromCache(
       name: `${name}/`,
       type: "directory",
       children: [],
+      ...(params.responseMode === "compact" ? projectPath(rawPath, directories) : {}),
     };
     parent.push(created);
     return created;
   };
 
   for (const entry of entries) {
-    const relative =
-      normalizedPrefix === "/"
-        ? entry.path.replace(/^\/+/u, "")
-        : path.posix.relative(normalizedPrefix, `/${entry.path.replace(/^\/+/, "")}`);
-    if (!relative || relative.startsWith("..")) {
-      continue;
-    }
+    const rawPath = entry.path.replace(/^\//u, "");
+    if (!rawPath.startsWith(prefix)) continue;
+    const relative = rawPath.slice(prefix.length);
 
     const segments = relative.split("/").filter(Boolean);
     if (segments.length === 0) {
@@ -533,8 +580,10 @@ function buildFileTreeFromCache(
         ? Math.max(segments.length - 1, 0)
         : Math.min(params.recursionDepth + 1, Math.max(segments.length - 1, 0));
 
+    let parentPath = rawDirectory;
     for (let index = 0; index < maxDirectoryDepth; index++) {
-      const directoryNode = getOrCreateDirectory(currentLevel, segments[index]);
+      parentPath = path.posix.join(parentPath, segments[index]);
+      const directoryNode = getOrCreateDirectory(currentLevel, segments[index], parentPath);
       currentLevel = directoryNode.children;
     }
 
@@ -558,6 +607,7 @@ function buildFileTreeFromCache(
         name: fileName,
         type: "file",
         children: [],
+        ...projectPath(rawPath, files),
       });
     }
   }
@@ -566,7 +616,11 @@ function buildFileTreeFromCache(
     node.children = prune(node.children);
     return node.type === "file" || !regex || regex.test(node.name.replace(/\/$/u, "")) || node.children.length > 0;
   });
-  return sortTreeNodes(prune(root));
+  return {
+    nodes: sortTreeNodes(prune(root)),
+    rawDirectory: rawDirectory || "/",
+    vaultDirectory: vaultDirectory || "/",
+  };
 }
 
 function sortTreeNodes(nodes: FileTreeNode[]): FileTreeNode[] {

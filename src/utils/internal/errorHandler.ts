@@ -252,6 +252,7 @@ const CALLER_DERIVED_PUBLIC_FIELDS = new Set(["suggestedPath", "suggestedName"])
 
 const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "invalid_tool_arguments",
+  "vault_path_alias_ambiguous",
   BASE_FORMULA_ENGINE_REFUSAL,
   ...NOTE_NAME_REASON_CODES,
   ...NATIVE_MOVE_PUBLIC_REASON_CODES,
@@ -740,6 +741,8 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
     return "The note move was refused. See reasonCode and hint.";
   if (code === BaseErrorCode.VALIDATION_ERROR && isNoteNameReasonCode(reasonCode))
     return "The note path is not a valid name on every platform and in Obsidian. See hint and suggestedPath.";
+  if (code === BaseErrorCode.CONFLICT && reasonCode === "vault_path_alias_ambiguous")
+    return "The requested path and its Obsidian alias returned different content.";
   switch (code) {
     case BaseErrorCode.UNAUTHORIZED:
       return "Authentication is required for this request.";
