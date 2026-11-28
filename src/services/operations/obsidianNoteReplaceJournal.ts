@@ -174,6 +174,7 @@ export type ObsidianNoteReplaceJournalOptions = {
 
 export type PendingOperationKind =
   | "obsidian.operation.revert"
+  | "operon.filesystem.mutation"
   | "obsidian.note.replace"
   | "obsidian.frontmatter.patch"
   | "obsidian.base.formula.patch"
@@ -366,6 +367,12 @@ export class ObsidianNoteReplaceJournal {
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
           )
+        `);
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS operon_filesystem_recovery_keys (
+            idempotency_key TEXT PRIMARY KEY,
+            operation_id TEXT NOT NULL REFERENCES obsidian_note_replace_plans(operation_id) ON DELETE CASCADE
+          ) STRICT
         `);
         this.db.exec(`
           CREATE TABLE IF NOT EXISTS obsidian_text_patch_proposals (
@@ -624,8 +631,10 @@ export class ObsidianNoteReplaceJournal {
       updatedAt: now,
       effectTracking: { contractVersion: 1, untracked: false, attempts: [] },
     };
+    const operon = input.projection?.kind === "operon.filesystem.mutation";
     const insertValues = maximumActiveProjectionRows === undefined
-      ? "VALUES (?, ?, ?, ?, ?, ?)"
+      ? operon ? "SELECT ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM operon_filesystem_recovery_keys WHERE idempotency_key = ?)"
+        : "VALUES (?, ?, ?, ?, ?, ?)"
       : "SELECT ?, ?, ?, ?, ?, ? WHERE (SELECT count(*) FROM obsidian_note_replace_plans WHERE status IN ('planned','applying','outcome_unknown') AND json_extract(payload_json, '$.projection.kind') = ?) < ?";
     const inserted = this.db
       .prepare(
@@ -641,6 +650,7 @@ export class ObsidianNoteReplaceJournal {
         JSON.stringify(plan),
         plan.createdAt,
         plan.updatedAt,
+        ...(operon && maximumActiveProjectionRows === undefined ? [input.idempotencyKey] : []),
         ...(maximumActiveProjectionRows === undefined ? [] : [input.projection!.kind, maximumActiveProjectionRows]),
       );
     if (inserted.changes === 1) return plan;
@@ -650,6 +660,7 @@ export class ObsidianNoteReplaceJournal {
     // instead of surfacing a UNIQUE constraint as an MCP INTERNAL_ERROR.
     const winner = this.selectByIdempotencyKey(input.idempotencyKey);
     if (!winner) {
+      if (operon && this.operonRecoveryOwner(input.idempotencyKey)) throw this.operonKeyConflict();
       if (maximumActiveProjectionRows !== undefined) {
         throw new McpError(
           BaseErrorCode.SERVICE_UNAVAILABLE,
@@ -663,6 +674,29 @@ export class ObsidianNoteReplaceJournal {
       throw noteReplaceIdempotencyConflict();
     }
     return winner;
+  }
+
+  private operonRecoveryOwner(key: string) {
+    const row = this.db.prepare("SELECT operation_id FROM operon_filesystem_recovery_keys WHERE idempotency_key = ?").get(key);
+    return row?.operation_id;
+  }
+
+  private operonKeyConflict() {
+    return new McpError(BaseErrorCode.CONFLICT, "The Operon idempotency key is already in use.", { reasonCode: "idempotency_key_reused" });
+  }
+
+  bindOperonRecoveryKey(operationId: string, key: string) {
+    this.assertOpen();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const owner = this.operonRecoveryOwner(key);
+      if ((owner && owner !== operationId) || this.selectByIdempotencyKey(key)) throw this.operonKeyConflict();
+      if (!owner) this.db.prepare("INSERT INTO operon_filesystem_recovery_keys VALUES (?, ?)").run(key, operationId);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   get(operationId: string): ObsidianNoteReplacePlan | undefined {

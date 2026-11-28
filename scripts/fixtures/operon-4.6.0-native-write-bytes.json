@@ -1,0 +1,16 @@
+{
+  "upstream": "https://github.com/hasanyilmaz/operon/tree/4.6.0",
+  "capture": "TaskWriter.renderGuardedTaskSourceContent with upstream scripts/test-support/obsidian.ts; synthetic inputs; no Desktop session",
+  "instant": "2026-03-02T00:05:06Z",
+  "timeZone": "Pacific/Honolulu",
+  "inlineCompletion": {
+    "before": "# Fixture\n\n- [ ] Check bytes #fixture {{operonId:: target1}} {{status:: Work.Open}} {{datetimeCreated:: 2026-01-01T12:00:00}}\n",
+    "after": "# Fixture\n\n- [x] Check bytes #fixture {{operonId:: target1}} {{status:: Work.Done}} {{dateCompleted:: 2026-03-01}} {{datetimeCreated:: 2026-01-01T12:00:00}} {{datetimeModified:: 2026-03-01T14:05:06}}\n"
+  },
+  "fileDueUpdate": {
+    "before": "---\noperonId: file001\nstatus: Work.Open\ndateDue: 2026-02-17\n---\n# Synthetic file task\n",
+    "after": "---\noperonId: file001\nstatus: Work.Open\ndateDue: 2026-04-03\ndatetimeModified: 2026-03-01T14:05:06\n---\n# Synthetic file task\n"
+  },
+  "fileCompletion": "---\noperonId: file001\nstatus: Work.Done\ndateDue: 2026-04-03\ndatetimeModified: 2026-03-01T14:05:06\ndateCompleted: 2026-03-01\n---\n# Synthetic file task\n",
+  "fileReopen": "---\noperonId: file001\nstatus: Work.Open\ndateDue: 2026-04-03\ndatetimeModified: 2026-03-01T14:05:06\ndateCompleted:\n---\n# Synthetic file task\n"
+}

@@ -2,6 +2,10 @@
 
 French version: [operon-mcp-contract.fr.md](operon-mcp-contract.fr.md)
 
+This page describes the Desktop Bridge contract. The same MCP inputs are used
+for the bounded filesystem authority, which returns `source: "filesystem"`.
+[Governed Operon mutations](headless-server-profile.md#governed-operon-mutations).
+
 ## Surface
 
 The main MCP server registers twenty-five Operon tools:
@@ -116,7 +120,7 @@ Common controls:
 - Task Workflow results are strictly validated before projection; malformed or contradictory native evidence remains `outcome-unknown`, while `nativeProof` exposes only the bounded proof projection;
 - after apply, the Bridge rereads the verified live index;
 - the MCP returns the receipt without waiting for its SQLite snapshot; the refresh runs in the background, coalesced. The receipt states only what the Bridge proved (`after`). Any later read in the same process waits for a refresh that started after the receipt before it reuses the snapshot, even if the index generation did not move. While that snapshot misses a confirmed receipt, transient live failures (index settling or moving, Bridge 503 or retryable answer) are retried instead of falling back, within 15 seconds including the last attempt, once per pending mutation, and until the client cancels. A missing HTTP answer (connection refused, Bridge or Obsidian gone) is durable and falls back at once. Every fallback reloads the persisted snapshot, stays `operon-cache` / `stale: true`, and adds a limitation stating that it misses a confirmed mutation while that mutation is uncovered;
-- no mutation is available from a stale/headless snapshot.
+- mutations refuse stale snapshots.
 
 MCP results are stored in `operon_mutation_journal`. A reservation is committed before the Bridge call. Reusing an idempotency key with the same completed request returns the original `operationId` and result without calling the Bridge again. A restart or timeout that leaves the MCP reservation `in_progress` is treated as an uncertain outcome and blocks blind retry. Reusing a key for a different request is rejected as `CONFLICT`. Revision mismatch returns `conflict` without writing.
 

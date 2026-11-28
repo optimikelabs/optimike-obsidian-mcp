@@ -51,6 +51,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: node scripts/test-headless-governed-notes.mjs
+      - run: node scripts/test-operon-headless-writes.mjs
 
   runtime:
     needs: changes
@@ -90,6 +91,8 @@ jobs:
         run: node scripts/test-governed-frontmatter-model.mjs
       - if: env.RUN_SUITE == 'true'
         run: npm run test:runtime
+      - if: env.RUN_SUITE == 'true'
+        run: node scripts/test-operon-headless-writes.mjs
       - if: env.RUN_SUITE == 'true'
         run: npm run test:semantic-index-producer
       - if: env.RUN_SUITE == 'true'

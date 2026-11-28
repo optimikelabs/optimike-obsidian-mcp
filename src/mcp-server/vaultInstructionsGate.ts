@@ -66,6 +66,7 @@ export interface VaultInstructionsRuntime {
   seals: () => VaultInstructionsSealJournal | undefined;
   assetFolder?: string;
   resolveOperonTaskPath?: (operonId: string) => Promise<string | undefined>;
+  resolveOperonRecoveryPath?: (recoveryRef: string) => string;
   /**
    * Read-only preflight: the folder Operon routes new file tasks to (`""`
    * when none is configured). Throws when it cannot be read.
@@ -170,6 +171,11 @@ function directTargets(
   runtime: VaultInstructionsRuntime,
 ): TargetSpec | undefined {
   switch (name) {
+    case "operon_recover_mutation": {
+      if (!runtime.resolveOperonRecoveryPath) return undefined;
+      try { return explicit(file(runtime.resolveOperonRecoveryPath(p.recoveryRef)), 1); }
+      catch { return { kind: "unresolved", hint: "Use a known filesystem Operon recovery reference." }; }
+    }
     case "obsidian_update_note":
     case "obsidian_search_replace":
       return p.targetType === "filePath"
@@ -354,6 +360,7 @@ const DIRECT_TOOLS = new Set([
   "operon_update_periodic_scheduling",
   "operon_convert_task",
   "operon_relocate_task",
+  "operon_recover_mutation",
 ]);
 
 export function vaultInstructionsToolRole(name: string): ToolRole | undefined {

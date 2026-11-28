@@ -1019,11 +1019,34 @@ function operonCapabilities(input: CapabilityManifestProjectionInput): {
     const reason = available ? "ready" : configured ? "operon_index_not_ready" :
       input.operon.state === "timed_out" ? "bridge_probe_timed_out" :
       input.operon.state === "ready" && input.operon.value.degraded !== true ? "operon_not_present" : "operon_incompatible";
+    const write = unavailableOperonWrite(input, "operon_live_required", "use_live_runtime");
+    if (input.registrationMode === "headless-filesystem") {
+      const atomic = input.atomicWrite.state === "ready" ? input.atomicWrite.value.backend : undefined;
+      const format = input.operon.state === "ready" && input.operon.value.writableFormat === true;
+      const writeReason: CapabilityReasonCode = !available ? reason : !format ? "operon_incompatible" :
+        !atomic ? "headless_date_policy_unavailable" : atomic.headlessReplacement !== "exchange" ? "headless_atomic_exchange_unavailable" :
+        !input.operonMutationsEnabled ? "mcp_operon_mutations_disabled" : !atomic.writeEnabled ? "write_policy_blocked" : "ready";
+      const writeAction: CapabilityNextAction = !available ? "refresh_vault_cache" : !format ? "use_live_runtime" :
+        !atomic ? "configure_headless_date_policy" : atomic.headlessReplacement !== "exchange" ? "use_live_runtime" :
+        !input.operonMutationsEnabled ? "enable_mcp_operon_mutations" : !atomic.writeEnabled ? "enable_write_policy" : "none";
+      const ready = available && format && atomic?.headlessReplacement === "exchange";
+      const allowed = ready && input.operonMutationsEnabled && atomic?.writeEnabled === true;
+      const supported = new Set(["create", "update", "transition", "recovery"]);
+      const visibleTools = new Set(input.visibleToolNames);
+      const operations = write.operations?.map(operation => {
+        if (!supported.has(operation.id) || !visibleTools.has(operation.tool)) return operation;
+        const recoveryBlocked = operation.id === "recovery" && (input.writeMode !== "full" || input.operonAllowedPathPrefixesConfigured);
+        return { ...operation, available: ready, authorized: allowed && !recoveryBlocked,
+          reasonCode: recoveryBlocked ? "write_policy_blocked" as const : writeReason,
+          nextAction: recoveryBlocked ? "enable_write_policy" as const : writeAction };
+      });
+      Object.assign(write, entry(input, "operon-write", ready, allowed, writeReason, writeAction), { operations });
+    }
     return {
       read: entry(input, "operon-read", available, available, reason,
         available ? "none" : configured ? "refresh_vault_cache" :
           input.operon.state === "timed_out" ? "retry_capability_probe" : "load_or_update_operon"),
-      write: unavailableOperonWrite(input, "operon_live_required", "use_live_runtime"),
+      write,
     };
   }
   if (input.operon.state === "timed_out") {

@@ -2,6 +2,10 @@
 
 English version: [operon-mcp-contract.md](operon-mcp-contract.md)
 
+Cette page décrit le contrat du Bridge Desktop. Le mode sur disque reprend les
+mêmes schémas MCP dans son périmètre et renvoie `source: "filesystem"`.
+[Mutations Operon gouvernées](headless-server-profile.fr.md#mutations-operon-gouvernées).
+
 ## Surface
 
 Le serveur MCP principal enregistre vingt-cinq outils Operon :
@@ -176,7 +180,7 @@ Contrôles communs :
   snapshot enregistré, reste `operon-cache` / `stale: true` et, tant que la
   mutation n’est pas couverte, ajoute une limite indiquant qu’il ne contient pas
   une mutation confirmée ;
-- aucune mutation ne s’appuie sur un snapshot headless ou obsolète.
+- les mutations refusent les snapshots obsolètes.
 
 Le journal MCP `operon_mutation_journal` réserve la clé avant l’appel au Bridge.
 Rejouer une requête terminée avec la même clé renvoie le même `operationId` sans

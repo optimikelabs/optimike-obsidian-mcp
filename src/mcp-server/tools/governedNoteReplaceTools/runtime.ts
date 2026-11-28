@@ -822,6 +822,7 @@ export class GovernedNoteReplaceRuntime {
   get isFilesystem(): boolean { return Boolean(this.backend.filesystem); }
   restoreInterruptedFilesystemReplacements() { return this.backend.filesystem?.restoreInterruptedReplacements(); }
   filesystemStatus() { return this.backend.filesystem!.status(); }
+  ownsFilesystemBinding(binding: string) { return this.backend.filesystem?.ownsBinding(binding) === true; }
   readonly noteCreate: NoteCreateOperationAdapter | undefined;
   readonly filesystemRevert: FilesystemRevert | undefined;
   readonly baseCreate: VaultFileCreateOperationAdapter | undefined;
@@ -1087,6 +1088,20 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
   ): GovernedNoteReplacePlanView | undefined {
     const plan = this.journal.getByIdempotencyKey(idempotencyKey);
     return plan ? this.view(plan) : undefined;
+  }
+
+  listPendingOperonPlans() {
+    const input = { fallbackOperationKind: "operon.filesystem.mutation" as const,
+      admittedProjectionKinds: ["operon.filesystem.mutation" as const], allowUnprojectedFallback: false, limit: 100 };
+    return (["applying", "outcome_unknown"] as const).flatMap(status => {
+      const page = this.journal.listPendingOperationRows({ ...input, status });
+      if (page.hasMore) throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "The pending filesystem Operon recovery list exceeds its bound.");
+      return page.rows.map(row => ({ ...row, planRef: PLAN_REF_PREFIX + row.operationId }));
+    });
+  }
+
+  bindOperonRecoveryKey(operationId: string, key: string) {
+    this.journal.bindOperonRecoveryKey(operationId, key);
   }
 
   inspect(reference: string): GovernedNoteReplacePlanView {

@@ -147,6 +147,11 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
     if (vaultIdentity(this.root) !== this.bindingFingerprint) throw conflict("The headless vault identity changed.");
   }
 
+  ownsBinding(binding: string) {
+    this.assertVault();
+    return binding === this.bindingFingerprint;
+  }
+
   private async physical(relative: string, allowAbsent = false, exactSpelling = false, allowShared = false) {
     this.assertVault();
     const parts = relative.split("/");

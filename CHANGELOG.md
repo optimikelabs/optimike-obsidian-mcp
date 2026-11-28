@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add governed filesystem Operon writes for standalone Operon 4.6.0 tasks.
+  Create inline tasks and update or transition canonical inline and file
+  tasks through the existing tools, with atomic exchange and same-plan
+  recovery. Workflows with additional effects require Desktop.
+
 - Governed Markdown body and frontmatter patches, durable note creation and the
   pending-operation cockpit work without Desktop in both writable headless modes.
   `headless-filesystem` also supports whole-note replacement and governed revert.

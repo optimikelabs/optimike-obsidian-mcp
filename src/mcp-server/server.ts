@@ -1180,6 +1180,7 @@ async function createMcpServerInstance(
   const vaultInstructions = defaultVaultInstructionsRuntime(
     obsidianService,
     vaultCacheService,
+    governedNoteReplaceRuntime,
   );
   const instructions = withToolSearchInstruction(
     await vaultInstructionsServerText(vaultInstructions),
