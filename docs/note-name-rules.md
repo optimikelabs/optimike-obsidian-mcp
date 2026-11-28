@@ -44,8 +44,10 @@ paths have the same Obsidian spelling, the results preserve their exact disk
 spellings. A read returns a top-level `diskPath` in either content format, and a
 compact list entry has its own `diskPath`, when the physical spelling differs
 from the vault path. Use `diskPath` for filesystem access. Tree listings display
-the cache's recorded names. Local REST supplies the Obsidian spelling and does
-not expose the physical one. Write targets still follow the rules above.
+the cache's recorded names. Live compact listings and search results keep the
+Obsidian path from Local REST and add `diskPath` when a unique physical spelling
+containing U+00A0 or U+202F can be verified in the configured local vault and
+differs from that path. Write targets still follow the rules above.
 
 ## Where each constraint comes from
 

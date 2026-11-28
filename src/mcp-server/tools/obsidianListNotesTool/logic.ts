@@ -7,10 +7,12 @@
 
 import path from "node:path";
 import { z } from "zod/v3";
+import { config } from "../../../config/index.js";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import { normalizeVaultSlashes, toVaultPath } from "../../../utils/obsidian/obsidianApiUtils.js";
+import { addLiveDiskPaths } from "../../../utils/obsidian/liveDiskPaths.js";
 import {
   logger,
   RequestContext,
@@ -438,6 +440,9 @@ export const processObsidianListNotes = async (
       const offset = parseCursor(params.cursor);
       const limit = params.limit ?? 100;
       const entries = allEntries.slice(offset, offset + limit);
+      if (!cacheListing) {
+        await addLiveDiskPaths(config.obsidianVaultPath, entries);
+      }
       const nextOffset = offset + entries.length;
       const hasMore = nextOffset < allEntries.length;
       return {

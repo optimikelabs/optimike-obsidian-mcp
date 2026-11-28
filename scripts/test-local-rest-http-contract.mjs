@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test, after } from 'node:test';
@@ -29,6 +29,24 @@ const collisionName = 'Collision Space.md';
 const collisionDiskName = 'Collision\u00a0Space.md';
 const collisionBody = '# Different physical note';
 const collisionPath = aliasDir + '/' + collisionDiskName;
+const liveDir = 'Live Fixture';
+const liveDiskDir = 'Live\u00a0Fixture';
+const liveNames = [
+  ['Wide Space.md', 'Wide\u00a0Space.md'],
+  ['Narrow Space.md', 'Narrow\u202fSpace.md'],
+  ['Ordinary.md', 'Ordinary.md'],
+  ['Ambiguous Space.md', null],
+];
+const livePaths = liveNames.map(([name]) => liveDir + '/' + name);
+mkdirSync(path.join(temporary, liveDiskDir));
+for (const diskName of [...liveNames.map(([, name]) => name).filter(Boolean),
+  'Ambiguous\u00a0Space.md', 'Ambiguous\u202fSpace.md']) {
+  writeFileSync(path.join(temporary, liveDiskDir, diskName), note.content, 'utf8');
+}
+const ordinaryPaths = ['Note.md', 'Plain Space.md'];
+for (const filename of ordinaryPaths) {
+  writeFileSync(path.join(temporary, filename), note.content, 'utf8');
+}
 const server = createServer(async (req, res) => {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
@@ -39,6 +57,19 @@ const server = createServer(async (req, res) => {
     return;
   }
   const vaultPath = decodeURIComponent(req.url ?? '');
+  if (req.method === 'POST' && req.url?.startsWith('/search/simple/')) {
+    const results = [...livePaths, ...ordinaryPaths].map(filename => ({ filename, matches: [], score: 0 }));
+    res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(results));
+    return;
+  }
+  if (req.method === 'GET' && vaultPath.startsWith('/vault/' + liveDir + '/')) {
+    const filePath = vaultPath.slice('/vault/'.length);
+    const payload = filePath === liveDir + '/' ? { files: liveNames.map(([name]) => name) }
+      : livePaths.includes(filePath) ? { ...note, path: filePath } : null;
+    res.writeHead(payload ? 200 : 404, { 'Content-Type': 'application/json' })
+      .end(JSON.stringify(payload ?? { message: 'Not found' }));
+    return;
+  }
   if (req.method === 'GET' && vaultPath.startsWith('/vault/Alias')) {
     const filePath = vaultPath.slice('/vault/'.length);
     if (req.headers.accept === 'text/markdown') {
@@ -75,7 +106,7 @@ const server = createServer(async (req, res) => {
   }
   const payload = req.url === '/' ? {service:'Obsidian Local REST API', ok:'OK',
     authenticated:true, versions:{obsidian:'1.13.1',self:version}, extensions:[]} :
-    req.url === '/vault/' ? {files:['Rich/','Note.md']} :
+    req.url === '/vault/' ? {files:['Rich/', 'Note.md', liveDir + '/', 'Plain Space.md']} :
     req.url === '/vault/Rich/' ? {files:['Note.md']} : note;
   const send = () => { if (!res.destroyed) res.writeHead(200, {
     'Content-Type':'application/json', 'Content-Location':'Rich/Note.md'
@@ -100,6 +131,9 @@ const {BaseErrorCode} = await import('../dist/types-global/errors.js');
 const {publicMcpToolErrorPayload} = await import('../dist/utils/internal/errorHandler.js');
 const {processObsidianReadNote} = await import('../dist/mcp-server/tools/obsidianReadNoteTool/logic.js');
 const {processObsidianListNotes, ObsidianListNotesInputSchema} = await import('../dist/mcp-server/tools/obsidianListNotesTool/logic.js');
+const {processObsidianGlobalSearch, ObsidianGlobalSearchInputSchemaShape} =
+  await import('../dist/mcp-server/tools/obsidianGlobalSearchTool/logic.js');
+const {z} = await import('zod/v3');
 const api = new ObsidianRestApiService();
 const context = {requestId:'rest-contract', timestamp:new Date(0).toISOString(), operation:'test'};
 
@@ -128,7 +162,7 @@ test('rich paths are encoded per segment and JSON reads use the native media typ
   assert.equal(last.headers.authorization, 'Bearer ' + secret);
 });
 test('root listing and HEAD metadata stay compatible', async () => {
-  assert.deepEqual(await api.listFiles('/', context), ['Rich/','Note.md']);
+  assert.deepEqual(await api.listFiles('/', context), ['Rich/','Note.md', liveDir + '/', 'Plain Space.md']);
   assert.deepEqual(await api.getFileMetadata('Note.md', context), {ctime:1000,mtime:2000,size:7});
   for (const [dirPath, entryPath] of [['/Rich', '/Rich/Note.md'], ['Rich/', 'Rich/Note.md']]) {
     const listed = await processObsidianListNotes(
@@ -177,6 +211,48 @@ test('Obsidian JSON reads accept physical Unicode names and the paths returned b
   assert.equal((await read(' Rich/Note.md ')).content.path, note.path);
   assert.equal(requests.at(-1).url, '/vault/Rich/Note.md');
 });
+
+function assertLiveDiskPaths(entries) {
+  for (const [name, diskName] of liveNames) {
+    const entry = entries.find(result => result.path === liveDir + '/' + name);
+    assert.ok(entry, `expected the REST path for ${name}`);
+    if (diskName) assert.equal(entry.diskPath, liveDiskDir + '/' + diskName);
+    else assert.equal(Object.hasOwn(entry, 'diskPath'), false);
+  }
+}
+
+function assertOrdinaryPaths(entries) {
+  for (const filename of ordinaryPaths) {
+    const entry = entries.find(result => result.path === filename);
+    assert.ok(entry, `expected the ordinary REST path ${filename}`);
+    assert.equal(Object.hasOwn(entry, 'diskPath'), false);
+  }
+}
+
+for (const [dirPath, recursionDepth] of [[liveDir, 0], ['/', -1]]) {
+  test(`live compact listing resolves disk spelling from ${dirPath}`, async () => {
+    const listed = await processObsidianListNotes(
+      ObsidianListNotesInputSchema.parse({ dirPath, recursionDepth }), context, api);
+    assertLiveDiskPaths(listed.entries);
+    if (dirPath === '/') {
+      assert.equal(listed.entries.find(entry => entry.path === liveDir + '/').diskPath, liveDiskDir + '/');
+      assertOrdinaryPaths(listed.entries);
+    }
+  });
+}
+
+for (const [query, useRegex] of [['Heading', false], ['Head.ng', true]]) {
+  for (const responseMode of ['compact', 'detailed']) {
+    test(`live ${responseMode} search resolves disk spelling for ${useRegex ? 'regex' : 'text'}`, async () => {
+      const search = await processObsidianGlobalSearch(
+        z.object(ObsidianGlobalSearchInputSchemaShape).parse({ query, useRegex, responseMode }),
+        context, api);
+      assertLiveDiskPaths(search.results);
+      assertOrdinaryPaths(search.results);
+    });
+  }
+}
+
 test('active JSON read exposes the resolved file through NoteJson', async () => {
   assert.deepEqual(await api.getActiveFile('json', context), note);
   assert.equal(requests.at(-1).url, '/active/');
