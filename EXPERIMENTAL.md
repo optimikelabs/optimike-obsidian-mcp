@@ -28,6 +28,7 @@ This branch leaves `main` and the individual pull requests unaffected.
 | [#240](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/240) | `fa9571a813e899c698aa9a2ea022bb326473dd84` | Headless frontmatter and SQLite note links, background link indexing, cross-process text cache invalidation, and improved wikilink parsing |
 | [#241](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/241) | `0ab243287b173d10da8411be546a64bb5ac97895` | Live compact listings and global search report `diskPath` when a unique physical spelling uses NBSP or narrow NBSP. Search accepts up to 500 result files per page |
 | [#242](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/242) | `c6ac776c0f0fe8527bfede421312c8f7de7317c6` | Vault-bound Sync evidence and optional write guard, plus the incremental semantic indexing service with leases, bounded retention, and status |
+| [#244](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/244) | `dc6e7a12519942e5719827c9c3ec4784eb9086c2` | Reads and validates Operon tasks from Markdown and synchronized settings in all three headless modes, with filesystem provenance and local saved filters |
 | [#247](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/247) | `9cdf0af6e82f56373c88e66f7d7c8c682f90c43e` | Retries Operon `GET /status` once after a socket reset, with fixture connection cleanup |
 
 Run the read-only profile first. Test filesystem writes on a separate,
@@ -46,6 +47,17 @@ write locks. It preserves the hash rechecks and create-if-absent behavior.
 Exact disk reads retain their independent observation time. Semantic service
 status comes from the current generation and its expiring observation.
 
+The #244 merge keeps the exact tool sets from the shared catalogue in the
+HTTP, stdio proxy, and static profile tests. The `tasks` catalogue includes
+both the new Operon reads and #240's frontmatter and note links. The
+changelog and bilingual guides retain Sync evidence and external semantic
+generations alongside the new Operon entries.
+
+Headless Operon can decode canonical Markdown fields without the plugin
+settings. Configuration and saved filters require a synchronized
+`.obsidian/plugins/operon/data.json`. Active timers and writes require
+Desktop. See the [headless profile](docs/headless-server-profile.md#operon-without-desktop).
+
 On this branch the proposal HTTP test from #220 uses #219's shared startup
 helper. Its lost-response, redaction, and shutdown assertions still run.
 
@@ -55,6 +67,8 @@ in the provenance. The full inventory may still be refreshing. Cached reads
 keep the successful scan's start and refresh timestamps. The regression test
 exercises both responses on the same note.
 Carry commit `1d52fc50fb1b5a1d96e08a7ac4851ba25fb83b86` into `main` when integrating #218 and #242. It updates the exact cache freshness test to require the three null Sync evidence fields when upstream Sync is unknown.
+The same test's cached-read assertion still expects the older provenance
+shape and fails on the three Sync fields.
 
 The headless Bases scan validates request filters with #234's shared compiler
 before enforcing #204's explicit opt-in. It reads note properties with #228's
