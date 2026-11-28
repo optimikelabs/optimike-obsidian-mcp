@@ -159,6 +159,13 @@ export class VaultCacheService {
   private isCacheReady = false;
   private isBuilding = false;
   private lastRefreshStartedAt: number | null = null;
+  private refreshGeneration = 0;
+  private refreshCheckpoint?: {
+    at: number;
+    startedAt: number | null;
+    source: string | undefined;
+    origin: "startup-snapshot" | "process-refresh";
+  };
   private lastRefreshCompletedAt: number | null = null;
   private lastRefreshDurationMs: number | null = null;
   private lastRefreshError: string | null = null;
@@ -299,14 +306,36 @@ export class VaultCacheService {
     return this.metadataCache.size;
   }
 
+  public getRefreshEvidence() {
+    return {
+      lastRefreshAt: this.refreshCheckpoint?.at ?? null,
+      lastSuccessfulRefreshStartedAt: this.refreshCheckpoint?.startedAt ?? null,
+      refreshOrigin: this.refreshCheckpoint?.origin,
+      refreshing: Boolean(this.isBuilding || this.refreshRun || this.refreshRequested),
+      ready: this.isPubliclyReady(),
+      generation: this.refreshGeneration,
+    };
+  }
+
+  public getNewestFileMtimeMs(): number | null {
+    let newest: number | null = null;
+    for (const { mtime } of this.metadataCache.values()) {
+      newest = newest === null ? mtime : Math.max(newest, mtime);
+    }
+    return newest;
+  }
+
   public getStats(): Record<string, unknown> {
+    const headless = config.obsidianRuntimeMode.startsWith("headless-");
     const eventCache = this.eventSupervisor?.snapshot() ?? {
       state: config.obsidianCacheEventsEnabled ? "not_applicable" : "disabled",
     };
     return {
       eventCache,
       dbPath: config.obsidianSharedCacheDbPath,
-      refreshSource: this.readMetadataValue("last_refresh_source"),
+      refreshSource: headless
+        ? this.refreshCheckpoint?.source
+        : this.readMetadataValue("last_refresh_source"),
       configuredRefreshSource: config.obsidianCacheSource,
       refreshConcurrency: config.obsidianCacheConcurrency,
       vaultExcludePatterns: config.obsidianVaultExcludePatterns,
@@ -319,7 +348,9 @@ export class VaultCacheService {
       cachedFileCount: this.metadataCache.size,
       hotCacheSize: this.contentHotCache.size,
       hotCacheLimit: this.hotCacheLimit,
-      lastRefreshAt: this.readMetadataNumber("last_refresh_at"),
+      lastRefreshAt: headless
+        ? this.refreshCheckpoint?.at
+        : this.readMetadataNumber("last_refresh_at"),
       lastRefreshStartedAt: this.lastRefreshStartedAt,
       lastRefreshCompletedAt: this.lastRefreshCompletedAt,
       lastRefreshDurationMs: this.lastRefreshDurationMs,
@@ -720,8 +751,10 @@ export class VaultCacheService {
     isInitialBuild ||= this.lastRefreshError !== null || !this.isCacheReady ||
       (previousState !== "complete" && previousState !== "pending-events");
     this.isBuilding = true;
+    this.refreshGeneration++;
     const uncertaintyAtStart = this.uncertaintyGeneration;
-    this.lastRefreshStartedAt = Date.now();
+    const startedAt = Date.now();
+    this.lastRefreshStartedAt = startedAt;
     this.lastRefreshCompletedAt = null;
     this.lastRefreshDurationMs = null;
     this.lastRefreshError = null;
@@ -868,6 +901,7 @@ export class VaultCacheService {
       this.lastRefreshCompletedAt = Date.now();
       this.lastRefreshDurationMs = Math.round(duration * 1000);
       this.lastRefreshFileCount = this.metadataCache.size;
+      const successfulAt = this.isCacheReady ? this.lastRefreshCompletedAt : null;
       // Commit completeness with its evidence. An interrupted scan retains
       // 'building'; partial work never advances the last successful checkpoint.
       this.db.exec("BEGIN IMMEDIATE");
@@ -875,14 +909,23 @@ export class VaultCacheService {
         this.upsertMetadataValue("last_refresh_failed_files", String(this.lastRefreshFailedFiles));
         this.upsertMetadataValue("refresh_state", this.isCacheReady
           ? (this.eventWorkPending ? "pending-events" : "complete") : "incomplete");
-        if (this.isCacheReady) {
-          this.upsertMetadataValue("last_refresh_at", String(Date.now()));
+        if (successfulAt !== null) {
+          this.upsertMetadataValue("last_refresh_at", String(successfulAt));
           this.upsertMetadataValue("last_refresh_source", refreshSource);
+          this.upsertMetadataValue("last_refresh_window", `${successfulAt}:${startedAt}`);
         }
         this.db.exec("COMMIT");
       } catch (error) {
         this.db.exec("ROLLBACK");
         throw error;
+      }
+      if (successfulAt !== null) {
+        this.refreshCheckpoint = {
+          at: successfulAt,
+          startedAt,
+          source: refreshSource,
+          origin: "process-refresh",
+        };
       }
       logger.info(
         `${
@@ -926,10 +969,39 @@ export class VaultCacheService {
   }
 
   private loadMetadataSnapshot(): void {
-    const stmt = this.db.prepare(
-      "SELECT path, ctime, mtime, size, hash FROM file_cache ORDER BY path ASC",
-    );
-    const rows = stmt.all() as unknown as CacheIndexEntry[];
+    // Read the index and its checkpoint from the same SQLite view. Subsequent
+    // commits from another server do not update this in-memory inventory.
+    this.db.exec("BEGIN");
+    let rows: CacheIndexEntry[];
+    let state: string | undefined;
+    try {
+      rows = this.db.prepare(
+        "SELECT path, ctime, mtime, size, hash FROM file_cache ORDER BY path ASC",
+      ).all() as unknown as CacheIndexEntry[];
+      state = this.readMetadataValue("refresh_state");
+      const lastRefreshAt = this.readMetadataNumber("last_refresh_at");
+      if (lastRefreshAt !== undefined) {
+        // An older writer can advance last_refresh_at without recording a
+        // window. Only a window paired with the loaded completion is usable.
+        const [completed, started] = (
+          this.readMetadataValue("last_refresh_window") ?? ""
+        ).split(":");
+        const startedAt = completed === String(lastRefreshAt) && started
+          ? Number(started)
+          : NaN;
+        this.refreshCheckpoint = {
+          at: lastRefreshAt,
+          startedAt: Number.isFinite(startedAt) ? startedAt : null,
+          source: this.readMetadataValue("last_refresh_source"),
+          origin: "startup-snapshot",
+        };
+      }
+      this.lastRefreshFailedFiles = Math.max(0, this.readMetadataNumber("last_refresh_failed_files") ?? 0);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
     this.metadataCache.clear();
     for (const row of rows) {
       if (
@@ -942,8 +1014,6 @@ export class VaultCacheService {
       }
       this.metadataCache.set(row.path, row);
     }
-    const state = this.readMetadataValue("refresh_state");
-    this.lastRefreshFailedFiles = Math.max(0, this.readMetadataNumber("last_refresh_failed_files") ?? 0);
     this.lastRefreshError = state && state !== "complete"
       ? "cache_refresh_unverified"
       : null;

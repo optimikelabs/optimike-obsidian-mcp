@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -10,6 +11,7 @@ import {
   readFile,
   readdir,
   rm,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -19,6 +21,7 @@ import { SignJWT } from "jose";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const jwtSecret =
   "headless-multiclient-test-secret-must-be-at-least-32-characters";
+const newestMarkdownMtime = 1_700_000_001;
 
 async function hashDirectory(root) {
   const hash = createHash("sha256");
@@ -261,6 +264,13 @@ async function createPilotVault(sandbox) {
     ].join("\n"),
     "utf8",
   );
+  for (const [file, mtime] of [
+    ["Reference.md", newestMarkdownMtime - 1],
+    ["Projects/Pilot.md", newestMarkdownMtime],
+    ["Pilot.base", newestMarkdownMtime + 1],
+  ]) {
+    await utimes(path.join(vaultPath, file), mtime, mtime);
+  }
   return vaultPath;
 }
 
@@ -449,6 +459,9 @@ try {
   assert.equal(readinessBody.ready, true);
   assert.equal(readinessBody.state, "ready");
   assert.equal(readinessBody.provenance.source, "filesystem");
+  assert.equal(readinessBody.provenance.readSource, "filesystem");
+  assert.equal(readinessBody.provenance.freshnessScope, "local-cache");
+  assert.equal(readinessBody.provenance.upstreamSync, "unknown");
   assert.equal(readinessBody.capabilities.liveObsidianReads, false);
   assert.equal(readinessBody.capabilities.filesystemReads, true);
   assert.equal(readinessBody.capabilities.mutations, false);
@@ -457,6 +470,7 @@ try {
   assert.equal(statusBody.state, "ready");
   assert.equal(statusBody.runtimeMode, "headless-readonly");
   assert.equal(statusBody.provenance.source, "filesystem");
+  assert.equal(statusBody.provenance.upstreamSync, "unknown");
   assert.equal(statusBody.capabilities.mutations, false);
   const serializedStatus = JSON.stringify(statusBody);
   for (const secret of [tokenA, tokenB, monitorToken, jwtSecret, vaultPath]) {
@@ -561,7 +575,18 @@ try {
     "obsidian_runtime_status",
   );
   assertToolIncludes(runtime, "headless-readonly", "runtime status");
-  assertToolIncludes(runtime, "filesystem", "runtime provenance");
+  const runtimeStatus = JSON.parse(toolText(runtime));
+  const { lastSuccessfulRefreshStartedAt, ...headlessRead } = runtimeStatus.headlessRead;
+  assert.deepEqual(headlessRead, {
+    source: "filesystem",
+    upstreamSync: "unknown",
+    refreshOrigin: "process-refresh",
+    refreshing: false,
+    newestFileMtimeMs: newestMarkdownMtime * 1000,
+  });
+  assert.ok(runtimeStatus.sharedCache.lastRefreshAt > 0);
+  assert.ok(lastSuccessfulRefreshStartedAt > 0);
+  assert.ok(lastSuccessfulRefreshStartedAt <= runtimeStatus.sharedCache.lastRefreshAt);
 
   const notes = await callTool(
     clientA,
@@ -590,6 +615,15 @@ try {
     },
   );
   assertToolIncludes(search, "Projects/Pilot.md", "global search");
+  for (const result of [notes, note, search]) {
+    assert.deepEqual(JSON.parse(toolText(result)).provenance, {
+      source: readinessBody.provenance.readSource,
+      upstreamSync: "unknown",
+      lastRefreshAt: runtimeStatus.sharedCache.lastRefreshAt,
+      lastSuccessfulRefreshStartedAt,
+      refreshOrigin: "process-refresh",
+    });
+  }
 
   const tasks = await callTool(clientB, backend.baseUrl, "list_all_tasks", {
     path: "/",

@@ -1,8 +1,12 @@
+import "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { test, after } from "node:test";
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport, McpServer } from "@modelcontextprotocol/server";
 const root = mkdtempSync(path.join(os.tmpdir(), "optimike-cache-freshness-"));
 Object.assign(process.env, {
   OBSIDIAN_RUNTIME_MODE: "headless-readonly",
@@ -16,6 +20,12 @@ const { VaultCacheService } = await import(
   "../dist/services/obsidianRestAPI/vaultCache/service.js"
 );
 const { config } = await import("../dist/config/index.js");
+const { registerObsidianReadNoteTool } = await import(
+  "../dist/mcp-server/tools/obsidianReadNoteTool/index.js"
+);
+const { collectRuntimeStatus, projectPublicRuntimeStatus } = await import(
+  "../dist/services/runtimeState.js"
+);
 const context = {
   requestId: "cache-freshness-test",
   timestamp: new Date(0).toISOString(),
@@ -45,6 +55,176 @@ after(async () => {
   else cache.db.close();
   rmSync(root, { recursive: true, force: true });
 });
+
+async function connectReadNote(t, obsidianService, vaultCacheService) {
+  const server = new McpServer({ name: "cache-read-test", version: "0" });
+  const client = new Client({ name: "cache-read-client", version: "0" });
+  t.after(async () => {
+    await client.close();
+    await server.close();
+  });
+  await registerObsidianReadNoteTool(server, obsidianService, vaultCacheService);
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  return client;
+}
+
+test("headless read reports the start of a cold scan that missed a concurrent edit", async (t) => {
+  const previousSource = config.obsidianCacheSource;
+  const previousDb = config.obsidianSharedCacheDbPath;
+  const previousConcurrency = config.obsidianCacheConcurrency;
+  config.obsidianCacheSource = "filesystem";
+  config.obsidianSharedCacheDbPath = path.join(root, "first-read.sqlite");
+  config.obsidianCacheConcurrency = 1;
+  const instance = new VaultCacheService(undefined);
+  const note = "FirstRead.md";
+  const notePath = path.join(root, note);
+  const lastPath = path.join(root, "ZLastRead.md");
+  writeFileSync(notePath, "filesystem fixture");
+  writeFileSync(lastPath, "last file");
+  const scanStartedAt = 1_800_000_000_000;
+  const editedAt = scanStartedAt + 1000;
+  const scanFinishedAt = editedAt + 1000;
+  let now = scanStartedAt;
+  t.mock.method(Date, "now", () => now);
+  const scanning = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const stat = fs.stat;
+  t.mock.method(fs, "stat", async (filePath, options) => {
+    if (filePath === lastPath) {
+      scanning.resolve();
+      await release.promise;
+    }
+    return stat(filePath, options);
+  });
+
+  const status = async () => projectPublicRuntimeStatus(await collectRuntimeStatus(instance));
+  let read;
+  try {
+    const client = await connectReadNote(t, undefined, instance);
+    const cold = await status();
+    assert.equal(cold.sharedCache.lastRefreshAt, undefined);
+    assert.equal(cold.headlessRead.refreshing, false);
+    assert.equal(cold.headlessRead.newestFileMtimeMs, null);
+
+    read = client.callTool({ name: "obsidian_read_note", arguments: { filePath: note } });
+    await Promise.race([scanning.promise, read]);
+    const duringScan = await status();
+    assert.equal(duringScan.headlessRead.refreshing, true);
+    assert.equal(duringScan.sharedCache.lastRefreshAt, undefined);
+    assert.equal(duringScan.headlessRead.lastSuccessfulRefreshStartedAt, null);
+
+    now = editedAt;
+    writeFileSync(notePath, "edited during the scan");
+    utimesSync(notePath, editedAt / 1000, editedAt / 1000);
+    now = scanFinishedAt;
+    release.resolve();
+    const result = await read;
+    assert.equal(result.isError, false);
+    const payload = JSON.parse(result.content[0].text);
+    assert.equal(payload.content, "filesystem fixture");
+    const completed = await status();
+    assert.equal(completed.sharedCache.lastRefreshAt, scanFinishedAt);
+    assert.equal(completed.headlessRead.lastSuccessfulRefreshStartedAt, scanStartedAt);
+    assert.deepEqual(payload.provenance, {
+      source: "filesystem",
+      upstreamSync: "unknown",
+      lastRefreshAt: scanFinishedAt,
+      lastSuccessfulRefreshStartedAt: scanStartedAt,
+      refreshOrigin: "process-refresh",
+      refreshing: true,
+      partial: true,
+    });
+    await instance.close();
+    const restarted = new VaultCacheService(undefined);
+    try {
+      const evidence = restarted.getRefreshEvidence();
+      assert.equal(evidence.refreshOrigin, "startup-snapshot");
+      assert.equal(evidence.lastRefreshAt, scanFinishedAt);
+      assert.equal(evidence.lastSuccessfulRefreshStartedAt, scanStartedAt);
+    } finally {
+      await restarted.close();
+    }
+  } finally {
+    release.resolve();
+    await read?.catch(() => undefined);
+    await instance.close();
+    config.obsidianCacheSource = previousSource;
+    config.obsidianSharedCacheDbPath = previousDb;
+    config.obsidianCacheConcurrency = previousConcurrency;
+  }
+});
+
+test("live note reads preserve the existing response body", async (t) => {
+  const previousMode = config.obsidianRuntimeMode;
+  config.obsidianRuntimeMode = "live";
+  try {
+    const client = await connectReadNote(t, rest, cache);
+    const result = await client.callTool({
+      name: "obsidian_read_note",
+      arguments: { filePath: "Note.md" },
+    });
+    assert.equal(result.isError, false);
+    assert.deepEqual(JSON.parse(result.content[0].text), { content });
+    const status = projectPublicRuntimeStatus(await collectRuntimeStatus(cache));
+    assert.equal("headlessRead" in status, false);
+  } finally {
+    config.obsidianRuntimeMode = previousMode;
+  }
+});
+
+test("another server's scan cannot advance the checkpoint of this process's index", async (t) => {
+  const previous = {
+    obsidianCacheSource: config.obsidianCacheSource,
+    obsidianSharedCacheDbPath: config.obsidianSharedCacheDbPath,
+    obsidianVaultPath: config.obsidianVaultPath,
+  };
+  const vault = mkdtempSync(path.join(root, "shared-index-"));
+  Object.assign(config, {
+    obsidianCacheSource: "filesystem",
+    obsidianSharedCacheDbPath: path.join(root, "shared-index.sqlite"),
+    obsidianVaultPath: vault,
+  });
+  const note = path.join(vault, "Note.md");
+  let now = 1_800_000_000_000;
+  t.mock.method(Date, "now", () => now);
+  function changeReplica(seconds) {
+    writeFileSync(note, "filesystem fixture");
+    utimesSync(note, seconds, seconds);
+    now += 1000;
+  }
+  function assertCheckpoint(cache, lastRefreshAt, mtime, refreshOrigin) {
+    assert.equal(cache.getRefreshEvidence().lastRefreshAt, lastRefreshAt);
+    assert.equal(cache.getRefreshEvidence().lastSuccessfulRefreshStartedAt, lastRefreshAt);
+    assert.equal(cache.getRefreshEvidence().refreshOrigin, refreshOrigin);
+    assert.equal(cache.getStats().lastRefreshAt, lastRefreshAt);
+    assert.equal(cache.getNewestFileMtimeMs(), mtime * 1000);
+  }
+
+  const writer = new VaultCacheService(undefined);
+  let reader;
+  try {
+    changeReplica(1_700_000_001);
+    await writer.refreshCache(true);
+    const startupRefresh = now;
+    reader = new VaultCacheService(undefined);
+    changeReplica(1_700_000_002);
+    await writer.refreshCache(true);
+    assertCheckpoint(reader, startupRefresh, 1_700_000_001, "startup-snapshot");
+
+    await reader.refreshCache(true);
+    const localRefresh = now;
+    changeReplica(1_700_000_003);
+    await writer.refreshCache(true);
+    assertCheckpoint(reader, localRefresh, 1_700_000_002, "process-refresh");
+  } finally {
+    await reader?.close();
+    await writer.close();
+    Object.assign(config, previous);
+  }
+});
+
 test("REST incremental updates cannot read excluded notes", async () => {
   const before = fetches;
   await cache.updateCacheForFile("Private/secret.md", context);
@@ -276,12 +456,15 @@ test("incomplete refresh survives restart and cannot advance successful-refresh 
   try {
     await instance.refreshCache(true);
     const successfulAt = instance.getStats().lastRefreshAt;
+    const { lastSuccessfulRefreshStartedAt: startedAt } = instance.getRefreshEvidence();
     fail = true;
     await new Promise(resolve => setTimeout(resolve, 10));
     await instance.refreshCache(true);
     assert.equal(instance.getStats().lastRefreshAt, successfulAt);
+    assert.equal(instance.getRefreshEvidence().lastSuccessfulRefreshStartedAt, startedAt);
     await instance.close();
     instance = new VaultCacheService(rest);
+    assert.equal(instance.getRefreshEvidence().lastSuccessfulRefreshStartedAt, startedAt);
     assert.equal(instance.isReady(), false);
     assert.equal(instance.getStats().freshness, "uncertain");
     assert.equal(instance.getStats().lastRefreshFailedFiles, 1);
