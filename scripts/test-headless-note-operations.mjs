@@ -1,6 +1,6 @@
 import { isolatedStateEnv, isolatedStateDirectory } from "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
-import { link, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { link, mkdir, readdir, readFile, realpath, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
@@ -37,7 +37,8 @@ const start = async (entry, fault = false, overrides = {}) => {
     const unlink = fs.unlinkSync;
     let probeBusy = false;
     fs.unlinkSync = file => {
-      if (fault === 'probe-busy' && !probeBusy && file.includes('.optimike-probe-') && file.endsWith('-link.tmp')) {
+      if (fault === 'probe-busy' && !probeBusy &&
+          file.includes('.optimike-probe-' + process.pid + '-') && file.endsWith('-link.tmp')) {
         probeBusy = true;
         throw Object.assign(new Error('fixture busy probe'), { code: 'EBUSY' });
       }
@@ -306,22 +307,49 @@ try {
     const crashedProbe = await probeFiles("New");
     assert.equal(crashedProbe.length, 2);
     for (const file of crashedProbe) assert.equal(await read("New/" + file), "hard link probe\n");
-    const legacyProbe = "Reader/.optimike-probe-01234567-0123-0123-0123-0123456789ab.tmp";
+    const legacyProbe = "New/.optimike-probe-01234567-0123-0123-0123-0123456789ab.tmp";
     await link(at("Unavailable.md"), at(legacyProbe));
+    const orphanProbe = "New/.optimike-probe-abcdef01-0123-0123-0123-0123456789ab.tmp";
+    await put("Lost original.md", "the only remaining copy");
+    await link(at("Lost original.md"), at(orphanProbe));
+    await unlink(at("Lost original.md"));
     await start("dist/index.js", "probe");
     const unavailable = await rawCall("obsidian_note_move_plan", {
       sourcePath: "Unavailable.md", destinationPath: "New/Unavailable moved.md", idempotencyKey: "probe",
     });
     assert.equal(unavailable.body.error.details.reasonCode, "hard_links_unsupported");
-    assert.deepEqual(await probeFiles("New"), []);
-    await missing(legacyProbe);
     await start("dist/index.js", "probe-busy");
     const busyProbePlan = await movePlan("Unavailable.md", "New/Unavailable moved.md", "probe-busy");
-    const busyFiles = await probeFiles("New");
+    const busyFiles = (await probeFiles("New")).filter(file => file.endsWith("-link.tmp") && !crashedProbe.includes(file));
     assert.equal(busyFiles.length, 1);
     assert.equal(await read("New/" + busyFiles[0]), "hard link probe\n");
     await lifecycle("move", "recover", busyProbePlan, "probe-busy");
-    assert.deepEqual(await probeFiles("New"), []);
+    assert.deepEqual(await probeFiles("New"), [path.basename(orphanProbe)]);
+    await missing(legacyProbe);
+    assert.equal(await read(orphanProbe), "the only remaining copy");
+    const probeStatus = await lifecycle("move", "status", busyProbePlan);
+    assert.deepEqual(probeStatus.probeCleanup, {
+      orphanedLegacyProbes: [orphanProbe], orphanedLegacyProbeCount: 1,
+    });
+    assert.equal(await read("Unavailable.md"), "link fixture");
+    await unlink(at(orphanProbe));
+
+    const cleanupFixture = path.join(isolatedStateDirectory, "scoped-probe-cleanup");
+    for (const dir of ["Touched", "Unrelated/Nested"]) {
+      await mkdir(path.join(cleanupFixture, dir), { recursive: true });
+    }
+    const { HeadlessVaultFiles, startProbeCleanup } = await import("../dist/services/operations/headlessVaultFiles.js");
+    const canonicalFixture = await realpath(cleanupFixture);
+    await startProbeCleanup(canonicalFixture);
+    const scratch = `.optimike-probe-${process.pid}-01234567-0123-0123-0123-0123456789ab-source.tmp`;
+    const scratchIn = dir => path.join(canonicalFixture, dir, scratch);
+    for (const dir of [".", "Touched", "Unrelated/Nested"]) await writeFile(scratchIn(dir), "probe");
+    await startProbeCleanup(canonicalFixture);
+    const scopedFiles = new HeadlessVaultFiles(canonicalFixture);
+    await scopedFiles.cleanProbes(["Touched/Absent/Trash.md"]);
+    await assert.rejects(stat(scratchIn(".")), { code: "ENOENT" });
+    await assert.rejects(stat(scratchIn("Touched")), { code: "ENOENT" });
+    assert.equal(await readFile(scratchIn("Unrelated/Nested"), "utf8"), "probe");
     await start("dist/index.js");
     const linkFailure = await movePlan("Unavailable.md", "New/Unavailable moved.md", "unavailable");
     await start("dist/index.js", "link");

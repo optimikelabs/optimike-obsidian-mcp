@@ -152,8 +152,11 @@ Sans effet publié, l’opération se règle en conflit et libère son verrou. L
 reprise ou l’abandon supprime les fichiers de préparation encore accessibles.
 
 La sonde des liens physiques utilise ses propres fichiers temporaires sur le
-même système de fichiers et peut renvoyer `hard_links_unsupported`. Le démarrage
-et la reprise nettoient les sondes restantes. Chaque remplacement est atomique. Les autres
+même système de fichiers et peut renvoyer `hard_links_unsupported`. Un seul
+balayage tourne en arrière-plan au démarrage. La reprise vérifie la racine du
+coffre et les dossiers sur les chemins du plan. Une ancienne sonde avec un seul
+lien est conservée. Le statut liste ces chemins dans
+`probeCleanup.orphanedLegacyProbes` pour examen manuel. Chaque remplacement est atomique. Les autres
 processus ne partagent pas les verrous, et plusieurs remplacements peuvent
 être visibles en cours d’opération. Ce parcours s’applique à un coffre copié
 ou dédié. L’[ADR](adr/ADR-External-Reference-Integrity.md#vault-only-moves)

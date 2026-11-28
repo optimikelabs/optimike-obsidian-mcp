@@ -151,7 +151,10 @@ An attempt with no published file effect releases the reservation and reports
 a conflict. Recovery or abandonment cleans the operation's addressable staging files.
 
 The same-filesystem hard-link probe uses its own temporary files and can return
-`hard_links_unsupported`. Startup and recovery remove leftover probes.
+`hard_links_unsupported`. One background startup sweep checks for leftovers.
+Recovery checks the vault root and folders on paths recorded in the plan.
+A legacy probe with a single link is preserved. Status lists such paths under
+`probeCleanup.orphanedLegacyProbes` for manual review.
 Each replacement is atomic. Other file writers remain outside these locks, and
 several replacements can be visible partway through. The workflow is scoped to
 a copied or dedicated vault. See the [ADR](adr/ADR-External-Reference-Integrity.md#vault-only-moves)

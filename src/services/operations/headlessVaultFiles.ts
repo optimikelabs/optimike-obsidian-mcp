@@ -92,7 +92,7 @@ function hardLinksUnsupported(): never {
 
 const probeName = /^\.optimike-probe-(?:(\d+)-)?[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}(-(source|link))?\.tmp$/u;
 const activeProbes = new Set<string>();
-const startupSweeps = new Map<string, Promise<void>>();
+const startupSweeps = new Map<string, { completed: Promise<void>; orphans: Set<string> }>();
 
 function probeOwnerActive(pid: string | undefined): boolean {
   if (!pid || Number(pid) === process.pid) return false;
@@ -100,45 +100,59 @@ function probeOwnerActive(pid: string | undefined): boolean {
   catch (error) { return (error as NodeJS.ErrnoException)?.code !== "ESRCH"; }
 }
 
-function removeProbe(file: string): void {
+function removeProbe(file: string, legacy = false): "orphan" | "removed" | undefined {
   try {
-    if (realpathSync(path.dirname(file)) === path.dirname(file) && lstatSync(file).isFile()) unlinkSync(file);
+    if (realpathSync(path.dirname(file)) !== path.dirname(file)) return;
+    const stat = lstatSync(file);
+    if (!stat.isFile()) return;
+    if (legacy && stat.nlink <= 1) return "orphan";
+    unlinkSync(file);
+    return "removed";
   } catch { /* A busy probe remains eligible for the next sweep. */ }
 }
 
-async function sweepProbes(root: string): Promise<void> {
+async function sweepProbeDirectory(directory: string, orphans: Set<string>): Promise<string[]> {
+  let entries;
+  try {
+    if (realpathSync(directory) !== directory) return [];
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch { return []; }
+  const subdirectories: string[] = [];
+  for (const entry of entries) {
+    const file = path.join(directory, entry.name);
+    if (entry.isDirectory() && !entry.isSymbolicLink() && foldedPath(entry.name) !== ".obsidian") {
+      subdirectories.push(file);
+    } else if (entry.isFile()) {
+      const match = probeName.exec(entry.name);
+      if (!match || Boolean(match[1]) !== Boolean(match[2]) || activeProbes.has(file) || probeOwnerActive(match[1])) continue;
+      const outcome = removeProbe(file, !match[1]);
+      if (outcome === "orphan") orphans.add(file);
+      if (outcome === "removed") orphans.delete(file);
+    }
+  }
+  return subdirectories;
+}
+
+async function sweepProbes(root: string, orphans: Set<string>): Promise<void> {
   const pending = [root];
   while (pending.length) {
-    const directory = pending.pop()!;
-    let entries;
-    try {
-      if (realpathSync(directory) !== directory) continue;
-      entries = await readdir(directory, { withFileTypes: true });
-    } catch { continue; }
-    for (const entry of entries) {
-      const file = path.join(directory, entry.name);
-      if (entry.isDirectory() && !entry.isSymbolicLink() && foldedPath(entry.name) !== ".obsidian") {
-        pending.push(file);
-      } else if (entry.isFile()) {
-        const match = probeName.exec(entry.name);
-        if (match && Boolean(match[1]) === Boolean(match[2]) && !activeProbes.has(file) && !probeOwnerActive(match[1])) {
-          removeProbe(file);
-        }
-      }
-    }
+    for (const directory of await sweepProbeDirectory(pending.pop()!, orphans)) pending.push(directory);
   }
 }
 
-export function startProbeCleanup(root: string): Promise<void> {
-  let canonical: string;
-  try { canonical = realpathSync(root); }
-  catch { return Promise.resolve(); }
-  let cleanup = startupSweeps.get(canonical);
+function probeCleanup(root: string) {
+  let cleanup = startupSweeps.get(root);
   if (!cleanup) {
-    cleanup = sweepProbes(canonical);
-    startupSweeps.set(canonical, cleanup);
+    const orphans = new Set<string>();
+    cleanup = { orphans, completed: sweepProbes(root, orphans) };
+    startupSweeps.set(root, cleanup);
   }
   return cleanup;
+}
+
+export function startProbeCleanup(root: string): Promise<void> {
+  try { return probeCleanup(realpathSync(root)).completed; }
+  catch { return Promise.resolve(); }
 }
 
 export class HeadlessVaultFiles {
@@ -200,9 +214,33 @@ export class HeadlessVaultFiles {
     }
   }
 
-  async cleanProbes(): Promise<void> {
-    await startProbeCleanup(this.root);
-    await sweepProbes(this.root);
+  async cleanProbes(paths: readonly string[]): Promise<void> {
+    const directories = new Set([this.root]);
+    for (const relative of paths) {
+      let parent = path.posix.dirname(safeRelativePath(relative, true));
+      // A trash probe can be in the nearest existing ancestor of its destination.
+      while (parent !== ".") {
+        directories.add(path.join(this.root, parent));
+        parent = path.posix.dirname(parent);
+      }
+    }
+    const { orphans } = probeCleanup(this.root);
+    for (const directory of directories) await sweepProbeDirectory(directory, orphans);
+  }
+
+  orphanedLegacyProbes() {
+    const orphans = probeCleanup(this.root).orphans;
+    const paths = [];
+    for (const file of orphans) {
+      try {
+        if (realpathSync(path.dirname(file)) !== path.dirname(file)) continue;
+        const stat = lstatSync(file);
+        if (stat.isFile() && stat.nlink <= 1) paths.push(path.relative(this.root, file).split(path.sep).join("/"));
+      } catch { /* The file may have been restored or removed since the sweep. */ }
+    }
+    return paths.length ? {
+      orphanedLegacyProbes: paths.sort().slice(0, 50), orphanedLegacyProbeCount: paths.length,
+    } : undefined;
   }
 
   private staging(relative: string, operationId: string): string {

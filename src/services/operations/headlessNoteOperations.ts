@@ -52,10 +52,8 @@ function inverseEdits(rewrite: Rewrite) {
 }
 
 export class HeadlessNoteOperations {
-  private readonly probeCleanup: Promise<void>;
-
   constructor(private readonly root: string, private readonly journalPath: string, private readonly cache: VaultCacheService) {
-    this.probeCleanup = startProbeCleanup(root);
+    void startProbeCleanup(root);
   }
 
   private bound() {
@@ -176,7 +174,6 @@ export class HeadlessNoteOperations {
 
   private async plan(intent: Intent, key: string) {
     this.authorize(intent.kind, "plan", intent.source);
-    await this.probeCleanup;
     const { files, journal } = this.bound();
     const internalKey = this.key(intent.kind, key);
     const replay = (existing: HeadlessRow<Snapshot>) => {
@@ -246,16 +243,18 @@ export class HeadlessNoteOperations {
   async status(kind: Intent["kind"], ref: string) {
     const { files, journal } = this.bound();
     const row = this.get(kind, ref, journal);
-    if (row.phase === "applying") return this.runPending(files, journal, row, "status");
-    return this.withCache(row, files, journal);
+    const result = await (row.phase === "applying" ? this.runPending(files, journal, row, "status") :
+      this.withCache(row, files, journal));
+    const probeCleanup = files.orphanedLegacyProbes();
+    return probeCleanup ? { ...result, probeCleanup } : result;
   }
 
   async recover(kind: Intent["kind"], ref: string, key: string, action: RecoveryAction = "resume") {
     const { files, journal } = this.bound();
     const row = this.get(kind, ref, journal, key);
-    await files.cleanProbes();
+    if (row.phase === "applying") this.authorize(kind, "apply", row.payload.intent.source);
+    await files.cleanProbes(this.paths(row.payload));
     if (row.phase !== "applying") return this.withCache(row, files, journal);
-    this.authorize(kind, "apply", row.payload.intent.source);
     return this.runPending(files, journal, row, action);
   }
 
