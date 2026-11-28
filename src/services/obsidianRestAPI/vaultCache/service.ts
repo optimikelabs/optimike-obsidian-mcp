@@ -103,6 +103,12 @@ CREATE TABLE IF NOT EXISTS shared_cache_metadata (
 `;
 
 const SHARED_CACHE_SCHEMA_VERSION = "2026-03-18.1";
+const LINK_CACHE_REFRESH_REASONS = new Map([
+  ["building", "headless_link_cache_refreshing"],
+  ["pending-events", "headless_link_cache_events_pending"],
+  ["uncertain", "headless_link_cache_uncertain"],
+  ["incomplete", "headless_link_cache_uncertain"],
+]);
 
 function computeContentHash(content: string): string {
   return createHash("sha1").update(content).digest("hex");
@@ -160,6 +166,7 @@ export class VaultCacheService {
   private readonly obsidianService: ObsidianRestApiService | undefined;
   private readonly db: DatabaseSync;
   private readonly fileUpsert;
+  private readonly dataVersion;
   private readonly markdownLinks?: MarkdownLinkIndex;
   private readonly filesystemIndexScope?: string;
   private readonly technicalExclusions = ignore().add(DEFAULT_VAULT_EXCLUDE_PATTERNS);
@@ -167,6 +174,7 @@ export class VaultCacheService {
     ? ignore().add(config.obsidianVaultExcludePatterns)
     : undefined;
   private checkedFilesystemVersion?: number;
+  private hotCacheDataVersion?: number;
   private linkIndexRun?: Promise<void>;
   private readonly vaultExclusionMatcher = createVaultExclusionMatcher(
     config.obsidianVaultExcludePatterns,
@@ -196,6 +204,7 @@ export class VaultCacheService {
   constructor(obsidianService?: ObsidianRestApiService) {
     this.obsidianService = obsidianService;
     this.db = this.initializeDatabase();
+    this.dataVersion = this.db.prepare("PRAGMA data_version");
     this.fileUpsert = this.db.prepare(`
       INSERT INTO file_cache (path, ctime, mtime, size, hash, content, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -441,6 +450,15 @@ export class VaultCacheService {
       isVaultPathExcluded(filePath, this.vaultExclusionMatcher)
     )
       return undefined;
+    if (this.markdownLinks) {
+      // This version changes for commits from another connection. Local
+      // writes invalidate their own entries in upsertRow and deleteRow.
+      const version = this.readDataVersion();
+      if (version !== this.hotCacheDataVersion) {
+        this.contentHotCache.clear();
+        this.hotCacheDataVersion = version;
+      }
+    }
     const cached = this.contentHotCache.get(filePath);
     if (cached) {
       this.touchHotCache(filePath, cached);
@@ -466,16 +484,7 @@ export class VaultCacheService {
     return entry;
   }
 
-  private async findFilesystemNote(filePath: string, context: RequestContext): Promise<string> {
-    const normalized = normalizedCacheFilePath(filePath);
-    if (!normalized) {
-      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Expected a vault-relative Markdown note path.", context);
-    }
-    if (this.refreshRun) await this.refreshRun;
-    if (!this.isReady()) await this.buildVaultCache();
-    if (!this.isReady()) {
-      throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Shared filesystem cache reconciliation is incomplete.", context);
-    }
+  private findFilesystemNote(normalized: string, context: RequestContext): string {
     if (!this.acceptFilesystemSource(normalized)) {
       throw new McpError(BaseErrorCode.NOT_FOUND, "Markdown note not found in the shared filesystem cache.", context);
     }
@@ -501,15 +510,23 @@ export class VaultCacheService {
     filePath: string,
     context: RequestContext,
     project: (matched: string, mtime: number) => T,
+    checkSnapshot?: () => void,
   ): Promise<T> {
-    const matched = await this.findFilesystemNote(filePath, context);
+    const normalized = normalizedCacheFilePath(filePath);
+    if (!normalized) {
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Expected a vault-relative Markdown note path.", context);
+    }
+    if (this.refreshRun) await this.refreshRun;
+    if (!this.isReady()) await this.buildVaultCache();
     this.db.exec("BEGIN");
     try {
-      const note = this.db.prepare("SELECT mtime FROM file_cache WHERE path = ?").get(matched) as
-        { mtime: number } | undefined;
-      if (!this.isReady() || !note) {
+      checkSnapshot?.();
+      if (!this.isReady()) {
         throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Shared filesystem cache reconciliation is incomplete.", context);
       }
+      const matched = this.findFilesystemNote(normalized, context);
+      const note = this.db.prepare("SELECT mtime FROM file_cache WHERE path = ?").get(matched) as
+        { mtime: number };
       return project(matched, note.mtime);
     } finally {
       this.db.exec("ROLLBACK");
@@ -553,7 +570,20 @@ export class VaultCacheService {
         },
         ...links.read(matched, limit),
       };
-    });
+    }, () => this.assertFilesystemLinkCacheReady(context));
+  }
+
+  private assertFilesystemLinkCacheReady(context: RequestContext): void {
+    const reasonCode = LINK_CACHE_REFRESH_REASONS.get(this.readMetadataValue("refresh_state") ?? "");
+    if (reasonCode) {
+      throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "The shared note cache is not settled.", {
+        ...context, reasonCode, retryable: true,
+      });
+    }
+  }
+
+  private readDataVersion(): number {
+    return this.dataVersion.get()!.data_version as number;
   }
 
   /** Refresh from disk before using the index to admit a filesystem mutation. */
@@ -587,7 +617,7 @@ export class VaultCacheService {
     if (!this.markdownLinks) return false;
     // SQLite advances this value for other connections' commits, including
     // incremental REST upserts that leave last_refresh_source untouched.
-    const version = this.db.prepare("PRAGMA data_version").get()!.data_version as number;
+    const version = this.readDataVersion();
     if (version === this.checkedFilesystemVersion) return true;
     if (this.readMetadataValue("refresh_state") !== "complete" ||
         !this.hasFilesystemIndexScope() ||

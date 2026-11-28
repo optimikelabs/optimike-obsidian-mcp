@@ -39,6 +39,13 @@ test('dollars in autolinks and wikilinks are literal, and formulas still hide li
 test('external email autolinks leave adjacent vault references visible',()=>{
  assert.deepEqual(linkTexts('name+alias@example.com [[V]] <other@example.com> [mail](mailto:name@example.com) [[After]]'),['V','After']);
 });
+test('wikilink aliases keep square brackets and triples resolve the inner target',()=>{
+ const links=extractMarkdownLinkReferences('[[V|a[b]] [[[V]]] [[Other|a]b]]\n[[Broken|a[b\n[[After]]');
+ assert.deepEqual(links.map(({linkPath,displayText})=>[linkPath,displayText]),[
+  ['V','a[b'],['V',undefined],['Other','a]b'],['After',undefined],
+ ]);
+ assert.deepEqual(linkTexts('<span>[[Hidden|</span> [[Visible]]'),['Visible']);
+});
 test('unpaired inline HTML is scoped to its paragraph',()=>{
  assert.deepEqual(linkTexts('a <span>x\n\n[[P2]]\n\n</span> [[V]]'),['P2','V']);
 });
@@ -84,13 +91,11 @@ test('filesystem links preserve observations and reconcile edits, destination am
  config.obsidianRuntimeMode='hybrid';
  let cache=new VaultCacheService();
  const readLinks=(filePath,limit=200)=>processObsidianNoteLinks({filePath,limit},context,undefined,cache);
- const indexPending=(error)=>error.code==='SERVICE_UNAVAILABLE' &&
-  error.details?.reasonCode==='headless_link_index_building' && error.details?.retryable===true;
  const read=async(filePath,limit)=>{
   try {
    return await readLinks(filePath,limit);
   } catch(error) {
-   if (!indexPending(error)) throw error;
+   if (!isIndexPending(error)) throw error;
    await cache.linkIndexRun;
    return readLinks(filePath,limit);
   }
@@ -107,7 +112,7 @@ test('filesystem links preserve observations and reconcile edits, destination am
   assert.equal(cache.isReady(),true);
   assert.equal(await cache.readFilesystemNoteContent('Notes/Source.md',context),source);
   await assert.rejects(readLinks('Notes/People/Ada.md'),(error)=>{
-   assert.ok(indexPending(error));
+   assert.ok(isIndexPending(error));
    const response=publicMcpToolErrorPayload(error,{
     operation:'test',toolName:'obsidian_note_links',params:{filePath:'Notes/People/Ada.md'},
    });
@@ -186,13 +191,15 @@ test('filesystem links preserve observations and reconcile edits, destination am
    assert.equal(cache.getStats().refreshSource,'rest');
    config.obsidianCacheSource='filesystem';
    assert.deepEqual((await read('Notes/Shared.md')).backlinks,[{sourcePath:'Another.md',count:1},{sourcePath:'Notes/Source.md',count:2}]);
+   assert.equal((await cache.getEntry('/Another.md')).content,restContent);
    config.obsidianCacheSource='rest';
    restContent='Changed through Local REST.';
    assert.deepEqual(await rest.updateFileVerified('Another.md',context),{ok:true,disposition:'updated'});
    assert.equal(cache.getStats().refreshSource,'rest');
    config.obsidianCacheSource='filesystem';
    assert.equal(await cache.readFilesystemNoteContent('Another.md',context),restContent);
-   await assert.rejects(readLinks('Notes/Shared.md'),indexPending);
+   assert.equal((await cache.getEntry('/Another.md')).content,restContent);
+   await assert.rejects(readLinks('Notes/Shared.md'),isIndexPending);
    assert.deepEqual((await read('Notes/Shared.md')).backlinks,[{sourcePath:'Notes/Source.md',count:2}]);
   } finally {
    await rest.close();
@@ -202,6 +209,115 @@ test('filesystem links preserve observations and reconcile edits, destination am
   Object.assign(config,previous);
  }
 });
+
+async function linkFixture(run) {
+ const vault=fs.mkdtempSync(path.join(root,'link-worker-'));
+ const previous={obsidianVaultPath:config.obsidianVaultPath,obsidianCacheSource:config.obsidianCacheSource,
+  obsidianSharedCacheDbPath:config.obsidianSharedCacheDbPath};
+ Object.assign(config,{obsidianVaultPath:vault,obsidianCacheSource:'filesystem',obsidianSharedCacheDbPath:path.join(vault,'cache.sqlite')});
+ const write=(name,content)=>fs.writeFileSync(path.join(vault,name),content,'utf8');
+ write('A.md','[[Target]]');
+ write('Target.md','# Target');
+ let cache=new VaultCacheService();
+ try {
+  await run({
+   get cache(){return cache;}, write,
+   read:()=>cache.readFilesystemNoteLinks('Target.md',200,context),
+   reopen:async()=>{await cache.close();cache=new VaultCacheService();},
+  });
+ } finally {
+  await cache.close();
+  Object.assign(config,previous);
+ }
+}
+
+test('link refusals expose the shared text cache state from another connection',()=>linkFixture(async f=>{
+ await f.cache.buildVaultCache();
+ await f.cache.linkIndexRun;
+ const writer=new VaultCacheService();
+ try {
+  for (const [state,reason] of [
+   ['building','headless_link_cache_refreshing'],
+   ['pending-events','headless_link_cache_events_pending'],
+   ['uncertain','headless_link_cache_uncertain'],
+  ]) {
+   writer.db.prepare("UPDATE shared_cache_metadata SET value = ? WHERE key = 'refresh_state'").run(state);
+   await assert.rejects(f.read(),error=>{
+    const {error:publicError}=publicMcpToolErrorPayload(error,{
+     operation:'test',toolName:'obsidian_note_links',params:{filePath:'Target.md'},
+    });
+    assert.equal(publicError.code,'SERVICE_UNAVAILABLE');
+    assert.equal(publicError.details.reasonCode,reason);
+    assert.equal(publicError.details.retryable,true);
+    return true;
+   });
+  }
+  writer.db.prepare("UPDATE shared_cache_metadata SET value = 'complete' WHERE key = 'refresh_state'").run();
+  assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1}]);
+ } finally { await writer.close(); }
+}));
+
+function pauseAfterFirstLinkBatch(cache) {
+ const index=cache.markdownLinks;
+ const reconcile=index.reconcileBatch.bind(index);
+ return new Promise(resolve=>{
+  index.reconcileBatch=(afterPath,accept)=>{
+   index.reconcileBatch=reconcile;
+   const result=reconcile(afterPath,file=>file==='/A.md' && accept(file));
+   resolve();
+   return result;
+  };
+ });
+}
+
+function isIndexPending(error) {
+ return error.code==='SERVICE_UNAVAILABLE' &&
+  error.details?.reasonCode==='headless_link_index_building' && error.details.retryable===true;
+}
+
+test('a local update behind the link cursor cannot yield stale backlinks',()=>linkFixture(async f=>{
+ const firstBatch=pauseAfterFirstLinkBatch(f.cache);
+ await f.cache.buildVaultCache();
+ await firstBatch;
+ f.write('A.md','[[Other]]');
+ // Read the fixture synchronously to finish this real cache write before the next index batch.
+ f.cache.readCacheRow=async file=>({path:file,ctime:1,mtime:2,size:9,hash:'local-edit',content:fs.readFileSync(path.join(config.obsidianVaultPath,file.slice(1)),'utf8')});
+ assert.deepEqual(await f.cache.updateFileVerified('A.md',context),{ok:true,disposition:'updated'});
+ await assert.rejects(f.read(),isIndexPending);
+ await f.cache.linkIndexRun;
+ assert.deepEqual((await f.read()).backlinks,[]);
+}));
+
+test('restart resumes a committed partial link index without exposing it',()=>linkFixture(async f=>{
+ f.write('Z.md','[[Target]]');
+ const firstBatch=pauseAfterFirstLinkBatch(f.cache);
+ await f.cache.buildVaultCache();
+ await firstBatch;
+ await f.reopen();
+ const stored=f.cache.db.prepare('SELECT path FROM markdown_link_files ORDER BY path').all();
+ assert.deepEqual(stored.map(row=>row.path),['/A.md']);
+ assert.equal(f.cache.isReady(),true);
+ await assert.rejects(f.read(),isIndexPending);
+ await f.cache.linkIndexRun;
+ assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Z.md',count:1}]);
+}));
+
+test('an indexing error rolls back the batch and a later link request retries it',()=>linkFixture(async f=>{
+ const index=f.cache.markdownLinks;
+ const reconcile=index.reconcileBatch.bind(index);
+ index.reconcileBatch=(...args)=>{
+  index.reconcileBatch=reconcile;
+  reconcile(...args);
+  throw new Error('Synthetic index failure');
+ };
+ await f.cache.buildVaultCache();
+ await f.cache.linkIndexRun;
+ assert.equal(f.cache.db.prepare('SELECT count(*) AS count FROM markdown_link_files').get().count,0);
+ assert.equal(await f.cache.readFilesystemNoteContent('A.md',context),'[[Target]]');
+ await assert.rejects(f.read(),isIndexPending);
+ await f.cache.linkIndexRun;
+ assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1}]);
+}));
 async function readTaskModes(cache){
  const compact=JSON.parse(await processListAllTasks({responseFormat:'json'},context,cache));
  assert.equal(compact.responseMode,'compact');
