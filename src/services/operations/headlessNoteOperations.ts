@@ -19,6 +19,10 @@ import {
 const PREVIEW_LIMIT = 12;
 const BACKLINK_LIMIT = 200;
 const PREFIX = { move: NATIVE_MOVE_PREFIX, delete: NOTE_DELETE_PREFIX };
+const WRITE_OPERATIONS = {
+  move: { plan: "obsidian_note_move_plan", apply: "obsidian_note_move_apply" },
+  delete: { plan: "obsidian_note_delete_plan", apply: "obsidian_note_delete_apply" },
+} as const;
 type Intent = { kind: "move"; source: string; destination: string } |
   { kind: "delete"; source: string; acknowledged: boolean };
 type Rewrite = NonNullable<ReturnType<typeof rewriteIncoming>> & { path: string; beforeHash: string };
@@ -41,7 +45,7 @@ export class HeadlessNoteOperations {
   }
 
   private authorize(kind: Intent["kind"], phase: "plan" | "apply", source: string) {
-    assertWriteAllowed({ operation: `obsidian_note_${kind}_${phase}`, action: phase,
+    assertWriteAllowed({ operation: WRITE_OPERATIONS[kind][phase], action: phase,
       target: source, targetType: "filePath", destructive: true });
   }
 
