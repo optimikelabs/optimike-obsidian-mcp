@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { loadSmartEnv } from "../dist/services/smartEnv.js";
@@ -217,6 +217,15 @@ try {
     "latest append-only registry dimensions must drive the current vector fingerprint",
   );
   assert.equal(duplicateVectors[0].vec.length, 1024);
+
+  await appendFile(
+    path.join(root, "embedding_models", "embedding_models.ajson"),
+    ',\n"embedding_models:ollama#qwen": null\n',
+    "utf8",
+  );
+  assert.equal(await detectSmartEnvQueryProvider(root), undefined, "a selected model tombstone clears provider routing");
+  assert.deepEqual(await readSmartEnvV3(root, { blocks: true }), { notes: [] },
+    "a selected model tombstone cannot fall back to the model's previous vector rows");
 
   await writeFile(
     path.join(root, "embedding_models", "embedding_models.ajson"),

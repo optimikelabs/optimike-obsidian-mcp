@@ -70,6 +70,61 @@ invalid UTF-8 or by BitNet count toward the thresholds. The configured note
 size rule reports `note_below_min_size` and its skips are exempt. Use
 `--allow-deletions` for one run after verifying that the losses are intentional.
 
+## Bootstrap from Smart Connections v3
+
+```text
+optimike-semantic-index bootstrap --from-smart-env <smart-env-dir> --vault <vault-dir> --index <index-dir> --endpoint <bitnet-origin> --model <model-id> --revision <model-revision> --model-sha256 <expected-weights-sha256>
+```
+
+Use an index directory without `CURRENT`, disjoint from both the vault and the
+Smart Environment. The source directories are read-only. Use a stable Smart
+Environment snapshot if Desktop is still indexing. The importer matches the
+active provider, model ID, dimensions, token budget and v3 fingerprint. It
+checks the current note hash, the vector reference and, for a section, its
+block key, inclusive lines and block hash. For notes it requires an identical
+unfiltered input. When Smart Connections has excluded headings configured,
+note vectors are encoded again. A conservative UTF-8 size bound leaves room
+for tokenizer overhead. Unmatched, oversized or invalid rows enter the
+normal encoding path.
+
+Bootstrap uses the section keys and range selection of Smart Connections
+4.7.2 with Smart Environment v3 selection policy 2. It reads the configured
+note and block minima, embedding toggle, heading exclusions, file and folder
+patterns, and recorded Git ignore rules. Explicit CLI minima override the
+settings. The generation freezes that settings snapshot for later incremental
+builds on any machine. To adopt another Desktop selection snapshot, bootstrap
+into a new index directory. The verification report counts notes at or
+below the byte cutoff as exclusions. When the note vector is omitted, its
+sections are omitted from the published generation.
+
+Section imports require the source record's selection policy version, block
+minimum, and character budget to match policy 2, the effective minimum, and
+`floor(max_tokens * 3.7)`. The report counts selected sections with an SC
+reference and a missing or incompatible rule in `sectionsWithRuleMismatch`.
+Publication stops when this count is nonzero. Use `--allow-selection-mismatch`
+to encode those sections through the normal path.
+
+Before encoding any remaining rows, the producer re-encodes a deterministic
+sample stratified by vector type and UTC encoding month from the SC reference,
+with an unknown-month stratum. The default is up to 100 rows. Use an encoder
+with a fresh document cache. If the bridge reports a
+cache hit, the check stops. The minimum cosine must reach 0.995 and the median
+0.999. The v3 fingerprint does not identify the original weights or preserve
+every historical input. The current heading exclusions do not establish which
+rules were active when historical vectors were encoded. SC's 32-bit text hash
+uses the low byte of each UTF-16 code unit, so a matching hash can conceal text
+changes. The manifest marks imported rows as `sc-hash32` and preserves the
+marker when reusing them. It also records the sample result, population and
+comparison counts per stratum, and imported and encoded counts by kind.
+
+Add `--verify-only` to report import coverage, rows that require encoding and
+sample agreement as JSON. The report also compares section keys with eligible
+Smart Environment references, including references outside the scanned corpus.
+Use `--max-samples` with a value from 20 to 500 to set the cap in either
+bootstrap mode. Verification-only uses the producer lock and can create the index directory.
+It does not encode the remaining rows or publish a generation.
+The queued counts are measured before the encoder can refuse an item for length.
+
 ## Publication and recovery
 
 - `<index>/CURRENT` contains the active generation ID and a newline.

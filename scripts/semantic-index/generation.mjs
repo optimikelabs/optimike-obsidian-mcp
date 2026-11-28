@@ -186,11 +186,16 @@ export async function validateGeneration(directory, manifest) {
   }
 }
 
-export async function readVector(handle, row, dimensions) {
+export async function readVector(handle, row, dimensions, { allowInvalid = false } = {}) {
   const bytes = Buffer.allocUnsafe(dimensions * 4);
   const { bytesRead } = await handle.read(bytes, 0, bytes.length, row * bytes.length);
-  if (bytesRead !== bytes.length) throw Error("Incomplete cached vector row");
-  validateVector(Array.from({ length: dimensions }, (_, i) => bytes.readFloatLE(i * 4)), dimensions);
+  try {
+    if (bytesRead !== bytes.length) throw Error("Incomplete cached vector row");
+    validateVector(Array.from({ length: dimensions }, (_, i) => bytes.readFloatLE(i * 4)), dimensions);
+  } catch (error) {
+    if (allowInvalid) return null;
+    throw error;
+  }
   return bytes;
 }
 

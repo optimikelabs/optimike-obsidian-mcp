@@ -119,15 +119,15 @@ export function parse_markdown_blocks(markdown, opts={}) {
     }
 
     // A closing fence must match the opening type and be at least as long, without trailing content.
-    const fence_match = (trimmed_line.startsWith('```') || trimmed_line.startsWith('~~~'))
+    const fence_match = (trimmed_line.startsWith('```') || (!opts.smart_env_v3 && trimmed_line.startsWith('~~~')))
       ? trimmed_line.match(/^(`{3,}|~{3,})(.*)$/)
       : null;
     const opens_fence = !code_fence && fence_match
-      && (fence_match[1][0] !== '`' || !fence_match[2].includes('`'));
+      && (opts.smart_env_v3 || fence_match[1][0] !== '`' || !fence_match[2].includes('`'));
     const closes_fence = code_fence && fence_match
-      && fence_match[1][0] === code_fence.char
+      && (opts.smart_env_v3 || (fence_match[1][0] === code_fence.char
       && fence_match[1].length >= code_fence.length
-      && fence_match[2] === '';
+      && fence_match[2] === ''));
     if (opens_fence || closes_fence) {
       // track codeblock ranges
       if (opens_fence) {

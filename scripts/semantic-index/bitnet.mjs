@@ -86,7 +86,7 @@ export function bitnetClient(endpoint, modelId, revision, modelSha256) {
         },
       };
     },
-    async encode(parts, profile) {
+    async encode(parts, profile, { fresh = false } = {}) {
       const items = parts.map(part => ({
         purpose: "document",
         input: part.input,
@@ -100,12 +100,15 @@ export function bitnetClient(endpoint, modelId, revision, modelSha256) {
       if (payload === null) {
         if (parts.length === 1) return [null];
         const middle = Math.floor(parts.length / 2);
-        return [...await this.encode(parts.slice(0, middle), profile),
-          ...await this.encode(parts.slice(middle), profile)];
+        return [...await this.encode(parts.slice(0, middle), profile, { fresh }),
+          ...await this.encode(parts.slice(middle), profile, { fresh })];
       }
       if (payload?.model !== modelId || !Array.isArray(payload.results) ||
           payload.results.length !== parts.length) throw Error("BitNet returned unexpected document results");
       return payload.results.map((row, index) => {
+        if (fresh && row?.cache_hit === true) {
+          throw Error("Bootstrap verification requires uncached document encodings");
+        }
         // The single-document CPU route returns the native worker row. Its
         // device label is added only to the bridge's audit record.
         const device = !batch && row?.device === undefined ? "cpu" : row?.device;
