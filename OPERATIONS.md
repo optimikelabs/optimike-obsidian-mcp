@@ -235,10 +235,11 @@ latency guarantees.
 
 Client sequence:
 
-1. `obsidian_note_replace_plan(path, nextContent, idempotencyKey)`;
-2. `obsidian_note_replace_apply(planRef, idempotencyKey)`;
-3. after any timeout or lost response, call `obsidian_note_replace_status`;
-4. call `obsidian_note_replace_recover` only when the receipt authorizes
+1. Read the note with `obsidian_read_note` and retain its `sha256`.
+2. Call `obsidian_note_replace_plan` with `path`, `nextContent`, `idempotencyKey` and the read hash as `expectedBeforeSha256`.
+3. Call `obsidian_note_replace_apply(planRef, idempotencyKey)`.
+4. After any timeout or lost response, call `obsidian_note_replace_status`.
+5. Call `obsidian_note_replace_recover` only when the receipt authorizes
    exact-plan recovery.
 
 `planRef` is opaque. Apply and recover never accept a new target, content or

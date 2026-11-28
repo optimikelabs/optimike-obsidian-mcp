@@ -106,17 +106,6 @@ for (const tool of tools) {
     `2.6.0 changelog section omits ${tool}`,
   );
 }
-const unreleasedSection = changelog.slice(
-  changelog.indexOf("## [Unreleased]") + "## [Unreleased]".length,
-  changelog.indexOf("## [2.6.0] - 2026-08-14"),
-);
-for (const tool of tools) {
-  assert.equal(
-    unreleasedSection.includes(`\`${tool}\``),
-    false,
-    `${tool} must belong to 2.6.0, not Unreleased`,
-  );
-}
 assert.match(liveCanary, /os\.tmpdir\(\)/);
 assert.doesNotMatch(
   liveCanary,

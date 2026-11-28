@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/server";
+import { createHash } from "node:crypto";
 import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
@@ -44,7 +45,7 @@ export const registerObsidianReadNoteTool = async (
 ): Promise<void> => {
   const toolName = "obsidian_read_note";
   const toolDescription =
-    "Retrieves the content and metadata of a specified file within the Obsidian vault. Tries the exact path first, then attempts a case-insensitive fallback. Returns an object containing the content (markdown string or full NoteJson object based on 'format'), and optionally formatted file stats ('stats' object with creationTime, modifiedTime, tokenCountEstimate). Use 'includeStat: true' with 'format: markdown' to include stats; stats are always included with 'format: json'.";
+    "Retrieves the content and metadata of a specified file within the Obsidian vault. Tries the exact path first, then attempts a case-insensitive fallback. Returns the content (markdown string or full NoteJson object based on 'format') and a top-level sha256 of the returned Markdown encoded as UTF-8. Pass that hash as expectedBeforeSha256 when planning a full replacement based on this read. Use 'includeStat: true' with 'format: markdown' to include formatted file stats; stats are always included with 'format: json'.";
 
   // Create a context specifically for the registration process.
   const registrationContext: RequestContext =
@@ -103,13 +104,15 @@ export const registerObsidianReadNoteTool = async (
                 handlerContext,
               );
 
-              // Format the successful response object from the logic function into the required MCP CallToolResult structure.
-              // The entire response object (containing content and optional stat) is serialized to JSON.
+              const markdown = typeof response.content === "string"
+                ? response.content
+                : response.content.content;
+              const sha256 = createHash("sha256").update(markdown, "utf8").digest("hex");
               return {
                 content: [
                   {
                     type: "text", // Standard content type for structured JSON data
-                    text: JSON.stringify(response, null, 2), // Pretty-print JSON
+                    text: JSON.stringify({ ...response, sha256 }, null, 2),
                   },
                 ],
                 isError: false, // Indicate successful execution

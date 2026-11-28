@@ -1375,12 +1375,50 @@ try {
   session = await startClient("full", "live");
 
   fake.reset();
-  const stalePlan = await call(session, "obsidian_note_replace_plan", {
+  const readA = await call(session, "obsidian_read_note", {
+    filePath: FIXTURE_PATH,
+    format: "json",
+  });
+  const shaA = sha256(readA.payload.content.content);
+  const editB = nextContent("third-party-edit");
+  fake.content = editB;
+  const staleBeforePlan = await call(session, "obsidian_note_replace_plan", {
+    path: FIXTURE_PATH,
+    nextContent: nextContent("based-on-a"),
+    idempotencyKey: "stale-before-plan",
+    expectedBeforeSha256: shaA,
+  }, true);
+  assert.equal(staleBeforePlan.payload.error.code, "CONFLICT", "an edit after read and before plan must refuse the stale replacement");
+  assert.equal(staleBeforePlan.payload.error.details.reasonCode, "note_replace_base_changed");
+  assert.equal(staleBeforePlan.payload.error.details.observedSha256, sha256(editB));
+  assert.equal(staleBeforePlan.payload.error.details.mutationMayHaveApplied, false);
+  assert.equal(fake.content, editB);
+  assert.equal(readA.payload.sha256, shaA, "the read hash must cover the returned UTF-8 content");
+
+  const staleBeforePlanRetry = await call(session, "obsidian_note_replace_plan", {
+    path: FIXTURE_PATH,
+    nextContent: nextContent("based-on-b"),
+    idempotencyKey: "stale-before-plan",
+    expectedBeforeSha256: sha256(editB),
+  });
+  assert.equal(staleBeforePlanRetry.payload.beforeProof.details.sha256, sha256(editB), "the refused request must not have sealed a plan or bound the key");
+
+  fake.reset();
+  const staleRequest = {
     path: FIXTURE_PATH,
     nextContent: nextContent("stale-target"),
     idempotencyKey: "stale-target",
-  });
-  fake.content = nextContent("third-party-edit");
+    expectedBeforeSha256: readA.payload.sha256,
+  };
+  const stalePlan = await call(session, "obsidian_note_replace_plan", staleRequest);
+  fake.content = editB;
+  const staleReplay = await call(session, "obsidian_note_replace_plan", staleRequest);
+  assert.equal(staleReplay.payload.planRef, stalePlan.payload.planRef, "same-base retries replay the sealed plan even after a later edit");
+  const differentBase = await call(session, "obsidian_note_replace_plan", {
+    ...staleRequest,
+    expectedBeforeSha256: sha256(editB),
+  }, true);
+  assert.equal(differentBase.payload.error.code, "CONFLICT", "the same key cannot be rebound to a different expected base");
   const staleWrites = fake.successfulWrites;
   const stale = await call(session, "obsidian_note_replace_apply", {
     planRef: stalePlan.payload.planRef,
@@ -1388,7 +1426,7 @@ try {
   });
   assertTerminal(stale.payload, "conflict");
   assert.equal(fake.successfulWrites, staleWrites);
-  assert.equal(fake.content, nextContent("third-party-edit"));
+  assert.equal(fake.content, editB, "apply preserves an edit made after planning");
 
   // A wrapper preflight refusal has not sent a CAS and must not wait for
   // an automation window belonging to a write that never happened.

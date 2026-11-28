@@ -238,6 +238,7 @@ const SAFE_ERROR_DETAIL_FIELDS = new Set([
   "recoveryAllowed",
   "applyAllowed",
   "mutationMayHaveApplied",
+  "observedSha256",
   // Closed, content-free sub-cause of date_preparation_unverified.
   "preparationCheck",
   "httpStatus",
@@ -483,6 +484,8 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "date_preparation_bridge_upgrade_required",
   "date_preparation_fdm_pending",
   "date_preparation_not_started",
+  "note_replace_base_changed",
+  "note_replace_date_preparation_required",
   "effect_attempt_limit_reached",
   "frontmatter_format_capability_missing",
   "frontmatter_format_changed",
@@ -623,7 +626,7 @@ function isSafeDiagnosticString(field: string, value: string): boolean {
   if (field === "profile") {
     return SAFE_PROFILES.has(value);
   }
-  if (field === "planDigest") return /^[a-f0-9]{64}$/u.test(value);
+  if (field === "planDigest" || field === "observedSha256") return /^[a-f0-9]{64}$/u.test(value);
   if (field === "preparationCheck") return isDatePreparationCheck(value);
   if (field === "reasonCode") return SAFE_PUBLIC_REASON_CODES.has(value);
   if (field === "hint") return isNoteNameHint(value) || isNativeMoveHint(value);
@@ -718,6 +721,10 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
     return "Le gestionnaire de dates ou une autre préparation occupe encore la file ; rien n'a été modifié par cette préparation. Relancez le plan dans une trentaine de secondes.";
   if (reasonCode === "date_preparation_not_started")
     return "La préparation des dates n'a pas démarré ; rien n'a été modifié par cette préparation. Relisez la note puis relancez le plan.";
+  if (reasonCode === "note_replace_base_changed")
+    return "The note changed since the source read. Read it again with obsidian_read_note and rebuild the replacement from that content and hash.";
+  if (reasonCode === "note_replace_date_preparation_required")
+    return "The note needs a creation date. Open and save it in Obsidian, wait for the date manager to finish, then read it again with obsidian_read_note and rebuild the replacement from that content and hash.";
   if (reasonCode === "effect_attempt_limit_reached")
     return "La limite de tentatives de cette opération est atteinte. Consultez son statut avant toute nouvelle action ; ne rejouez pas un effet incertain.";
   if (reasonCode === "atomic_bridge_version_unsupported")

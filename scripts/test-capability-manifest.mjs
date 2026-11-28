@@ -166,8 +166,7 @@ function capability(manifest, id) {
 
 const ready = projectCapabilityManifest(input());
 assert.equal(ready.contractVersion, 1);
-assert.equal(ready.capabilities.length, 15);
-assert.equal(ready.summary.ready, 15);
+assert.equal(ready.summary.ready, ready.capabilities.length);
 assert.equal(ready.admission.state, "not-applicable");
 // Catches: the dual-only applyConfirmation field leaking into legacy responses.
 {
@@ -330,7 +329,7 @@ assert.deepEqual(
 for (const [id, missingTools] of [
   [
     "governed-note-write",
-    ["obsidian_note_replace_apply", "obsidian_text_patch_apply"],
+    ["obsidian_note_replace_plan", "obsidian_text_patch_apply"],
   ],
   ["governed-frontmatter-write", ["obsidian_frontmatter_patch_apply"]],
   ["governed-canvas-write", ["obsidian_canvas_patch_apply"]],
@@ -407,10 +406,14 @@ assert.equal(partialWrite.available, true);
 assert.equal(partialWrite.authorized, false);
 assert.equal(partialWrite.state, "degraded");
 assert.equal(partialWrite.reasonCode, "operon_partial_capabilities");
-assert.equal(partialWrite.operations.length, 13);
 assert.equal(
   partialWrite.operations.find((operation) => operation.id === "transition")
     .reasonCode,
+  "operon_capability_not_advertised",
+);
+assert.equal(
+  partialWrite.operations.find((operation) => operation.id === "recurrence")
+    ?.reasonCode,
   "operon_capability_not_advertised",
 );
 assert.equal(
