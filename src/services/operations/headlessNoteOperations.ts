@@ -5,6 +5,7 @@ import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { NATIVE_MOVE_PREFIX, nativeDigest } from "../nativeNoteMoveContract.js";
 import { NOTE_DELETE_PREFIX } from "../noteDeleteContract.js";
 import { assertNewNotePath } from "../noteNameMcp.js";
+import { HEADLESS_LINK_COVERAGE_INCOMPLETE, incompleteHeadlessLinkCoverageError } from "../headlessLinkCoverage.js";
 import { assertWriteAllowed } from "../writePolicy.js";
 import type { VaultCacheService } from "../obsidianRestAPI/vaultCache/service.js";
 import type { MarkdownLinkReference } from "../obsidianRestAPI/vaultCache/markdownLinkReferences.js";
@@ -42,8 +43,8 @@ function graphProof(references: readonly MarkdownLinkReference[], note: string, 
 }
 
 function planConflictReason(error: McpError) {
-  return error.details?.reasonCode === "headless_link_coverage_incomplete"
-    ? "headless_link_coverage_incomplete" : "headless_plan_stale";
+  return error.details?.reasonCode === HEADLESS_LINK_COVERAGE_INCOMPLETE
+    ? HEADLESS_LINK_COVERAGE_INCOMPLETE : "headless_plan_stale";
 }
 
 function inverseEdits(rewrite: Rewrite) {
@@ -74,11 +75,11 @@ export class HeadlessNoteOperations {
       target: source, targetType: "filePath", destructive: true });
   }
 
-  private requireCompleteLinks(content: string, bytes: number, editable = false) {
+  private requireCompleteLinks(note: string, content: string, bytes: number, editable = false) {
     const source = this.cache.extractFilesystemLinkSource(content, bytes, editable);
     if (!source.complete) {
-      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The operation requires complete link extraction.",
-        { reasonCode: "headless_link_coverage_incomplete" });
+      const indexCoverage = { limitedSourceCount: 1, limitedSources: [{ path: note, reason: source.limitReason ?? "region" }] };
+      throw incompleteHeadlessLinkCoverageError(indexCoverage);
     }
     return source.references;
   }
@@ -123,13 +124,13 @@ export class HeadlessNoteOperations {
       const state = note === intent.source ? original : files.state(note, { readBytes: true });
       if (!state?.bytes) filesystemConflict("An indexed backlink source disappeared.");
       const content = state.bytes.toString("utf8");
-      const links = this.requireCompleteLinks(content, state.size, intent.kind === "move");
+      const links = this.requireCompleteLinks(note, content, state.size, intent.kind === "move");
       if (intent.kind === "delete") {
         const count = links.filter(ref => before.resolve(indexedPath, ref.linkPath)?.path === source).length;
         if (count) snapshot.backlinks.push({ sourcePath: note, count });
       } else {
         const { rewrite, references } = rewriteIncoming(content, indexedPath, source, "/" + destination, before, after,
-          settings, links, next => this.requireCompleteLinks(next, Buffer.byteLength(next)));
+          settings, links, next => this.requireCompleteLinks(note, next, Buffer.byteLength(next)));
         const resultPath = indexedPath === source ? "/" + destination : indexedPath;
         snapshot.graphProofs!.push({ path: resultPath.slice(1), digest: graphProof(references, resultPath, after) });
         if (!rewrite) continue;

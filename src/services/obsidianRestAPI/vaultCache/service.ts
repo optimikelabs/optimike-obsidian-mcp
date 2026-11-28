@@ -34,7 +34,8 @@ import { CacheEventSupervisor } from "./eventSupervisor.js";
 import { MarkdownLinkIndex } from "./markdownLinkIndex.js";
 import { extractIndexedLinkSource } from "./boundedLinkReferences.js";
 import { foldedPath, readVaultAppSettings } from "../../operations/headlessVaultFiles.js";
-import { MarkdownLinkWorker } from "./markdownLinkWorker.js";
+import { LinkStorageFailure, MarkdownLinkWorker } from "./markdownLinkWorker.js";
+import { incompleteHeadlessLinkCoverageError } from "../../headlessLinkCoverage.js";
 import {
   applyWalSizeLimit,
   checkpointWal,
@@ -193,6 +194,8 @@ export class VaultCacheService {
   private linkIndexRun?: Promise<void>;
   private linkIndexWorker?: MarkdownLinkWorker;
   private linkIndexIdleTimer?: ReturnType<typeof setTimeout>;
+  private linkIndexRetryTimer?: ReturnType<typeof setTimeout>;
+  private linkStorageFailures = 0;
   private linkIndexIdleRun?: Promise<void>;
   private readonly linkExtraction = config.obsidianLinkExtraction;
   private readonly vaultExclusionMatcher = createVaultExclusionMatcher(
@@ -691,7 +694,7 @@ export class VaultCacheService {
     );
   }
 
-  public async readFilesystemNoteLinks(filePath: string, limit: number, context: RequestContext): Promise<FilesystemNoteLinksResponse> {
+  public async readFilesystemNoteLinks(filePath: string, limit: number, context: RequestContext, requireComplete = false): Promise<FilesystemNoteLinksResponse> {
     const vaultRoot = getVaultRoot();
     const links = this.markdownLinks;
     if (!links || !vaultRoot) {
@@ -704,6 +707,8 @@ export class VaultCacheService {
           ...context, reasonCode: "headless_link_index_building", retryable: true,
         });
       }
+      const indexCoverage = links.readIndexCoverage(matched);
+      if (requireComplete && indexCoverage) throw incompleteHeadlessLinkCoverageError(indexCoverage);
       return {
         ok: true,
         contractVersion: 1,
@@ -721,7 +726,7 @@ export class VaultCacheService {
           backlinks: "filesystem", unresolved: "filesystem",
         },
         ...links.read(matched, limit),
-        indexCoverage: links.readIndexCoverage(matched),
+        indexCoverage,
       };
     }, () => this.assertFilesystemLinkCacheReady(context));
   }
@@ -756,10 +761,7 @@ export class VaultCacheService {
         throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "The filesystem link inventory is changing.");
       }
       const inventory = this.markdownLinks.moveInventory("/" + filePath, destination ? "/" + destination : undefined, limit);
-      if (!inventory.complete) {
-        throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The operation requires complete backlink coverage.",
-          { reasonCode: "headless_link_coverage_incomplete" });
-      }
+      if (inventory.indexCoverage) throw incompleteHeadlessLinkCoverageError(inventory.indexCoverage);
       this.db.exec("COMMIT");
       return inventory;
     } catch (error) {
@@ -859,24 +861,44 @@ export class VaultCacheService {
   }
 
   private scheduleFilesystemLinkIndex(): void {
-    if (!this.markdownLinks || this.closing || this.linkIndexRun || !this.isReady()) return;
+    if (!this.markdownLinks || this.closing || this.linkIndexRun ||
+        (this.linkIndexRetryTimer && this.linkStorageFailures > 0) || !this.isReady()) return;
+    clearTimeout(this.linkIndexRetryTimer);
+    this.linkIndexRetryTimer = undefined;
+    let storageDelay: number | undefined;
     // Scheduling can happen inside the read snapshot. Perform writes only
     // after yielding, when that snapshot and any current writers have finished.
     this.linkIndexRun = this.buildFilesystemLinkIndex(this.markdownLinks)
-      .catch(() => {
+      .then(() => { this.linkStorageFailures = 0; })
+      .catch((error) => {
         this.checkedFilesystemVersion = undefined;
+        if (error instanceof LinkStorageFailure) {
+          storageDelay = 250 * 2 ** Math.min(this.linkStorageFailures++, 6);
+          return;
+        }
         if (!this.closing) {
           logger.warning("Headless link indexing was interrupted. The link tool can retry.",
             requestContextService.createRequestContext({ operation: "buildFilesystemLinkIndex" }));
         }
       })
-      .finally(() => { this.linkIndexRun = undefined; });
+      .finally(() => {
+        this.linkIndexRun = undefined;
+        if (this.closing) return;
+        const due = this.markdownLinks?.nextRetryTime();
+        const delay = storageDelay ?? (due === undefined ? undefined : Math.max(0, due - Date.now()));
+        if (delay !== undefined) {
+          this.linkIndexRetryTimer = setTimeout(() => {
+            this.linkIndexRetryTimer = undefined;
+            this.scheduleFilesystemLinkIndex();
+          }, delay).unref();
+        }
+      });
   }
 
   private async buildFilesystemLinkIndex(links: MarkdownLinkIndex): Promise<void> {
     await yieldToEventLoop();
     if (this.closing || !this.isReady()) return;
-    if (this.verifyFilesystemIndex()) return;
+    if (this.verifyFilesystemIndex() && (links.nextRetryTime() ?? Infinity) > Date.now()) return;
     clearTimeout(this.linkIndexIdleTimer);
     await this.linkIndexIdleRun;
     if (this.closing) return;
@@ -1123,6 +1145,7 @@ export class VaultCacheService {
     this.stopPeriodicRefresh();
     this.closing = true;
     clearTimeout(this.linkIndexIdleTimer);
+    clearTimeout(this.linkIndexRetryTimer);
     await this.eventStop;
     await this.refreshRun?.catch(() => undefined);
     await this.linkIndexWorker?.close();

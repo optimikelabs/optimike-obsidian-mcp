@@ -33,6 +33,7 @@ This branch leaves `main` and the individual pull requests unaffected.
 | [#245](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/245) | `8bef7f1ed9f05cd0af3ddcf9c9ec75470721a42b` | Governed filesystem Markdown patches, creation, replacement and revert with a per-vault journal and native exchange on supported Linux/macOS filesystems |
 | [#246](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/246) | `5b3edb76c2003e1370a448190f61aa4ac866cef9` | Ranked BM25 search over cached Markdown and hybrid search with lexical, note, and section signals |
 | [#247](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/247) | `9cdf0af6e82f56373c88e66f7d7c8c682f90c43e` | Retries Operon `GET /status` once after a socket reset, with fixture connection cleanup |
+| [#248](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/248) | `4c39df5bc0d2f2448439916ad3c35327133038e6` | Bounded link parsing, persisted retries, limited-source diagnostics and bounded smoke waits |
 
 Run the read-only profile first. Test filesystem writes on a separate,
 disposable copy using synthetic notes. Write serialization is process-local.
@@ -71,6 +72,25 @@ suite runs both headless Operon and note-operation tests. Static profiles
 keep read-only Operon in all headless modes and use the extended governed
 move and trash lifecycles only in `headless-filesystem`. The old index
 revision remains only in a test fixture that verifies migration.
+
+### Résolution d'intégration #243 × #248
+
+The integrated link index uses revision `v15:`, superseding both
+parent revisions. The merge retains #243's shared resolver and editable
+link ranges, correcting both public positions and rewrite offsets for
+any synthetic list prefix from #248. The cache tests cover the old
+revision, transaction rollback and #248's persisted retry behavior.
+The public error handler keeps the Bases messages alongside #248's
+bounded, sanitized limited-source diagnostics.
+
+Move and trash still refuse when relevant link coverage is incomplete.
+The refusals use the same limited-source payload as link lookups, including
+a destination-retargeting source when relevant. An already sealed plan
+that loses coverage still settles as a conflict. A timeout stays retryable
+and fences affected writes until coverage is sufficient. The index keeps
+`region` for a bounded or unsafe parse region and `cap` for a reference
+ceiling. The smoke and note-operation tests use the shared bounded wait
+for the public retryable index response.
 
 The #245 merge preserves #243's cache-backed move and trash lifecycle and
 #244's Operon reads. It adds the guarded Markdown families to both writable

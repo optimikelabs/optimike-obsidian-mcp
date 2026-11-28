@@ -1,5 +1,6 @@
 import { isolatedStateEnv, isolatedStateDirectory } from "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
+import { readHeadlessNoteLinks } from "./test-support/headless-note-links.mjs";
 import { link, mkdir, readdir, readFile, realpath, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/client";
@@ -87,7 +88,7 @@ const movePlan = (sourcePath, destinationPath, idempotencyKey) =>
 const lifecycle = (kind, role, plan, idempotencyKey) => call(`obsidian_note_${kind}_${role}`, {
   planRef: plan.planRef, ...(idempotencyKey ? { idempotencyKey } : {}),
 });
-const linkQuery = filePath => call("obsidian_note_links", { filePath });
+const linkQuery = filePath => readHeadlessNoteLinks(client, filePath);
 const recorded = receipt => ({ ...receipt, cache: "recorded", postflightSource: "recorded" });
 
 try {
@@ -480,7 +481,10 @@ try {
       sourcePath: "Distinct target.md", destinationPath: "A/Unexpected.md", idempotencyKey: "bounded-destination",
     });
     for (const refusal of [boundedMove, boundedDelete, boundedDestination]) {
-      assert.equal(refusal.body.error.details.reasonCode, "headless_link_coverage_incomplete");
+      const coverage = refusal.body.error.details;
+      assert.equal(coverage.reasonCode, "headless_link_coverage_incomplete");
+      assert.equal(coverage.limitedSourceCount, 1);
+      assert.deepEqual(coverage.limitedSources, [{ path: "Reader/Large backlink source.md", reason: "region" }]);
     }
     const unrelated = await movePlan("Distinct target.md", "New/Distinct moved.md", "unrelated-limited-source");
     assert.equal((await lifecycle("move", "apply", unrelated, "unrelated-limited-source")).outcome, "committed");

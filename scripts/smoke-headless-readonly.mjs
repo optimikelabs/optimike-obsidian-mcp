@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { isolatedStateEnv } from "./test-support/isolated-state.mjs";
+import { readHeadlessNoteLinks } from "./test-support/headless-note-links.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import "./test-support/isolated-state.mjs";
@@ -435,10 +436,6 @@ async function main() {
   try {
     await withTimeout(client.connect(transport), "connect");
 
-    // Give the background filesystem cache build a short window. The tool calls
-    // below also fail loudly if cache readiness does not arrive.
-    await new Promise((resolve) => setTimeout(resolve, 750));
-
     const tools = await withTimeout(client.listTools(), "listTools");
     const toolNames = tools.tools.map((tool) => tool.name).sort();
     const toolsByName = new Map(tools.tools.map((tool) => [tool.name, tool]));
@@ -456,10 +453,7 @@ async function main() {
           provenance: { source: "filesystem" },
         });
       }
-      const result = await client.callTool({
-        name: "obsidian_note_links", arguments: { filePath: "Projects/Headless.md" },
-      });
-      const links = jsonOf(result, "filesystem note links");
+      const links = await readHeadlessNoteLinks(client, "Projects/Headless.md", Math.min(timeoutMs, 60_000));
       assert.equal(links.backend.kind, "filesystem");
       assert.deepEqual(links.outgoing.find((link) => link.linkText === "Root")?.resolution,
         { status: "resolved", targetPath: "Root.md" });
@@ -850,11 +844,8 @@ async function main() {
         [hiddenNotes[2]]: excluded,
         [explicitlyIncludedNote]: { listed: true, found: true, readable: true, frontmatterReadable: true },
       });
-      const links = await withTimeout(client.callTool({
-        name: "obsidian_note_links", arguments: { filePath: explicitlyIncludedNote },
-      }), "links from the explicitly included hidden note");
-      assert.equal(links.isError, false);
-      assert.deepEqual(jsonOf(links, "reincluded note links").outgoing.map(({ resolution }) =>
+      const links = await readHeadlessNoteLinks(client, explicitlyIncludedNote, Math.min(timeoutMs, 60_000));
+      assert.deepEqual(links.outgoing.map(({ resolution }) =>
         resolution.targetPath ?? null), ["Root.md", null]);
     }
 
