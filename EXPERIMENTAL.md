@@ -27,16 +27,24 @@ This branch leaves `main` and the individual pull requests unaffected.
 | [#239](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/239) | `2f42c5da8dacd4e0527e0a699aa9c54d264bafb9` | Bases Bridge 1.3.2 uses native row selection in both live query modes and omits formula columns with `evaluate: false` |
 | [#240](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/240) | `fa9571a813e899c698aa9a2ea022bb326473dd84` | Headless frontmatter and SQLite note links, background link indexing, cross-process text cache invalidation, and improved wikilink parsing |
 | [#241](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/241) | `0ab243287b173d10da8411be546a64bb5ac97895` | Live compact listings and global search report `diskPath` when a unique physical spelling uses NBSP or narrow NBSP. Search accepts up to 500 result files per page |
+| [#242](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/242) | `c6ac776c0f0fe8527bfede421312c8f7de7317c6` | Vault-bound Sync evidence and optional write guard, plus the incremental semantic indexing service with leases, bounded retention, and status |
+| [#247](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/247) | `9cdf0af6e82f56373c88e66f7d7c8c682f90c43e` | Retries Operon `GET /status` once after a socket reset, with fixture connection cleanup |
 
 Run the read-only profile first. Test filesystem writes on a separate,
 disposable copy using synthetic notes. Write serialization is process-local.
-The runtime cannot attest to upstream sync. Headless property scans do not run
+Upstream Sync stays unknown unless a valid vault-bound heartbeat is configured.
+Headless property scans do not run
 the Bases engine. Semantic search requires a complete generation and a
 compatible encoder. The producer's v3 input profile requires an explicit
 rebuild of generations made with the older block selection. See the [producer](docs/semantic-index-producer.md) and
 [reader](docs/semantic-vector-cache-encoding.md#external-smart-env-v3-generations)
 contracts. Proposal planning needs the live Atomic Write authority. Apply
 retains the sealed plan and its compare-and-swap check.
+
+The optional Sync guard runs before filesystem effects, inside the existing
+write locks. It preserves the hash rechecks and create-if-absent behavior.
+Exact disk reads retain their independent observation time. Semantic service
+status comes from the current generation and its expiring observation.
 
 On this branch the proposal HTTP test from #220 uses #219's shared startup
 helper. Its lost-response, redaction, and shutdown assertions still run.
