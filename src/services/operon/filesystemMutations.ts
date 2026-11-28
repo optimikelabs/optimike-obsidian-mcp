@@ -78,29 +78,28 @@ function statusFor(configuration: FilesystemConfiguration, selector: { statusId?
   return candidates[0];
 }
 
-function validDate(value: string, datetime: boolean) {
-  const shape = datetime ? /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/u : /^\d{4}-\d{2}-\d{2}$/u;
-  if (!shape.test(value)) return false;
-  const time = new Date(datetime ? value + "Z" : value + "T00:00:00Z");
+function validDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;
+  const time = new Date(value + "T00:00:00Z");
   return Number.isFinite(time.getTime()) && time.toISOString().slice(0, value.length) === value;
 }
 
 function scalarFields(input: Record<string, unknown> | undefined, configuration: FilesystemConfiguration) {
   const fields: Record<string, string | null> = {};
-  for (const [key, value] of Object.entries(input ?? {})) {
+  for (const [key, rawValue] of Object.entries(input ?? {})) {
+    const value = rawValue === "" ? null : rawValue;
     if (key === "priority") {
       const id = typeof value === "string" ? resolveOperonPriorityStableId(value, configuration.priorities.items) : undefined;
       const priorities = configuration.priorities.items.filter(item => id && item.id === id);
       if (value !== null && priorities.length !== 1) invalid("Provide one uniquely configured Operon priority.");
       fields.priority = value === null ? null : priorities[0].label;
-    } else if (["dateDue", "dateStarted", "datetimeStart", "datetimeEnd"].includes(key)) {
-      if (value !== null && (typeof value !== "string" || !validDate(value, key.startsWith("datetime")))) {
-        invalid("Use a valid local Operon date or datetime.");
+    } else if (key === "dateDue" || key === "dateStarted") {
+      if (value !== null && (typeof value !== "string" || !validDate(value))) {
+        invalid("Use a valid local Operon date.");
       }
       fields[key] = value as string | null;
-    } else if (key === "estimate") {
-      if (value !== null && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) invalid("Use a nonnegative estimate in seconds.");
-      fields.estimate = value === null ? null : String(value);
+    } else if (key === "estimate" || key === "datetimeStart" || key === "datetimeEnd") {
+      unsupportedFilesystemMutation("Datetime scheduling and estimates can induce native scheduling and status changes.");
     } else {
       unsupportedFilesystemMutation("This field requires Operon's native typed writer.");
     }
@@ -168,14 +167,18 @@ export class FilesystemOperonMutations {
   updateTask(input: unknown) {
     const params = parseToolInput(OperonUpdateTaskSchema, input, OPERON_PUBLIC_INPUT_MESSAGES);
     if (params.patch.properties) return unsupportedFilesystemMutation("Unmanaged file properties require the native Operon property contract.");
-    return this.edit("operon_update_task", params, view => ({
-      description: params.patch.description, tags: params.patch.tags, fields: scalarFields(params.patch.fields, view.configuration),
-    }));
+    return this.edit("operon_update_task", params, (view, task) => {
+      // Operon normalizes existing time slots even during other field edits.
+      if (params.patch.fields && (task.dates.datetimeStart || task.dates.datetimeEnd)) {
+        return unsupportedFilesystemMutation("Updating fields on a task with a time slot requires native scheduling normalization.");
+      }
+      return { description: params.patch.description, tags: params.patch.tags, fields: scalarFields(params.patch.fields, view.configuration) };
+    });
   }
 
   transitionTask(input: unknown) {
     const params = parseToolInput(OperonTransitionTaskSchema, input, OPERON_PUBLIC_INPUT_MESSAGES);
-    return this.edit("operon_transition_task", params, (view, task, timestamp) => {
+    return this.edit("operon_transition_task", params, (view, task, timestamp): SimpleTaskEdit & { noChange?: boolean } => {
       const taxonomy = view.configuration.workflow;
       if (view.projectSerials) return unsupportedFilesystemMutation("Configured project serial scopes require Operon's native transition transaction.");
       if (task.source === "file" && view.filePipelineRouting) {
@@ -184,6 +187,7 @@ export class FilesystemOperonMutations {
       const intent = params.intent && resolveOperonTransitionIntent(taxonomy, task, params.intent);
       if (intent && "error" in intent) return invalid(intent.error);
       const selected = statusFor(view.configuration, { statusId: params.statusId ?? (intent || undefined)?.statusId, status: params.status });
+      if (selected.value === task.status) return { fields: {}, noChange: true };
       const checkbox = selected.isFinished ? "done" : selected.isCancelled ? "cancelled" : "open";
       if (checkbox !== "open" && (view.pinned?.has(task.operonId) ||
           (task.source === "file" && view.configuration.automation.fileTaskAutoArchiveEnabled))) {
@@ -195,10 +199,11 @@ export class FilesystemOperonMutations {
     });
   }
 
-  private edit(action: WriteAction, params: Control & { operonId: string }, change: (view: Snapshot, task: OperonTask, timestamp: string) => SimpleTaskEdit) {
+  private edit(action: WriteAction, params: Control & { operonId: string }, change: (view: Snapshot, task: OperonTask, timestamp: string) => SimpleTaskEdit & { noChange?: boolean }) {
     return this.execute(action, params, undefined, (view, content, timestamp, _path, task) => {
       ensureStandalone(view, task!);
       const edit = change(view, task!, timestamp);
+      if (edit.noChange) return { content, operonId: task!.operonId, noChange: true };
       const next = editTaskSource(content, task!, view.configuration, edit);
       if (next === content) return invalid("The Operon edit would leave the task unchanged.");
       edit.fields.datetimeModified = timestamp;
@@ -207,10 +212,9 @@ export class FilesystemOperonMutations {
   }
 
   private async execute(action: WriteAction, params: Control, explicitPath: string | undefined,
-    compile: (view: Snapshot, content: string, timestamp: string, path: string, task?: OperonTask) => { content: string; operonId: string }) {
+    compile: (view: Snapshot, content: string, timestamp: string, path: string, task?: OperonTask) => { content: string; operonId: string; noChange?: boolean }) {
     if (!params.dryRun) requireApplyOptIn();
     assertWriteAllowed({ operation: action, action: params.dryRun ? "dry_run" : "apply", allowInGuarded: true, allowInReadonly: params.dryRun });
-    await this.requireAtomicExchange();
     const internalKey = journalKey(params.idempotencyKey);
     const identity = operationDigest({ action, params });
     const existing = this.notes.findPlanByIdempotencyKey(internalKey);
@@ -224,8 +228,13 @@ export class FilesystemOperonMutations {
       authorizePath(path);
       const source = await this.notes.readForProjection(path);
       if (task && view.sourceDigests.get(task) !== source.sha256) conflict("The task note was edited after the index read.");
+      if (task?.source === "file" && source.content.startsWith("\uFEFF")) {
+        throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Operon file tasks require frontmatter without a BOM.", { reasonCode: "malformed-frontmatter" });
+      }
       const timestamp = formatOperonLocalTime(this.now(), process.env.OPTIMIKE_VAULT_TIMEZONE?.trim() || view.provenance.timeZone);
       const edit = compile(view, source.content, timestamp, path, task);
+      const previewOnly = params.dryRun || edit.noChange === true;
+      if (!previewOnly) await this.requireAtomicExchange();
       const projected = parseOperonMarkdown(edit.content, path, view.configuration);
       if (projected.invalidFrontmatter || projected.tasks.filter(row => row.id === edit.operonId).length !== 1) {
         return unsupportedFilesystemMutation("The proposed task does not resolve to a unique indexed source.");
@@ -234,14 +243,16 @@ export class FilesystemOperonMutations {
         idempotencyIdentity: identity, expectedBeforeSha256: source.sha256, expectedBindingFingerprint: source.bindingFingerprint,
         projection: { contractVersion: 1, kind: FILESYSTEM_OPERON_PROJECTION, publicIdempotencyKey: params.idempotencyKey,
           intentDigest: identity, proof: { action, operonId: edit.operonId, before: task ? stripOperonTaskProperties(task) : null,
-            settingsSignature: view.snapshot.settingsSignature, mutationBinding: view.mutationBinding } },
-      }, source.sha256);
+            settingsSignature: view.snapshot.settingsSignature, mutationBinding: view.mutationBinding,
+            ...(previewOnly ? { previewOnly: true } : {}), ...(edit.noChange ? { noChange: true } : {}) } },
+      }, source.sha256, previewOnly);
       ref = receipt.planRef;
     }
     const sealed = this.requirePlan(ref);
     authorizePath(sealed.path);
     const previous = await this.notes.status(ref);
-    if (params.dryRun || previous.phase !== "planned") return this.result(previous, params, Boolean(existing));
+    if (params.dryRun || sealed.projection!.proof.noChange || previous.phase !== "planned") return this.result(previous, params, Boolean(existing));
+    await this.requireAtomicExchange();
     const current = await this.reader.mutationSnapshot();
     if (sealed.projection!.proof.mutationBinding !== current.mutationBinding) conflict("Operon settings or runtime state changed after planning.");
     if (params.operonId) ensureStandalone(current, exactTask(current, params.operonId, params.expectedRevision!));
@@ -315,6 +326,12 @@ export class FilesystemOperonMutations {
     const base = { contractVersion: OPERON_CONTRACT_VERSION, operationId: receipt.operationId, idempotencyKey: requested.idempotencyKey,
       source: "filesystem", stale: false, planDigest: receipt.planDigest };
     const projection = this.requirePlan(receipt.planRef).projection!;
+    if (projection.proof.noChange === true) {
+      const dryRun = "dryRun" in requested && requested.dryRun === true;
+      return { ...base, ok: true, status: dryRun ? "planned" : replayed ? "already-applied" : "applied",
+        requested, before: projection.proof.before, after: projection.proof.before, noChange: true,
+        fieldValues: {}, ...(replayed ? { replayed: true } : {}) };
+    }
     if (receipt.outcome === "conflict") conflict("The note changed before the sealed Operon write could commit.");
     if (receipt.postflight.reason === "headless_atomic_exchange_unavailable") throw atomicExchangeUnavailable();
     if (receipt.phase === "planned") return { ...base, ok: true, status: "planned", requested, before: projection.proof.before,

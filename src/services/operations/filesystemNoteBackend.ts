@@ -14,12 +14,12 @@ import { nativeNotePath } from "../nativeNoteMoveContract.js";
 import { createPolicyDigest, type NoteCreateApply, type NoteCreatePolicy } from "../noteCreateContract.js";
 import type { AtomicWriteReadRequest, AtomicWriteCasRequest, AtomicWriteReadResponse, AtomicWriteStatusResponse } from "../obsidianRestAPI/types.js";
 import { frontmatterEnvelope } from "../obsidianFrontmatterFormat.js";
-import { operationDigest } from "./contract.js";
+import { HEADLESS_VAULT_LOCK_BUSY, isHeadlessVaultLockBusy, operationDigest } from "./contract.js";
 import { ATOMIC_EXCHANGE_UNAVAILABLE, atomicExchangeUnavailable, nativeFilesystemExchange } from "./filesystemAtomicExchange.js";
 import { materializeFilesystemDates, normalizeDateKey, readFilesystemDatePolicy, renderFilesystemDates, sealFilesystemDates } from "./filesystemDatePolicy.js";
 import type { AtomicWriteBackend } from "./obsidianNoteReplaceOperationAdapter.js";
 import type { NoteCreateBackend } from "./noteCreateOperationAdapter.js";
-import { FILESYSTEM_OPERON_PROJECTION, type ObsidianNoteReplacePlan, type ObsidianNoteReplaceJournal } from "./obsidianNoteReplaceJournal.js";
+import { FILESYSTEM_OPERON_PROJECTION, ObsidianNoteReplaceConcurrencyError, type ObsidianNoteReplacePlan, type ObsidianNoteReplaceJournal } from "./obsidianNoteReplaceJournal.js";
 
 export const FILESYSTEM_AUTHORITY = "headless-filesystem" as const;
 const absent = (error: unknown) => (error as NodeJS.ErrnoException)?.code === "ENOENT";
@@ -35,7 +35,8 @@ const frontmatter = (content: string): Record<string, unknown> =>
   (load(frontmatterEnvelope(content)?.yaml ?? "") ?? {}) as Record<string, unknown>;
 
 type DiskSnapshot = { bytes: Buffer; size: number; sha256: string; stat: BigIntStats };
-const evidence = ({ bytes, sha256 }: DiskSnapshot) => ({ sha256, bytesBase64: bytes.toString("base64") });
+const modifiedAt = (stat: BigIntStats) => new Date(Number(stat.mtimeMs)).toISOString();
+const evidence = ({ bytes, sha256, stat }: DiskSnapshot) => ({ sha256, bytesBase64: bytes.toString("base64"), modifiedAt: modifiedAt(stat) });
 
 async function syncDirectory(directory: string) {
   if (process.platform === "win32") return;
@@ -111,7 +112,10 @@ class PathLocks {
       const deadline = Date.now() + 15_000;
       for (;;) {
         try { db.exec("BEGIN IMMEDIATE"); break; } catch (error) {
-          if ((error as { errcode?: number }).errcode !== 5 || Date.now() >= deadline) throw error;
+          if (((error as { errcode?: number }).errcode ?? 0) % 256 !== 5) throw error;
+          if (Date.now() >= deadline) throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE,
+            "The headless vault lock is busy. No write was started. Retry with a new plan after the lock is released.",
+            { reasonCode: HEADLESS_VAULT_LOCK_BUSY, retryable: true });
           await delay(25);
         }
       }
@@ -258,7 +262,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
       content, size, sha256 };
   }
 
-  async seal(relative: string, proposed: string, source: AtomicWriteReadResponse, requireAtomicExchange = false) {
+  async seal(relative: string, proposed: string, source: AtomicWriteReadResponse, requireAtomicExchange = false, previewOnly = false) {
     const policy = await this.policy();
     const snapshot = await this.snapshot(relative);
     if (snapshot.sha256 !== source.sha256) throw conflict("The note changed during plan preparation.");
@@ -270,15 +274,27 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
         throw new McpError(BaseErrorCode.FORBIDDEN, "The date manager owns the configured timestamp properties.");
       }
     }
-    const content = sealFilesystemDates(policy, relative, proposed, this.now(),
-      { content: source.content, birthtimeMs: Number(snapshot.stat.birthtimeMs) });
+    const content = previewOnly && proposed === source.content ? proposed :
+      sealFilesystemDates(policy, relative, proposed, this.now(),
+        { content: source.content, birthtimeMs: Number(snapshot.stat.birthtimeMs) });
     if (Buffer.byteLength(content, "utf8") > 5 * 1024 * 1024) throw conflict("The sealed note is too large.");
-    await this.probeReplacement(relative, requireAtomicExchange);
+    if (!previewOnly) await this.probeReplacement(relative, requireAtomicExchange);
     return { content, policyDigest: policy.digest };
   }
 
   private pathLock(relative: string) {
     return relative.normalize("NFC").toLowerCase();
+  }
+
+  private async withWriteLock<T>(plan: ObsidianNoteReplacePlan, write: () => Promise<T>): Promise<T> {
+    try { return await this.locks.run(this.pathLock(plan.path), write); }
+    catch (error) {
+      if (isHeadlessVaultLockBusy(error)) {
+        try { this.journal.settleFilesystemLockBusy(plan); }
+        catch (race) { if (!(race instanceof ObsidianNoteReplaceConcurrencyError)) throw race; }
+      }
+      throw error;
+    }
   }
 
   async matchesEffect(plan: ObsidianNoteReplacePlan) {
@@ -574,7 +590,8 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
       content = sealFilesystemDates(policy, relative, content, this.now(),
         { content: current.content, birthtimeMs: Number(current.stat.birthtimeMs) });
     }
-    return { policyDigest: policy.digest, before: current.content, content,
+    return { policyDigest: policy.digest, before: current.content, beforeModifiedAt: modifiedAt(current.stat),
+      beforeObservedAt: new Date(this.now()).toISOString(), content,
       afterSha256: source === undefined ? operationDigest({ absent: relative, binding: this.bindingFingerprint }) : hash(content),
       bindingFingerprint: this.bindingFingerprint };
   }
@@ -604,7 +621,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
 
   async applyRevert(plan: ObsidianNoteReplacePlan) {
     if (plan.projection?.proof.restoreAbsence !== true) return this.publish(plan, plan.beforeSha256);
-    return this.locks.run(this.pathLock(plan.path), async () => {
+    return this.withWriteLock(plan, async () => {
       const target = await this.target(plan.path, true);
       const observed = await this.snapshot(plan.path).catch(error => {
         if (absent(error)) throw conflict("The sealed note no longer exists.");
@@ -639,7 +656,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
 
   private async publish(plan: ObsidianNoteReplacePlan, expectedHash?: string) {
     const relative = plan.path;
-    return this.locks.run(this.pathLock(relative), async () => {
+    return this.withWriteLock(plan, async () => {
       const target = await this.target(relative, true);
       if (!plan.filesystem || plan.bindingFingerprint !== this.bindingFingerprint ||
           hash(plan.nextContent) !== plan.afterSha256) throw conflict("The headless filesystem seal is invalid.");

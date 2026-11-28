@@ -90,6 +90,10 @@ pour une session centrée sur les tâches : ses outils Operon restent découvrab
 si Desktop ou le Bridge est momentanément indisponible et renvoient un état
 structuré indisponible ou stale jusqu’au rafraîchissement du contrat live par
 `operon_status`.
+Les outils Operon réservés au live exigent un mode d’enregistrement `live` ou
+`hybrid-live` explicite. Le proxy stdio utilise le mode déclaré par le serveur
+connecté à l’initialisation MCP. Si le serveur omet ce mode, le proxy expose
+uniquement le sous-ensemble Operon disponible hors live.
 
 ```bash
 node dist/stdio-proxy.js --tool-profile standard

@@ -1,5 +1,6 @@
 import type { McpServer, RegisteredTool } from "@modelcontextprotocol/server";
 import { currentToolProfileContext } from "./toolProfileContext.js";
+import type { ToolRegistrationMode } from "./toolSurfaceRegistry.js";
 import {
   parseToolProfileId,
   selectAvailableToolProfileNames,
@@ -31,7 +32,7 @@ export function resolveToolProfile(raw?: string): ToolProfileId {
 export function installToolProfileRegistrationGate(
   server: McpServer,
   profile: ToolProfileId = resolveToolProfile(),
-  operonFilesystem = false,
+  registrationMode?: ToolRegistrationMode,
 ): void {
   if (profile === "full") return;
 
@@ -46,7 +47,7 @@ export function installToolProfileRegistrationGate(
       selectAvailableToolProfileNames({
         profile,
         availableNames: [...handles.keys()],
-        operonFilesystem,
+        registrationMode,
       }),
     );
 

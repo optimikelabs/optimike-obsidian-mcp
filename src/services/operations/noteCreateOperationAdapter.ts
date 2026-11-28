@@ -7,7 +7,7 @@ import { nativeNotePath } from "../nativeNoteMoveContract.js";
 import { assertNewNotePath } from "../noteNameMcp.js";
 import { NOTE_CREATE_PREFIX, NOTE_CREATE_MAX_BYTES, createPolicyDigest, noteCreateHash, observeCreateContent, validateCreatePolicy, validateNoteCreate,
   type NoteCreateApply, type NoteCreatePreflight } from "../noteCreateContract.js";
-import { operationDigest } from "./contract.js";
+import { HEADLESS_VAULT_LOCK_BUSY, isHeadlessVaultLockBusy, operationDigest } from "./contract.js";
 import { frontmatterEnvelope, inspectNativeFrontmatter, rejectNonCanonical } from "../obsidianFrontmatterFormat.js";
 import { effectFenceEpoch, type AtomicWriteBackend } from "./obsidianNoteReplaceOperationAdapter.js";
 import { ObsidianNoteReplaceJournal, ObsidianNoteReplaceConcurrencyError, type ObsidianNoteReplacePlan } from "./obsidianNoteReplaceJournal.js";
@@ -169,7 +169,8 @@ export class NoteCreateOperationAdapter {
       if (result.outcome !== "created") {
         row = this.journal.transition(row.operationId, ["applying"], result.outcome, "create_not_acknowledged", attempt);
       }
-    } catch {
+    } catch (error) {
+      if (row.filesystem && isHeadlessVaultLockBusy(error)) throw error;
       try { row = this.journal.transition(row.operationId, ["applying"], dispatched ? "outcome_unknown" : "rejected", "create_dispatch_unverified", attempt); }
       catch (error) { if (!(error instanceof ObsidianNoteReplaceConcurrencyError)) throw error; }
     }
@@ -244,6 +245,7 @@ export class NoteCreateOperationAdapter {
       beforeProof: { kind: "observed-path-absence", digest: row.beforeSha256 },
       expectedContentSha256: row.afterSha256, effectProof: row.effectProof ?? null, postflight,
       ...(row.filesystem && postflight === "verified" ? { postflightSource: "filesystem-reread" } : {}),
+      ...(row.failure === HEADLESS_VAULT_LOCK_BUSY ? { reasonCode: HEADLESS_VAULT_LOCK_BUSY, retryable: true } : {}),
       automaticDateFields: row.projection?.proof.filesystemDateFields ??
         plan.policy.fields.map(field => ({ propertyName: field.propertyName, role: field.role })),
       typeWarnings: row.projection?.proof.typeWarnings ?? [],

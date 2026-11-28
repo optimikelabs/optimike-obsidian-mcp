@@ -177,18 +177,21 @@ avec absence transitoire est activé pour d’autres outils. L’application exi
 | Outil | Périmètre sur disque |
 | --- | --- |
 | `operon_create_task` | Ajout d’une tâche inline indépendante à la fin d’une note existante passée dans `task.targetPath` |
-| `operon_update_task` | Description ou tags inline. Priorité, échéance, date de démarrage, date-heure de début et de fin, estimation sur tâche inline canonique ou tâche-fichier à propriétés scalaires simples |
+| `operon_update_task` | Description ou tags inline. Priorité, échéance et date de démarrage sur une tâche inline canonique ou une tâche-fichier à propriétés scalaires simples. Une chaîne vide efface un champ scalaire pris en charge |
 | `operon_transition_task` | Statut configuré, identifiant stable ou intention du pipeline de la tâche. Un statut terminal règle la case et la date locale de fin ou d’annulation |
 | `operon_resolve_task` | Identifiant, emplacement exact, chemin, nom ou recherche textuelle locale. Les ambiguïtés sont signalées |
 | `operon_list_pending_recoveries` / `operon_recover_mutation` | Réconciliation du même plan dans le journal. La récupération accepte `recovery.kind="developer-api"` en politique d’écriture complète. Les deux appels exigent une liste de préfixes Operon vide |
 
 Lancer une simulation et utiliser une autre clé d’idempotence pour
-l’application. En cas de perte de réponse, relire le résultat avec la même
+l’application. La simulation peut sceller un aperçu sous `MCP_WRITE_MODE=readonly`
+sans modifier le coffre. Une transition vers le statut courant renvoie
+`noChange` et un objet `fieldValues` vide. En cas de perte de réponse, relire le résultat avec la même
 requête et sa clé d’application, ou réconcilier la référence renvoyée. La
 révision issue de la lecture lie les octets de la note et la configuration.
 Une modification concurrente déclenche `CONFLICT`. Les reçus indiquent
 `source: "filesystem"`. Les dates de la tâche utilisent
-`OPTIMIKE_VAULT_TIMEZONE`. La date de modification de la note suit la
+`OPTIMIKE_VAULT_TIMEZONE`. Régler cette valeur sur le fuseau des appareils qui
+exécutent Obsidian. Operon utilise l’heure locale du processus Desktop. La date de modification de la note suit la
 politique de dates des écritures gouvernées.
 
 Le mode sur disque refuse les tâches récurrentes, suivies par un minuteur ou
@@ -196,7 +199,11 @@ reliées à d’autres tâches, ainsi que les transitions susceptibles de décle
 un déplacement, un archivage, un désépinglage ou une mise à jour de la
 numérotation des projets. La création de tâches-fichiers, le routage
 automatique, les modèles, les champs complexes et les propriétés non gérées
-exigent Desktop. Les profils de compatibilité signalent aussi cette exigence
+exigent Desktop. Les dates-heures de début et de fin, l’estimation et les
+modifications de champs scalaires sur une tâche avec un créneau enregistré
+exigent aussi Desktop. Operon peut en déduire une date planifiée, une heure de
+fin et d’autres effets de workflow. Voir les [règles de planification d’Operon 4.6.0](https://github.com/hasanyilmaz/operon/blob/4.6.0/src/core/scheduling-rules.ts).
+Les profils de compatibilité signalent aussi cette exigence
 pour l’adoption (conversion des métadonnées Tasks), les notes quotidiennes ou
 hebdomadaires (routage et réalignement), les mises à jour par lot (plusieurs
 sources), les épingles (état du plugin), les relations (liens réciproques et
@@ -204,10 +211,13 @@ agrégats), la récurrence (séries et occurrences suivantes), les déplacements
 les conversions (plusieurs sources).
 
 Après le build, `node scripts/test-operon-headless-writes.mjs` compare les
-octets produits à des captures synthétiques du sérialiseur Operon 4.6.0,
-exécuté avec le substitut Obsidian des tests amont. Le test vérifie la date
-de modification gouvernée, le BOM et les fins de ligne CRLF. La parité de
-bout en bout avec Desktop et le Bridge reste à vérifier.
+octets produits aux captures synthétiques du moteur d’écriture et du
+sérialiseur inline d’Operon 4.6.0. Les captures de tâches-fichiers utilisent le
+substitut YAML des tests amont. `stringifyYaml` d’Obsidian et la parité de bout
+en bout avec Desktop et le Bridge restent à vérifier. Comme Operon, le mode
+headless refuse un BOM avant le frontmatter d’une tâche-fichier avec
+`malformed-frontmatter`. Il conserve le BOM inline et les fins de ligne
+d’origine. Desktop peut réécrire des lignes modifiées ou du frontmatter en LF.
 
 ### Banc de parité Operon
 
@@ -336,6 +346,12 @@ pour rétablir l’édition déplacée octet pour octet. Le retour arrière lie 
 observé. Si une édition plus récente est déjà dans la note, l’opération se clôt
 en `conflict` et garde les versions au journal sans proposer de retour arrière. Un programme qui
 garde l’ancien fichier ouvert peut encore l’écrire après son dernier contrôle.
+Si le retour arrière remplace une autre édition concurrente, le statut et le
+plan l’indiquent dans `replacesConcurrentEdit` avec son SHA-256 et son horodatage
+d’observation. L’heure de modification du fichier est fournie lorsqu’elle est
+disponible. Pour rétablir l’édition remplacée, passez le `planRef` du retour
+arrière appliqué à `obsidian_operation_revert_plan`. Le nouveau plan vérifie
+le hash de la version en place avant de la remplacer.
 
 Placez le cache partagé hors du coffre. Le journal est créé à côté du cache
 par défaut, d’après l’identité du coffre quel que soit le mode headless, ou
@@ -344,6 +360,10 @@ coffre est dans l’état local indépendamment du chemin du journal. Les proces
 qui coopèrent partagent cet état. `MCP_HEADLESS_GOVERNED_JOURNAL_PATH` accepte
 un chemin absolu hors du coffre. Le journal conserve les versions antérieures
 et les divergences traitées pendant 30 jours. Protégez-le comme les données du coffre.
+Si le verrou du chemin reste occupé pendant 15 secondes, apply renvoie le motif
+réessayable `headless_vault_lock_busy`. Le statut indique `failed` et la tentative
+n’a effectué aucune écriture. Une fois le verrou libéré, utilisez un nouveau
+plan et une nouvelle clé d’idempotence.
 
 Gardez les réglages `.obsidian` disponibles avec la liste des extensions
 actives et les réglages de Frontmatter Date Manager. L’autorité lit les noms

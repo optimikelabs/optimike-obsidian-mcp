@@ -86,6 +86,7 @@ type ExpectedSource = { sha256: string; bindingFingerprint: string };
 type CallContext =
   | {
       kind: "plan";
+      previewOnly?: boolean;
       path: string;
       nextContent: string;
       proposal?: TextPatchProposalIdentity;
@@ -449,7 +450,7 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
           "The planning read target differs from the requested note target.",
         );
       }
-      assertCurrentWritePolicy("plan", payload.path, context.nextContent);
+      if (!context.previewOnly) assertCurrentWritePolicy("plan", payload.path, context.nextContent);
       if (context.callerExpectedBeforeSha256 !== undefined) {
         verifyPlanningRead(payload.path, result);
         assertCallerBase(context.callerExpectedBeforeSha256, result.sha256);
@@ -1128,18 +1129,20 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
   plan(
     input: ObsidianNoteReplacePlanInput,
     callerExpectedBeforeSha256?: string,
+    previewOnly = false,
   ): Promise<OperationReceipt> {
-    assertCurrentWritePolicy("plan", input.path, input.nextContent);
+    if (!previewOnly) assertCurrentWritePolicy("plan", input.path, input.nextContent);
     return this.backend.withContext(
       {
         kind: "plan",
+        previewOnly,
         path: input.path,
         nextContent: input.nextContent,
         requireNativeFormat: !!input.frontmatterFormat,
         callerExpectedBeforeSha256,
         proposal: input.proposalSeal?.identity,
       },
-      () => this.adapter.plan(input),
+      () => this.adapter.plan(input, previewOnly),
     );
   }
 
@@ -1149,6 +1152,9 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
     completionMode: SettlementCompletionMode = "verified",
   ): Promise<OperationReceipt> {
     const plan = this.required(reference);
+    if (plan.projection?.kind === FILESYSTEM_OPERON_PROJECTION && plan.projection.proof.previewOnly === true) {
+      throw new McpError(BaseErrorCode.FORBIDDEN, "An Operon preview cannot publish an effect.");
+    }
     if (plan.status === "planned") {
       assertCurrentWritePolicy("apply", plan.path, plan.nextContent);
       if (this.backend.filesystem) await this.backend.filesystem.status();

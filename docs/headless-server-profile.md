@@ -180,16 +180,19 @@ fallback for other notes is configured. Apply requires
 | Tool | Accepted filesystem scope |
 | --- | --- |
 | `operon_create_task` | Append a standalone inline task to an existing note named by `task.targetPath` |
-| `operon_update_task` | Inline description or tags. Scalar priority, due date, earliest start date, start/end datetime and estimate on canonical inline or simple scalar file tasks |
+| `operon_update_task` | Inline description or tags. Priority, due date and earliest start date on canonical inline or simple scalar file tasks. Clear a supported scalar with an empty string |
 | `operon_transition_task` | Configured status, stable status ID or intent from the task's pipeline. A terminal status sets the matching checkbox and local completion or cancellation date |
 | `operon_resolve_task` | Filesystem ID, exact locator, path or name and local text match. Ambiguity is reported explicitly |
 | `operon_list_pending_recoveries` / `operon_recover_mutation` | Same-plan reconciliation of the filesystem journal. Recovery uses `recovery.kind="developer-api"` and requires full write policy. Both calls require an empty Operon mutation path allowlist |
 
-Run a dry-run first and use a different idempotency key for apply. For an
+Run a dry-run first and use a different idempotency key for apply. A dry-run
+can seal a preview under `MCP_WRITE_MODE=readonly` without changing the vault.
+A same-status transition returns `noChange` with empty `fieldValues`. For an
 update or transition, pass the filesystem revision from the current task read.
 It binds the note bytes and settings. A concurrent edit causes `CONFLICT`.
 The writer seals the exact bytes in the shared note journal and writes task
-timestamps in `OPTIMIKE_VAULT_TIMEZONE`. The note's own modification stamp
+timestamps in `OPTIMIKE_VAULT_TIMEZONE`. Set it to the timezone of the devices
+running Obsidian, where Operon uses the process's local time. The note's own modification stamp
 follows the governed date policy. Receipts use `source: "filesystem"`.
 If the acknowledgement is lost, repeat the identical request with its apply
 key to read the established result or reconcile the returned recovery reference.
@@ -197,6 +200,9 @@ key to read the established result or reconcile the returned recovery reference.
 The filesystem writer refuses repeating, tracked or related tasks and
 transitions that can unpin, move or archive a task or update project serials. File creation, automatic inline
 routing, templates, rich fields and unmanaged properties require Desktop.
+Start/end datetimes, estimates and scalar field edits on tasks with stored time
+slots require Desktop because Operon can derive scheduled dates, end times and
+additional workflow effects. See the [Operon 4.6.0 scheduling rules](https://github.com/hasanyilmaz/operon/blob/4.6.0/src/core/scheduling-rules.ts).
 Compatibility profiles retain explicit Desktop-required refusals for adoption
 (Tasks metadata conversion), periodic creation and scheduling (Daily/Weekly
 routes), batch updates (multiple sources), pinning (plugin data), relationships
@@ -204,10 +210,12 @@ routes), batch updates (multiple sources), pinning (plugin data), relationships
 instances), relocation and conversion (multiple sources).
 
 Run `node scripts/test-operon-headless-writes.mjs` after the build to compare
-the produced bytes with synthetic captures of Operon 4.6.0's native source
-writer using the upstream Obsidian test adapter. The test also checks the
-governed note stamp, BOM and CRLF preservation. Desktop and Bridge
-end-to-end write parity remain unverified.
+the produced bytes with synthetic captures of the Operon 4.6.0 source writer
+and inline serializer. The file-task captures use the upstream test adapter's
+YAML stub. Obsidian's `stringifyYaml` and end-to-end Desktop/Bridge writes remain
+unverified. Like Operon, headless refuses a BOM before file-task frontmatter
+with `malformed-frontmatter`. Headless preserves inline BOM and original line
+endings. Desktop can rewrite edited lines or frontmatter with LF.
 
 ### Operon parity harness
 
@@ -331,6 +339,12 @@ displaced a write and the restored target is intact. In full write mode, use
 restore that displaced edit byte-for-byte. The revert is sealed against the
 recorded target hash. If a newer edit already occupies the note, the operation
 ends in `conflict` and keeps the journal evidence without offering restoration.
+When restoration would replace another concurrent edit, status and the revert
+plan identify it as `replacesConcurrentEdit` with its SHA-256 and observation
+timestamp. The filesystem modification timestamp is included when available.
+To restore the replaced edit later, pass the committed revert's `planRef` to
+`obsidian_operation_revert_plan`. The new plan checks the hash of the version
+currently installed before replacing it.
 A process holding an old file open can still write to it after its final check.
 
 Put the shared cache outside the vault. The default governed journal is next
@@ -340,6 +354,9 @@ in local state independently of the journal override. Cooperating processes
 must share local state. `MCP_HEADLESS_GOVERNED_JOURNAL_PATH` selects an absolute
 path outside the vault. Committed before images and settled divergence evidence
 follow the terminal retention period (30 days). Treat the journal like vault data.
+If the path lock stays busy for 15 seconds, apply returns the retryable reason
+`headless_vault_lock_busy`. Status shows `failed` and the attempt made no write.
+Use a fresh plan and idempotency key after the lock is released.
 
 Keep the vault's `.obsidian` configuration available, including its enabled
 plugins list and Frontmatter Date Manager settings. The authority reads

@@ -14,6 +14,8 @@ import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { supportedAtomicBridgeVersion } from "../atomicBridgeVersion.js";
 import {
   OPERATION_RUNTIME_CONTRACT_VERSION,
+  HEADLESS_VAULT_LOCK_BUSY,
+  isHeadlessVaultLockBusy,
   operationDigest,
   type OperationAdapter,
   type OperationOutcome,
@@ -25,6 +27,7 @@ import {
   FILESYSTEM_OPERON_PROJECTION,
   ObsidianNoteReplaceJournal,
   displacedFilesystemEdit,
+  replacedConcurrentEdit,
   noteReplaceIdempotencyConflict,
   type ObsidianNoteReplacePlan,
   type ObsidianNoteReplaceProjection,
@@ -255,7 +258,7 @@ export type ObsidianNoteReplaceAdapterOptions = {
   now?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
   filesystem?: {
-    seal(path: string, content: string, source: AtomicWriteReadResponse, requireAtomicExchange?: boolean): Promise<{ content: string; policyDigest: string }>;
+    seal(path: string, content: string, source: AtomicWriteReadResponse, requireAtomicExchange?: boolean, previewOnly?: boolean): Promise<{ content: string; policyDigest: string }>;
     matchesEffect(plan: ObsidianNoteReplacePlan): Promise<boolean>;
   };
 };
@@ -562,6 +565,7 @@ function receipt(
       : undefined;
   const committedSha256 =
     plan.filesystem?.stagedSha256 ?? plan.modifiedTimeSettlementEvidence?.observedSha256 ?? plan.afterSha256;
+  const concurrentEdit = replacedConcurrentEdit(plan);
   return {
     contractVersion: OPERATION_RUNTIME_CONTRACT_VERSION,
     operationId: plan.operationId,
@@ -632,6 +636,7 @@ function receipt(
       ...(plan.filesystem && plan.status === "committed" ? { source: "filesystem-reread" as const } : {}),
       ...(plan.filesystem && plan.failure === "headless_atomic_exchange_unavailable" ? { reason: plan.failure } : {}),
       ...(displacedFilesystemEdit(plan) ? { reason: "headless_displaced_edit" as const } : {}),
+      ...(plan.failure === HEADLESS_VAULT_LOCK_BUSY ? { reason: HEADLESS_VAULT_LOCK_BUSY, retryable: true as const } : {}),
       ...(settlementCheckAt !== undefined
         ? {
             reason: "modified_time_settlement" as const,
@@ -648,6 +653,7 @@ function receipt(
               ? "unverified"
               : "not_started",
     },
+    ...(concurrentEdit ? { replacesConcurrentEdit: concurrentEdit } : {}),
     admittedAt: plan.createdAt,
     updatedAt: plan.updatedAt,
     ...(terminal ? { terminalAt: plan.updatedAt } : {}),
@@ -739,8 +745,11 @@ export class ObsidianNoteReplaceOperationAdapter
     return receipt(this.profile, existing);
   }
 
-  async plan(input: ObsidianNoteReplacePlanInput): Promise<OperationReceipt> {
+  async plan(input: ObsidianNoteReplacePlanInput, previewOnly = false): Promise<OperationReceipt> {
     validateInput(this.profile, input);
+    if (previewOnly && (!this.options.filesystem || input.projection?.kind !== FILESYSTEM_OPERON_PROJECTION || input.projection.proof.previewOnly !== true)) {
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Only an Operon filesystem preview can bypass the plan write gate.");
+    }
     let afterSha256 = createHash("sha256")
       .update(input.nextContent, "utf8")
       .digest("hex");
@@ -761,7 +770,7 @@ export class ObsidianNoteReplaceOperationAdapter
         reason: "proposal_authority_mismatch",
       });
     }
-    if (!status.backend.writeEnabled) {
+    if (!previewOnly && !status.backend.writeEnabled) {
       const replay = this.replayIfDurableWinner(input, afterSha256);
       if (replay) return replay;
       throw new Error(
@@ -823,11 +832,11 @@ export class ObsidianNoteReplaceOperationAdapter
     let nextContent = input.nextContent;
     if (this.options.filesystem) {
       const sealed = await this.options.filesystem.seal(input.path, nextContent, read,
-        input.projection?.kind === FILESYSTEM_OPERON_PROJECTION);
+        input.projection?.kind === FILESYSTEM_OPERON_PROJECTION, previewOnly);
       filesystem = { policyDigest: sealed.policyDigest, beforeContent: read.content, projectedSha256: afterSha256 };
       nextContent = sealed.content;
       afterSha256 = createHash("sha256").update(nextContent, "utf8").digest("hex");
-      if (afterSha256 === read.sha256) {
+      if (afterSha256 === read.sha256 && !(previewOnly && input.projection?.proof.noChange === true)) {
         throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The sealed edit would leave the note unchanged.");
       }
     }
@@ -1191,6 +1200,7 @@ export class ObsidianNoteReplaceOperationAdapter
         executionAttemptId,
       );
     } catch (error) {
+      if (this.options.filesystem && isHeadlessVaultLockBusy(error)) throw error;
       if (error instanceof Error && preDispatchErrors.delete(error)) {
         casDispatched = false;
       }

@@ -35,6 +35,10 @@ const beforeSources = new Map([
   [textPath, before],
   ["BOM.md", "\uFEFF" + before.replace("target1", "bom0001").replaceAll("\n", "\r\n")],
   [filePath, initialFile],
+  ["File BOM.md", "\uFEFF" + initialFile.replace("file001", "bomfile")],
+  ["Description.md", before.replace("target1", "descrip")],
+  ["Tags.md", before.replace("target1", "tags001")],
+  ["Timed.md", initialFile.replace("file001", "timed01").replace("\n---\n#", "\ndatetimeEnd: 2026-04-02T10:00\n---\n#")],
   [racePath, before.replace("target1", "race001")],
   [phonePath, before.replace("target1", "phone01")],
   [interruptedPath, before.replace("target1", "crash01")],
@@ -96,7 +100,7 @@ async function start(mode = "headless-filesystem", profile = "tasks", options = 
       OBSIDIAN_CACHE_SOURCE: "filesystem", OBSIDIAN_SHARED_CACHE_DB_PATH: path.join(state, "cache.sqlite"),
       MCP_HEADLESS_GOVERNED_JOURNAL_PATH: path.join(state, "governed.sqlite"),
       OBSIDIAN_ENABLE_CACHE: "true", OBSIDIAN_BASE_URL: "http://127.0.0.1:9", OBSIDIAN_API_KEY: "",
-      MCP_TRANSPORT_TYPE: "stdio", MCP_TOOL_PROFILE: profile, MCP_WRITE_MODE: "full",
+      MCP_TRANSPORT_TYPE: "stdio", MCP_TOOL_PROFILE: profile, MCP_WRITE_MODE: options.writeMode ?? "full",
       OPERON_MUTATIONS_ENABLED: "true", MCP_VAULT_INSTRUCTIONS: options.instructions ?? "off",
       MCP_LOG_LEVEL: "error", LOGS_DIR: logs, SEMANTIC_SEARCH_PREWARM: "false",
       TZ: zone, OPTIMIKE_VAULT_TIMEZONE: zone, MCP_HEADLESS_ALLOW_TRANSIENT_ABSENCE: "true" }, stderr: "pipe",
@@ -179,6 +183,17 @@ try {
     const full = await start("headless-filesystem", "full");
     const paths = await profile(full, "full", "headless-filesystem");
     assert.ok(paths.includes("operon_update_recurrence"));
+    const readonly = await start("headless-filesystem", "tasks", { writeMode: "readonly" });
+    const readonlyInput = payload(initial, "readonly-preview", { intent: "cancel", dryRun: true });
+    assert.equal((await call(readonly, "operon_transition_task", readonlyInput)).status, "planned");
+    await rejects(readonly, "operon_transition_task", { ...readonlyInput, dryRun: false, idempotencyKey: "readonly-apply" }, "FORBIDDEN");
+    const noop = payload(initial, "same-status", { statusId: "work_open" });
+    const unchanged = await call(first, "operon_transition_task", noop);
+    assert.equal(unchanged.noChange, true);
+    assert.deepEqual(unchanged.fieldValues, {});
+    assert.equal(unchanged.after.revision, initial.revision);
+    assert.equal((await call(first, "operon_transition_task", noop)).status, "already-applied");
+    await bytes(textPath, before);
     const preview = payload(initial, "preview-only", { intent: "complete", dryRun: true });
     assert.equal((await call(first, "operon_transition_task", preview)).status, "planned");
     await bytes(textPath, before);
@@ -200,7 +215,9 @@ try {
       assert.equal(result.after.status, status);
       const expected = before.replace("- [ ]", `- [${mark}]`).replace("{{status:: Work.Open}}", `{{status:: ${status}}}${date}`)
         .replace("}}\n", `}} {{datetimeModified:: ${timestamp}}}\n`);
-      await bytes(textPath, `---\nmodification: ${timestamp}\n---\n` + (status === "Work.Done" ? native.inlineCompletion.after : expected));
+      const captured = { "Work.Done": native.inlineCompletion.after, "Work.Cancelled": native.inlineCancel,
+        ...(index === 3 ? { "Work.Open": native.inlineReopen } : {}) };
+      await bytes(textPath, `---\nmodification: ${timestamp}\n---\n` + (captured[status] ?? expected));
       assert.equal((await call(first, "operon_transition_task", input)).status, "already-applied");
     }
     const updated = await call(first, "operon_update_task", payload(await task(first, "file001"), "file-update",
@@ -220,7 +237,43 @@ try {
       task: { source: "inline", targetPath: "Create.md", description: "New task", tags: ["synthetic"], fields: { dateDue: "2026-04-02" } } });
     assert.equal(created.status, "applied", JSON.stringify(created));
     assert.match(created.after.operonId, /^[a-z0-9]{7}$/u);
-    await bytes("Create.md", `# Fixture destination\n- [ ] New task #synthetic {{operonId:: ${created.after.operonId}}} {{status:: Work.Open}} {{priority:: High}} {{dateDue:: 2026-04-02}} {{datetimeCreated:: ${timestamp}}} {{datetimeModified:: ${timestamp}}}\n`);
+    await bytes("Create.md", `# Fixture destination\n${native.inlineCreation.replace("new0001", created.after.operonId)}\n`);
+
+    for (const [filename, id, patch, captured] of [
+      ["Description.md", "descrip", { description: "Updated native description" }, native.inlineDescription],
+      ["Tags.md", "tags001", { tags: ["synthetic", "nested/example"] }, native.inlineTags],
+    ]) {
+      const result = await call(first, "operon_update_task", payload(await task(first, id), `native-${id}`, { patch }));
+      assert.equal(result.status, "applied");
+      await bytes(filename, `---\nmodification: ${timestamp}\n---\n${captured.replace("target1", id)}`);
+    }
+    const bomFile = await rejects(first, "operon_update_task", payload(await task(first, "bomfile"), "bom-file",
+      { patch: { fields: { dateDue: "2026-04-03" } } }), "VALIDATION_ERROR");
+    assert.equal(bomFile.reason, native.fileBomRefusal.split(":")[1]);
+    await bytes("File BOM.md", beforeSources.get("File BOM.md"));
+
+    const fileTask = await task(first, "file001");
+    const fileBeforeClear = await read(filePath);
+    for (const [index, expected] of native.scheduling.entries()) {
+      const [key, value] = Object.entries(expected)[0];
+      const inputValue = index === 3 ? "2026-04-02T10:00" : value;
+      const refusal = await rejects(first, "operon_update_task", payload(fileTask, `schedule-${index}`,
+        { patch: { fields: { [key]: inputValue } } }), "SERVICE_UNAVAILABLE");
+      assert.equal(refusal.reason, "operon_filesystem_live_required");
+    }
+    for (const [index, invalidValue] of [7200, null, false].entries()) {
+      await rejects(first, "operon_update_task", payload(fileTask, `invalid-estimate-${index}`,
+        { patch: { fields: { estimate: invalidValue } } }), "VALIDATION_ERROR");
+    }
+    assert.deepEqual(await read(filePath), fileBeforeClear);
+    const timed = await rejects(first, "operon_update_task", payload(await task(first, "timed01"), "existing-time-slot",
+      { patch: { fields: { dateDue: "2026-04-03" } } }), "SERVICE_UNAVAILABLE");
+    assert.equal(timed.reason, "operon_filesystem_live_required");
+    await bytes("Timed.md", beforeSources.get("Timed.md"));
+    const cleared = await call(first, "operon_update_task", payload(fileTask, "clear-due",
+      { patch: { fields: { dateDue: "" } } }));
+    assert.equal(cleared.status, "applied");
+    assert.equal((await task(first, "file001")).dates.due, null);
 
     for (const [id, relative] of [["repeat1", "Repeat.md"], ["target2", "Related.md"]]) {
       const refused = await rejects(first, "operon_transition_task", payload(await task(first, id), `guard-${id}`, { intent: "complete" }), "SERVICE_UNAVAILABLE");

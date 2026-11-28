@@ -36,6 +36,8 @@ export const OPERON_REFUSAL_MESSAGES = {
     "This filter uses semantics unavailable in headless mode. Query it through the Desktop Bridge.",
   operon_filesystem_live_required:
     "This Operon operation or task shape requires the live Obsidian Desktop Bridge.",
+  "malformed-frontmatter":
+    "Operon cannot edit this file task because its YAML frontmatter is malformed or starts with a BOM.",
   operon_filesystem_mutation_snapshot_incomplete:
     "A complete Operon filesystem snapshot with valid frontmatter and workflow configuration is required to plan a mutation.",
   operon_filesystem_duplicate_id:

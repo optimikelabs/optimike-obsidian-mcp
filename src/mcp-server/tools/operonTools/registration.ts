@@ -37,7 +37,7 @@ import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultC
 import { OperonService } from "../../../services/operon/service.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
-import { mcpSchema } from "../../mcpSchema.js";
+import { mcpSchema, mcpSchemaWithPublicValidation } from "../../mcpSchema.js";
 
 const ForceRefreshSchema = z.object({
   forceRefresh: z.boolean().optional().default(false),
@@ -367,7 +367,7 @@ export async function registerOperonTools(
         "Create an Operon inline or file task through the loaded engine's supported official API. task.targetPath is the destination Markdown note of an inline task. A file task always goes to Operon's configured file-task folder: do not pass targetPath or targetFolder. targetFolder is legacy-only and rejected by official Developer API V1. fields.related takes Operon task ids; note links go in fields.links. taskFolder is not a supported argument. dateScheduled is reserved for operon_update_periodic_scheduling. dryRun defaults to true. Use one idempotencyKey for the dry-run and a new one for the apply; reusing the dry-run key returns idempotency_key_reused. Apply requires the live Bridge and an idempotencyKey; no raw Markdown fallback exists.",
       // Keep business refinements in the service, so their safe diagnostics
       // reach the application boundary instead of an opaque SDK refusal.
-      inputSchema: mcpSchema(OperonCreateTaskInputSchema.shape),
+      inputSchema: mcpSchemaWithPublicValidation(OperonCreateTaskInputSchema.shape),
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonCreateTaskSchema>) =>
@@ -399,10 +399,10 @@ export async function registerOperonTools(
     "operon_update_task",
     {
       description: writer
-        ? "Update one standalone canonical Operon 4.6.0 task in a sealed filesystem plan. Supports inline description or tags, and scalar priority, dateDue, dateStarted, datetimeStart, datetimeEnd or estimate. Use the current filesystem expectedRevision. dryRun defaults to true; use a new idempotencyKey for apply."
+        ? "Update one standalone canonical Operon 4.6.0 task in a sealed filesystem plan. Supports inline description or tags, and scalar priority, dateDue or dateStarted. An empty string clears a supported scalar. Datetime scheduling and estimates require Desktop. Use the current filesystem expectedRevision. dryRun defaults to true; use a new idempotencyKey for apply."
         :
         "Change the due date (dateDue, deadline) or other fields of an existing Operon task. Update exactly one ordinary Operon mutation group: description, managed fields/tags, or one unmanaged file property. Do not use this tool for dateScheduled (use operon_update_periodic_scheduling), relationships (use operon_set_relationships), or recurrence fields (use operon_update_recurrence). expectedRevision and idempotencyKey are mandatory; dryRun defaults to true. Use one idempotencyKey for the dry-run and a new one for the apply; reusing the dry-run key returns idempotency_key_reused.",
-      inputSchema: mcpSchema(OperonUpdateTaskSchema.shape),
+      inputSchema: mcpSchemaWithPublicValidation(OperonUpdateTaskSchema.shape),
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonUpdateTaskSchema>) =>
@@ -415,7 +415,7 @@ export async function registerOperonTools(
         ? "Transition one standalone canonical Operon 4.6.0 task. Provide one configured statusId, exact status or semantic intent (complete | cancel | reopen) and the current filesystem expectedRevision. Recurrence, dependency and side-effecting transitions require Desktop. dryRun defaults to true; use a new idempotencyKey for apply."
         :
         "Transition an Operon task through Operon's dependency, recurrence, aggregate, and workflow guards. Prefer stable statusId from operon_get_configuration; exact configured status remains supported. To complete, cancel or reopen without naming a status, pass intent (complete | cancel | reopen): it resolves to the matching status of the task's own pipeline. expectedRevision and idempotencyKey are mandatory; dryRun defaults to true. Use one idempotencyKey for the dry-run and a new one for the apply; reusing the dry-run key returns idempotency_key_reused.",
-      inputSchema: mcpSchema(OperonTransitionTaskInputSchema.shape),
+      inputSchema: mcpSchemaWithPublicValidation(OperonTransitionTaskInputSchema.shape),
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonTransitionTaskSchema>) =>
