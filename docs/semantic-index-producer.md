@@ -91,26 +91,37 @@ Bootstrap uses the section keys and range selection of Smart Connections
 4.7.2 with Smart Environment v3 selection policy 2. It reads the configured
 note and block minima, embedding toggle, heading exclusions, file and folder
 patterns, and recorded Git ignore rules. Explicit CLI minima override the
-settings. The generation stores the selection settings so incremental builds
-can reuse them on another machine. The verification report counts notes at or
+settings. The generation freezes that settings snapshot for later incremental
+builds on any machine. To adopt another Desktop selection snapshot, bootstrap
+into a new index directory. The verification report counts notes at or
 below the byte cutoff as exclusions. When the note vector is omitted, its
 sections are omitted from the published generation.
 
+Section imports require the source record's selection policy version, block
+minimum, and character budget to match policy 2, the effective minimum, and
+`floor(max_tokens * 3.7)`. The report counts selected sections with an SC
+reference and a missing or incompatible rule in `sectionsWithRuleMismatch`.
+Publication stops when this count is nonzero. Use `--allow-selection-mismatch`
+to encode those sections through the normal path.
+
 Before encoding any remaining rows, the producer re-encodes a deterministic
-sample balanced across notes and sections where possible. The sample is 1%,
-bounded to 20–40 rows when at least 20 qualify. Smaller sets are checked in
-full. Use an encoder with a fresh document cache. If the bridge reports a
+sample stratified by vector type and UTC encoding month from the SC reference,
+with an unknown-month stratum. The default is up to 100 rows. Use an encoder
+with a fresh document cache. If the bridge reports a
 cache hit, the check stops. The minimum cosine must reach 0.995 and the median
 0.999. The v3 fingerprint does not identify the original weights or preserve
-every historical input. The sample checks agreement with the configured
-encoder. The manifest records the sample result and imported and encoded
-counts by kind.
+every historical input. The current heading exclusions do not establish which
+rules were active when historical vectors were encoded. SC's 32-bit text hash
+uses the low byte of each UTF-16 code unit, so a matching hash can conceal text
+changes. The manifest marks imported rows as `sc-hash32` and preserves the
+marker when reusing them. It also records the sample result, population and
+comparison counts per stratum, and imported and encoded counts by kind.
 
 Add `--verify-only` to report import coverage, rows that require encoding and
 sample agreement as JSON. The report also compares section keys with eligible
 Smart Environment references, including references outside the scanned corpus.
-Use `--max-samples` with a value from 20 to 40 to limit a verification-only
-run. This mode uses the producer lock and can create the index directory.
+Use `--max-samples` with a value from 20 to 500 to set the cap in either
+bootstrap mode. Verification-only uses the producer lock and can create the index directory.
 It does not encode the remaining rows or publish a generation.
 The queued counts are measured before the encoder can refuse an item for length.
 

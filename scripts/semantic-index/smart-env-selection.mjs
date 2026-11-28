@@ -40,8 +40,12 @@ export async function readSmartEnvSelection(directory) {
 export function exclusionMatcher(policy) {
   if (!policy) return () => false;
   const patterns = policy.patterns.map(pattern => glob_to_regex(pattern));
-  return relative => relative.includes("#") || patterns.some(pattern => pattern.test(relative));
+  return (relative, pruning = false) => relative.includes("#") ||
+    (!pruning && patterns.some(pattern => pattern.test(relative)));
 }
+
+export const blockSelectionVersion = 2;
+export const blockInputCapacity = tokenBudget => Math.floor(tokenBudget * 3.7);
 
 /**
  * A range tree models the Smart Environment v3 selection policy shipped by
@@ -49,7 +53,7 @@ export function exclusionMatcher(policy) {
  * rather than checking for two descendants at the parent's line boundaries.
  */
 export function selectSmartEnvBlocks(blocks, minimum, tokenBudget) {
-  const capacity = Math.floor(tokenBudget * 3.7);
+  const capacity = blockInputCapacity(tokenBudget);
   const ordered = blocks.map(([key, [start, end], text, prefix]) => ({
     key, start, end, size: text.length, capacity: Math.max(0, capacity - prefix.length - 1), branches: [],
   })).sort((a, b) => a.start - b.start || b.end - a.end || a.key.length - b.key.length);

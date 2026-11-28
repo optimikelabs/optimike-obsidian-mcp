@@ -4,11 +4,14 @@ import {
   modelFingerprint, readSmartEnvV3Model, readSmartEnvV3References, smartEnvV3SourceFiles, smartTextHash,
 } from "../../dist/services/smartEnvV3.js";
 import { readVector, vectorFiles } from "./generation.mjs";
+import { blockInputCapacity, blockSelectionVersion } from "./smart-env-selection.mjs";
 import { noteInput, readSourceParts, sha256 } from "./vault.mjs";
 
 const kinds = ["notes", "sections"];
 const medianThreshold = 0.999;
 const minThreshold = 0.995;
+export const defaultSampleLimit = 100;
+export const maxSampleLimit = 500;
 
 async function stamp(filename, directory = false) {
   let stat;
@@ -47,6 +50,8 @@ export async function scanBootstrap(directory, vault, scan, manifest) {
   const imported = { notes: 0, sections: 0 };
   const toEncode = { notes: 0, sections: 0 };
   const rows = new Map();
+  let sectionsWithRuleMismatch = 0;
+  const expectedBlockCapacity = blockInputCapacity(model.max_tokens);
   const selection = { shared: 0, smartEnvOnly: 0, producerOnly: 0, smartEnvOutsideCorpus: 0 };
   const excludedNotes = { invalidPath: scan.unsafePaths.size, invalidUtf8: 0, belowMinSize: 0 };
   const before = await snapshot(directory, fingerprint);
@@ -92,6 +97,9 @@ export async function scanBootstrap(directory, vault, scan, manifest) {
       const { note, blocks } = parts;
       const fresh = source && source.readHash === smartTextHash(note.text);
       const blockRefs = new Map(source?.blocks?.map(block => [block.blockKey, block]));
+      const rule = source?.blockSelection;
+      const ruleMatches = rule?.version === blockSelectionVersion && rule.min_chars === chunking.minBlockChars &&
+        rule.max_input_chars === expectedBlockCapacity;
       const shared = blocks.filter(block => blockRefs.has(block.key)).length;
       selection.shared += shared;
       selection.smartEnvOnly += blockRefs.size - shared;
@@ -99,8 +107,10 @@ export async function scanBootstrap(directory, vault, scan, manifest) {
       const matches = new Map();
       for (const part of [note, ...blocks]) {
         const kind = part.key ? "sections" : "notes";
+        const block = part.key ? blockRefs.get(part.key) : undefined;
+        if (block && !ruleMatches) sectionsWithRuleMismatch++;
         const row = part.key
-          ? blockRow(part, fresh ? blockRefs.get(part.key) : undefined)
+          ? blockRow(part, fresh && ruleMatches ? block : undefined)
           : noteRow(relative, note, fresh && importNotes ? source : undefined, fingerprint);
         // Smart Connections does not record per-row truncation. Use a
         // conservative UTF-8 bound, allowing for special tokens and tokenizer
@@ -110,7 +120,10 @@ export async function scanBootstrap(directory, vault, scan, manifest) {
           ? await readVector(handles[kind], row, model.dimensions, { allowInvalid: true })
           : null;
         if (vector) {
-          matches.set(part.key, { vector, inputSha256: sha256(part.input) });
+          matches.set(part.key, {
+            vector, inputSha256: sha256(part.input),
+            period: encodingMonth(part.key ? block.encodedAt : source.reference.at),
+          });
           imported[kind]++;
         } else {
           toEncode[kind]++;
@@ -122,7 +135,7 @@ export async function scanBootstrap(directory, vault, scan, manifest) {
       throw Error("Smart Environment changed during bootstrap scan. Use a stable copy or retry when idle");
     }
     return { rows, report: {
-      source: "smart-env-v3", modelMatched, imported, toEncode, excludedNotes,
+      source: "smart-env-v3", modelMatched, imported, toEncode, excludedNotes, sectionsWithRuleMismatch,
       sectionSelection: modelMatched ? selection : null,
     } };
   } finally {
@@ -141,20 +154,48 @@ function blockRow(part, ref) {
       ref.readHash === smartTextHash(part.text)) return ref.fileIndex;
 }
 
+function encodingMonth(timestamp) {
+  if (!Number.isFinite(timestamp) || timestamp <= 0 || timestamp >= Date.UTC(10000, 0)) return "unknown";
+  return new Date(timestamp).toISOString().slice(0, 7);
+}
+
 function sampleRows(rows, imported, limit) {
-  const candidates = { notes: [], sections: [] };
+  const cohorts = { notes: new Map(), sections: new Map() };
   for (const [relative, matches] of rows) {
     for (const [key, row] of matches) {
+      const kind = key ? "sections" : "notes";
+      const periods = cohorts[kind];
+      if (!periods.has(row.period)) periods.set(row.period, []);
       const rank = sha256(JSON.stringify([relative, key ?? null, row.inputSha256]));
-      candidates[key ? "sections" : "notes"].push({ relative, key, row, rank });
+      periods.get(row.period).push({ relative, key, row, rank });
     }
   }
   const total = imported.notes + imported.sections;
-  const count = Math.min(total, limit, Math.max(20, Math.ceil(total / 100)));
+  const count = Math.min(total, limit);
   const notes = Math.min(imported.notes, Math.max(Math.ceil(count / 2), count - imported.sections));
   const quotas = { notes, sections: count - notes };
-  return kinds.flatMap(kind => candidates[kind].sort((a, b) => a.rank < b.rank ? -1 : Number(a.rank > b.rank))
-    .slice(0, quotas[kind]));
+  const sample = [];
+  const strata = [];
+  for (const kind of kinds) {
+    const periods = [...cohorts[kind].keys()].sort();
+    const groups = periods.map(period => {
+      const entries = cohorts[kind].get(period).sort((a, b) => a.rank < b.rank ? -1 : Number(a.rank > b.rank));
+      const summary = { kind, period, candidates: entries.length, planned: 0, compared: 0 };
+      strata.push(summary);
+      return { entries, summary };
+    });
+    let remaining = quotas[kind];
+    for (let offset = 0; remaining > 0; offset++) {
+      for (const { entries, summary } of groups) {
+        if (remaining === 0) break;
+        if (offset >= entries.length) continue;
+        sample.push({ ...entries[offset], summary });
+        summary.planned++;
+        remaining--;
+      }
+    }
+  }
+  return { sample, strata };
 }
 
 function cosine(left, right) {
@@ -171,18 +212,19 @@ function cosine(left, right) {
 
 export async function verifyBootstrap(bootstrap, vault, scan, client, manifest, limit) {
   const { rows, report } = bootstrap;
-  const sample = sampleRows(rows, report.imported, limit);
+  const { sample, strata } = sampleRows(rows, report.imported, limit);
   const verification = {
     status: sample.length ? "incomplete" : "no-imports",
     sampleCount: 0,
     sampled: { notes: 0, sections: 0 },
+    strata,
     minCosine: null,
     medianCosine: null,
   };
   report.verification = verification;
   const scores = [];
   try {
-    for (const { relative, key, row } of sample) {
+    for (const { relative, key, row, summary } of sample) {
       const { parts } = await readSourceParts(vault, relative, scan.files.get(relative), manifest.chunking);
       const part = key ? parts?.blocks.find(block => block.key === key) : parts?.note;
       if (!part || sha256(part.input) !== row.inputSha256) {
@@ -192,7 +234,8 @@ export async function verifyBootstrap(bootstrap, vault, scan, client, manifest, 
       const [encoded] = await client.encode([{ ...part, relative }], manifest, { fresh: true });
       if (!encoded) throw Error("Bootstrap verification sample was refused by the encoder");
       scores.push(cosine(row.vector, encoded));
-      verification.sampled[key ? "sections" : "notes"]++;
+      summary.compared++;
+      verification.sampled[summary.kind]++;
     }
   } finally {
     verification.sampleCount = scores.length;

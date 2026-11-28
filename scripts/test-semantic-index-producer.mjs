@@ -2,13 +2,17 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { chmod, mkdir, mkdtemp, open, readFile, readdir, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { appendFileSync } from "node:fs";
+import { chmod, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { readSmartEnvV3, smartTextHash } from "../dist/services/smartEnvV3.js";
+import { scanBootstrap } from "./semantic-index/bootstrap.mjs";
+import { selectSmartEnvBlocks } from "./semantic-index/smart-env-selection.mjs";
+import { inventory } from "./semantic-index/vault.mjs";
 
 const cli = fileURLToPath(new URL("./semantic-index-producer.mjs", import.meta.url));
 const model = "fixture-model";
@@ -459,7 +463,7 @@ if (process.getuid?.() > 0 && process.platform !== "win32") {
   });
 }
 
-async function smartEnvFixture(f, { maxTokens = 256, settings = {} } = {}) {
+async function smartEnvFixture(f, { maxTokens = 256, settings = {}, extraNames = [], changeRule = (_, rule) => rule } = {}) {
   const directory = path.join(f.root, "desktop");
   for (const sub of ["smart_sources", "smart_blocks", "embedding_models"]) {
     await mkdir(path.join(directory, sub), { recursive: true });
@@ -475,31 +479,32 @@ async function smartEnvFixture(f, { maxTokens = 256, settings = {} } = {}) {
   const records = [];
   const notes = [];
   const sections = [];
-  function addRow(rows, input, text) {
+  function addRow(rows, input, text, at) {
     const vector = Buffer.alloc(8);
     vector.writeFloatLE(1, parseInt(hash(input)[0], 16) % 2 * 4);
     const readHash = smartTextHash(text);
-    const ref = { file: fingerprint, file_i: rows.length, read_hash: readHash };
+    const ref = { file: fingerprint, file_i: rows.length, read_hash: readHash, at };
     rows.push(vector);
     return { last_read: { hash: readHash }, embedding: { default: { [fingerprint]: ref } } };
   }
-  for (const name of ["fresh", "changed", "excluded", "deleted", "outside"]) {
+  for (const name of ["fresh", "changed", "excluded", "deleted", "outside", ...extraNames]) {
     const text = name === "excluded" ? "# Heading\n\nexcluded\n# Private\n\nRemoved from the input\n" : note(name);
     const relative = name + ".md";
+    const at = name === "fresh" ? Date.UTC(2026, 9, 31, 23) : Date.UTC(2026, 10, 1);
     if (name !== "outside") await f.put(relative, text);
     const block = text.split("\n").slice(2, name === "excluded" ? 3 : 4).join("\n");
     const source = {
       path: relative,
-      ...addRow(notes, name + ":\n" + text, text),
-      block_embedding_selection: {
+      ...addRow(notes, name + ":\n" + text, text, at),
+      block_embedding_selection: changeRule(name, {
         version: 2, min_chars: 0, max_input_chars: Math.floor(maxTokens * 3.7), source_key: relative,
         requires_reimport: false,
-      },
+      }),
       blocks_data: {
         "#Heading": { lines: [1, name === "excluded" ? 3 : 4], should_embed: false },
         "#Heading#{1}": {
           lines: [3, name === "excluded" ? 3 : 4], size: block.length, should_embed: true,
-          ...addRow(sections, name + " > Heading\n" + block, block),
+          ...addRow(sections, name + " > Heading\n" + block, block, at),
         },
       },
     };
@@ -526,6 +531,9 @@ test("bootstrap imports fresh rows and encodes stale, transformed and tombstoned
   assert.equal(manifest.bootstrap.verification.sampleCount, 3);
   assert.equal(manifest.bootstrap.verification.medianCosine, 1);
   assert.equal(manifest.bootstrap.encoded.notes, 3);
+  assert.equal(manifest.sources["fresh.md"].note.provenance, "sc-hash32");
+  assert.equal(manifest.sources["fresh.md"].blocks["#Heading#{1}"].provenance, "sc-hash32");
+  assert.equal(manifest.sources["changed.md"].note.provenance, undefined);
   assert.equal(manifest.stats.encoded, f.requests.length - 3);
   assert.equal(await f.current(), receipt.generation);
   const loaded = await f.load(receipt.generation);
@@ -536,6 +544,7 @@ test("bootstrap imports fresh rows and encodes stale, transformed and tombstoned
   f.requests.length = 0;
   const incremental = await f.run("--exclude-heading", "Private");
   assert.equal(incremental.encoded, 0);
+  assert.equal((await f.manifest(incremental.generation)).sources["fresh.md"].note.provenance, "sc-hash32");
   assert.equal(f.requests.length, 0);
   await f.fail(/requires an index without CURRENT/u, "bootstrap", "--from-smart-env", desktop);
   assert.equal(await f.current(), incremental.generation);
@@ -594,6 +603,103 @@ test("bootstrap queues all rows when the Smart Env fingerprint differs", async t
   assert.equal(stats.encoded, stats.notes + stats.sections);
 });
 
+test("bootstrap reports incompatible selection rules and requires explicit re-encoding to publish", async t => {
+  const f = await fixture(t);
+  const desktop = await smartEnvFixture(f, {
+    changeRule(name, rule) {
+      if (name === "fresh") return { ...rule, version: 3 };
+      if (name === "changed") return { ...rule, min_chars: 1 };
+      if (name === "excluded") return { ...rule, max_input_chars: rule.max_input_chars - 1 };
+      if (name === "unversioned") return undefined;
+      return rule;
+    },
+    extraNames: ["unversioned"],
+  });
+  const args = ["bootstrap", "--from-smart-env", desktop];
+  const preview = await f.run(...args, "--verify-only");
+  assert.equal(preview.sectionsWithRuleMismatch, 4);
+  assert.deepEqual(preview.imported, { notes: 4, sections: 0 });
+  await assert.rejects(f.current(), { code: "ENOENT" });
+  f.requests.length = 0;
+  await f.fail(/selection rule mismatch for 4 section\(s\)/u, ...args);
+  assert.equal(f.requests.length, 0);
+  assert.deepEqual(await readdir(path.join(f.index, "generations")), []);
+  const receipt = await f.run(...args, "--allow-selection-mismatch", "--max-samples", "20");
+  const manifest = await f.manifest(receipt.generation);
+  assert.equal(manifest.bootstrap.sectionsWithRuleMismatch, 4);
+  assert.deepEqual(manifest.bootstrap.imported, { notes: 4, sections: 0 });
+  assert.equal(manifest.bootstrap.encoded.sections, 6);
+  assert.ok(f.requests.some(row => row.source_path === "fresh.md#Heading#{1}"));
+  assert.equal(manifest.sources["fresh.md"].blocks["#Heading#{1}"].provenance, undefined);
+});
+
+test("bootstrap samples a rare encoding month in both vector types within the configured cap", async t => {
+  const f = await fixture(t);
+  const desktop = await smartEnvFixture(f, { extraNames: Array.from({ length: 52 }, (_, index) => "recent-" + index) });
+  const args = ["bootstrap", "--from-smart-env", desktop, "--verify-only"];
+  await f.fail(/--max-samples requires bootstrap/u, "--max-samples", "20");
+  await f.fail(/from 20 to 500/u, ...args, "--max-samples", "19");
+  await f.fail(/from 20 to 500/u, ...args, "--max-samples", "501");
+
+  const limited = await f.run(...args, "--max-samples", "20");
+  assert.equal(limited.verification.sampleCount, 20);
+  assert.deepEqual(limited.verification.strata, [
+    { kind: "notes", period: "2026-10", candidates: 1, planned: 1, compared: 1 },
+    { kind: "notes", period: "2026-11", candidates: 54, planned: 9, compared: 9 },
+    { kind: "sections", period: "2026-10", candidates: 1, planned: 1, compared: 1 },
+    { kind: "sections", period: "2026-11", candidates: 54, planned: 9, compared: 9 },
+  ]);
+  assert.ok(f.requests.some(row => row.source_path === "fresh.md"));
+  assert.ok(f.requests.some(row => row.source_path === "fresh.md#Heading#{1}"));
+  f.requests.length = 0;
+  const standard = await f.run(...args);
+  assert.equal(standard.verification.sampleCount, 100);
+  assert.equal(f.requests.length, 100);
+});
+
+test("bootstrap re-encodes the renamed note and its section with the new breadcrumb", async t => {
+  const f = await fixture(t);
+  const desktop = await smartEnvFixture(f);
+  await rename(path.join(f.vault, "fresh.md"), path.join(f.vault, "renamed.md"));
+  const receipt = await f.run("bootstrap", "--from-smart-env", desktop);
+  const manifest = await f.manifest(receipt.generation);
+  assert.equal(manifest.sources["fresh.md"], undefined);
+  assert.equal(manifest.sources["renamed.md"].note.provenance, undefined);
+  assert.deepEqual(f.requests.filter(row => row.source_path.startsWith("renamed.md")).map(row => row.input), [
+    "renamed:\n" + note("fresh"),
+    "renamed > Heading\nfresh\n",
+  ]);
+});
+
+test("bootstrap detects a vector file change before accepting its scanned candidates", async t => {
+  const f = await fixture(t);
+  const desktop = await realpath(await smartEnvFixture(f));
+  const profile = { provider_key: "ollama", model_key: model, dimensions: 2, max_tokens: 256 };
+  const fingerprint = "mf_" + smartTextHash(JSON.stringify(profile));
+  const vault = await realpath(f.vault);
+  const scan = await inventory(vault, []);
+  const entries = [...scan.files];
+  scan.files[Symbol.iterator] = function* () {
+    yield* entries;
+    appendFileSync(path.join(desktop, "smart_sources", fingerprint), Buffer.alloc(8));
+  };
+  await assert.rejects(scanBootstrap(desktop, vault, scan, {
+    fingerprint, model: profile,
+    chunking: { minNoteChars: 1, minBlockChars: 0, excludedHeadings: [],
+      smartEnvSelection: { embedBlocks: true }, blockMaxTokens: 256 },
+  }), /Smart Environment changed during bootstrap scan/u);
+});
+
+test("Smart Environment range selection favors a child when the parent would lose more text", () => {
+  const blocks = [
+    ["#", [1, 2], "abcdefghijkl\nno", "Doc"],
+    ["##{1}", [1, 1], "abcdefghijkl", "Doc"],
+    ["##{2}", [2, 2], "no", "Doc"],
+  ];
+  assert.deepEqual([...selectSmartEnvBlocks(blocks, 3, 4)], ["##{1}"]);
+  assert.deepEqual([...selectSmartEnvBlocks(blocks, 3, 5)], ["#"]);
+});
+
 test("bootstrap refuses publication on one bad sampled vector before encoding any misses", async t => {
   const f = await fixture(t);
   const desktop = await smartEnvFixture(f);
@@ -625,14 +731,17 @@ test("bootstrap and its refresh mirror Smart Environment exclusions and Desktop 
   const desktop = await smartEnvFixture(f, { settings: {
     smart_sources: { file_exclusions_list: ["deleted.md"], folder_exclusions_list: ["hidden-*"] },
     smart_blocks: { embed_blocks: true, min_chars: 0 },
+    gitignore_exclusions: ["build"],
   } });
   await mkdir(path.join(f.vault, "hidden-archive"));
+  await mkdir(path.join(f.vault, "build"));
+  await f.put("build/keep.md", note("The parent matches but this file does not"));
   await f.put("hidden-archive/keep.md", note("Excluded by folder glob"));
   await f.put("ignore#hash.md", note("Excluded by key syntax"));
   await f.put("fenced.md", "# Outer\n~~~\n# Desktop heading\nVisible content\n~~~");
   const receipt = await f.run("bootstrap", "--from-smart-env", desktop);
   const loaded = await f.load(receipt.generation);
-  assert.deepEqual(loaded.notes.map(row => row.notePath), ["changed.md", "excluded.md", "fenced.md", "fresh.md"]);
+  assert.deepEqual(loaded.notes.map(row => row.notePath), ["build/keep.md", "changed.md", "excluded.md", "fenced.md", "fresh.md"]);
   assert.ok(loaded.blocks.refs.some(row => row.notePath === "fenced.md" && row.blockKey === "#Desktop heading#{1}"));
   assert.ok(f.requests.every(row => !/^(?:hidden-archive\/|ignore#hash\.md|deleted\.md)/u.test(row.source_path)));
   f.requests.length = 0;

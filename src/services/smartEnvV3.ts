@@ -12,7 +12,9 @@ type ModelRecord = {
   max_tokens?: number;
 };
 
-type VectorReference = { file?: string; file_i?: number; read_hash?: string };
+type VectorReference = { file?: string; file_i?: number; read_hash?: string; at?: number };
+
+type BlockSelection = { version?: number; min_chars?: number; max_input_chars?: number };
 
 type BlockRecord = {
   lines?: unknown;
@@ -29,6 +31,7 @@ type SourceRecord = {
   };
   metadata?: { tags?: string[] };
   blocks_data?: Record<string, BlockRecord | null>;
+  block_embedding_selection?: BlockSelection;
 };
 
 type SearchSource = {
@@ -37,6 +40,7 @@ type SearchSource = {
   readHash: string | undefined;
   tags: string[] | undefined;
   blocks: SmartBlockCandidate[] | undefined;
+  blockSelection?: BlockSelection;
 };
 
 /** A block whose current vector reference passed every metadata check. */
@@ -48,6 +52,8 @@ export type SmartBlockCandidate = {
   fileIndex: number;
   /** `smartTextHash` of the embedded lines, as Smart Connections read them. */
   readHash: string;
+  /** Encoding time when collecting bootstrap metadata. */
+  encodedAt?: number;
 };
 
 export type SmartBlockRef = SmartBlockCandidate & { notePath: string };
@@ -180,6 +186,7 @@ const FRONTMATTER_BLOCK = /^#+---frontmatter---/u;
 function blockCandidates(
   blocks: SourceRecord["blocks_data"],
   fingerprint: string,
+  bootstrapMetadata?: boolean,
 ): SmartBlockCandidate[] | undefined {
   if (!blocks || typeof blocks !== "object") return undefined;
   const candidates: SmartBlockCandidate[] = [];
@@ -209,6 +216,7 @@ function blockCandidates(
       lineEnd: lines[1],
       fileIndex: index,
       readHash: reference.read_hash,
+      ...(bootstrapMetadata && typeof reference.at === "number" && { encodedAt: reference.at }),
     });
   }
   return candidates.length ? candidates : undefined;
@@ -344,8 +352,9 @@ export async function readSmartEnvV3References(
           readHash: source.last_read?.hash ?? source.last_import?.hash,
           tags: Array.isArray(source.metadata?.tags) ? source.metadata.tags : undefined,
           blocks: options.blocks
-            ? blockCandidates(source.blocks_data, fingerprint)
+            ? blockCandidates(source.blocks_data, fingerprint, options.strict)
             : undefined,
+          ...(options.strict && { blockSelection: source.block_embedding_selection }),
         });
       } catch {
         if (options.strict) throw new Error("Invalid Smart Environment source record");

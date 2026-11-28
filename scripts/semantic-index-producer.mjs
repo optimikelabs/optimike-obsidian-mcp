@@ -5,7 +5,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { modelFingerprint, smartTextHash } from "../dist/services/smartEnvV3.js";
 import { bitnetClient, isSha256 } from "./semantic-index/bitnet.mjs";
-import { scanBootstrap, verifyBootstrap } from "./semantic-index/bootstrap.mjs";
+import { defaultSampleLimit, maxSampleLimit, scanBootstrap, verifyBootstrap } from "./semantic-index/bootstrap.mjs";
 import { exclusionMatcher, readSmartEnvSelection } from "./semantic-index/smart-env-selection.mjs";
 import {
   currentFile, jsonLine, readActiveGeneration, readManifest, readVector, sealGeneration, sourceFile,
@@ -22,7 +22,8 @@ const help = `Usage: optimike-semantic-index --vault DIR --index DIR --endpoint 
 
        optimike-semantic-index bootstrap --from-smart-env DIR --vault DIR
        --index DIR --endpoint ORIGIN --model ID --revision REV
-       --model-sha256 SHA256 [--verify-only [--max-samples 20..40]]
+       --model-sha256 SHA256 [--verify-only] [--max-samples 20..500]
+       [--allow-selection-mismatch]
        [--exclude-path RELATIVE/PATH]... [--exclude-heading TITLE]...
        [--min-note-chars N] [--min-block-chars N]
 
@@ -49,9 +50,9 @@ function previousRows(manifest) {
   const rows = new Map();
   if (manifest) {
     for (const source of Object.values(manifest.sources)) {
-      rows.set(source.note.inputSha256, { kind: "notes", row: source.note.row });
+      rows.set(source.note.inputSha256, { kind: "notes", row: source.note.row, provenance: source.note.provenance });
       for (const block of Object.values(source.blocks)) {
-        rows.set(block.inputSha256, { kind: "sections", row: block.row });
+        rows.set(block.inputSha256, { kind: "sections", row: block.row, provenance: block.provenance });
       }
     }
   }
@@ -96,7 +97,9 @@ async function populate(staging, vault, scan, client, manifest, previous, hashes
           }
           await output[kind].writeFile(row);
           digests[kind].update(row);
-          const ref = { row: stats[kind]++, readHash: smartTextHash(part.text), inputSha256: part.inputSha256 };
+          const provenance = importedRow ? "sc-hash32" : existing?.provenance;
+          const ref = { row: stats[kind]++, readHash: smartTextHash(part.text), inputSha256: part.inputSha256,
+            ...(provenance && { provenance }) };
           if (part.key) part.source.blocks[part.key] = { ...ref, lines: part.range };
           else part.source.note = ref;
           const disposition = importedRow ? "imported" : existing ? "reused" : "encoded";
@@ -217,8 +220,12 @@ async function build(options, vault, index, client, smartEnv) {
   let imported;
   if (smartEnv) {
     const bootstrap = await scanBootstrap(smartEnv, vault, scan, manifest);
+    const { sectionsWithRuleMismatch } = bootstrap.report;
+    if (sectionsWithRuleMismatch && !options["verify-only"] && !options["allow-selection-mismatch"]) {
+      throw Error(`Smart Environment selection rule mismatch for ${sectionsWithRuleMismatch} section(s). Use --verify-only to inspect the scan or --allow-selection-mismatch to re-encode those sections`);
+    }
     try {
-      await verifyBootstrap(bootstrap, vault, scan, client, manifest, Number(options["max-samples"] ?? 40));
+      await verifyBootstrap(bootstrap, vault, scan, client, manifest, Number(options["max-samples"] ?? defaultSampleLimit));
       await verifyProfile();
     } catch (error) {
       if (options["verify-only"]) console.log(JSON.stringify(bootstrap.report));
@@ -229,7 +236,7 @@ async function build(options, vault, index, client, smartEnv) {
     const { source, modelMatched, verification, sectionSelection } = bootstrap.report;
     manifest.bootstrap = {
       source, modelMatched, imported: { notes: 0, sections: 0 }, encoded: { notes: 0, sections: 0 },
-      verification, sectionSelection,
+      verification, sectionSelection, sectionsWithRuleMismatch,
     };
     manifest.stats.imported = 0;
   }
@@ -293,6 +300,7 @@ async function main() {
     "from-smart-env": { type: "string" },
     "verify-only": { type: "boolean" },
     "max-samples": { type: "string" },
+    "allow-selection-mismatch": { type: "boolean" },
     "exclude-path": { type: "string", multiple: true, default: [] },
     "exclude-heading": { type: "string", multiple: true, default: [] },
   } });
@@ -302,12 +310,13 @@ async function main() {
   }
   const bootstrap = positionals.length === 1 && positionals[0] === "bootstrap";
   if (bootstrap ? !options["from-smart-env"]?.trim() || options.rebuild
-    : positionals.length || options["from-smart-env"] !== undefined || options["verify-only"]) {
+    : positionals.length || options["from-smart-env"] !== undefined || options["verify-only"] ||
+      options["allow-selection-mismatch"]) {
     throw Error("Invalid bootstrap options. Run with --help");
   }
-  if (options["max-samples"] !== undefined && (!bootstrap || !options["verify-only"] ||
-      !/^(?:[23][0-9]|40)$/u.test(options["max-samples"]))) {
-    throw Error("--max-samples requires bootstrap --verify-only and an integer from 20 to 40");
+  if (options["max-samples"] !== undefined && (!bootstrap || !/^\d{2,3}$/u.test(options["max-samples"]) ||
+      Number(options["max-samples"]) < 20 || Number(options["max-samples"]) > maxSampleLimit)) {
+    throw Error(`--max-samples requires bootstrap and an integer from 20 to ${maxSampleLimit}`);
   }
   if (["vault", "index", "endpoint", "model", "revision"].some(key => !options[key]?.trim()) ||
       !isSha256(options["model-sha256"])) throw Error("Missing or invalid required option. Run with --help");

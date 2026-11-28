@@ -93,27 +93,39 @@ L’amorçage reprend les clés et la sélection par plages de Smart Connections
 seuils des notes et des blocs, l’activation des vecteurs de blocs, les titres
 exclus, les motifs de fichiers et dossiers et les règles Git ignore
 enregistrées. Les seuils explicites de la CLI priment. La génération conserve
-les paramètres de sélection pour les réutiliser en incrémental sur une autre
-machine. Le rapport compte les notes dont la taille en octets est inférieure
+les paramètres de sélection pour les incrémentaux suivants, y compris sur une
+autre machine. Pour adopter une autre configuration Desktop, amorcer un nouveau
+dossier d’index. Le rapport compte les notes dont la taille en octets est inférieure
 ou égale au seuil parmi les exclusions. Si le vecteur d’une note est écarté,
 ses sections sont également absentes de la génération publiée.
 
-Avant d’encoder le reste, le producteur réencode un échantillon déterministe,
-réparti autant que possible entre notes et sections. Il prend 1 % des
-vecteurs candidats, avec un plancher de 20 et un plafond de 40. En dessous de
-20 candidats, il les contrôle tous. Utiliser un encodeur avec un cache de
+Pour importer une section, la règle de sa source doit indiquer la version 2,
+le minimum effectif des blocs et un budget de `floor(max_tokens * 3.7)`.
+`sectionsWithRuleMismatch` compte les sections sélectionnées qui ont une
+référence SC et dont la règle est absente ou incompatible. Ce nombre bloque la
+publication s’il est non nul. `--allow-selection-mismatch` autorise le
+réencodage de ces sections par le parcours normal.
+
+Avant d’encoder le reste, le producteur réencode un échantillon déterministe
+réparti par type de vecteur et par mois UTC d’encodage selon la référence SC.
+Les dates manquantes forment un groupe. Le plafond par défaut est de 100.
+Utiliser un encodeur avec un cache de
 documents vierge. Si le bridge déclare un résultat issu du cache, le contrôle
 s’arrête. Le cosinus minimal doit atteindre 0,995 et la médiane 0,999.
 L’empreinte v3 ne permet pas d’identifier les poids d’origine ni de retrouver
-toutes les entrées historiques. L’échantillon mesure l’accord avec l’encodeur
-configuré. Le manifeste enregistre le résultat et les nombres de vecteurs
-importés et encodés par type.
+toutes les entrées historiques. Les titres exclus dans la configuration
+actuelle n’établissent pas les règles actives lors des encodages passés.
+L’empreinte de texte SC sur 32 bits utilise l’octet faible de chaque unité
+UTF-16. Une égalité d’empreinte peut donc masquer un changement de texte. Le
+manifeste marque les vecteurs importés avec `sc-hash32`, conserve la marque
+lors d’une réutilisation et consigne le contrôle, les effectifs et comparaisons
+par groupe ainsi que les nombres de vecteurs importés et encodés par type.
 
 Ajouter `--verify-only` pour obtenir en JSON la couverture de l’import, les
 lignes à encoder et l’accord sur l’échantillon. Le rapport compare aussi les
 clés des sections aux références Smart Environment admissibles, y compris
-hors du corpus parcouru. Utiliser `--max-samples` avec une valeur de 20 à 40
-pour limiter un essai de vérification seule. Ce mode prend le verrou du
+hors du corpus parcouru. Utiliser `--max-samples` avec une valeur de 20 à 500
+pour fixer le plafond dans les deux modes du bootstrap. La vérification seule prend le verrou du
 producteur et peut créer le dossier d’index. Il n’encode pas les autres lignes
 et ne publie aucune génération.
 Le décompte des lignes à encoder précède les éventuels refus pour longueur.

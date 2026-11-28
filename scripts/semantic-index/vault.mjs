@@ -70,11 +70,11 @@ export async function inventory(vault, excludedPaths, excludedByProfile = () => 
     directories.set(relative, inode(stat));
     for (const name of (await readdir(directory)).sort()) {
       const child = relative ? relative + "/" + name : name;
-      if (name.startsWith(".") || excludes.has(child) || excludedByProfile(child)) continue;
+      if (name.startsWith(".") || excludes.has(child) || excludedByProfile(child, true)) continue;
       const entry = await lstat(path.join(vault, child), { bigint: true });
       if (entry.isSymbolicLink()) throw Error("Symbolic links require an explicit path exclusion");
       if (entry.isDirectory()) await walk(child);
-      else if (/\.md$/iu.test(name)) {
+      else if (/\.md$/iu.test(name) && !excludedByProfile(child)) {
         if (!entry.isFile() || entry.dev !== root.dev) throw Error("Unsafe Markdown source");
         // Match the strict Smart Env v3 reader's note-path constraints.
         const valid = !/[:\\\x00-\x1f]/u.test(child) &&
