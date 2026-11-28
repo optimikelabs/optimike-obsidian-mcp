@@ -8,7 +8,7 @@
     {
       "type": "code",
       "query": "Bôbines relay pulse",
-      "relevant": ["Notes/Coil.md"]
+      "relevant": [{ "path": "Notes/Coil.md", "heading": "" }]
     }
   ]
 }

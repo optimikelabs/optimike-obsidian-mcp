@@ -16,7 +16,7 @@ export function readGold(value) {
     const paths = new Set();
     const relevant = item.relevant.map((entry) => {
       const { path, grade = 1, section, heading } = typeof entry === "string" ? { path: entry } : entry;
-      const expectedSection = section ?? heading;
+      const expectedSection = section ?? (typeof heading === "string" && !heading.trim() ? undefined : heading);
       if (typeof path !== "string" || !notePath(path) || paths.has(notePath(path)) ||
           !Number.isInteger(grade) || grade < 1 || grade > 5 ||
           (expectedSection !== undefined && (typeof expectedSection !== "string" || !expectedSection.trim()))) {
