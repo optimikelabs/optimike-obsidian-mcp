@@ -1036,10 +1036,14 @@ async function handleSearchRequest(params: unknown, cache?: VaultCacheService): 
   } catch (error) {
     const reason = error instanceof McpError ? error.details?.reasonCode : undefined;
     if (!(error instanceof McpError)) {
-      logger.error("Unexpected hybrid semantic search failure.", requestContextService.createRequestContext({
-        operation: "HybridSemanticSearch",
-        reasonCode: "semantic_internal_error",
-      }));
+      logger.error(
+        "Unexpected hybrid semantic search failure.",
+        error instanceof Error ? error : new Error("Non-Error rejection"),
+        requestContextService.createRequestContext({
+          operation: "HybridSemanticSearch",
+          reasonCode: "semantic_internal_error",
+        }),
+      );
     }
     return fuseHybrid(parsed, hybrid, undefined, {
       semantic_status: "unavailable",

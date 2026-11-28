@@ -419,11 +419,12 @@ const start = async () => {
           // Once the initial build is done, start the periodic refresh
           vaultCacheService?.startPeriodicRefresh();
           if (vaultCacheService?.isReady()) {
-            void getLexicalIndex(vaultCacheService).catch(() => {
-              logger.warning("Background ranked-search index preparation failed.", {
-                ...startupContext,
-                operation: "RankedSearchPrebuild",
-              });
+            void getLexicalIndex(vaultCacheService).catch((error: unknown) => {
+              logger.error(
+                "Background ranked-search index preparation failed.",
+                error instanceof Error ? error : new Error("Non-Error rejection"),
+                { ...startupContext, operation: "RankedSearchPrebuild" },
+              );
             });
           }
         })
