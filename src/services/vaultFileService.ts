@@ -226,8 +226,15 @@ export class VaultFileService {
     try {
       return await this.assertRealPathInsideVault(absolutePath, context);
     } catch (error) {
-      if (!hasFsCode(error, "ENOENT") || absolutePath === this.vaultRoot) {
+      if (!hasFsCode(error, "ENOENT")) {
         throw error;
+      }
+      if (absolutePath === this.vaultRoot) {
+        throw new McpError(
+          BaseErrorCode.VALIDATION_ERROR,
+          "Unable to verify parent real path inside the vault root.",
+          { ...context, absolutePath },
+        );
       }
       const parent = await this.resolveRealPathForWrite(
         path.dirname(absolutePath),
@@ -349,6 +356,17 @@ export class VaultFileService {
     return this.withLockedFiles([filePath], context, async () => {
       const current = await this.readIfPresent(filePath, context);
       return this.replaceFile(filePath, content, current?.hash, context);
+    });
+  }
+
+  async createIfAbsent(
+    filePath: string,
+    content: string,
+    context: RequestContext,
+  ): Promise<VaultFileReadResult> {
+    return this.withLockedFiles([filePath], context, async () => {
+      await this.assertUnchanged(filePath, undefined, context);
+      return this.replaceFile(filePath, content, undefined, context);
     });
   }
 

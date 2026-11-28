@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Serialize headless filesystem mutations per file within a server process.
   Recheck the content hash or target absence before replacement and discard the
-  temporary file on conflict (#201).
+  temporary file on conflict. Reject stale Canvas edits and Canvas or Base
+  creates that would overwrite an existing file with `overwrite=false` (#201).
 
 ## [3.23.1] - 2026-11-26
 

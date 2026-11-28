@@ -253,6 +253,18 @@ try {
   const moved = await service.moveFile("Notes/Existante.md", "Notes/Déplacée — ok.md", context, { expectedHash: (await service.read("Notes/Existante.md", context)).hash });
   eq(moved.result.path.replaceAll("\\", "/"), "Notes/Déplacée — ok.md");
 
+  await test("a missing vault root is a path validation error before creation", async () => {
+    const missingRoot = path.join(root, "missing-vault");
+    await assert.rejects(
+      new VaultFileService(missingRoot).writeAtomic("Note.md", "new\n", context),
+      {
+        code: BaseErrorCode.VALIDATION_ERROR,
+        message: "Unable to verify parent real path inside the vault root.",
+      },
+    );
+    assert.equal(existsSync(missingRoot), false);
+  });
+
   await test("concurrent updates cannot both commit against the same stale hash", async () => {
     const file = "Notes/Conditional.md";
     const { hash } = await service.writeAtomic(file, "base\n", context);

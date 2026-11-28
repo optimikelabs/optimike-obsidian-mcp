@@ -113,8 +113,11 @@ The filesystem writer shared by `headless-guarded` and `headless-filesystem`
 serializes mutations of the same resolved file within one server process.
 An update that changes the content invalidates the previous `expectedHash`.
 Concurrent appends within the writer preserve each caller's text even without
-a precondition. Before replacing a file, the writer rechecks the content hash
-it read, or that the target is still absent for a new file. A mismatch returns
+a precondition. Canvas handlers pass the hash of the Canvas they read to the
+writer, even when the caller omits `expectedHash`. Canvas and Base creates
+with `overwrite=false` require an absent target. Before replacing a file, the
+writer rechecks the content hash it read, or that the target is still absent
+for a new file. A mismatch returns
 `CONFLICT` and discards the temporary file. Another process can still change
 the target between the last check and the rename, so coordinate independent
 writers separately.

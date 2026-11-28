@@ -114,7 +114,10 @@ exécute successivement les mutations du même fichier résolu dans un même
 processus serveur. Une mise à jour qui modifie le contenu invalide le précédent
 `expectedHash`. Lors d’ajouts concurrents en fin de fichier, le service conserve
 le texte de chaque appel, même sans précondition. Avant de remplacer le fichier,
-il revérifie le hash du contenu lu ou l’absence de la cible pour une création.
+le service revérifie le hash du contenu lu ou l’absence de la cible pour une
+création. Les outils Canvas transmettent le hash du Canvas qu’ils ont lu,
+même quand l’appel ne fournit pas `expectedHash`. La création d’un Canvas ou
+d’une Base avec `overwrite=false` exige que la cible soit absente.
 En cas d’écart, il renvoie `CONFLICT` et supprime le fichier temporaire. Un autre
 processus peut encore modifier la cible entre le dernier contrôle et le
 renommage, ce qui exige de coordonner séparément les écritures indépendantes.
