@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import "./test-support/isolated-state.mjs";
+import assert from "node:assert/strict";
 import {
   mkdtemp,
   rm,
@@ -79,6 +81,8 @@ async function createTempVault() {
     [
       "---",
       "type: smoke",
+      "due: 2026-12-01",
+      "started: 2026-11-28T12:30:00Z",
       "tags:",
       "  - headless",
       "---",
@@ -99,6 +103,8 @@ async function createTempVault() {
     [
       "---",
       "type: root",
+      "due: 2026-11-28",
+      "started: 2026-11-28T09:00:00Z",
       "---",
       "",
       "Root smoke note with searchable keyword alphasmoke.",
@@ -132,7 +138,7 @@ async function createTempVault() {
       '  priority_label: \'if(priority, "P" + priority.toString(), "")\'',
       "filters:",
       "  and:",
-      "    - 'file.ext == \"md\"'",
+      "    - 'type == \"project\"'",
       "views:",
       "  - type: table",
       "    name: Active",
@@ -147,6 +153,12 @@ async function createTempVault() {
     ].join("\n"),
     "utf8",
   );
+  for (const [name, yaml] of [
+    ["Plain", "views:\n  - type: table\n    name: Plain\n"],
+    ["Calendar", "views:\n  - type: calendar\n    name: Calendar\n"],
+  ]) {
+    await writeFile(path.join(vaultRoot, `${name}.base`), yaml, "utf8");
+  }
   await writeFile(
     path.join(vaultRoot, "Canvases", "Flow.canvas"),
     JSON.stringify(
@@ -219,6 +231,33 @@ async function main() {
       if (request.method === "GET" && request.url === "/vault/Projects/") {
         response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ files: ["Headless.md"] }));
+        return;
+      }
+      if (request.method === "POST" && request.url === "/bases/Smoke.base/query") {
+        const chunks = [];
+        for await (const chunk of request) chunks.push(chunk);
+        const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        response.setHeader("content-type", "application/json");
+        if (
+          payload.view !== "Active" ||
+          payload.evaluate !== true ||
+          "property_only" in payload
+        ) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: "Unexpected Bases query request" }));
+          return;
+        }
+        response.end(JSON.stringify({
+          source: "engine",
+          evaluate: true,
+          total: 1,
+          page: 1,
+          rows: [{
+            file: { path: "Projects/Headless.md", name: "Headless" },
+            props: { type: "project" },
+            computed: { priority_label: "P1" },
+          }],
+        }));
         return;
       }
       if (request.url?.startsWith("/vault/")) {
@@ -499,6 +538,20 @@ async function main() {
       "obsidian_runtime_maintenance",
       "obsidian_validate_format",
     ];
+    if (modeArg === "hybrid-live") {
+      const result = await withTimeout(
+        client.callTool({
+          name: "bases_query",
+          arguments: { base_id: "Smoke.base", view: "Active", property_only: true },
+        }),
+        "live Bases query preserves REST evaluation and does not forward the local opt-in",
+      );
+      assert.equal(result.isError, false);
+      const payload = jsonOf(result, "live Bases query");
+      assert.equal(payload.source, "engine");
+      assert.deepEqual(payload.rows[0].computed, { priority_label: "P1" });
+    }
+
     if (
       ["headless-readonly", "headless-guarded", "headless-filesystem"].includes(
         modeArg,
@@ -731,21 +784,93 @@ async function main() {
       assertTextIncludes(schema, "local-fallback", "bases schema");
       assertTextIncludes(schema, "file.name", "bases schema");
 
-      const query = await withTimeout(
-        client.callTool({
-          name: "bases_query",
-          arguments: {
-            base_id: "Smoke.base",
-            filter: { type: "root" },
-            sort: [{ prop: "file.name", dir: "asc" }],
-            limit: 10,
-            page: 1,
-          },
-        }),
-        "bases query",
-      );
-      assertTextIncludes(query, "local-fallback", "bases query");
-      assertTextIncludes(query, "Root.md", "bases query");
+      for (const [regression, args] of [
+        ["a filterless calendar cannot silently become a Markdown scan", { base_id: "Calendar.base" }],
+        ["disabling evaluation does not opt into a Markdown scan", { base_id: "Plain.base", evaluate: false, property_only: false }],
+      ]) {
+        const result = await withTimeout(
+          client.callTool({ name: "bases_query", arguments: args }),
+          regression,
+        );
+        assert.equal(result.isError, true, regression);
+        const payload = jsonOf(result, regression);
+        assert.equal(payload.error.code, "SERVICE_UNAVAILABLE", regression);
+        assert.equal(payload.error.details.reasonCode, "base_query_requires_obsidian", regression);
+        assert.match(payload.error.message, /Obsidian.*property_only/u, regression);
+        assert.equal(payload.rows, undefined, regression);
+      }
+
+      for (const [regression, filter, expected] of [
+        ["unquoted YAML dates preserve ISO equality", { and: ['due == "2026-11-28"'] }, ["/Root.md"]],
+        ["unquoted YAML dates sort chronologically in expression comparisons", { and: ['due >= "2026-12-01"'] }, ["/Projects/Headless.md"]],
+        ["unquoted YAML timestamps preserve the time in comparisons", { and: ['started > "2026-11-28T10:00:00Z"'] }, ["/Projects/Headless.md"]],
+        ["property-map paths match a vault-relative path", { or: [{ "file.path": "Root.md" }] }, ["/Root.md"]],
+        ["slash-prefixed path operands still match cached rows", { "file.path": { in: ["/Root.md"] } }, ["/Root.md"]],
+      ]) {
+        const result = await withTimeout(
+          client.callTool({
+            name: "bases_query",
+            arguments: { base_id: "Plain.base", filter, property_only: true },
+          }),
+          regression,
+        );
+        assert.equal(result.isError, false, regression);
+        assert.deepEqual(jsonOf(result, regression).rows.map((row) => row.file.path), expected, regression);
+      }
+
+      for (const [regression, args, hint] of [
+        ["oversized expressions are refused before parsing", { filter: { and: [`type ==${" ".repeat(20_000)}"root"`] } }, /1,024 characters/u],
+        ["logical groups reject invalid leaves even in an unused branch", { filter: { or: ["type", "unrecognized()"] } }, /and, or, not/u],
+        ["a property array of operators cannot silently match nothing", { filter: { type: [{ eq: "root" }] } }, /direct equality/u],
+        ["an empty operator object cannot silently match everything", { filter: { type: {} } }, /direct equality/u],
+        ["an opted-in scan cannot filter against an unevaluated formula", { property_only: true, filter: { not: "formula.score == 2" } }, /formula/u],
+        ["an opted-in scan cannot silently sort on an unevaluated formula", { property_only: true, sort: [{ prop: "formula.score" }] }, /formula/u],
+        ["an unknown filter operator must not match every note", { filter: { type: { exists: true } } }, /eq, ne, in, contains/u],
+        ["an unsupported file property must not filter against missing values", { filter: { "file.folder": "Projects" } }, /file\.path, file\.name, file\.ctime, file\.mtime, file\.size/u],
+        ["an opted-in scan must not sort on a note namespace it cannot resolve", { property_only: true, sort: [{ prop: "note.type" }] }, /unprefixed frontmatter/u],
+      ]) {
+        const result = await withTimeout(
+          client.callTool({
+            name: "bases_query",
+            arguments: { base_id: "Plain.base", property_only: true, ...args },
+          }),
+          regression,
+        );
+        assert.equal(result.isError, true, regression);
+        const payload = jsonOf(result, regression);
+        assert.equal(payload.error.code, "VALIDATION_ERROR", regression);
+        assert.match(payload.error.message, hint, regression);
+        assert.equal(payload.rows, undefined, regression);
+      }
+
+      const propertyQuery = {
+        filter: {
+          and: [
+            { or: [{ type: { eq: "root" } }, 'type == "area"'] },
+            { not: 'type == "area"' },
+          ],
+        },
+        limit: 1,
+      };
+      for (const [regression, args] of [
+        ["a calendar Base permits an explicitly requested property scan", { base_id: "Calendar.base", property_only: true }],
+        ["an opted-in scan returns Markdown outside the selected Base and labels it", {
+          base_id: "Smoke.base", view: "Active", evaluate: true, property_only: true,
+        }],
+      ]) {
+        const result = await withTimeout(
+          client.callTool({ name: "bases_query", arguments: { ...args, ...propertyQuery } }),
+          regression,
+        );
+        assert.equal(result.isError, false, regression);
+        const payload = jsonOf(result, regression);
+        assert.equal(payload.source, "local-fallback", regression);
+        assert.equal(payload.mode, "property-scan", regression);
+        assert.equal(payload.evaluate, false, regression);
+        assert.equal(payload.total, 1, regression);
+        assert.deepEqual(payload.rows.map((row) => row.file.path), ["/Root.md"], regression);
+        assert.ok(payload.limitations.includes("Non-Markdown files are not listed."), regression);
+      }
 
       const baseValidation = await withTimeout(
         client.callTool({

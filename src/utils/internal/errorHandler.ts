@@ -253,6 +253,8 @@ const CALLER_DERIVED_PUBLIC_FIELDS = new Set(["suggestedPath", "suggestedName"])
 const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "invalid_tool_arguments",
   BASE_FORMULA_ENGINE_REFUSAL,
+  "base_query_requires_obsidian",
+  "base_query_unsupported_local_input",
   ...NOTE_NAME_REASON_CODES,
   ...NATIVE_MOVE_PUBLIC_REASON_CODES,
   ...OPERON_REFUSAL_CODES,
@@ -704,6 +706,16 @@ function safeDiagnosticFields(
 }
 
 function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
+  if (
+    code === BaseErrorCode.SERVICE_UNAVAILABLE &&
+    reasonCode === "base_query_requires_obsidian"
+  )
+    return "Base rows require Obsidian and the Bases Bridge, including for Bases without filters. Set property_only: true to scan cached Markdown properties independently of the Base and its views.";
+  if (
+    code === BaseErrorCode.VALIDATION_ERROR &&
+    reasonCode === "base_query_unsupported_local_input"
+  )
+    return "Unsupported local Base query filter or sort. Use unprefixed frontmatter keys or file.path, file.name, file.ctime, file.mtime, file.size. Property filters accept direct equality, scalar arrays, and non-empty operator objects with eq, ne, in, contains, gt, gte, lt, lte. Use and, or, not to combine property filters and simple comparison or truthy expressions of up to 1,024 characters each. Filter and sort references to formula values require Obsidian and the Bases Bridge.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_tool_arguments")
     return "Invalid tool arguments. See validationIssues for the field and reason.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === BASE_FORMULA_ENGINE_REFUSAL)

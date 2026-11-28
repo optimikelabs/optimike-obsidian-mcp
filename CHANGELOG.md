@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Base rows require Obsidian and the Bases Bridge, including for filterless Bases. Headless `bases_query` requires `property_only: true` for a labeled scan of cached Markdown properties, independent of the Base and its views. The scan accepts `and`/`or`/`not` filter trees with simple leaves and rejects unsupported filter and sort inputs, including formula references (#200).
+
 ## [3.23.1] - 2026-11-26
 
 No Bridge change: Atomic Write Bridge 0.10.0, Operon Bridge 0.9.9 and Bases Bridge 1.3.0 ship unchanged in the bundle of this release. See the [English](docs/releases/3.23.1.md) and [French](docs/releases/3.23.1.fr.md) release notes.

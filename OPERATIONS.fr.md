@@ -174,11 +174,30 @@ Le serveur final peut exposer des capacités différentes selon les plugins Obsi
 - Fallback local Bases
 
   - disponible en modes headless pour `bases_list`, `bases_get_schema` et `bases_query`
-  - renvoie `source: "local-fallback"`
-
-- supporte l’égalité directe, les arrays, `contains`, `in`, les comparaisons, le tri simple, la pagination et l’inspection de schéma
-
-  - n’évalue pas les formules, filtres plugin, propriétés calculées ni la sémantique exacte des vues UI
+  - les lignes d’une Base nécessitent Obsidian et le Bases Bridge, même pour
+    une Base sans filtre et quelle que soit la valeur de `evaluate`. Sans l’API
+    REST d’Obsidian, `bases_query` renvoie `SERVICE_UNAVAILABLE` sauf avec
+    `property_only: true`
+  - `property_only: true` parcourt les propriétés Markdown en cache
+    indépendamment de la Base et de ses vues. Le fichier Base doit exister
+  - le parcours renvoie `source: "local-fallback"`, `mode: "property-scan"`,
+    `evaluate: false` et `limitations`. Ses lignes et son total décrivent le
+    parcours Markdown, avec le filtre de propriétés, le tri et la pagination de la requête.
+    Les fichiers non Markdown sont exclus
+  - les filtres du parcours prennent en charge l’égalité directe, les tableaux,
+    `eq`, `ne`, `contains`, `in`, `gt`, `gte`, `lt` et `lte`. Filtres
+    et tris acceptent les clés de frontmatter sans préfixe et `file.path`,
+    `file.name`, `file.ctime`, `file.mtime` et `file.size`. Combiner les
+    conditions avec `{"and":[...]}`, `{"or":[...]}` ou `{"not":...}`.
+    Chaque groupe a une seule clé logique. Une feuille peut être une table de
+    propriétés locale, une comparaison comme `type == "project"` ou une
+    propriété évaluée comme booléen, par exemple `active`. Une feuille textuelle
+    est limitée à 1 024 caractères. Les dates et horodatages gardent leur texte YAML.
+    Les filtres utilisent des chemins `file.path` relatifs au coffre. L’égalité
+    et l’appartenance acceptent aussi un slash initial. Les formes inconnues,
+    objets opérateurs vides et tableaux d’objets opérateurs renvoient
+    `VALIDATION_ERROR`. Les références à des formules dans les filtres et tris
+    sont refusées même avec `property_only: true`
 
 - Smart Connections
   - requis pour la recherche sémantique

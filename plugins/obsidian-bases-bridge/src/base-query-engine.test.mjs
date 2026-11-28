@@ -57,7 +57,10 @@ const TABLE = {
   'file.name + "!"': (row) => `${row.name}!`,
 };
 
-async function queryRoute({ baseText = JSON.stringify(BASE), engine = true, notes = NOTES, table = TABLE } = {}) {
+async function queryRoute({
+  baseText = JSON.stringify(BASE), engine = true, notes = NOTES, table = TABLE,
+  frontmatter = Object.fromEntries(notes.map((path) => [path, { status: "open" }])),
+} = {}) {
   const { Bridge, TFile } = await loadBridge();
   const files = new Map();
   const add = (path) => {
@@ -106,7 +109,7 @@ async function queryRoute({ baseText = JSON.stringify(BASE), engine = true, note
   plugin.app = {
     workspace: { onLayoutReady: (callback) => callback() },
     plugins: { plugins: { "obsidian-local-rest-api": { getPublicApi: () => api } } },
-    metadataCache: { getFileCache: () => ({ frontmatter: { status: "open" } }) },
+    metadataCache: { getFileCache: (file) => ({ frontmatter: frontmatter[file.path] }) },
     cli: { handlers: new Map(engine ? [["base:query", { handler }]] : []) },
     vault,
   };
@@ -126,6 +129,53 @@ async function queryRoute({ baseText = JSON.stringify(BASE), engine = true, note
     return { payload, calls, sha256: createHash("sha256").update(baseText, "utf8").digest("hex") };
   };
 }
+
+test("the local scan matches the Bridge for supported expression trees", async () => {
+  const { outputFiles: [local] } = await build({
+    entryPoints: [fileURLToPath(new URL("../../../src/services/localBaseFilter.ts", import.meta.url))],
+    format: "esm",
+    write: false,
+  });
+  const { compileLocalBaseFilter } = await import(
+    `data:text/javascript;base64,${Buffer.from(local.text).toString("base64")}`
+  );
+  const frontmatter = {
+    "Notes/a.md": { type: "project", priority: "5", open: true, due: "2026-11-28", started: "2026-11-28T09:00:00Z" },
+    "Notes/b.md": { type: "area", priority: 1, open: false, due: "2026-12-01", started: "2026-11-28T12:30:00Z" },
+    "Notes/c.md": { type: "project", priority: 5, closed: true },
+    "Other/z.md": { type: "area", priority: 5, open: " " },
+  };
+  const query = await queryRoute({ baseText: "{}", engine: false, frontmatter });
+
+  for (const [filter, expected] of [
+    [
+      { and: [
+        { or: ['type == "project"', 'type == "area"'] },
+        { not: "closed" },
+        { or: ["open", 'file.path == "Notes/b.md"'] },
+        "priority <= 5",
+      ] },
+      ["Notes/a.md", "Notes/b.md"],
+    ],
+    [{ not: 'type == "a && b" or priority >= 5' }, ["Notes/b.md"]],
+    [{ and: ["closed = null", { or: [] }] }, []],
+    [{ and: ["closed = null", { and: [] }] }, ["Notes/a.md", "Notes/b.md", "Other/z.md"]],
+    [{ and: ['due == "2026-11-28"'] }, ["Notes/a.md"]],
+    [{ and: ['due >= "2026-12-01"'] }, ["Notes/b.md"]],
+    [{ and: ['started > "2026-11-28T10:00:00Z"'] }, ["Notes/b.md"]],
+  ]) {
+    const { payload } = await query({ filter, evaluate: false });
+    const compiled = compileLocalBaseFilter(filter);
+    assert.ok(compiled);
+    const matches = NOTES.filter((path) => compiled.matches(
+      (key) => key === "file.path" ? `/${path}` : frontmatter[path][key],
+    ));
+    const bridgePaths = payload.rows.map((row) => row.file.path);
+    assert.deepEqual(payload.warnings, []);
+    assert.deepEqual(bridgePaths, expected);
+    assert.deepEqual(matches, bridgePaths);
+  }
+});
 
 test("evaluate returns the engine's rows, view limit and formula values", async () => {
   const query = await queryRoute();

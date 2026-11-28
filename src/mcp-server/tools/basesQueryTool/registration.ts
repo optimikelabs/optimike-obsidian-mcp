@@ -19,7 +19,7 @@ import { mcpSchema } from "../../mcpSchema.js";
 
 const TOOL_NAME = "bases_query";
 const TOOL_DESCRIPTION =
-  "Exécute une requête sur une base (.base) avec filtres additionnels, tri et pagination.";
+  "Interroge les lignes d’une Base (.base) via Obsidian et le Bases Bridge. Sans REST, property_only: true est requis pour parcourir les propriétés des notes Markdown en cache, indépendamment des règles de la Base et de ses vues.";
 
 export async function registerBasesQueryTool(
   server: McpServer,
@@ -75,7 +75,9 @@ export async function registerBasesQueryTool(
                     publicMcpToolErrorPayload(error, {
                       operation: "HandleBasesQuery",
                       toolName: TOOL_NAME,
-                      params,
+                      // Local refusals use fixed reasons. Raw filter strings can
+                      // exceed the diagnostic input budget and hide that reason.
+                      params: obsidianService ? params : { hasInput: true },
                     }),
                     null,
                     2,

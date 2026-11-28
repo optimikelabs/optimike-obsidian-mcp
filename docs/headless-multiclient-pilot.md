@@ -29,7 +29,7 @@ server contract; a real Linux host remains an operational field gate.
 | Liveness, readiness and sanitized status                         | Yes                       | HTTP runtime and filesystem cache            | Automated; path existence alone is not readiness       |
 | Vault list, read and global search                               | Yes                       | Copied/dedicated vault plus filesystem cache | Automated on a disposable fixture                      |
 | Legacy Markdown tasks                                            | Yes                       | Markdown/filesystem cache                    | Read-only; not the native Operon filter engine         |
-| Bases list/query                                                 | Yes                       | Local `.base` and Markdown fallback          | Read-only local fallback                               |
+| Bases list/query                                                 | Yes                       | Local `.base` inspection and Markdown scans  | `bases_query` requires `property_only: true` for a [Markdown property scan](../OPERATIONS.md#required-dependencies). |
 | External-root read and HTTP ticket handoff                       | Optional                  | Explicit root allowlist and `external:read`  | Covered by the separate handoff and gateway suites     |
 | Note, frontmatter, tag, Bases or Canvas writes                   | No                        | Guarded/filesystem write profile             | Write tools must not be registered in this pilot       |
 | External move diagnostics                                        | No over direct HTTP       | Local stdio                                  | Scan/plan/status only; mutation is disabled everywhere |

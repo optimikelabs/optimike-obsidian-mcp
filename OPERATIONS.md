@@ -174,9 +174,28 @@ The final server can expose different capabilities depending on which Obsidian p
 - Local Bases fallback
 
   - available in headless modes for `bases_list`, `bases_get_schema`, and `bases_query`
-  - returns `source: "local-fallback"`
-  - supports direct equality, arrays, `contains`, `in`, comparisons, simple sorting, pagination, and schema inspection
-  - does not evaluate formulas, plugin filters, calculated properties, or exact UI view semantics
+  - Base rows require Obsidian and the Bases Bridge, even for a filterless
+    Base and regardless of `evaluate`. Without Obsidian REST, `bases_query`
+    returns `SERVICE_UNAVAILABLE` unless `property_only: true` is set
+  - `property_only: true` scans cached Markdown properties independently
+    of the Base and its views. The Base file must exist
+  - a scan reports `source: "local-fallback"`, `mode: "property-scan"`,
+    `evaluate: false`, and `limitations`. Its rows and total describe the
+    Markdown scan, with only the request's property filter, sort and pagination.
+    Non-Markdown files are excluded
+  - scan filters support direct equality, arrays, `eq`, `ne`, `contains`,
+    `in`, `gt`, `gte`, `lt`, and `lte`. Both filters and sorts accept
+    unprefixed frontmatter keys and `file.path`, `file.name`, `file.ctime`,
+    `file.mtime`, and `file.size`. Combine conditions with
+    `{"and":[...]}`, `{"or":[...]}`, or `{"not":...}`. Each group has a
+    single logical key. Leaves can be local property maps, comparisons such
+    as `type == "project"`, or bare truthy properties such as `active`.
+    String leaves are limited to 1,024 characters. Date and timestamp
+    properties retain their YAML text. Filters use vault-relative
+    `file.path` values, and equality and membership also accept a leading slash.
+    Unknown leaf forms, empty operator objects, and arrays of operator
+    objects return `VALIDATION_ERROR`. Formula references in filters
+    and sorts are rejected even with `property_only: true`
 
 - Smart Connections
   - required for semantic search
