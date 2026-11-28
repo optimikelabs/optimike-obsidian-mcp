@@ -46,6 +46,55 @@ test('wikilink aliases keep square brackets and triples resolve the inner target
  ]);
  assert.deepEqual(linkTexts('<span>[[Hidden|</span> [[Visible]]'),['Visible']);
 });
+test('a rejected alias spanning code or HTML does not consume the next wikilink',()=>{
+ for (const source of ['[[A|b `x` [[C]]','[[A|b <i>x</i> [[C]]']) {
+  assert.deepEqual(linkTexts(source),['C']);
+ }
+});
+test('a double bracket opens a new wikilink inside an unfinished alias',()=>{
+ assert.deepEqual(linkTexts('[[A|b [[C]]'),['C']);
+});
+test('wikilink targets and aliases skip comments and retain their original source span',()=>{
+ const source='[[A %% x %% B#Heading|a[b] %% hide %% c]]';
+ const [link]=extractMarkdownLinkReferences(source);
+ assert.deepEqual([link.linkPath,link.subpath,link.displayText,link.original],['A  B','#Heading','a[b]  c',source]);
+ assert.equal(link.position.end.offset,source.length);
+ assert.deepEqual(linkTexts('[[A %% x %% B]] [[%% only a comment %%]]'),['A  B']);
+});
+test('the wikilink shortcut agrees with the Markdown tree on a fixed and generated corpus',()=>{
+ const corpus=[
+  '---\r\nrelated: "[[One|a[b]]"\r\n---\r\n[[One]] and ![[Two#Heading]]',
+  '[[Visible]] (ordinary parentheses) [spaced] : [[Also visible]]',
+  '[ref][id]\n\n[id]: Target.md\n\n[id] : [[Visible]]',
+  '[[A|b `x` [[C]] and [[Open|alias [[Next]]',
+  '[[A %% x %% B|a[b] %% hide %% c]] and %% [[Hide]] %% [[Keep]]',
+  'https://example.test/$part [[Keep]] $[[Math]]$ <i>[[HTML]]</i>',
+  '    [[Indented]]\n\n~~~\n[[Fenced]]\n~~~\n\n[[Visible]]',
+  '[[Note|a\\[[literal]] [[[Triple]]] and \\[[Escaped]]',
+ ];
+ const fragments=[
+  '[[One]]','![[Two#^block]]','[[Folder/Three|a[b]]','[[Open|label [[Inner]]',
+  '[[A %% ignored %% B]]','%% [[Hidden]] %%','[[C|left]right]]','(prose)','[loose] :',
+  '`[[Code]]`','~~~','<i>[[HTML]]</i>','$[[Math]]$','    [[Indent]]','\t[[Tab]]',
+  '[label](Other.md)','[ref][id]','[id]: Target.md','https://example.test/[[URL]]','www.example.test/$x',
+  '\\[[Escaped]]','[[[Triple]]]','**[[Bold]]**','[nested [label]]','%% unclosed',
+ ];
+ let seed=0x2401;
+ const pick=items=>{
+  seed=(Math.imul(seed,1664525)+1013904223)>>>0;
+  return items[(seed>>>16)%items.length];
+ };
+ for (let i=0;i<320;i++) {
+  const choices=i%2===0 ? fragments.slice(0,9) : fragments;
+  const separator=pick([' ','\n','\n\n','\r\n']);
+  const body=Array.from({length:3+(i%9)},()=>pick(choices)).join(separator);
+  corpus.push(i%5===0 ? '---\nrelated: "[[Meta]]"\n---\n'+body : body);
+ }
+ for (const [index,source] of corpus.entries()) {
+  assert.deepEqual(extractMarkdownLinkReferences(source),
+   extractMarkdownLinkReferences(source,{forceMarkdownTree:true}),`corpus case ${index}: ${JSON.stringify(source)}`);
+ }
+});
 test('unpaired inline HTML is scoped to its paragraph',()=>{
  assert.deepEqual(linkTexts('a <span>x\n\n[[P2]]\n\n</span> [[V]]'),['P2','V']);
 });
