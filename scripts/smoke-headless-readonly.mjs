@@ -81,6 +81,8 @@ async function createTempVault() {
     [
       "---",
       "type: smoke",
+      "due: 2026-12-01",
+      "started: 2026-11-28T12:30:00Z",
       "tags:",
       "  - headless",
       "---",
@@ -101,6 +103,8 @@ async function createTempVault() {
     [
       "---",
       "type: root",
+      "due: 2026-11-28",
+      "started: 2026-11-28T09:00:00Z",
       "---",
       "",
       "Root smoke note with searchable keyword alphasmoke.",
@@ -785,7 +789,23 @@ async function main() {
       assertTextIncludes(schema, "local-fallback", "bases schema");
       assertTextIncludes(schema, "file.name", "bases schema");
 
+      for (const [regression, filter, expected] of [
+        ["unquoted YAML dates preserve ISO equality", { and: ['due == "2026-11-28"'] }, ["/Root.md"]],
+        ["unquoted YAML dates sort chronologically in expression comparisons", { and: ['due >= "2026-12-01"'] }, ["/Projects/Headless.md"]],
+        ["unquoted YAML timestamps preserve the time in comparisons", { and: ['started > "2026-11-28T10:00:00Z"'] }, ["/Projects/Headless.md"]],
+        ["property-map paths match a vault-relative path", { or: [{ "file.path": "Root.md" }] }, ["/Root.md"]],
+        ["slash-prefixed path operands still match cached rows", { "file.path": { in: ["/Root.md"] } }, ["/Root.md"]],
+      ]) {
+        const result = await withTimeout(
+          client.callTool({ name: "bases_query", arguments: { base_id: "Plain.base", filter } }),
+          regression,
+        );
+        assert.equal(result.isError, false, regression);
+        assert.deepEqual(jsonOf(result, regression).rows.map((row) => row.file.path), expected, regression);
+      }
+
       for (const [regression, args, hint] of [
+        ["oversized expressions are refused before parsing", { filter: { and: [`type ==${" ".repeat(20_000)}"root"`] } }, /1,024 characters/u],
         ["logical groups reject invalid leaves even in an unused branch", { filter: { or: ["type", "unrecognized()"] } }, /and, or, not/u],
         ["a property array of operators cannot silently match nothing", { filter: { type: [{ eq: "root" }] } }, /direct equality/u],
         ["an empty operator object cannot silently match everything", { filter: { type: {} } }, /direct equality/u],

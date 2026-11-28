@@ -140,8 +140,8 @@ test("the local scan matches the Bridge for supported expression trees", async (
     `data:text/javascript;base64,${Buffer.from(local.text).toString("base64")}`
   );
   const frontmatter = {
-    "Notes/a.md": { type: "project", priority: "5", open: true },
-    "Notes/b.md": { type: "area", priority: 1, open: false },
+    "Notes/a.md": { type: "project", priority: "5", open: true, due: "2026-11-28", started: "2026-11-28T09:00:00Z" },
+    "Notes/b.md": { type: "area", priority: 1, open: false, due: "2026-12-01", started: "2026-11-28T12:30:00Z" },
     "Notes/c.md": { type: "project", priority: 5, closed: true },
     "Other/z.md": { type: "area", priority: 5, open: " " },
   };
@@ -160,6 +160,9 @@ test("the local scan matches the Bridge for supported expression trees", async (
     [{ not: 'type == "a && b" or priority >= 5' }, ["Notes/b.md"]],
     [{ and: ["closed = null", { or: [] }] }, []],
     [{ and: ["closed = null", { and: [] }] }, ["Notes/a.md", "Notes/b.md", "Other/z.md"]],
+    [{ and: ['due == "2026-11-28"'] }, ["Notes/a.md"]],
+    [{ and: ['due >= "2026-12-01"'] }, ["Notes/b.md"]],
+    [{ and: ['started > "2026-11-28T10:00:00Z"'] }, ["Notes/b.md"]],
   ]) {
     const { payload } = await query({ filter, evaluate: false });
     const compiled = compileLocalBaseFilter(filter);
