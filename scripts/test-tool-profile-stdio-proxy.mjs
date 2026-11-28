@@ -149,11 +149,26 @@ try {
   try {
     const result = await tasks.listTools();
     const names = result.tools.map((tool) => tool.name);
-    assert.equal(names.length, 14);
-    assert.ok(names.includes("operon_status"));
-    assert.ok(names.includes("operon_get_configuration"));
-    assert.ok(names.includes("operon_list_tasks"));
-    assert.ok(!names.includes("obsidian_update_note"));
+    assert.equal(names.length, 17);
+    assert.deepEqual([...names].sort(), [
+      "list_all_tasks",
+      "obsidian_global_search",
+      "obsidian_list_notes",
+      "obsidian_read_note",
+      "obsidian_runtime_status",
+      "obsidian_validate_format",
+      "operon_find_tasks",
+      "operon_get_configuration",
+      "operon_get_relationships",
+      "operon_get_task",
+      "operon_list_tasks",
+      "operon_query_saved_filter",
+      "operon_query_tasks",
+      "operon_status",
+      "operon_validate",
+      "query_tasks",
+      "smart_semantic_search",
+    ]);
 
     const status = await tasks.callTool({
       name: "operon_status",
