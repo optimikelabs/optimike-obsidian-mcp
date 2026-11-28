@@ -2,7 +2,7 @@
 
 import { isolatedStateEnv } from "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { startHttpTestBackend } from "./test-support/http-backend.mjs";
 import { createHash } from "node:crypto";
 import {
   existsSync,
@@ -13,7 +13,6 @@ import {
   rmSync,
 } from "node:fs";
 import http from "node:http";
-import { createServer } from "node:net";
 import { nativeFormatFixture } from "./fixtures/native-frontmatter-format.mjs";
 import path from "node:path";
 import { getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -203,40 +202,6 @@ class FakeAtomicWriteServer {
   }
 }
 
-async function unusedPort() {
-  const server = createServer();
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const address = server.address();
-  assert.ok(address && typeof address === "object");
-  const port = address.port;
-  await new Promise((resolve, reject) =>
-    server.close((error) => (error ? reject(error) : resolve())),
-  );
-  return port;
-}
-
-async function waitForHealth(url, child) {
-  // Shared CI runners can need more than five seconds to start a freshly
-  // built Node process. Keep the poll interval short but give startup a
-  // bounded 15-second window before declaring a product failure.
-  for (let attempt = 0; attempt < 300; attempt += 1) {
-    if (child.exitCode !== null) {
-      throw new Error(`HTTP MCP exited before health check: ${child.exitCode}`);
-    }
-    try {
-      const response = await fetch(url);
-      if (response.ok) return;
-    } catch {
-      // Startup race.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error("Timed out waiting for HTTP MCP health.");
-}
-
 function parse(result) {
   const text = result.content
     .filter((block) => block.type === "text")
@@ -295,21 +260,17 @@ const journalPath = path.join(root, "note-replace.sqlite");
 mkdirSync(logsPath, { recursive: true });
 const fake = new FakeAtomicWriteServer();
 await fake.listen();
-const port = await unusedPort();
 let stderr = "";
 let stdout = "";
-const backend = spawn(process.execPath, [path.resolve("dist/index.js")], {
-  cwd: root,
-  env: {
-    ...getDefaultEnvironment(),
-    ...isolatedStateEnv(),
-    APPDATA: isolatedStateEnv().LOCALAPPDATA,
-    NODE_ENV: "test",
-    MCP_TRANSPORT_TYPE: "http",
+let httpBackend;
+let backend;
+let first;
+let second;
+let third;
+let lostClient;
+try {
+  httpBackend = await startHttpTestBackend({
     MCP_PROTOCOL_MODE: modern ? "dual" : "legacy",
-    MCP_HTTP_HOST: "127.0.0.1",
-    MCP_HTTP_PORT: String(port),
-    MCP_HTTP_PORT_RETRIES: "0",
     MCP_LOG_LEVEL: "error",
     MCP_WRITE_MODE: "full",
     MCP_VAULT_INSTRUCTIONS: "enforce",
@@ -325,24 +286,17 @@ const backend = spawn(process.execPath, [path.resolve("dist/index.js")], {
     OBSIDIAN_STARTUP_RETRY_DELAY_MS: "10",
     SEMANTIC_SEARCH_PREWARM: "false",
     ENABLE_QUERY_EMBEDDING: "false",
-  },
-  stdio: ["ignore", "pipe", "pipe"],
-});
-backend.stdout.on("data", (chunk) => {
-  stdout += chunk.toString("utf8");
-});
-backend.stderr.on("data", (chunk) => {
-  stderr += chunk.toString("utf8");
-});
-
-const baseUrl = `http://127.0.0.1:${port}`;
-const mcpUrl = `${baseUrl}/mcp`;
-let first;
-let second;
-let third;
-let lostClient;
-try {
-  await waitForHealth(`${baseUrl}/healthz`, backend);
+  }, {
+    cwd: root,
+    inheritedEnv: {
+      ...getDefaultEnvironment(),
+      APPDATA: isolatedStateEnv().LOCALAPPDATA,
+    },
+    onStdout: (chunk) => { stdout += chunk; },
+    onStderr: (chunk) => { stderr += chunk; },
+  });
+  backend = httpBackend.child;
+  const mcpUrl = (await httpBackend.ready()) + "/mcp";
   first = await startClient(mcpUrl, "governed-http-first");
   const tools = await first.client.listTools();
   assert.equal(
@@ -554,7 +508,7 @@ try {
   await second?.close();
   await third?.close();
   await lostClient?.close();
-  if (backend.exitCode === null && backend.signalCode === null) {
+  if (backend?.pid && backend.exitCode === null && backend.signalCode === null) {
     const forcedExit = new Promise((resolve) =>
       backend.once("exit", () => resolve()),
     );

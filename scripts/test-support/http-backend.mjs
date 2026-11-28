@@ -19,12 +19,18 @@ async function unusedPort() {
   return port;
 }
 
-export async function startHttpTestBackend(env) {
+export async function startHttpTestBackend(env, {
+  cwd,
+  inheritedEnv = process.env,
+  onStdout,
+  onStderr,
+} = {}) {
   const port = await unusedPort();
   const baseUrl = `http://${host}:${port}`;
-  const child = spawn(process.execPath, ["dist/index.js"], {
+  const child = spawn(process.execPath, [path.resolve("dist/index.js")], {
+    cwd,
     env: {
-      ...process.env,
+      ...inheritedEnv,
       ...env,
       ...isolatedStateEnv(),
       NODE_ENV: "test",
@@ -32,7 +38,7 @@ export async function startHttpTestBackend(env) {
       MCP_HTTP_HOST: host,
       MCP_HTTP_PORT: String(port),
       MCP_HTTP_PORT_RETRIES: "0",
-      MCP_LOG_LEVEL: "info",
+      MCP_LOG_LEVEL: env.MCP_LOG_LEVEL ?? "info",
     },
     stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
@@ -41,9 +47,11 @@ export async function startHttpTestBackend(env) {
   let stderr = "";
   child.stdout.setEncoding("utf8").on("data", (chunk) => {
     stdout = (stdout + chunk).slice(-diagnosticLimit);
+    onStdout?.(chunk);
   });
   child.stderr.setEncoding("utf8").on("data", (chunk) => {
     stderr = (stderr + chunk).slice(-diagnosticLimit);
+    onStderr?.(chunk);
   });
 
   let phase = "spawning the child process";
@@ -66,6 +74,7 @@ export async function startHttpTestBackend(env) {
   void listening.catch(() => {});
 
   return {
+    child,
     async ready() {
       const deadline = AbortSignal.timeout(30_000);
       const timedOut = new Promise((_, reject) => {

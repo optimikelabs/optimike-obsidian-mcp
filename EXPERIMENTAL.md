@@ -7,22 +7,30 @@ This branch leaves `main` and the individual pull requests unaffected.
 | Pull request | Integrated head | Behavior |
 | --- | --- | --- |
 | [#202](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/202) | `3dd977a7d5d1c3b12a1efc7a52228dc290848c7e` | Filesystem write serialization and conflict checks |
-| [#204](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/204) | `a100abad7b77354dc0527f8de00cf0634968ee8b` | Explicit refusal and labeled Markdown property scans with supported filter trees |
+| [#204](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/204) | `3dcc86ca556a9b7213459711ad4f517678041516` | Labeled Markdown property scans, filter trees, and YAML dates preserved as strings |
 | [#205](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/205) | `12890e70897675a2becad16210d98e8559fd1132` | Read provenance, successful scan start time, and index freshness reporting |
 | [#209](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/209) | `f628b91a56c46a8ad5d5b98ff98fe73f4cc5dac0` | Bases Bridge tests replay a capture from Obsidian 1.15.1 |
-| [#210](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/210) | `b715fe2b8e7cc0af222e9cdf263146cb8b5cf958` | Semantic search reads complete external generations selected by `CURRENT` |
-| [#212](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/212) | `12a35db5b6781b86303c3fa2f0ed543801d30252` | Standalone BitNet producer publishes note and section vectors outside the vault |
+| [#210](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/210) | `de81ed30427fd7a33158ef4d8de2bbd6504ee269` | Semantic search reads external generations selected by a strict `CURRENT` pointer |
+| [#212](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/212) | `12a1489b590aa63107b294c5800e3f688a61f896` | BitNet producer with Smart Connections block selection, configurable minimum sizes, and deletion guards before encoding and publication |
 | [#217](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/217) | `9710f22b365ebc773ddbfb5e7fc899bb2edb3fb7` | Formula diagnostics recognize registered function names regardless of case |
+| [#219](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/219) | `da7ef45f3c74f2b10cc053406ea609ceace398dd` | Shared HTTP startup test helper waits for the listener before probing it |
+| [#220](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/220) | `2fd17ad831bd97b0bc2c413321ac0b1d167f80e2` | Import a text patch proposal into a sealed plan and recover its receipt after a lost response |
+| [#223](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/223) | `1ac99ddd625a734c36855ff6e879917cb61354ff` | Notes expose the read SHA-256 for optional strict-base replacement planning |
 
 Run the read-only profile first. Test filesystem writes on a separate,
 disposable copy using synthetic notes. Write serialization is process-local.
 The runtime cannot attest to upstream sync. Headless property scans do not run
-the Bases engine. The captured #204 head predates its follow-up for date-valued
-frontmatter comparisons. Semantic search requires a complete generation and a
-compatible encoder. See the [producer](docs/semantic-index-producer.md) and
+the Bases engine. Semantic search requires a complete generation and a
+compatible encoder. The producer's v3 input profile requires an explicit
+rebuild of generations made with the older block selection. See the [producer](docs/semantic-index-producer.md) and
 [reader](docs/semantic-vector-cache-encoding.md#external-smart-env-v3-generations)
-contracts. The Windows HTTP startup issue [#214](https://github.com/optimikelabs/optimike-obsidian-mcp/issues/214)
-is outside this integration.
+contracts. Proposal planning needs the live Atomic Write authority. Apply
+retains the sealed plan and its compare-and-swap check.
+
+On this branch the proposal HTTP test from #220 uses #219's shared startup
+helper. Its lost-response, redaction, and shutdown assertions still run.
+The cold-start change in [#218](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/218)
+is deferred while its read provenance is reconciled with #205.
 
 ## Add another change
 
