@@ -10,15 +10,13 @@ import {
   requestContextService,
 } from "../../../utils/index.js";
 // Import necessary types, schema, and logic function from the logic file
-import type {
-  ObsidianReadNoteInput,
-  ObsidianReadNoteResponse,
-} from "./logic.js";
+import type { ObsidianReadNoteInput } from "./logic.js";
 import {
   ObsidianReadNoteInputSchema,
   processObsidianReadNote,
 } from "./logic.js";
 import { mcpSchema } from "../../mcpSchema.js";
+import { noteReadResult } from "../noteReadResult.js";
 
 /**
  * Registers the 'obsidian_read_note' tool with the MCP server.
@@ -87,34 +85,16 @@ export const registerObsidianReadNoteTool = async (
 
           // Wrap the core logic execution in a tryCatch block.
           return await ErrorHandler.tryCatch(
-            async () => {
-              // Delegate the actual file reading logic to the dedicated processing function.
-              // Pass the (already shape-validated) parameters, context, and the Obsidian service.
-              // The process function handles the refined validation internally if needed, but here shape = refined.
-              const response: ObsidianReadNoteResponse =
-                await processObsidianReadNote(
-                  params, // Pass params directly as shape matches refined schema
-                  handlerContext,
-                  obsidianService,
-                  vaultCacheService,
-                );
-              logger.debug(
-                `'${toolName}' processed successfully`,
+            () => noteReadResult(
+              () => processObsidianReadNote(
+                params,
                 handlerContext,
-              );
-
-              // Format the successful response object from the logic function into the required MCP CallToolResult structure.
-              // The entire response object (containing content and optional stat) is serialized to JSON.
-              return {
-                content: [
-                  {
-                    type: "text", // Standard content type for structured JSON data
-                    text: JSON.stringify(response, null, 2), // Pretty-print JSON
-                  },
-                ],
-                isError: false, // Indicate successful execution
-              };
-            },
+                obsidianService,
+                vaultCacheService,
+              ),
+              vaultCacheService,
+              { operation: `processing ${toolName} handler`, toolName, params },
+            ),
             {
               // Configuration for the inner error handler (processing logic).
               operation: `processing ${toolName} handler`,

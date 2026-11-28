@@ -43,6 +43,9 @@ export type HealthSnapshot = {
     freshnessMs: number | null;
     stale: boolean;
     freshnessKnown: boolean;
+    readSource?: "filesystem";
+    freshnessScope?: "local-cache";
+    upstreamSync?: "unknown";
   };
   dependencies: {
     obsidianDesktop: HealthDependency;
@@ -246,6 +249,7 @@ export function buildHealthSnapshot(
   const runtimeMode = normalizeRuntimeMode(
     options.runtimeMode ?? process.env.OBSIDIAN_RUNTIME_MODE,
   );
+  const headless = runtimeMode.startsWith("headless");
   const vaultPath = options.vaultPath ?? process.env.OBSIDIAN_VAULT;
   const cacheSource =
     options.cacheSource ?? process.env.OBSIDIAN_CACHE_SOURCE ?? "";
@@ -320,12 +324,11 @@ export function buildHealthSnapshot(
   // A recent direct probe is stronger evidence than a cache whose last
   // successful refresh came from REST. In particular, a fresh failed probe
   // must immediately withdraw live-read and mutation capability.
-  const liveObserved = directLiveKnown
-    ? directLiveObserved
-    : cacheLiveObserved;
+  const liveObserved =
+    !headless && (directLiveKnown ? directLiveObserved : cacheLiveObserved);
   const filesystemObserved =
     origin === "filesystem" ||
-    runtimeMode.startsWith("headless") ||
+    headless ||
     cacheSource.toLowerCase().includes("filesystem");
   const filesystemReads = filesystemObserved && vaultAvailable && cacheReady;
   const usableFallback =
@@ -342,7 +345,6 @@ export function buildHealthSnapshot(
   } else if (cacheReady && cacheHasData) provenance = "cache";
   else if (cacheReady && origin === "snapshot") provenance = "snapshot";
 
-  const headless = runtimeMode.startsWith("headless");
   const reasons: string[] = [];
   let state: ReadinessState;
 
@@ -419,8 +421,8 @@ export function buildHealthSnapshot(
   if (!filesystemReads) unavailable.push("filesystem-reads");
   if (!cacheReady) unavailable.push("cache-reads");
   if (!mutationCapable) unavailable.push("mutations");
-  const selectDirectProvenance =
-    directLiveObserved || (liveApiTimestampInvalid && !cacheHasData);
+  const selectDirectProvenance = !headless &&
+    (directLiveObserved || (liveApiTimestampInvalid && !cacheHasData));
   const selectedObservedAtMs = selectDirectProvenance
     ? liveApiObservedAtMs
     : cacheObservedAtMs;
@@ -448,6 +450,11 @@ export function buildHealthSnapshot(
       freshnessMs: selectedFreshnessMs,
       stale: selectedStale,
       freshnessKnown: selectedFreshnessMs !== null,
+      ...(headless ? {
+        readSource: "filesystem",
+        freshnessScope: "local-cache",
+        upstreamSync: "unknown",
+      } : {}),
     },
     dependencies: {
       obsidianDesktop: {

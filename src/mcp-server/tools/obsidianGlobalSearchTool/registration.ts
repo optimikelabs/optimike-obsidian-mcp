@@ -15,15 +15,13 @@ import {
   requestContextService,
 } from "../../../utils/index.js";
 // Import types, schema shape, and the core processing logic from logic.ts
-import type {
-  ObsidianGlobalSearchInput,
-  ObsidianGlobalSearchResponse,
-} from "./logic.js"; // Ensure '.js' extension
+import type { ObsidianGlobalSearchInput } from "./logic.js";
 import {
   ObsidianGlobalSearchInputSchemaShape,
   processObsidianGlobalSearch,
 } from "./logic.js";
 import { mcpSchema } from "../../mcpSchema.js";
+import { noteReadResult } from "../noteReadResult.js";
 
 /**
  * Registers the 'obsidian_global_search' tool with the MCP server instance.
@@ -83,29 +81,16 @@ export async function registerObsidianGlobalSearchTool(
           logger.debug(`Handling '${toolName}' request`, handlerContext);
 
           return await ErrorHandler.tryCatch(
-            async () => {
-              const response: ObsidianGlobalSearchResponse =
-                await processObsidianGlobalSearch(
-                  params,
-                  handlerContext,
-                  obsidianService,
-                  vaultCacheService,
-                );
-              logger.debug(
-                `'${toolName}' processed successfully`,
+            () => noteReadResult(
+              () => processObsidianGlobalSearch(
+                params,
                 handlerContext,
-              );
-
-              return {
-                content: [
-                  {
-                    type: "text",
-                    text: JSON.stringify(response, null, 2),
-                  },
-                ],
-                isError: false,
-              };
-            },
+                obsidianService,
+                vaultCacheService,
+              ),
+              vaultCacheService,
+              { operation: `executing tool ${toolName}`, toolName, params },
+            ),
             {
               operation: `executing tool ${toolName}`,
               context: handlerContext,
