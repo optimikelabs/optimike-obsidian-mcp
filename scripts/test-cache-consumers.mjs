@@ -1,3 +1,4 @@
+import "./test-support/isolated-state.mjs";
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -9,6 +10,9 @@ process.env.MCP_LOG_DIR=path.join(root,'logs');
 const {config}=await import('../dist/config/index.js');
 const {VaultCacheService}=await import('../dist/services/obsidianRestAPI/vaultCache/service.js');
 const {LocalBasesService}=await import('../dist/services/localBasesService.js');
+const { processObsidianReadNote } = await import(
+  "../dist/mcp-server/tools/obsidianReadNoteTool/logic.js"
+);
 const {warmSharedTaskCache,processListAllTasks}=await import('../dist/mcp-server/tools/tasksShared/logic.js');
 const context={requestId:'cache-consumer-fixture',timestamp:new Date().toISOString(),operation:'test'};
 config.obsidianVaultPath=root;config.obsidianCacheSource='rest';
@@ -21,9 +25,9 @@ async function readTaskModes(cache){
  return [compact.tasks,legacy];
 }
 after(()=>fs.rmSync(root,{recursive:true,force:true}));
-async function fixture(body){
+async function fixture(body, files = {'One.md':'- [ ] task-one'}){
  config.obsidianSharedCacheDbPath=path.join(root,crypto.randomUUID()+'.sqlite');
- let fail=false,files={'One.md':'- [ ] task-one'};
+ let fail=false;
  const rest={listFiles:async()=>Object.keys(files),getFileMetadata:async()=>({ctime:1,mtime:2,size:14}),
   getFileContent:async p=>{if(fail)throw new Error('offline');return {path:p,content:files[p.replace(/^\//,'')],stat:{ctime:1,mtime:2,size:14}};}};
  let cache=new VaultCacheService(rest);
@@ -31,6 +35,71 @@ async function fixture(body){
   restart:async()=>{await cache.close();cache=new VaultCacheService(rest);},set:v=>{files=v;}});}
  finally{await cache.close();}
 }
+
+const dateProperties = {
+  day: "2026-04-01",
+  localTime: "2026-04-01T13:45:00",
+  offsetTime: "2026-04-01T13:45:00+05:30",
+};
+const dateFields = Object.entries(dateProperties).map(([key, value]) => `${key}: ${value}`);
+
+// Synthetic notes using the Local REST JSON types observed in the parity report.
+for (const [name, eol, bom, fields, frontmatter, tags] of [
+  [
+    "CRLF frontmatter keeps properties and separates metadata from body tags",
+    "\r\n", "", ["aliases: [Sample alias]", "tags: [project/demo]", "#metadata-only"],
+    { aliases: ["Sample alias"], tags: ["project/demo"] }, ["project/demo", "body"],
+  ],
+  [
+    "a UTF-8 BOM before the opening delimiter keeps frontmatter readable",
+    "\n", "\uFEFF", ["title: Sample"],
+    { title: "Sample" }, ["body"],
+  ],
+  [
+    "plain YAML dates and datetimes keep their Local REST string values and offsets",
+    "\n", "", [...dateFields, "count: 3", "active: true"],
+    { ...dateProperties, count: 3, active: true }, ["body"],
+  ],
+]) {
+  test(`cached JSON note reads: ${name}`, () => {
+    const content = bom + ["---", ...fields, "---", "Sample #body", ""].join(eol);
+    return fixture(async ({ cache }) => {
+      const result = await processObsidianReadNote(
+        { filePath: "Sample.md", format: "json", includeStat: false },
+        context,
+        undefined,
+        cache,
+      );
+      const { content: markdown, frontmatter: properties, tags: noteTags } = result.content;
+      assert.deepEqual({ content: markdown, frontmatter: properties, tags: noteTags }, {
+        content,
+        frontmatter,
+        tags,
+      });
+    }, { "Sample.md": content });
+  });
+}
+
+test("local Bases match date strings and return the written datetime offset", async () => {
+  const baseId = "Date properties.base";
+  const basePath = path.join(root, baseId);
+  fs.writeFileSync(basePath, "views: []\n");
+  try {
+    const content = ["---", ...dateFields, "---", ""].join("\n");
+    await fixture(async ({ cache }) => {
+      const result = await new LocalBasesService(cache).queryBase(
+        baseId,
+        { filter: { day: dateProperties.day } },
+        context,
+      );
+      assert.equal(result.rows.length, 1);
+      const { day, localTime, offsetTime } = result.rows[0].props;
+      assert.deepEqual({ day, localTime, offsetTime }, dateProperties);
+    }, { "Sample.md": content });
+  } finally {
+    fs.unlinkSync(basePath);
+  }
+});
 
 for(const kind of ['tasks','bases','tasks-without-service'])test(kind+' refuses durable incomplete cache after failed reconciliation',()=>fixture(async f=>{
  f.cache.markEventWorkPending();await f.restart();f.fail();
