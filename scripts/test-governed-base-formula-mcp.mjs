@@ -26,11 +26,13 @@ let basesListStatus = 200;
 const ENGINE_RESULTS = new Map([
   ["fooBar(file.name)", ["runtime_error", 'Error: Unknown function "fooBar"']],
   ["fooBar(1)", ["runtime_error", 'Error: Unknown function "fooBar"']],
+  ["file.name.LOWER() + fooBar(1)", ["runtime_error", 'Error: Cannot find function "fooBar"']],
   ['if(file.name == "x", 1', ["syntax_error", 'Error: Expected ")"']],
   ["formula.inexistante + 1", ["runtime_error", 'Error: Unknown formula "inexistante"']],
-  ["file.name.round()", ["runtime_error", "Error: round is not a function"]],
+  ["NUMBER(1) + file.name.ROUND()", ["runtime_error", 'Error: Cannot find function "ROUND" on type String']],
   ["file.name.lowr()", ["runtime_error", "Error: lowr is not a function"]],
-  ["file.name.LOWER()", ["runtime_error", "Error: LOWER is not a function"]],
+  // Obsidian 1.15.1 resolves LOWER to the registered String method lower.
+  ["file.name.LOWER()", ["ok"]],
   ["file.toString.foo()", ["runtime_error", "Error: foo is not a function"]],
   ["note.champ_inexistant_zz", ["all_null"]],
 ]);
@@ -374,16 +376,17 @@ try {
   const missingFormula = await refusal("bases_formula_patch_plan", "formula.inexistante + 1", "engine-refuse-3");
   assert.deepEqual(missingFormula.unknownFunctions, []);
 
-  const wrongType = await refusal("bases_formula_patch_plan", "file.name.round()", "engine-refuse-4");
-  assert.deepEqual(wrongType.unknownFunctions, [{ name: "round", on: "String", definedOn: ["Number"] }]);
-  assert.equal(wrongType.validFunctions.on, "String");
-  assert.ok(wrongType.validFunctions.names.includes("lower") && wrongType.validFunctions.names.includes("toString"));
-
   const nearMiss = await refusal("bases_config_patch_plan", "file.name.lowr()", "engine-refuse-5");
   assert.deepEqual(nearMiss.suggestions, ["lower"]);
 
-  const caseOnly = await refusal("bases_formula_patch_plan", "file.name.LOWER()", "engine-refuse-6");
-  assert.equal(caseOnly.suggestions[0], "lower", "a case-only typo suggests the exact name first");
+  const mixed = await refusal("bases_formula_patch_plan", "file.name.LOWER() + fooBar(1)", "engine-refuse-6");
+  assert.deepEqual(mixed.unknownFunctions, unknownGlobal.unknownFunctions, "LOWER is a known String method");
+  assert.deepEqual(mixed.suggestions, unknownGlobal.suggestions, "suggestions address the unknown global call");
+
+  const wrongType = await refusal("bases_formula_patch_plan", "NUMBER(1) + file.name.ROUND()", "engine-refuse-4");
+  assert.deepEqual(wrongType.unknownFunctions, [{ name: "ROUND", on: "String", definedOn: ["Number"] }]);
+  assert.equal(wrongType.validFunctions.on, "String");
+  assert.ok(wrongType.validFunctions.names.includes("lower") && wrongType.validFunctions.names.includes("toString"));
 
   const prototypeKey = await refusal("bases_formula_patch_plan", "file.toString.foo()", "engine-refuse-7");
   assert.deepEqual(
@@ -396,7 +399,7 @@ try {
   assert.equal(yaml, before);
   assert.equal(await pendingCount(), pendingBefore, "a refused plan seals nothing");
 
-  const accepted = { op: "set_formula", name: "score", expression: '"ok " + file.name' };
+  const accepted = { op: "set_formula", name: "score", expression: "file.name.LOWER()" };
   const verified = parsed(await plan("bases_formula_patch_plan", [accepted], "engine-accept-1"));
   assert.equal(verified.phase, "planned", "a pre-existing engine error does not block");
   assert.deepEqual(verified.engineCheck, { status: "verified", obsidianVersion: "1.15.1" });
