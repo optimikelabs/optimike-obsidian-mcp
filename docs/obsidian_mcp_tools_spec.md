@@ -323,9 +323,9 @@ semantic manifest/vector metadata are cached locally for faster warm refreshes.
 
 - `bases_list`: list `.base` definitions via Bases Bridge REST or local fallback.
 - `bases_get_schema`: inspect a `.base` schema via REST or local fallback.
-- `bases_query`: query Bases via REST, or simple local fallback filters in
-  headless modes. Through the Bases Bridge, `evaluate` (default) lets
-  Obsidian's engine select the view's rows (filters, sort, limit) and compute
+- `bases_query`: query Bases via REST. Through the Bases Bridge, `evaluate`
+  defaults to `true` and lets Obsidian's engine select the view's rows
+  (filters, sort, limit) and compute
   formulas for the rows of the requested page only (`source: "engine"`, values
   as the engine's text); request filters and sorts on `formula.*` use these
   values and compute every row, in chunks of 100, up to 1,000 rows (past it, formula predicates and sorts are skipped:
@@ -347,8 +347,21 @@ semantic manifest/vector metadata are cached locally for faster warm refreshes.
 - `bases_upsert_rows`: live REST row upsert, or guarded Markdown frontmatter
   `set` operations in `headless-filesystem`.
 
-Local/headless Bases support does not evaluate Obsidian formulas, calculated
-properties, plugin-specific filters, or exact UI view semantics.
+Without Obsidian REST, `bases_query` returns `SERVICE_UNAVAILABLE` for a named
+view, Base-level filters, filters or a limit on the default view, grouping or ordering on
+the default view without a request sort, configured formulas, filters or sorts on
+`formula.*`, or explicit `evaluate: true`. Use Obsidian with the Bases Bridge
+to apply those rules. A plain request with none of these requirements can omit
+`evaluate`.
+
+Set `property_only: true` to explicitly scan cached Markdown notes in the
+local fallback. The Base must exist. The scan applies ad-hoc filters and sorts
+to raw properties and paginates their matches. Results report
+`source: "local-fallback"`, `mode: "property-scan"`, `evaluate: false`, and
+`limitations`. The rows and total exclude non-Markdown files, even for plain
+queries. Unsupported local operators, unsupported `file.*` keys, and `note.*`
+keys return `VALIDATION_ERROR`. See the [supported local filters and properties](../OPERATIONS.md#required-dependencies).
+On REST, the option is ignored and the Bridge receives its usual query.
 
 ## Canvas And Format Validation
 

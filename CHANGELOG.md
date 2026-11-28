@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Recheck the content hash or target absence before replacement and discard the
   temporary file on conflict. Reject stale Canvas edits and Canvas or Base
   creates that would overwrite an existing file with `overwrite=false` (#201).
+- Headless `bases_query` refuses queries that need Obsidian to apply Base or view rules or evaluate formulas. Use `property_only: true` to opt into a labeled property scan of cached Markdown notes. Plain queries can use the same Markdown-only scan without opting in. Unsupported local filter operators and unsupported `file.*` or `note.*` keys are rejected (#200).
 
 ## [3.23.1] - 2026-11-26
 

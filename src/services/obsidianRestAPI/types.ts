@@ -518,6 +518,7 @@ export interface BaseQueryResponse {
   rows: BaseQueryRow[];
   evaluate?: boolean;
   source?: "engine" | "fallback" | "local-fallback";
+  mode?: "property-scan";
   limitations?: string[];
 }
 

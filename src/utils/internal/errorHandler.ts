@@ -253,6 +253,8 @@ const CALLER_DERIVED_PUBLIC_FIELDS = new Set(["suggestedPath", "suggestedName"])
 const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "invalid_tool_arguments",
   BASE_FORMULA_ENGINE_REFUSAL,
+  "base_query_requires_obsidian",
+  "base_query_unsupported_local_input",
   ...NOTE_NAME_REASON_CODES,
   ...NATIVE_MOVE_PUBLIC_REASON_CODES,
   ...OPERON_REFUSAL_CODES,
@@ -704,6 +706,16 @@ function safeDiagnosticFields(
 }
 
 function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
+  if (
+    code === BaseErrorCode.SERVICE_UNAVAILABLE &&
+    reasonCode === "base_query_requires_obsidian"
+  )
+    return "Without Obsidian, this query cannot apply Base filters, view rules (filters, grouping, ordering and limits), or formula evaluation. Run with Obsidian and the Bases Bridge, or set property_only: true to scan cached Markdown properties.";
+  if (
+    code === BaseErrorCode.VALIDATION_ERROR &&
+    reasonCode === "base_query_unsupported_local_input"
+  )
+    return "Unsupported local Base query filter or sort. Use unprefixed frontmatter keys or file.path, file.name, file.ctime, file.mtime, file.size. Filters accept direct equality, arrays, and the operators eq, ne, in, contains, gt, gte, lt, lte. Use Obsidian and the Bases Bridge for other query semantics.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_tool_arguments")
     return "Invalid tool arguments. See validationIssues for the field and reason.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === BASE_FORMULA_ENGINE_REFUSAL)
