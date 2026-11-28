@@ -52,7 +52,8 @@ The #240 update merges cleanly. The #246 merge keeps the SQLite checkpoint
 and inventory in one read transaction, increments the BM25 generation when
 the visible inventory changes, and preserves hot-content and link-index
 invalidation. Global search retains live `diskPath`, multiline regex and the
-500-file page limit alongside ranked scoring and ranked snippets.
+500-file page limit alongside ranked scoring and ranked snippets. Live
+`diskPath` enrichment runs only when the exact REST search succeeds.
 
 The BM25 index warms after the text cache. A first ranked request waits for
 the index. Hybrid search can fall back to lexical results and uses compatible

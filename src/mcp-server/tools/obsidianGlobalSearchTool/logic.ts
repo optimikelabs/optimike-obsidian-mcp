@@ -243,6 +243,7 @@ export const processObsidianGlobalSearch = async (
   let sinceDate: Date | null = null;
   let untilDate: Date | null = null;
   let strategyMessage = "";
+  let apiFailedOrTimedOut = false;
   let allFilteredResults: GlobalSearchResult[] = []; // Store all results matching filters before pagination
   let totalMatchesCount = 0; // Total matches across all files before limiting per file
 
@@ -297,7 +298,6 @@ export const processObsidianGlobalSearch = async (
     strategyMessage = "Searched cached Markdown with BM25. ";
   } else {
   // 2. Attempt API Search with Retries and Timeout
-  let apiFailedOrTimedOut = false;
   try {
     if (!obsidianService) {
       throw new McpError(
@@ -568,7 +568,7 @@ export const processObsidianGlobalSearch = async (
   });
 
   const paginatedResults = allFilteredResults.slice(startIndex, endIndex);
-  if (!apiFailedOrTimedOut) {
+  if (!ranked && !apiFailedOrTimedOut) {
     await addLiveDiskPaths(config.obsidianVaultPath, paginatedResults);
   }
   if (terms && params.responseMode === "detailed") {
