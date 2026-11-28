@@ -576,7 +576,8 @@ try {
   );
   assertToolIncludes(runtime, "headless-readonly", "runtime status");
   const runtimeStatus = JSON.parse(toolText(runtime));
-  assert.deepEqual(runtimeStatus.headlessRead, {
+  const { lastSuccessfulRefreshStartedAt, ...headlessRead } = runtimeStatus.headlessRead;
+  assert.deepEqual(headlessRead, {
     source: "filesystem",
     upstreamSync: "unknown",
     refreshOrigin: "process-refresh",
@@ -584,6 +585,8 @@ try {
     newestFileMtimeMs: newestMarkdownMtime * 1000,
   });
   assert.ok(runtimeStatus.sharedCache.lastRefreshAt > 0);
+  assert.ok(lastSuccessfulRefreshStartedAt > 0);
+  assert.ok(lastSuccessfulRefreshStartedAt <= runtimeStatus.sharedCache.lastRefreshAt);
 
   const notes = await callTool(
     clientA,
@@ -617,6 +620,7 @@ try {
       source: readinessBody.provenance.readSource,
       upstreamSync: "unknown",
       lastRefreshAt: runtimeStatus.sharedCache.lastRefreshAt,
+      lastSuccessfulRefreshStartedAt,
       refreshOrigin: "process-refresh",
     });
   }

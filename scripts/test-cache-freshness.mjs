@@ -70,23 +70,33 @@ async function connectReadNote(t, obsidianService, vaultCacheService) {
   return client;
 }
 
-test("headless read labels a cold request that overlaps the first filesystem scan", async (t) => {
+test("headless read reports the start of a cold scan that missed a concurrent edit", async (t) => {
   const previousSource = config.obsidianCacheSource;
   const previousDb = config.obsidianSharedCacheDbPath;
+  const previousConcurrency = config.obsidianCacheConcurrency;
   config.obsidianCacheSource = "filesystem";
   config.obsidianSharedCacheDbPath = path.join(root, "first-read.sqlite");
+  config.obsidianCacheConcurrency = 1;
   const instance = new VaultCacheService(undefined);
   const note = "FirstRead.md";
-  writeFileSync(path.join(root, note), "filesystem fixture");
+  const notePath = path.join(root, note);
+  const lastPath = path.join(root, "ZLastRead.md");
+  writeFileSync(notePath, "filesystem fixture");
+  writeFileSync(lastPath, "last file");
+  const scanStartedAt = 1_800_000_000_000;
+  const editedAt = scanStartedAt + 1000;
+  const scanFinishedAt = editedAt + 1000;
+  let now = scanStartedAt;
+  t.mock.method(Date, "now", () => now);
   const scanning = Promise.withResolvers();
   const release = Promise.withResolvers();
-  const readdir = fs.readdir;
-  t.mock.method(fs, "readdir", async (directory, options) => {
-    if (directory === root) {
+  const stat = fs.stat;
+  t.mock.method(fs, "stat", async (filePath, options) => {
+    if (filePath === lastPath) {
       scanning.resolve();
       await release.promise;
     }
-    return readdir(directory, options);
+    return stat(filePath, options);
   });
 
   const status = async () => projectPublicRuntimeStatus(await collectRuntimeStatus(instance));
@@ -103,26 +113,46 @@ test("headless read labels a cold request that overlaps the first filesystem sca
     const duringScan = await status();
     assert.equal(duringScan.headlessRead.refreshing, true);
     assert.equal(duringScan.sharedCache.lastRefreshAt, undefined);
+    assert.equal(duringScan.headlessRead.lastSuccessfulRefreshStartedAt, null);
 
+    now = editedAt;
+    writeFileSync(notePath, "edited during the scan");
+    utimesSync(notePath, editedAt / 1000, editedAt / 1000);
+    now = scanFinishedAt;
     release.resolve();
     const result = await read;
     assert.equal(result.isError, false);
     const payload = JSON.parse(result.content[0].text);
     assert.equal(payload.content, "filesystem fixture");
+    const completed = await status();
+    assert.equal(completed.sharedCache.lastRefreshAt, scanFinishedAt);
+    assert.equal(completed.headlessRead.lastSuccessfulRefreshStartedAt, scanStartedAt);
     assert.deepEqual(payload.provenance, {
       source: "filesystem",
       upstreamSync: "unknown",
-      lastRefreshAt: (await status()).sharedCache.lastRefreshAt,
+      lastRefreshAt: scanFinishedAt,
+      lastSuccessfulRefreshStartedAt: scanStartedAt,
       refreshOrigin: "process-refresh",
       refreshing: true,
       partial: true,
     });
+    await instance.close();
+    const restarted = new VaultCacheService(undefined);
+    try {
+      const evidence = restarted.getRefreshEvidence();
+      assert.equal(evidence.refreshOrigin, "startup-snapshot");
+      assert.equal(evidence.lastRefreshAt, scanFinishedAt);
+      assert.equal(evidence.lastSuccessfulRefreshStartedAt, scanStartedAt);
+    } finally {
+      await restarted.close();
+    }
   } finally {
     release.resolve();
     await read?.catch(() => undefined);
     await instance.close();
     config.obsidianCacheSource = previousSource;
     config.obsidianSharedCacheDbPath = previousDb;
+    config.obsidianCacheConcurrency = previousConcurrency;
   }
 });
 
@@ -166,6 +196,7 @@ test("another server's scan cannot advance the checkpoint of this process's inde
   }
   function assertCheckpoint(cache, lastRefreshAt, mtime, refreshOrigin) {
     assert.equal(cache.getRefreshEvidence().lastRefreshAt, lastRefreshAt);
+    assert.equal(cache.getRefreshEvidence().lastSuccessfulRefreshStartedAt, lastRefreshAt);
     assert.equal(cache.getRefreshEvidence().refreshOrigin, refreshOrigin);
     assert.equal(cache.getStats().lastRefreshAt, lastRefreshAt);
     assert.equal(cache.getNewestFileMtimeMs(), mtime * 1000);
@@ -425,12 +456,15 @@ test("incomplete refresh survives restart and cannot advance successful-refresh 
   try {
     await instance.refreshCache(true);
     const successfulAt = instance.getStats().lastRefreshAt;
+    const { lastSuccessfulRefreshStartedAt: startedAt } = instance.getRefreshEvidence();
     fail = true;
     await new Promise(resolve => setTimeout(resolve, 10));
     await instance.refreshCache(true);
     assert.equal(instance.getStats().lastRefreshAt, successfulAt);
+    assert.equal(instance.getRefreshEvidence().lastSuccessfulRefreshStartedAt, startedAt);
     await instance.close();
     instance = new VaultCacheService(rest);
+    assert.equal(instance.getRefreshEvidence().lastSuccessfulRefreshStartedAt, startedAt);
     assert.equal(instance.isReady(), false);
     assert.equal(instance.getStats().freshness, "uncertain");
     assert.equal(instance.getStats().lastRefreshFailedFiles, 1);

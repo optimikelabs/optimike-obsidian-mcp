@@ -203,6 +203,7 @@ type PublicRuntimeStatus = {
     source: "filesystem";
     upstreamSync: "unknown";
     refreshOrigin?: "startup-snapshot" | "process-refresh";
+    lastSuccessfulRefreshStartedAt: number | null;
     refreshing: boolean;
     newestFileMtimeMs: number | null;
   };
@@ -521,6 +522,8 @@ export function projectPublicRuntimeStatus(
           "startup-snapshot",
           "process-refresh",
         ] as const),
+        lastSuccessfulRefreshStartedAt:
+          optionalNumber(headlessRead.lastSuccessfulRefreshStartedAt) ?? null,
         refreshing: booleanOr(headlessRead.refreshing),
         newestFileMtimeMs: optionalNumber(headlessRead.newestFileMtimeMs) ?? null,
       },
@@ -667,6 +670,7 @@ export async function collectRuntimeStatus(
       headlessRead: {
         refreshing: refresh?.refreshing ?? false,
         refreshOrigin: refresh?.refreshOrigin,
+        lastSuccessfulRefreshStartedAt: refresh?.lastSuccessfulRefreshStartedAt ?? null,
         newestFileMtimeMs: vaultCacheService?.getNewestFileMtimeMs() ?? null,
       },
     } : {}),
