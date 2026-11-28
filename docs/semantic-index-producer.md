@@ -8,7 +8,7 @@ checkout, run `npm run build` and use `node scripts/semantic-index-producer.mjs`
 optimike-semantic-index --vault <vault-dir> --index <index-dir> --endpoint <bitnet-origin> --model <model-id> --revision <model-revision> --model-sha256 <expected-weights-sha256>
 ```
 
-Use a dedicated index directory outside the vault on a local filesystem. The
+Use a dedicated index directory outside any Obsidian vault on a local filesystem. The
 bridge receives the document inputs and their vault-relative provenance. Use a
 trusted endpoint and restrict access to the index, including any backups. On
 Windows, set access restrictions on the parent directory before the first build.
@@ -26,15 +26,31 @@ skips any block that overlaps them. Set these options on each invocation. Linked
 entries require an explicit path exclusion. Directory traversal across devices
 is refused.
 
+The jsbrains `SmartSource.should_embed` rule selects notes whose file size in
+bytes exceeds `--min-note-chars` (300 by default, including when set to 0).
 Note inputs use the vault-relative breadcrumb followed by `:\n` and the
 Markdown. Block inputs use the parent breadcrumb followed by a newline and the
 original inclusive line range. The producer uses the pinned jsbrains parser and
-indexes nonempty blocks outside frontmatter and excluded ranges. Smart
-Connections Desktop settings, minimum lengths and parent/child selection are
-outside this policy. CUDA documents use `/bitnet/embed-batch` with up to four
-items. CPU documents use `/bitnet/embed`. Both send `purpose: document` and
-require untruncated L2-normalized vectors. Long inputs rejected by the bridge
-abort the generation.
+`SmartBlock.should_embed` rule. Set `--min-block-chars` to match the Smart
+Connections block setting for the corpus (300 by default). For a Smart
+Connections configuration with note and block minimums of 200 and 250, pass
+`--min-note-chars 200 --min-block-chars 250`. A parent is
+omitted when selected descendants meet both edge lines defined by jsbrains.
+Frontmatter and excluded heading ranges are omitted from block search.
+CUDA uses `/bitnet/embed-batch` with up to four items across notes. CPU uses
+`/bitnet/embed`. Both send `purpose: document` and validate vector identity and
+normalization.
+
+The generic jsbrains note adapter estimates a character budget at 3.7
+characters per token. The producer sends the exact input and lets the BitNet
+tokenizer enforce its context (`max_tokens` from health, 32,768 in the current
+bridge). When the bridge truncates an input or reports a size or context
+refusal, the producer omits that input instead of publishing a partial vector.
+The strict external reader requires a note vector for each source record, so
+an omitted note's blocks are also omitted even when they fit the context.
+The manifest and CLI output
+list skipped paths or blocks with their reasons, including invalid UTF-8
+and paths the strict reader cannot load. Filesystem read errors abort the run.
 
 Each run rechecks the full source inventory and source hashes before publication.
 Incremental runs only request embeddings for inputs absent from the active
@@ -44,6 +60,15 @@ identity can stop publication. A live filesystem can still change between the
 last check and pointer replacement. Use a stable filesystem snapshot if a
 point-in-time source view is required, with a dedicated index root for that
 snapshot.
+
+Before encoding, compare the active generation's paths with the new inventory.
+Before sealing, compare those paths with the notes that will actually publish.
+Refuse publication if more than 10% or more than 50 active paths would be lost.
+Use `--max-deletion-percent` and `--max-deletions` to configure the limits.
+Renames, newly excluded paths, invalid paths and active notes refused for
+invalid UTF-8 or by BitNet count toward the thresholds. The configured note
+size rule reports `note_below_min_size` and its skips are exempt. Use
+`--allow-deletions` for one run after verifying that the losses are intentional.
 
 ## Publication and recovery
 

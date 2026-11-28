@@ -31,6 +31,15 @@ export async function resolveRoots(vaultPath, indexPath) {
   if (isInside(vault, index) || isInside(index, vault)) {
     throw Error("Vault and index directories must be disjoint");
   }
+  for (const start of new Set([path.resolve(indexPath), index])) {
+    for (let directory = start; ; directory = path.dirname(directory)) {
+      const marker = await lstat(path.join(directory, ".obsidian")).catch(error => {
+        if (error.code !== "ENOENT") throw error;
+      });
+      if (marker) throw Error("Index directory must be outside any Obsidian vault");
+      if (directory === path.dirname(directory)) break;
+    }
+  }
   return { vault, index };
 }
 
@@ -47,6 +56,7 @@ export async function inventory(vault, excludedPaths) {
   if (!root.isDirectory()) throw Error("Vault root is unavailable");
   const directories = new Map();
   const files = new Map();
+  const unsafePaths = new Map();
   const excludes = new Set(excludedPaths);
   // Filter only known exclusions. A failed traversal of an included entry aborts.
   async function walk(relative) {
@@ -65,13 +75,16 @@ export async function inventory(vault, excludedPaths) {
       if (entry.isDirectory()) await walk(child);
       else if (/\.md$/iu.test(name)) {
         if (!entry.isFile() || entry.dev !== root.dev) throw Error("Unsafe Markdown source");
-        files.set(child, stamp(entry));
+        // Match the strict Smart Env v3 reader's note-path constraints.
+        const valid = !/[:\\\x00-\x1f]/u.test(child) &&
+          child.split("/").every(segment => segment && segment !== "." && segment !== "..");
+        (valid ? files : unsafePaths).set(child, stamp(entry));
       }
     }
   }
   await walk("");
   if (directories.get("") !== inode(root)) throw Error("Vault root was replaced during inventory");
-  return { binding: sha256(vault + "\0" + inode(root)), files, directories };
+  return { binding: sha256(vault + "\0" + inode(root)), files, directories, unsafePaths };
 }
 
 export async function readSource(vault, relative, expected) {
@@ -95,17 +108,18 @@ function sameEntries(left, right) {
   return left.size === right.size && [...left].every(([key, value]) => right.get(key) === value);
 }
 
-export async function verifySources(vault, excludedPaths, initial, sources) {
+export async function verifySources(vault, excludedPaths, initial, hashes) {
   function compare(current) {
     if (current.binding !== initial.binding ||
         !sameEntries(initial.files, current.files) ||
+        !sameEntries(initial.unsafePaths, current.unsafePaths) ||
         !sameEntries(initial.directories, current.directories)) {
       throw Error("Vault inventory changed during build");
     }
   }
   compare(await inventory(vault, excludedPaths));
   for (const [relative, expected] of initial.files) {
-    if (sha256(await readSource(vault, relative, expected)) !== sources[relative].sha256) {
+    if (sha256(await readSource(vault, relative, expected)) !== hashes.get(relative)) {
       throw Error("Markdown content changed during build");
     }
   }
@@ -127,8 +141,7 @@ function tagsFrom(text) {
   ].filter(Boolean))];
 }
 
-export function sourceParts(relative, bytes, excludedHeadings) {
-  const raw = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+export function sourceParts(relative, raw, excludedHeadings, minBlockChars) {
   const ranges = Object.entries(parse_markdown_blocks(raw).blocks);
   const lines = raw.split("\n");
   const mask = lines.map(() => false);
@@ -139,11 +152,42 @@ export function sourceParts(relative, bytes, excludedHeadings) {
     }
   }
   const text = mask.some(Boolean) ? lines.filter((line, index) => !mask[index] && line.length).join("\n") : raw;
+  const textByKey = new Map(ranges.map(([key, [start, end]]) => [key, lines.slice(start - 1, end).join("\n")]));
+  const rangeByKey = new Map(ranges);
+  const descendants = new Map();
+  for (const entry of ranges) {
+    const [key] = entry;
+    for (let split = key.indexOf("#", 1); split !== -1; split = key.indexOf("#", split + 1)) {
+      const parent = key.slice(0, split);
+      if (!rangeByKey.has(parent)) continue;
+      if (!descendants.has(parent)) descendants.set(parent, []);
+      descendants.get(parent).push(entry);
+    }
+  }
+  const selection = new Map();
+  // Adapted from jsbrains SmartBlock.should_embed at parserRevision (MIT).
+  function shouldEmbed(key) {
+    if (selection.has(key)) return selection.get(key);
+    const [start, end] = rangeByKey.get(key);
+    let embed = textByKey.get(key).length >= minBlockChars;
+    if (embed) {
+      let first;
+      let last;
+      for (const [child, [childStart, childEnd]] of descendants.get(key) ?? []) {
+        if (childStart === start + 1) first = child;
+        if (childEnd === end) last = child;
+        if (first && last) break;
+      }
+      if (first && last && shouldEmbed(first) && shouldEmbed(last)) embed = false;
+    }
+    selection.set(key, embed);
+    return embed;
+  }
   const blocks = [];
   for (const [key, range] of ranges) {
     if (/^#+---frontmatter---/u.test(key) || mask.slice(range[0] - 1, range[1]).some(Boolean)) continue;
-    const text = lines.slice(range[0] - 1, range[1]).join("\n");
-    if (!text.trim()) continue;
+    const text = textByKey.get(key);
+    if (!text.trim() || !shouldEmbed(key)) continue;
     const prefix = breadcrumbs((relative + key).split("#").slice(0, -1).join(" > "));
     blocks.push({ key, range, text, input: prefix + "\n" + text });
   }

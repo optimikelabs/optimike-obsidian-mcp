@@ -9,7 +9,7 @@ d’encodage sur `GET /health`. Lancer la commande installée
 optimike-semantic-index --vault <coffre> --index <index> --endpoint <origine-bitnet> --model <id-modèle> --revision <révision-modèle> --model-sha256 <sha256-poids-attendu>
 ```
 
-Utiliser un dossier dédié à l’index, hors du coffre, sur un système de fichiers
+Utiliser un dossier dédié à l’index, hors de tout coffre Obsidian, sur un système de fichiers
 local. Le bridge reçoit les textes à encoder et leur provenance relative au
 coffre. Utiliser un service de confiance et limiter l’accès à l’index et à ses
 sauvegardes. Sous Windows, définir ces droits sur le dossier parent avant la
@@ -28,15 +28,30 @@ blocs qui les recouvrent. Fournir ces options à chaque lancement. Les liens
 symboliques exigent une exclusion explicite. La traversée vers un autre volume
 est refusée.
 
-Chaque note est encodée avec son fil d’Ariane, suivi de `:\n` et du Markdown.
+La règle jsbrains `SmartSource.should_embed` retient les notes dont la taille
+en octets dépasse `--min-note-chars` (300 par défaut, y compris avec la valeur 0).
+Chaque note retenue est encodée avec son fil d’Ariane, suivi de `:\n` et du Markdown.
 Chaque bloc est encodé avec son fil d’Ariane parent et ses lignes d’origine,
-bornes incluses. Le parseur jsbrains est épinglé. La CLI indexe les blocs non
-vides hors frontmatter et plages exclues. Elle applique sa propre politique
-de sélection, indépendamment des minima et de la préférence parent/enfant de
-Smart Connections Desktop. En CUDA, elle appelle `/bitnet/embed-batch` par lots
-de quatre au plus. Sur CPU, elle appelle `/bitnet/embed`. Les deux routes
-reçoivent `purpose: document`. Un vecteur tronqué, invalide ou non normalisé en
-L2 arrête la génération.
+bornes incluses. La CLI utilise le parseur épinglé de jsbrains et sa règle
+`SmartBlock.should_embed`. Régler `--min-block-chars` sur la valeur utilisée
+par Smart Connections pour le corpus (300 par défaut). Pour une configuration
+Smart Connections avec des seuils de 200 pour les notes et 250 pour les blocs,
+passer `--min-note-chars 200 --min-block-chars 250`. La règle écarte un
+parent quand des descendants retenus atteignent les deux bornes définies par
+jsbrains. Le frontmatter et les plages exclues restent hors de la recherche
+par blocs. CUDA utilise `/bitnet/embed-batch` par lots de quatre au plus,
+répartis entre les notes. Le CPU utilise `/bitnet/embed`. Les deux routes
+reçoivent `purpose: document` et les vecteurs sont validés.
+
+L’adaptateur générique jsbrains estime la limite à 3,7 caractères par token.
+Le producteur fournit le texte exact et laisse le tokenizer BitNet appliquer
+la limite annoncée dans `max_tokens` (32 768 pour le bridge actuel). Une
+troncature ou un refus de taille écarte l’entrée. Le lecteur strict exige un
+vecteur de note par source. Quand une note est écartée, ses blocs le sont aussi,
+même s’ils tiennent dans le contexte. Le manifeste et la sortie de la CLI indiquent les
+chemins ou blocs écartés et leur motif, y compris un UTF-8 invalide ou un
+chemin incompatible avec le lecteur strict. Un échec de lecture arrête la
+génération.
 
 Le producteur recontrôle l’inventaire et les empreintes avant publication.
 L’incrémental retrouve les vecteurs de la génération active à partir du texte
@@ -45,6 +60,16 @@ coffre ou un changement d’identité du bridge peut arrêter la publication. Le
 coffre peut encore changer entre le dernier contrôle et le remplacement du
 pointeur. Pour une vue à un instant précis, utiliser un instantané stable du
 système de fichiers et lui dédier un dossier d’index.
+
+Avant d’encoder, la CLI compare l’inventaire aux chemins de la génération
+active. Avant de sceller la génération, elle vérifie à nouveau les chemins qui
+seront réellement publiés. Elle refuse si plus de 10 % ou plus de 50 chemins
+actifs seraient perdus. Les options `--max-deletion-percent` et
+`--max-deletions` règlent ces seuils. Les renommages, exclusions, chemins
+incompatibles et notes actives refusées pour un UTF-8 invalide ou par BitNet
+entrent dans le calcul. Les notes écartées par le seuil de taille sont
+signalées par `note_below_min_size` et exemptées. Utiliser `--allow-deletions`
+pour une exécution après avoir vérifié que les pertes sont voulues.
 
 ## Publication et reprise
 

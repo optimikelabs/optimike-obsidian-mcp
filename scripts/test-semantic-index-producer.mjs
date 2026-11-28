@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { mkdir, mkdtemp, open, readFile, readdir, rename, rm, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, open, readFile, readdir, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { readSmartEnvV3, smartTextHash } from "../dist/services/smartEnvV3.js";
 
 const cli = fileURLToPath(new URL("./semantic-index-producer.mjs", import.meta.url));
@@ -15,6 +15,11 @@ const model = "fixture-model";
 const weights = "a".repeat(64);
 const hash = input => createHash("sha256").update(input).digest("hex");
 const note = text => `# Heading\n\n${text}\n`;
+const strict = process.env.SEMANTIC_INDEX_STRICT_READER &&
+  (await import(pathToFileURL(path.resolve(process.env.SEMANTIC_INDEX_STRICT_READER)))).readSmartEnvV3;
+const producerTimeout = Number(process.env.SEMANTIC_INDEX_TEST_TIMEOUT_MS ?? 20_000);
+assert.ok(Number.isInteger(producerTimeout) && producerTimeout > 0 && producerTimeout <= 2 ** 31 - 1,
+  "SEMANTIC_INDEX_TEST_TIMEOUT_MS must be a positive timer delay in milliseconds");
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(tmpdir(), "semantic-index-test-"));
@@ -27,8 +32,10 @@ async function fixture(t) {
     gpu_worker_sha256: "c".repeat(64), gpu_model_sha256: "d".repeat(64),
   };
   const requests = [];
+  const batches = [];
   let beforeEncode;
   let transformRow = row => row;
+  let refuseBatch = () => false;
   const server = createServer(async (req, res) => {
     res.setHeader("content-type", "application/json");
     try {
@@ -41,6 +48,7 @@ async function fixture(t) {
       assert.equal(req.url, health.document_device === "cuda" ? "/bitnet/embed-batch" : "/bitnet/embed");
       const items = body.items ?? [body];
       assert.ok(items.length >= 1 && items.length <= 4);
+      batches.push(items);
       for (const item of items) {
         assert.equal(item.purpose, "document");
         assert.equal(item.entity_kind, item.source_path.includes("#") ? "block" : "source");
@@ -51,6 +59,10 @@ async function fixture(t) {
         beforeEncode = undefined;
         await callback();
       }
+      if (refuseBatch(items)) {
+        res.statusCode = 400;
+        return res.end(JSON.stringify({ error: "input too large" }));
+      }
       const cuda = health.document_device === "cuda";
       const results = items.map(item => transformRow({
         vector: parseInt(hash(item.input)[0], 16) % 2 ? [0, 1] : [1, 0],
@@ -59,7 +71,7 @@ async function fixture(t) {
         // BitNet's native CPU encoder returns the worker result. Device and
         // provenance fields are added to the audit log, not the response.
         ...(cuda && { device: "cuda" }),
-      }));
+      }, item));
       res.end(JSON.stringify({ model, results, ...(!cuda && { embeddings: results.map(row => row.vector) }) }));
     } catch (error) {
       res.statusCode = 500;
@@ -77,8 +89,9 @@ async function fixture(t) {
     const { promise, resolve } = Promise.withResolvers();
     const child = execFile(process.execPath, [
       cli, "--vault", vault, "--index", index, "--endpoint", `http://127.0.0.1:${server.address().port}`,
-      "--model", model, "--revision", "fixture-revision", "--model-sha256", weights, ...args,
-    ], { timeout: 20_000, windowsHide: true }, (error, stdout, stderr) => resolve({ error, stdout, stderr }));
+      "--model", model, "--revision", "fixture-revision", "--model-sha256", weights,
+      "--min-note-chars", "1", "--min-block-chars", "0", ...args,
+    ], { timeout: producerTimeout, windowsHide: true }, (error, stdout, stderr) => resolve({ error, stdout, stderr }));
     return { child, result: promise };
   }
   async function run(...args) {
@@ -93,14 +106,25 @@ async function fixture(t) {
     assert.match(result.stderr, pattern);
   }
   const put = (name, text) => writeFile(path.join(vault, name), text, "utf8");
-  const current = async () => (await readFile(path.join(index, "CURRENT"), "utf8")).trim();
+  const current = async () => {
+    const raw = await readFile(path.join(index, "CURRENT"), "utf8");
+    assert.equal(raw, raw.trim() + "\n");
+    return raw.slice(0, -1);
+  };
   const generation = id => path.join(index, "generations", id);
   const manifest = async id => JSON.parse(await readFile(path.join(generation(id), "generation.json"), "utf8"));
-  const load = id => readSmartEnvV3(generation(id), { blocks: true });
+  async function load(id) {
+    if (!strict) return readSmartEnvV3(generation(id), { blocks: true });
+    const { fingerprint, model, vectors } = await manifest(id);
+    return strict(generation(id), {
+      blocks: true, expected: { fingerprint, model, noteCount: vectors.notes.count, sectionCount: vectors.sections.count },
+    });
+  }
   return {
-    root, vault, index, requests, health, start, run, fail, put, current, generation, manifest, load,
+    root, vault, index, requests, batches, health, start, run, fail, put, current, generation, manifest, load,
     beforeEncode(callback) { beforeEncode = callback; },
     transformRow(callback) { transformRow = callback; },
+    refuseBatch(callback) { refuseBatch = callback; },
   };
 }
 
@@ -115,10 +139,10 @@ test("first build sends exact note/block inputs and the Smart Env reader resolve
   assert.deepEqual(loaded.notes.map(row => [row.notePath, row.tags]), [["Folder/Example.md", ["fixture"]]]);
   const sent = new Map(f.requests.map(row => [row.source_path, row.input]));
   assert.equal(sent.get("Folder/Example.md"), "Folder > Example:\n" + text);
-  const block = loaded.blocks.refs.find(ref => ref.blockKey === "#A#B");
-  const blockText = text.split("\n").slice(4).join("\n");
-  assert.deepEqual([block.lineStart, block.lineEnd, block.readHash], [5, 9, smartTextHash(blockText)]);
-  assert.equal(sent.get("Folder/Example.md#A#B"), "Folder > Example > A\n" + blockText);
+  const block = loaded.blocks.refs.find(ref => ref.blockKey === "#A#B#{1}");
+  const blockText = text.split("\n").slice(5).join("\n");
+  assert.deepEqual([block.lineStart, block.lineEnd, block.readHash], [6, 9, smartTextHash(blockText)]);
+  assert.equal(sent.get("Folder/Example.md#A#B#{1}"), "Folder > Example > A > B\n" + blockText);
   assert.ok(loaded.blocks.refs.every(ref => !/frontmatter|inside fence/u.test(ref.blockKey)));
   assert.equal((await f.manifest(receipt.generation)).sources["Folder/Example.md"].sha256, hash(text));
   assert.deepEqual(await readdir(path.join(f.vault, "Folder")), ["Example.md"]);
@@ -147,7 +171,7 @@ test("a deleted note and its block references leave the next generation", async 
   await f.put("stay.md", note("Keep me"));
   const first = await f.run();
   await unlink(path.join(f.vault, "remove.md"));
-  const second = await f.run();
+  const second = await f.run("--max-deletion-percent", "50");
   const loaded = await f.load(second.generation);
   assert.deepEqual(loaded.notes.map(row => row.notePath), ["stay.md"]);
   assert.ok(loaded.blocks.refs.length && loaded.blocks.refs.every(row => row.notePath === "stay.md"));
@@ -170,7 +194,7 @@ test("renaming drops old references and encodes the new breadcrumb instead of re
   await f.run();
   f.requests.length = 0;
   await rename(path.join(f.vault, "old.md"), path.join(f.vault, "new.md"));
-  const second = await f.run();
+  const second = await f.run("--allow-deletions");
   const loaded = await f.load(second.generation);
   assert.deepEqual(loaded.notes.map(row => row.notePath), ["new.md"]);
   assert.ok(loaded.blocks.refs.length && loaded.blocks.refs.every(ref => ref.notePath === "new.md"));
@@ -181,13 +205,13 @@ test("renaming drops old references and encodes the new breadcrumb instead of re
 test("a note lost between inventory and open aborts instead of publishing a deletion", async t => {
   const f = await fixture(t);
   await f.put("a.md", note("Alpha"));
-  await f.put("b.md", note("Beta"));
+  for (const letter of ["b", "c", "d", "e"]) await f.put(letter + ".md", note(letter));
   const first = await f.run();
   await f.put("a.md", note("Changed"));
-  f.beforeEncode(() => unlink(path.join(f.vault, "b.md")));
+  f.beforeEncode(() => unlink(path.join(f.vault, "e.md")));
   await f.fail(/ENOENT/u);
   assert.equal(await f.current(), first.generation);
-  assert.equal((await f.load(first.generation)).notes.length, 2);
+  assert.equal((await f.load(first.generation)).notes.length, 5);
 });
 
 test("a changed source or replacement vault volume refuses publication", async t => {
@@ -215,7 +239,7 @@ test("a killed writer and a competing invocation leave the previous pointer and 
   const running = f.start();
   try {
     await Promise.race([arrived.promise, running.result.then(result => assert.fail(result.stderr || "Writer exited early"))]);
-    await f.fail(/already has a producer lock/u);
+    await f.fail(new RegExp(`already has a producer lock \\(PID ${running.child.pid}, started \\d{4}-`, "u"));
     assert.equal(await f.current(), first.generation);
     assert.ok(running.child.kill("SIGKILL"));
     assert.equal((await running.result).error?.signal, "SIGKILL");
@@ -282,13 +306,11 @@ test("CPU accepts native rows without device metadata and removes excluded headi
   assert.ok(loaded.blocks.refs.every(ref => !ref.blockKey.includes("Omit") && ref.blockKey !== "#Parent"));
 });
 
-test("truncated or invalid vectors never become active", async t => {
+test("malformed or incompatible vectors still abort publication", async t => {
   const f = await fixture(t);
   await f.put("a.md", note("Alpha"));
   const first = await f.run();
   await f.put("a.md", note("Changed"));
-  f.transformRow(row => ({ ...row, truncated: true }));
-  await f.fail(/truncated or incompatible/u);
   f.transformRow(row => ({ ...row, vector: [0, 0] }));
   await f.fail(/Invalid BitNet vector/u);
   f.transformRow(row => ({ ...row, device: undefined }));
@@ -296,8 +318,143 @@ test("truncated or invalid vectors never become active", async t => {
   assert.equal(await f.current(), first.generation);
 });
 
+test("a readable partial vault cannot drop nine of ten active notes without approval", async t => {
+  const f = await fixture(t);
+  for (let n = 0; n < 10; n++) await f.put(`note-${n}.md`, note("Synthetic note " + n));
+  const first = await f.run();
+  assert.ok(f.batches.some(items => items.length === 4 &&
+    new Set(items.filter(item => item.entity_kind === "source").map(item => item.source_path)).size === 4));
+  for (let n = 1; n < 10; n++) await unlink(path.join(f.vault, `note-${n}.md`));
+  await f.fail(/Deletion limit exceeded \(9 of 10/u, "--rebuild");
+  await f.fail(/Deletion limit exceeded/u, "--max-deletion-percent", "100", "--max-deletions", "8");
+  assert.equal(await f.current(), first.generation);
+  const second = await f.run("--allow-deletions");
+  assert.equal(second.deletions, 9);
+  assert.deepEqual((await f.load(second.generation)).notes.map(row => row.notePath), ["note-0.md"]);
+});
+
+for (const [label, replaceBody, truncate] of [
+  ["invalid UTF-8", Buffer.from([0xe9, 0x20]), false],
+  ["BitNet truncation", note("Changed input exceeds the context"), true],
+]) {
+  test(`mass ${label} trips the deletion guard after encoding and before a generation is sealed`, async t => {
+    const f = await fixture(t);
+    await f.put("keep.md", note("Keep this note"));
+    for (let i = 0; i < 10; i++) await f.put(`changed-${i}.md`, note("Original input"));
+    const first = await f.run();
+    for (let i = 0; i < 10; i++) await f.put(`changed-${i}.md`, replaceBody);
+    if (truncate) {
+      f.transformRow((row, item) => item.source_path.startsWith("changed-")
+        ? { ...row, truncated: true, tokens: f.health.max_tokens } : row);
+    }
+    await f.fail(/Deletion limit exceeded \(10 of 11 active notes not publishable\)/u);
+    assert.equal(await f.current(), first.generation);
+    assert.deepEqual(await readdir(path.join(f.index, "generations")), [first.generation]);
+    const second = await f.run("--allow-deletions");
+    assert.equal(second.deletions, 10);
+    assert.equal(second.skipped.length, 10);
+    assert.ok(second.skipped.every(item => item.reason === (truncate ? "document_too_long" : "invalid_utf8")));
+    assert.deepEqual((await f.load(second.generation)).notes.map(row => row.notePath), ["keep.md"]);
+  });
+}
+
+test("jsbrains note selection compares a strict byte minimum and does not count size-policy skips as deletions", async t => {
+  const f = await fixture(t);
+  await f.put("shrunk.md", "s".repeat(301));
+  await f.put("multi.md", "é".repeat(151));
+  await f.put("equal.md", "é".repeat(150));
+  const first = await f.run("--min-note-chars", "0");
+  assert.deepEqual((await f.load(first.generation)).notes.map(row => row.notePath), ["multi.md", "shrunk.md"]);
+  assert.deepEqual(first.skipped, [{ path: "equal.md", reason: "note_below_min_size" }]);
+  await f.put("shrunk.md", "s".repeat(300));
+  const second = await f.run("--min-note-chars", "0");
+  assert.equal(second.deletions, 0);
+  assert.ok(second.skipped.some(item => item.path === "shrunk.md" && item.reason === "note_below_min_size"));
+  assert.deepEqual((await f.load(second.generation)).notes.map(row => row.notePath), ["multi.md"]);
+});
+
+test("a truncated input, HTTP context refusal and invalid UTF-8 are reported while valid notes publish", async t => {
+  const f = await fixture(t);
+  await f.put("good.md", note("A valid source"));
+  await f.put("too-long.md", note("Synthetic over-budget source"));
+  await f.put("oversize.md", note("Synthetic oversized body"));
+  await f.put("bad.md", Buffer.from([0xc3, 0x28]));
+  f.refuseBatch(items => items.some(item => item.source_path === "oversize.md"));
+  f.transformRow((row, item) => ["too-long.md", "good.md#Heading"].includes(item.source_path)
+    ? { ...row, truncated: true, tokens: f.health.max_tokens } : row);
+  const receipt = await f.run();
+  const skipped = [
+    { path: "bad.md", reason: "invalid_utf8" },
+    { path: "oversize.md", reason: "document_too_long" },
+    { path: "too-long.md", reason: "document_too_long" },
+    { path: "good.md", reason: "document_too_long", blockKey: "#Heading" },
+  ];
+  assert.deepEqual(receipt.skipped, skipped);
+  assert.deepEqual((await f.manifest(receipt.generation)).skipped, skipped);
+  const loaded = await f.load(receipt.generation);
+  assert.deepEqual(loaded.notes.map(row => row.notePath), ["good.md"]);
+  assert.ok(loaded.blocks.refs.length && loaded.blocks.refs.every(row => row.notePath === "good.md"));
+  assert.ok(f.requests.every(item => !/^(bad\.md|(?:too-long|oversize)\.md#)/u.test(item.source_path)));
+});
+
+test("jsbrains block selection uses inclusive size and suppresses parents only when selected descendants match both edges", async t => {
+  const f = await fixture(t);
+  await f.put("covered.md", "# Covered\n- 12345678\n- abcdefgh");
+  await f.put("gap.md", "# Gap\n\n- 12345678\n- abcdefgh");
+  await f.put("short-edge.md", "# Edge\n- 12345678\n- short");
+  const result = await f.run("--min-block-chars", "10");
+  const keys = (await f.load(result.generation)).blocks.refs.map(row => row.notePath + row.blockKey);
+  assert.deepEqual(keys, [
+    "covered.md#Covered#{1}", "covered.md#Covered#{2}",
+    "gap.md#Gap", "gap.md#Gap#{1}", "gap.md#Gap#{2}",
+    "short-edge.md#Edge", "short-edge.md#Edge#{1}",
+  ]);
+});
+
 test("an index inside the vault is refused before any directory is created", async t => {
   const f = await fixture(t);
   await f.fail(/must be disjoint/u, "--index", path.join(f.vault, "new", "index"));
   assert.deepEqual(await readdir(f.vault), []);
 });
+
+test("refuse an index beneath another vault and reject a linked vault subtree", async t => {
+  const f = await fixture(t);
+  const another = path.join(f.root, "another");
+  await mkdir(path.join(another, ".obsidian"), { recursive: true });
+  await f.fail(/outside any Obsidian vault/u, "--index", path.join(another, "missing", "index"));
+  assert.deepEqual(await readdir(another), [".obsidian"]);
+  await f.put("valid.md", note("Valid text"));
+  await symlink(another, path.join(f.vault, "link"), process.platform === "win32" ? "junction" : "dir");
+  await f.fail(/Symbolic links require an explicit path exclusion/u);
+  const receipt = await f.run("--exclude-path", "link");
+  assert.equal((await f.load(receipt.generation)).notes.length, 1);
+});
+
+if (process.platform !== "win32") {
+  test("strict-reader-incompatible POSIX names are reported and never enter generation records", async t => {
+    const f = await fixture(t);
+    const invalid = ["bad:name.md", "bad\\name.md", "bad\x1fname.md"];
+    for (const name of invalid) await f.put(name, note("Skip this input"));
+    await f.put("ok.md", note("Keep this input"));
+    const receipt = await f.run();
+    assert.deepEqual(receipt.skipped, invalid.sort().map(path => ({ path, reason: "invalid_note_path" })));
+    assert.deepEqual((await f.load(receipt.generation)).notes.map(row => row.notePath), ["ok.md"]);
+  });
+}
+
+if (process.getuid?.() > 0 && process.platform !== "win32") {
+  test("EACCES reading an indexed note preserves CURRENT instead of classifying it as skipped content", async t => {
+    const f = await fixture(t);
+    await f.put("locked.md", note("Cannot read"));
+    await f.put("okay.md", note("Can read"));
+    const first = await f.run();
+    const file = path.join(f.vault, "locked.md");
+    await chmod(file, 0o000);
+    try {
+      await f.fail(/EACCES/u, "--allow-deletions");
+      assert.equal(await f.current(), first.generation);
+    } finally {
+      await chmod(file, 0o600);
+    }
+  });
+}

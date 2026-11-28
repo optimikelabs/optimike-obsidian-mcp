@@ -110,8 +110,9 @@ export async function readActiveGeneration(index) {
     throw error;
   }
   if (!stat.isFile() || stat.size > 64) throw Error("Invalid CURRENT pointer");
-  const id = (await readFile(pointer, "utf8")).trim();
-  if (!generationId.test(id)) throw Error("Invalid CURRENT generation id");
+  const raw = await readFile(pointer, "utf8");
+  const id = raw.slice(0, -1);
+  if (!raw.endsWith("\n") || !generationId.test(id)) throw Error("Invalid CURRENT generation id");
   const directory = path.join(index, "generations", id);
   if (!(await lstat(directory)).isDirectory()) throw Error("Invalid active generation directory");
   return { directory, manifest: await readManifest(directory, id) };
