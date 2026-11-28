@@ -154,3 +154,19 @@ test('unparseable frontmatter leaves cached properties available', async () => {
   assert.deepEqual(note.frontmatter, restNote.frontmatter);
   assert.equal(Object.hasOwn(note, 'metadataCacheStale'), false);
 });
+
+test('an opening fence with trailing whitespace is Markdown, not frontmatter', async () => {
+  serve({}, '--- \r\nstatus: draft\r\n---\r\n# Body');
+  const { content: note } = JSON.parse(await call('obsidian_read_note', { format: 'json' }));
+  assert.deepEqual(note.frontmatter, {});
+  assert.equal(Object.hasOwn(note, 'metadataCacheStale'), false);
+});
+
+test('reading YAML template placeholders does not send collection keys to stderr', async (t) => {
+  const emitWarning = t.mock.method(process, 'emitWarning', () => {});
+  serve({ status: 'cached' }, '---\nstatus: draft\ntemplate: {{VALUE:x}}\n---\n# Body');
+  const result = JSON.parse(await call('obsidian_get_frontmatter', { key: 'status' }));
+  assert.equal(result.value, 'draft');
+  assert.deepEqual(result.metadataCacheStale, { keys: ['status', 'template'] });
+  assert.equal(emitWarning.mock.callCount(), 0);
+});

@@ -6,7 +6,7 @@ export interface FrontmatterReadSignal {
   metadataCacheStale?: { keys: string[] };
 }
 
-const OPENING_FENCE = /^\uFEFF?---[ \t]*\r?\n/u;
+const OPENING_FENCE = /^\uFEFF?---\r?\n/u;
 const CLOSING_FENCE = /^---[ \t]*\r?$/mu;
 
 function parseContentFrontmatter(content: string): NoteJson["frontmatter"] | undefined {
@@ -21,6 +21,7 @@ function parseContentFrontmatter(content: string): NoteJson["frontmatter"] | und
     const document = parseDocument(afterOpening.slice(0, closing.index), {
       schema: "core",
       version: "1.2",
+      logLevel: "error",
       resolveKnownTags: false,
     });
     if (document.errors.length || document.warnings.length) return undefined;
