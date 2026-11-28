@@ -160,11 +160,14 @@
     "docs/releases/3.23.0.fr.md",
     "docs/releases/3.23.1.md",
     "docs/releases/3.23.1.fr.md",
-    "docs/semantic-vector-cache-encoding.md"
+    "docs/semantic-vector-cache-encoding.md",
+    "docs/semantic-index-producer.md",
+    "docs/semantic-index-producer.fr.md"
   ],
   "bin": {
     "optimike-obsidian-mcp": "dist/index.js",
-    "optimike-obsidian-mcp-proxy": "dist/stdio-proxy.js"
+    "optimike-obsidian-mcp-proxy": "dist/stdio-proxy.js",
+    "optimike-semantic-index": "scripts/semantic-index-producer.mjs"
   },
   "type": "module",
   "repository": {
@@ -197,6 +200,7 @@
     "test:runtime": "npm run build && npm run test:operon-startup-order-offline && npm run smoke:headless-readonly && npm run smoke:hybrid-unavailable && npm run smoke:hybrid-api-available && npm run smoke:headless-guarded && npm run smoke:headless-filesystem && npm run smoke:headless-status && npm run test:local-rest-api-compat",
     "audit:production": "npm audit --omit=dev --audit-level=high",
     "verify:code": "npm run audit:production && npm run build",
+    "test:semantic-index-producer": "node --test scripts/test-semantic-index-producer.mjs",
     "rebuild": "npx ts-node --esm scripts/clean.ts && npm run build",
     "fetch:spec": "npx ts-node --esm scripts/fetch-openapi-spec.ts",
     "docs:generate": "typedoc --tsconfig ./tsconfig.typedoc.json",
