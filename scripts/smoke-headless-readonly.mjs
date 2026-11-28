@@ -155,6 +155,7 @@ async function createTempVault() {
     ["ViewFiltered", "views:\n  - type: table\n    name: Projects\n    filters: 'type == \"project\"'\n"],
     ["ViewLimited", "views:\n  - type: table\n    name: First\n    limit: 1\n"],
     ["ViewOrdered", "views:\n  - type: table\n    name: Ordered\n    order: [file.name]\n"],
+    ["ViewGrouped", "views:\n  - type: table\n    name: Grouped\n    groupBy:\n      property: type\n      direction: ASC\n"],
     ["Formulas", "formulas:\n  score: '1 + 1'\n"],
   ]) {
     await writeFile(path.join(vaultRoot, `${name}.base`), yaml, "utf8");
@@ -784,12 +785,29 @@ async function main() {
       assertTextIncludes(schema, "local-fallback", "bases schema");
       assertTextIncludes(schema, "file.name", "bases schema");
 
+      for (const [regression, args, hint] of [
+        ["an unknown filter operator must not match every note", { filter: { type: { exists: true } } }, /eq, ne, in, contains/u],
+        ["an unsupported file property must not filter against missing values", { filter: { "file.folder": "Projects" } }, /file\.path, file\.name, file\.ctime, file\.mtime, file\.size/u],
+        ["an opted-in scan must not sort on a note namespace it cannot resolve", { property_only: true, sort: [{ prop: "note.type" }] }, /unprefixed frontmatter/u],
+      ]) {
+        const result = await withTimeout(
+          client.callTool({ name: "bases_query", arguments: { base_id: "Plain.base", ...args } }),
+          regression,
+        );
+        assert.equal(result.isError, true, regression);
+        const payload = jsonOf(result, regression);
+        assert.equal(payload.error.code, "VALIDATION_ERROR", regression);
+        assert.match(payload.error.message, hint, regression);
+        assert.equal(payload.rows, undefined, regression);
+      }
+
       for (const [regression, args] of [
         ["requested view cannot silently become a vault-wide scan", { base_id: "Plain.base", view: "Plain" }],
         ["top-level scalar filter cannot be ignored", { base_id: "Filtered.base" }],
         ["the default view's filter cannot be ignored", { base_id: "ViewFiltered.base" }],
         ["the default view's limit cannot be ignored", { base_id: "ViewLimited.base" }],
         ["the default view's order cannot be ignored without a request sort", { base_id: "ViewOrdered.base" }],
+        ["the default view's grouping cannot be ignored without a request sort", { base_id: "ViewGrouped.base" }],
         ["explicit evaluation cannot silently be disabled", { base_id: "Plain.base", evaluate: true }],
         ["configured formulas cannot silently disappear", { base_id: "Formulas.base" }],
         ["formula filters cannot silently match against missing values", { base_id: "Plain.base", filter: { "formula.score": 2 } }],
@@ -806,9 +824,12 @@ async function main() {
         assert.equal(payload.rows, undefined, regression);
       }
 
-      const propertyQuery = { filter: { type: "root" }, limit: 1 };
+      const propertyQuery = { filter: { type: { eq: "root" } }, limit: 1 };
       for (const [regression, args] of [
         ["plain queries remain usable without any opt-in", { base_id: "Plain.base" }],
+        ["the request sort can replace the default view's grouping", {
+          base_id: "ViewGrouped.base", sort: [{ prop: "file.name" }],
+        }],
         ["an opted-in scan returns Markdown outside the selected Base and labels it", {
           base_id: "Smoke.base", view: "Active", evaluate: true, property_only: true,
         }],
@@ -824,7 +845,7 @@ async function main() {
         assert.equal(payload.evaluate, false, regression);
         assert.equal(payload.total, 1, regression);
         assert.deepEqual(payload.rows.map((row) => row.file.path), ["/Root.md"], regression);
-        assert.ok(payload.limitations.length > 0, regression);
+        assert.ok(payload.limitations.includes("Non-Markdown files are not listed."), regression);
       }
 
       const baseValidation = await withTimeout(

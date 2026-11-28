@@ -181,9 +181,13 @@ The final server can expose different capabilities depending on which Obsidian p
     without those requirements work with no opt-in
   - a scan reports `source: "local-fallback"`, `mode: "property-scan"`,
     `evaluate: false`, and `limitations`. Its rows and total describe the
-    Markdown scan, with only the request's property filter, sort and pagination
+    Markdown scan, with only the request's property filter, sort and pagination.
+    Non-Markdown files are excluded even for plain queries
   - scan filters support direct equality, arrays, `eq`, `ne`, `contains`,
-    `in`, and numeric comparisons
+    `in`, `gt`, `gte`, `lt`, and `lte`. Both filters and sorts accept
+    unprefixed frontmatter keys and `file.path`, `file.name`, `file.ctime`,
+    `file.mtime`, and `file.size`. Unsupported operators, other `file.*` keys
+    and `note.*` keys return `VALIDATION_ERROR` even with `property_only: true`
 
 - Smart Connections
   - required for semantic search

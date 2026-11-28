@@ -34,6 +34,13 @@ type LocalBaseRow = {
   props: Record<string, unknown>;
 };
 
+const LOCAL_FILE_PROPERTIES = new Set([
+  "file.path", "file.name", "file.ctime", "file.mtime", "file.size",
+]);
+const LOCAL_FILTER_OPERATORS = new Set([
+  "eq", "ne", "in", "contains", "gt", "gte", "lt", "lte",
+]);
+
 async function ensureCacheReady(
   vaultCacheService: VaultCacheService,
 ): Promise<void> {
@@ -73,8 +80,14 @@ function extractFrontmatter(content: string): Record<string, unknown> {
 function readProperty(row: LocalBaseRow, prop: string): unknown {
   if (prop === "file.path") return row.file.path;
   if (prop === "file.name") return row.file.name;
-  if (prop.startsWith("file.")) return row.props[prop];
   return row.props[prop];
+}
+
+function isUnsupportedLocalProperty(prop: string): boolean {
+  return (
+    prop.startsWith("note.") ||
+    (prop.startsWith("file.") && !LOCAL_FILE_PROPERTIES.has(prop))
+  );
 }
 
 function scalarMatches(actual: unknown, expected: unknown): boolean {
@@ -290,17 +303,38 @@ export class LocalBasesService {
     }
   > {
     const base = await this.getParsedBase(baseId, context);
+    const filter = request.filter;
+    const filterKeys = Object.keys(filter ?? {});
+    const sort = request.sort ?? [];
+    const usesUnsupportedOperator = Object.values(filter ?? {}).some(
+      (value) =>
+        isRecord(value) &&
+        Object.keys(value).some((operator) => !LOCAL_FILTER_OPERATORS.has(operator)),
+    );
+    if (
+      usesUnsupportedOperator ||
+      filterKeys.some(isUnsupportedLocalProperty) ||
+      sort.some(({ prop }) => isUnsupportedLocalProperty(prop))
+    ) {
+      throw new McpError(
+        BaseErrorCode.VALIDATION_ERROR,
+        "Unsupported local Base query filter or sort.",
+        { ...context, reasonCode: "base_query_unsupported_local_input" },
+      );
+    }
+
     const { filters, formulas, views } = base.config;
     // The REST Bridge uses the first view when the caller omits `view`.
     const defaultView = Array.isArray(views) ? views.find(isRecord) : undefined;
     const usesDefaultViewOrder =
-      !request.sort?.length &&
+      !sort.length &&
       ((Array.isArray(defaultView?.order) && defaultView.order.length > 0) ||
-        (Array.isArray(defaultView?.sort) && defaultView.sort.length > 0));
+        (Array.isArray(defaultView?.sort) && defaultView.sort.length > 0) ||
+        isRecord(defaultView?.groupBy));
     const usesFormulas =
       (isRecord(formulas) && Object.keys(formulas).length > 0) ||
-      Object.keys(request.filter ?? {}).some((key) => key.startsWith("formula.")) ||
-      request.sort?.some(({ prop }) => prop.startsWith("formula."));
+      filterKeys.some((key) => key.startsWith("formula.")) ||
+      sort.some(({ prop }) => prop.startsWith("formula."));
     const requiresObsidian =
       request.view !== undefined ||
       request.evaluate === true ||
@@ -339,10 +373,9 @@ export class LocalBasesService {
       });
     }
 
-    const filtered = request.filter
-      ? rows.filter((row) => matchesFilter(row, request.filter!))
+    const filtered = filter
+      ? rows.filter((row) => matchesFilter(row, filter))
       : rows;
-    const sort = request.sort ?? [];
     const sorted = [...filtered].sort((a, b) => {
       for (const item of sort) {
         const direction = item.dir === "desc" ? -1 : 1;
@@ -369,8 +402,9 @@ export class LocalBasesService {
       rows: paged,
       limitations: [
         "Rows and total describe cached Markdown notes matched by the request's property filter.",
+        "Non-Markdown files are not listed.",
         "Local fallback supports direct equality plus simple eq/ne/in/contains/gt/gte/lt/lte filters.",
-        "Base filters, view rules (filters, order and limits), formulas and calculated properties are ignored.",
+        "Base filters, view rules (filters, grouping, order and limits), formulas and calculated properties are ignored.",
       ],
     };
   }

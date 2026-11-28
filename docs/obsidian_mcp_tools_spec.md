@@ -348,7 +348,7 @@ semantic manifest/vector metadata are cached locally for faster warm refreshes.
   `set` operations in `headless-filesystem`.
 
 Without Obsidian REST, `bases_query` returns `SERVICE_UNAVAILABLE` for a named
-view, Base-level filters, filters or a limit on the default view, ordering on
+view, Base-level filters, filters or a limit on the default view, grouping or ordering on
 the default view without a request sort, configured formulas, filters or sorts on
 `formula.*`, or explicit `evaluate: true`. Use Obsidian with the Bases Bridge
 to apply those rules. A plain request with none of these requirements can omit
@@ -358,8 +358,10 @@ Set `property_only: true` to explicitly scan cached Markdown notes in the
 local fallback. The Base must exist. The scan applies ad-hoc filters and sorts
 to raw properties and paginates their matches. Results report
 `source: "local-fallback"`, `mode: "property-scan"`, `evaluate: false`, and
-`limitations`. The rows and total describe the scan. On REST, the option is
-ignored and the Bridge receives its usual query.
+`limitations`. The rows and total exclude non-Markdown files, even for plain
+queries. Unsupported local operators, unsupported `file.*` keys, and `note.*`
+keys return `VALIDATION_ERROR`. See the [supported local filters and properties](../OPERATIONS.md#required-dependencies).
+On REST, the option is ignored and the Bridge receives its usual query.
 
 ## Canvas And Format Validation
 
