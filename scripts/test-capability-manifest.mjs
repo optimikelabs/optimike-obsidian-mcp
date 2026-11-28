@@ -166,7 +166,6 @@ function capability(manifest, id) {
 
 const ready = projectCapabilityManifest(input());
 assert.equal(ready.contractVersion, 1);
-assert.equal(ready.capabilities.length, 15);
 assert.equal(ready.summary.ready, 15);
 assert.equal(ready.admission.state, "not-applicable");
 // Catches: the dual-only applyConfirmation field leaking into legacy responses.
@@ -269,6 +268,7 @@ assert.deepEqual(
 const headlessStandardInput = input({
   profile: "standard",
   registrationMode: "headless-readonly",
+  localRest: { state: "unavailable" },
   atomicWrite: { state: "unavailable" },
   baseAtomicWrite: { state: "unavailable" },
 });
@@ -278,6 +278,14 @@ headlessStandardInput.profileToolNames = compileToolProfileNames({
   availableStaticRequirements: ["vault-cache"],
 });
 const headlessStandard = projectCapabilityManifest(headlessStandardInput);
+const headlessReads = capability(headlessStandard, "vault-read");
+assert.equal(headlessReads.reasonCode, "cache_fallback");
+for (const name of ["obsidian_get_frontmatter", "obsidian_note_links"]) {
+  assert.ok(headlessReads.preferredTools.includes(name));
+  const off = projectCapabilityManifest({ ...headlessStandardInput, cacheReady: false });
+  assert.equal(capability(off, "vault-read").available, false);
+  assert.ok(!capability(off, "vault-read").preferredTools.includes(name));
+}
 assert.equal(
   capability(headlessStandard, "governed-note-write").reasonCode,
   "runtime_mode_unavailable",

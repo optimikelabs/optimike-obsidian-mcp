@@ -24,7 +24,9 @@ import {
   retryWithDelay,
 } from "../../../utils/index.js";
 import { NoteJson, ObsidianRestApiService } from "../index.js";
+import type { FilesystemNoteLinksResponse } from "../types.js";
 import { CacheEventSupervisor } from "./eventSupervisor.js";
+import { MarkdownLinkIndex } from "./markdownLinkIndex.js";
 import {
   applyWalSizeLimit,
   checkpointWal,
@@ -153,6 +155,7 @@ export class VaultCacheService {
   private readonly hotCacheLimit = config.obsidianContentHotCacheLimit;
   private readonly obsidianService: ObsidianRestApiService | undefined;
   private readonly db: DatabaseSync;
+  private readonly markdownLinks?: MarkdownLinkIndex;
   private readonly vaultExclusionMatcher = createVaultExclusionMatcher(
     config.obsidianVaultExcludePatterns,
   );
@@ -181,8 +184,15 @@ export class VaultCacheService {
   constructor(obsidianService?: ObsidianRestApiService) {
     this.obsidianService = obsidianService;
     this.db = this.initializeDatabase();
+    if (!obsidianService && config.obsidianRuntimeMode.startsWith("headless-")) {
+      this.markdownLinks = new MarkdownLinkIndex(this.db);
+    }
     this.ensureMetadata();
     this.loadMetadataSnapshot();
+    if (this.markdownLinks && this.isCacheReady &&
+        (this.readMetadataValue("last_refresh_source") !== "filesystem" || !this.markdownLinks.coversCache())) {
+      this.isCacheReady = false;
+    }
     logger.info(
       "VaultCacheService initialized with persistent shared store.",
       requestContextService.createRequestContext({
@@ -429,6 +439,50 @@ export class VaultCacheService {
     };
     this.touchHotCache(filePath, entry);
     return entry;
+  }
+
+  public async findFilesystemNote(filePath: string, context: RequestContext): Promise<string> {
+    const normalized = normalizedCacheFilePath(filePath);
+    if (!normalized) {
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Expected a vault-relative Markdown note path.", context);
+    }
+    if (!this.isReady()) {
+      await this.buildVaultCache();
+      await this.waitUntilReady();
+    }
+    if (!this.isReady() || !this.markdownLinks || this.readMetadataValue("last_refresh_source") !== "filesystem") {
+      throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Shared filesystem cache reconciliation is incomplete.", context);
+    }
+    const matched = this.markdownLinks.findNotePath(normalized);
+    if (!matched) throw new McpError(BaseErrorCode.NOT_FOUND, "Markdown note not found in the shared filesystem cache.", context);
+    return matched;
+  }
+
+  public async readFilesystemNoteLinks(filePath: string, limit: number, context: RequestContext): Promise<FilesystemNoteLinksResponse> {
+    const matched = await this.findFilesystemNote(filePath, context);
+    const note = this.metadataCache.get(matched);
+    const vaultRoot = getVaultRoot();
+    if (!this.isReady() || !this.markdownLinks || !note || !vaultRoot) {
+      throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Shared filesystem link index is unavailable.", context);
+    }
+    return {
+      ok: true,
+      contractVersion: 1,
+      path: matched.slice(1),
+      backend: { kind: "filesystem", bindingFingerprint: createHash("sha256").update(vaultRoot).digest("hex") },
+      cache: {
+        available: true, consistency: "best_effort_non_atomic_snapshot",
+        freshness: {
+          status: "unknown", observedAt: new Date().toISOString(), observedFileMtimeMs: note.mtime,
+          reason: "filesystem_cache_may_lag_disk",
+        },
+      },
+      provenance: {
+        sourceMetadata: "filesystem", resolution: "filesystem", subpath: "unavailable",
+        backlinks: "filesystem", unresolved: "filesystem",
+      },
+      ...this.markdownLinks.read(matched, limit),
+    };
   }
 
   /** Legacy post-write callers do not reinterpret a cache failure as a failed mutation. */
@@ -979,15 +1033,25 @@ export class VaultCacheService {
         content = excluded.content,
         updated_at = excluded.updated_at
     `);
-    stmt.run(
-      row.path,
-      row.ctime,
-      row.mtime,
-      row.size,
-      row.hash,
-      row.content,
-      now,
-    );
+    if (this.markdownLinks) this.db.exec("BEGIN IMMEDIATE");
+    try {
+      stmt.run(
+        row.path,
+        row.ctime,
+        row.mtime,
+        row.size,
+        row.hash,
+        row.content,
+        now,
+      );
+      if (this.markdownLinks) {
+        this.markdownLinks.update(row.path, row.hash, row.content);
+        this.db.exec("COMMIT");
+      }
+    } catch (error) {
+      if (this.markdownLinks) this.db.exec("ROLLBACK");
+      throw error;
+    }
 
     const indexEntry: CacheIndexEntry = {
       path: row.path,

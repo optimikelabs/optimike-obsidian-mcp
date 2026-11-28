@@ -13,6 +13,7 @@ Ce profil sert à valider un serveur dédié ou une copie Sync. Il garde une pos
 - Utiliser un vault dédié ou copié, pas le vault Desktop vivant.
 - Garder Obsidian Headless Sync en `pull-only` pour la première validation serveur.
 - Garder Optimike MCP en `headless-readonly` tant que list/read/search/tasks/Bases/status ne sont pas verts.
+- Avec le cache partagé actif, `obsidian_get_frontmatter` lit une clé YAML et `obsidian_note_links` renvoie les liens sortants, les liens non résolus et les backlinks. L’index recense les wikilinks, les liens Markdown vers des notes, les liens d’intégration et les wikilinks YAML entre guillemets pendant le scan Markdown. Il résout d’abord les chemins relatifs au dossier ou au coffre, puis les suffixes de chemin uniques, en privilégiant la casse exacte parmi les correspondances. Les destinations ambiguës et les pièces jointes hors index apparaissent comme non résolues. Les fragments de titre ou de bloc sont renvoyés avec une validation `unknown`. La provenance indique le système de fichiers. Le cache peut avoir du retard sur le disque jusqu’au prochain rafraîchissement.
 - Garder le cache MCP hors du vault synchronisé.
 - Utiliser les exclusions pour le bruit opérationnel, sans prétendre qu’elles bloquent les téléchargements Obsidian Sync.
 - Ne pas promettre la parité Desktop. Move/delete, tags frontmatter ou inline, batch frontmatter, écritures Bases minimales, validation de format et helpers Canvas minimaux existent comme fonctions filesystem/locales bornées, pas comme comportement Obsidian Desktop.

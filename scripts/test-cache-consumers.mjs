@@ -1,3 +1,4 @@
+import "./test-support/isolated-state.mjs";
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -10,8 +11,92 @@ const {config}=await import('../dist/config/index.js');
 const {VaultCacheService}=await import('../dist/services/obsidianRestAPI/vaultCache/service.js');
 const {LocalBasesService}=await import('../dist/services/localBasesService.js');
 const {warmSharedTaskCache,processListAllTasks}=await import('../dist/mcp-server/tools/tasksShared/logic.js');
+const {processObsidianNoteLinks}=await import('../dist/mcp-server/tools/obsidianNoteLinksTool/logic.js');
 const context={requestId:'cache-consumer-fixture',timestamp:new Date().toISOString(),operation:'test'};
 config.obsidianVaultPath=root;config.obsidianCacheSource='rest';
+
+test('filesystem links preserve observations and reconcile edits, destination ambiguity, and restart', async () => {
+ const vault=fs.mkdtempSync(path.join(root,'links-'));
+ const previous={obsidianVaultPath:config.obsidianVaultPath,obsidianCacheSource:config.obsidianCacheSource,
+  obsidianSharedCacheDbPath:config.obsidianSharedCacheDbPath,obsidianRuntimeMode:config.obsidianRuntimeMode};
+ Object.assign(config,{obsidianVaultPath:vault,obsidianCacheSource:'filesystem',obsidianSharedCacheDbPath:path.join(vault,'cache.sqlite')});
+ const file=(name)=>path.join(vault,name);
+ function write(name,content='Synthetic note.') {
+  fs.mkdirSync(path.dirname(file(name)),{recursive:true});
+  fs.writeFileSync(file(name),content,'utf8');
+ }
+ const source=[
+  '\uFEFF---','related: ["[[People/Ada|Ada]]"]','---',
+  '[[ada#Life|Lovelace]] ![[../B/Shared]] [encoded](../Space%20Name.md#Shown%20Here)',
+  '[[#Local]] [[Shared]] [[Gone]] [[Gone]] `[[Code]]` %% [[Comment]] %%',
+  '[[./Shared]] [[A/Shared]] [reference][note]',
+  '', '[note]: ../Space%20Name.md',
+ ].join('\r\n');
+ write('Notes/Source.md',source);
+ write('Notes/People/Ada.md','# Life\n');
+ write('A/Shared.md');
+ write('B/Shared.md');
+ write('Space Name.md');
+ write('Another.md','[[Notes/People/Ada]] [[Notes/People/Ada]]');
+ // Populate a cache from before the filesystem link index existed.
+ config.obsidianRuntimeMode='hybrid';
+ let cache=new VaultCacheService();
+ const read=(filePath,limit=200)=>processObsidianNoteLinks({filePath,limit},context,undefined,cache);
+ try {
+  await cache.refreshCache();
+  assert.equal(cache.isReady(),true);
+  await cache.close();
+  config.obsidianRuntimeMode='headless-readonly';
+  cache=new VaultCacheService();
+  assert.equal(cache.isReady(),false);
+  const result=await read('Notes/Source.md');
+  assert.equal(result.path,'Notes/Source.md');
+  assert.equal(result.provenance.sourceMetadata,'filesystem');
+  assert.deepEqual(result.outgoing.map(({kind,linkText,resolution,displayText,frontmatterKey})=>
+   [kind,linkText,resolution.targetPath ?? null,displayText ?? null,frontmatterKey ?? null]),[
+   ['frontmatter','People/Ada','Notes/People/Ada.md','Ada','related'],
+   ['link','ada#Life','Notes/People/Ada.md','Lovelace',null],
+   ['embed','../B/Shared','B/Shared.md',null,null],
+   ['link','../Space Name.md#Shown Here','Space Name.md','encoded',null],
+   ['link','#Local','Notes/Source.md',null,null],
+   ['link','Shared',null,null,null],
+   ['link','Gone',null,null,null],
+   ['link','Gone',null,null,null],
+   ['link','./Shared',null,null,null],
+   ['link','A/Shared','A/Shared.md',null,null],
+   ['link','../Space Name.md','Space Name.md','reference',null],
+  ]);
+  assert.deepEqual(result.outgoing[1].position.start,{line:3,col:0,offset:source.indexOf('[[ada')});
+  assert.deepEqual(result.outgoing[1].subpathValidation,{status:'unknown',reason:'target_cache_unavailable'});
+  assert.deepEqual(result.unresolved,[{linkText:'./Shared',count:1},{linkText:'Gone',count:2},{linkText:'Shared',count:1}]);
+  assert.deepEqual((await read('Notes/People/Ada.md')).backlinks,[
+   {sourcePath:'Another.md',count:2},{sourcePath:'Notes/Source.md',count:2},
+  ]);
+  const bounded=await read('Notes/People/Ada.md',1);
+  assert.deepEqual(bounded.backlinks,[{sourcePath:'Another.md',count:2}]);
+  assert.deepEqual(bounded.coverage.backlinks,{available:true,total:2,returned:1,truncated:true});
+  const boundedSource=await read('Notes/Source.md',1);
+  assert.deepEqual(boundedSource.coverage.outgoing,{available:true,total:11,returned:1,truncated:true});
+  assert.deepEqual(boundedSource.coverage.unresolved,{available:true,total:3,returned:1,truncated:true});
+  await assert.rejects(read('Missing.md'),(error)=>error.code==='NOT_FOUND');
+  await assert.rejects(read('Notes/../Another.md'),(error)=>error.code==='VALIDATION_ERROR');
+
+  fs.unlinkSync(file('B/Shared.md'));
+  write('Another.md','Changed content with no links.');
+  await cache.refreshCache();
+  assert.deepEqual((await read('A/Shared.md')).backlinks,[{sourcePath:'Notes/Source.md',count:2}]);
+  assert.deepEqual((await read('Notes/People/Ada.md')).backlinks,[{sourcePath:'Notes/Source.md',count:2}]);
+  write('Notes/Shared.md');
+  await cache.updateFileVerified('Notes/Shared.md',context);
+  await cache.close();
+  cache=new VaultCacheService();
+  assert.equal(cache.isReady(),true);
+  assert.deepEqual((await read('Notes/Shared.md')).backlinks,[{sourcePath:'Notes/Source.md',count:2}]);
+ } finally {
+  await cache.close();
+  Object.assign(config,previous);
+ }
+});
 async function readTaskModes(cache){
  const compact=JSON.parse(await processListAllTasks({responseFormat:'json'},context,cache));
  assert.equal(compact.responseMode,'compact');

@@ -11,6 +11,7 @@ This profile is for a dedicated server or copied Sync vault. It keeps the stable
 - Use a dedicated or copied vault, not the live desktop vault.
 - Keep Obsidian Headless Sync in `pull-only` for the first server validation.
 - Keep Optimike MCP in `headless-readonly` until list/read/search/tasks/Bases/status are green.
+- With the shared cache enabled, `obsidian_get_frontmatter` reads one YAML key and `obsidian_note_links` reads outgoing references, unresolved counts, and backlinks. The latter indexes wikilinks, Markdown note links, embeds, and quoted YAML wikilinks during the Markdown scan. It resolves folder-relative and vault-relative paths first, then unique shortest path suffixes, preferring exact casing within a match. Ambiguous destinations and unindexed attachments appear as unresolved. Heading and block fragments are returned with validation `unknown`. The response identifies filesystem provenance and can lag disk until the next cache refresh.
 - Keep MCP cache outside the synchronized vault.
 - Use vault exclusions for operational noise, but do not rely on them to stop Obsidian Sync downloads.
 - Do not claim Desktop parity. Move/delete, frontmatter or inline tags, batch frontmatter, minimal Bases writes, format validation, and minimal Canvas helpers exist as bounded filesystem/local features, not as Obsidian Desktop behavior.

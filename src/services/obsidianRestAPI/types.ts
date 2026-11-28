@@ -228,10 +228,11 @@ export type NoteLinkObservation = {
   provenance:
     | "metadataCache.links"
     | "metadataCache.embeds"
-    | "metadataCache.frontmatterLinks";
+    | "metadataCache.frontmatterLinks"
+    | "filesystem";
 };
 
-export type NoteLinksResponse = {
+export type NoteLinksResponse = NoteLinksProjection & {
   ok: true;
   contractVersion: 1;
   path: string;
@@ -258,6 +259,33 @@ export type NoteLinksResponse = {
     backlinks: "metadataCache.resolvedLinks";
     unresolved: "metadataCache.unresolvedLinks";
   };
+};
+
+export type FilesystemNoteLinksResponse = NoteLinksProjection & {
+  ok: true;
+  contractVersion: 1;
+  path: string;
+  backend: { kind: "filesystem"; bindingFingerprint: string };
+  cache: {
+    available: true;
+    consistency: "best_effort_non_atomic_snapshot";
+    freshness: {
+      status: "unknown";
+      observedAt: string;
+      observedFileMtimeMs: number;
+      reason: "filesystem_cache_may_lag_disk";
+    };
+  };
+  provenance: {
+    sourceMetadata: "filesystem";
+    resolution: "filesystem";
+    subpath: "unavailable";
+    backlinks: "filesystem";
+    unresolved: "filesystem";
+  };
+};
+
+export type NoteLinksProjection = {
   outgoing: NoteLinkObservation[];
   unresolved: Array<{ linkText: string; count: number }>;
   backlinks: Array<{ sourcePath: string; count: number }>;

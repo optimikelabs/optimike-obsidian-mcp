@@ -260,12 +260,16 @@ const LIVE_MODES = [
   "hybrid-live",
 ] as const satisfies readonly ToolRegistrationMode[];
 
-const BASE_READ_MODES = [
-  "live",
-  "hybrid-live",
+const HEADLESS_MODES = [
   "headless-readonly",
   "headless-guarded",
   "headless-filesystem",
+] as const satisfies readonly ToolRegistrationMode[];
+
+const LIVE_AND_HEADLESS_MODES = [
+  "live",
+  "hybrid-live",
+  ...HEADLESS_MODES,
 ] as const satisfies readonly ToolRegistrationMode[];
 
 const GUARDED_NOTE_MODES = [
@@ -374,12 +378,14 @@ const OPERON_MUTATION_TOOLS = [
 ] as const;
 
 export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
-  defineTool("obsidian_get_frontmatter", "notes.read", "frontmatter-read", LIVE_MODES, {
-    annotationClass: "read-only",
+  defineTool("obsidian_get_frontmatter", "notes.read", "frontmatter-read", LIVE_AND_HEADLESS_MODES, {
+    availabilityRules: [{ modes: HEADLESS_MODES, requires: ["vault-cache"] }],
   }),
   ...governedFamily("asset_import", "assets.governed", "asset-import").map(entry => ({...entry, availabilityRules: [{modes: LIVE_MODES, requires: ["asset-policy" as const]}]})),
   defineTool("obsidian_read_note", "notes.read", "notes-core", ALL_MODES),
-  defineTool("obsidian_note_links", "notes.read", "note-links", LIVE_MODES),
+  defineTool("obsidian_note_links", "notes.read", "note-links", LIVE_AND_HEADLESS_MODES, {
+    availabilityRules: [{ modes: HEADLESS_MODES, requires: ["vault-cache"] }],
+  }),
   defineTool("obsidian_list_notes", "notes.read", "notes-core", ALL_MODES),
   defineTool("obsidian_global_search", "notes.read", "notes-core", ALL_MODES, {
     availabilityRules: [
@@ -474,7 +480,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "frontmatter-patch",
   ),
 
-  defineTool("bases_list", "bases.read", "bases", BASE_READ_MODES, {
+  defineTool("bases_list", "bases.read", "bases", LIVE_AND_HEADLESS_MODES, {
     availabilityRules: [
       {
         modes: ["headless-readonly"],
@@ -482,7 +488,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
       },
     ],
   }),
-  defineTool("bases_get_schema", "bases.read", "bases", BASE_READ_MODES, {
+  defineTool("bases_get_schema", "bases.read", "bases", LIVE_AND_HEADLESS_MODES, {
     availabilityRules: [
       {
         modes: ["headless-readonly"],
@@ -490,7 +496,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
       },
     ],
   }),
-  defineTool("bases_query", "bases.read", "bases", BASE_READ_MODES, {
+  defineTool("bases_query", "bases.read", "bases", LIVE_AND_HEADLESS_MODES, {
     availabilityRules: [
       {
         modes: ["headless-readonly"],

@@ -303,8 +303,10 @@
       "external_runtime_status",
       "external_stat",
       "list_all_tasks",
+      "obsidian_get_frontmatter",
       "obsidian_global_search",
       "obsidian_list_notes",
+      "obsidian_note_links",
       "obsidian_read_note",
       "obsidian_runtime_maintenance",
       "obsidian_runtime_status",
@@ -355,9 +357,11 @@
       "external_runtime_status",
       "external_stat",
       "list_all_tasks",
+      "obsidian_get_frontmatter",
       "obsidian_global_search",
       "obsidian_list_notes",
       "obsidian_manage_frontmatter",
+      "obsidian_note_links",
       "obsidian_read_note",
       "obsidian_runtime_maintenance",
       "obsidian_runtime_status",
@@ -416,12 +420,14 @@
       "obsidian_admin_filesystem",
       "obsidian_batch_frontmatter",
       "obsidian_delete_note",
+      "obsidian_get_frontmatter",
       "obsidian_global_search",
       "obsidian_list_notes",
       "obsidian_manage_canvas",
       "obsidian_manage_frontmatter",
       "obsidian_manage_tags",
       "obsidian_move_note",
+      "obsidian_note_links",
       "obsidian_read_note",
       "obsidian_runtime_maintenance",
       "obsidian_runtime_status",
@@ -543,8 +549,10 @@
           "bases_get_schema",
           "bases_list",
           "bases_query",
+          "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
+          "obsidian_note_links",
           "obsidian_read_note",
           "obsidian_runtime_status",
           "obsidian_validate_format",
@@ -554,9 +562,11 @@
           "bases_get_schema",
           "bases_list",
           "bases_query",
+          "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
           "obsidian_manage_frontmatter",
+          "obsidian_note_links",
           "obsidian_read_note",
           "obsidian_runtime_status",
           "obsidian_search_replace",
@@ -568,9 +578,11 @@
           "bases_get_schema",
           "bases_list",
           "bases_query",
+          "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
           "obsidian_manage_frontmatter",
+          "obsidian_note_links",
           "obsidian_read_note",
           "obsidian_runtime_status",
           "obsidian_search_replace",
@@ -711,8 +723,10 @@
           "bases_get_schema",
           "bases_list",
           "bases_query",
+          "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
+          "obsidian_note_links",
           "obsidian_read_note",
           "obsidian_runtime_status",
           "obsidian_validate_format",
@@ -722,9 +736,11 @@
           "bases_get_schema",
           "bases_list",
           "bases_query",
+          "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
           "obsidian_manage_frontmatter",
+          "obsidian_note_links",
           "obsidian_read_note",
           "obsidian_runtime_status",
           "obsidian_search_replace",
@@ -738,11 +754,13 @@
           "bases_list",
           "bases_query",
           "bases_upsert_rows",
+          "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
           "obsidian_manage_canvas",
           "obsidian_manage_frontmatter",
           "obsidian_manage_tags",
+          "obsidian_note_links",
           "obsidian_read_note",
           "obsidian_runtime_status",
           "obsidian_search_replace",
@@ -853,8 +871,10 @@
         ],
         "headless-readonly": [
           "list_all_tasks",
+          "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
+          "obsidian_note_links",
           "obsidian_read_note",
           "obsidian_runtime_status",
           "obsidian_validate_format",
@@ -869,8 +889,10 @@
         ],
         "headless-guarded": [
           "list_all_tasks",
+          "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
+          "obsidian_note_links",
           "obsidian_read_note",
           "obsidian_runtime_status",
           "obsidian_validate_format",
@@ -885,8 +907,10 @@
         ],
         "headless-filesystem": [
           "list_all_tasks",
+          "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
+          "obsidian_note_links",
           "obsidian_read_note",
           "obsidian_runtime_status",
           "obsidian_validate_format",
@@ -1191,8 +1215,10 @@
           "external_runtime_status",
           "external_stat",
           "list_all_tasks",
+          "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
+          "obsidian_note_links",
           "obsidian_read_note",
           "obsidian_runtime_maintenance",
           "obsidian_runtime_status",
@@ -1243,9 +1269,11 @@
           "external_runtime_status",
           "external_stat",
           "list_all_tasks",
+          "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
           "obsidian_manage_frontmatter",
+          "obsidian_note_links",
           "obsidian_read_note",
           "obsidian_runtime_maintenance",
           "obsidian_runtime_status",
@@ -1304,12 +1332,14 @@
           "obsidian_admin_filesystem",
           "obsidian_batch_frontmatter",
           "obsidian_delete_note",
+          "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
           "obsidian_manage_canvas",
           "obsidian_manage_frontmatter",
           "obsidian_manage_tags",
           "obsidian_move_note",
+          "obsidian_note_links",
           "obsidian_read_note",
           "obsidian_runtime_maintenance",
           "obsidian_runtime_status",
@@ -1628,8 +1658,10 @@
           "external_runtime_status",
           "external_stat",
           "list_all_tasks",
+          "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
+          "obsidian_note_links",
           "obsidian_read_note",
           "obsidian_runtime_maintenance",
           "obsidian_runtime_status",
@@ -1680,9 +1712,11 @@
           "external_runtime_status",
           "external_stat",
           "list_all_tasks",
+          "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
           "obsidian_manage_frontmatter",
+          "obsidian_note_links",
           "obsidian_read_note",
           "obsidian_runtime_maintenance",
           "obsidian_runtime_status",
@@ -1740,12 +1774,14 @@
           "obsidian_admin_filesystem",
           "obsidian_batch_frontmatter",
           "obsidian_delete_note",
+          "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
           "obsidian_manage_canvas",
           "obsidian_manage_frontmatter",
           "obsidian_manage_tags",
           "obsidian_move_note",
+          "obsidian_note_links",
           "obsidian_read_note",
           "obsidian_runtime_maintenance",
           "obsidian_runtime_status",
@@ -3693,7 +3729,10 @@
       "annotationClass": "read-only",
       "registrationModes": [
         "live",
-        "hybrid-live"
+        "hybrid-live",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
       ],
       "profiles": [
         "standard",
@@ -3705,25 +3744,52 @@
       "profileModes": {
         "standard": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "authoring": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "tasks": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "full": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "operational": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
         ]
-      }
+      },
+      "availabilityRules": [
+        {
+          "modes": [
+            "headless-readonly",
+            "headless-guarded",
+            "headless-filesystem"
+          ],
+          "requires": [
+            "vault-cache"
+          ]
+        }
+      ]
     },
     {
       "name": "obsidian_global_search",
@@ -4286,7 +4352,10 @@
       "annotationClass": "read-only",
       "registrationModes": [
         "live",
-        "hybrid-live"
+        "hybrid-live",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
       ],
       "profiles": [
         "standard",
@@ -4298,25 +4367,52 @@
       "profileModes": {
         "standard": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "authoring": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "tasks": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "full": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "operational": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
         ]
-      }
+      },
+      "availabilityRules": [
+        {
+          "modes": [
+            "headless-readonly",
+            "headless-guarded",
+            "headless-filesystem"
+          ],
+          "requires": [
+            "vault-cache"
+          ]
+        }
+      ]
     },
     {
       "name": "obsidian_note_move_apply",
