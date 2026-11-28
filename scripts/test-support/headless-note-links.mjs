@@ -18,7 +18,12 @@ export async function readHeadlessNoteLinks(client, filePath, timeoutMs = 60_000
         { signal, timeout: timeoutMs },
       );
       const text = result.content?.map((item) => item.text ?? "").join("\n") ?? "";
-      const body = JSON.parse(text);
+      let body;
+      try {
+        body = JSON.parse(text);
+      } catch (cause) {
+        throw new Error(`obsidian_note_links returned non-JSON for ${filePath} (last status: ${lastReason})`, { cause });
+      }
       if (!result.isError && body?.ok === true) return body;
       const error = body?.error;
       if (error?.code !== "SERVICE_UNAVAILABLE" || error.details?.retryable !== true ||

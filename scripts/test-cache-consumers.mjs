@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {test, after} from 'node:test';
+import {DatabaseSync} from 'node:sqlite';
 import {serve} from '@hono/node-server';
 import {Hono} from 'hono';
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'optimike-cache-consumers-'));
@@ -18,7 +19,7 @@ const {publicMcpToolErrorPayload}=await import('../dist/utils/internal/errorHand
 const {createHttpObservability}=await import('../dist/mcp-server/transports/httpObservability.js');
 const {extractMarkdownLinkReferences}=await import('../dist/services/obsidianRestAPI/vaultCache/markdownLinkReferences.js');
 const {defaultLinkExtraction,extractBoundedLinkSource}=await import('../dist/services/obsidianRestAPI/vaultCache/boundedLinkReferences.js');
-const {incompleteHeadlessLinkCoverageError}=await import('../dist/services/headlessLinkCoverage.js');
+const {readHeadlessNoteLinks}=await import('./test-support/headless-note-links.mjs');
 const context={requestId:'cache-consumer-fixture',timestamp:new Date().toISOString(),operation:'test'};
 config.obsidianVaultPath=root;config.obsidianCacheSource='rest';
 
@@ -49,12 +50,24 @@ test('a long unclosed comment hides its entire tail and preserves earlier positi
   'x'.repeat(250*1024)+' [[Visible]] %%\n'+'[[Hidden]] inside a comment\n'.repeat(500),
  ]) {
   const result=extractBoundedLinkSource(opaque);
-  assert.equal(result.complete,false);
-  assert.equal(result.limitReason,'region');
+  assert.equal(result.complete,true);
   assert.equal(result.references.length,1);
   assert.deepEqual(result.references,extractMarkdownLinkReferences(opaque));
   assert.deepEqual(result.references.map(ref=>ref.linkPath),['Visible']);
  }
+});
+test('HTML comment delimiters in a bounded note do not hide subsequent links',()=>{
+ const tail='\n\nParagraph [[Tail]] text.'.repeat(400);
+ for (const prefix of ['<div>\n%%\n</div>\n\n[[Visible]]','<details>\n%%\n</details>\n\n[[Visible]]',
+  'a <span>%%</span> [[Visible]]']) {
+  const markdown=prefix+tail;
+  assert.deepEqual(extractBoundedLinkSource(markdown,{...defaultLinkExtraction,sectionBytes:1024}),
+   {complete:true,references:extractMarkdownLinkReferences(markdown)});
+ }
+});
+test('the smoke reports the note path and context for non-JSON link responses',async()=>{
+ await assert.rejects(readHeadlessNoteLinks({callTool:async()=>({content:[{text:'invalid'}]})},'Probe.md'),
+  /obsidian_note_links returned non-JSON for Probe\.md \(last status: no response\)/);
 });
 test('comment delimiters in code leave adjacent links visible',()=>{
  assert.deepEqual(linkTexts('Use `%%` to open [[A]]\n\nClose it with `%%`. Also [[B]].\n\n```\na %% b\n```\n[[Visible]]\n%% [[Hidden]] %% [[After]]'),['A','B','Visible','After']);
@@ -390,40 +403,80 @@ test('restart resumes a committed partial link index without exposing it',()=>li
  assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Z.md',count:1}]);
 }));
 
-test('a recurring batch failure isolates the failing note and publishes the other sources',()=>linkFixture(async f=>{
+test('a foreign SQLite writer defers indexing without marking notes as limited',()=>linkFixture(async f=>{
  f.write('Z.md','[[Target]]');
- f.cache.db.exec(`
-  CREATE TRIGGER fixture_reject_link BEFORE INSERT ON markdown_link_refs
-  WHEN NEW.source = '/Z.md'
-  BEGIN SELECT RAISE(ABORT,'synthetic index failure'); END
- `);
- await f.cache.buildVaultCache();
- await f.cache.linkIndexRun;
- const failed=await f.cache.readFilesystemNoteLinks('Z.md',20,context);
- assert.equal(failed.indexCoverage.sourceComplete,false);
- assert.deepEqual(failed.indexCoverage.limitedSources,[{path:'Z.md',reason:'region'}]);
- assert.deepEqual(failed.outgoing,[]);
- assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1}]);
- f.cache.db.exec('DROP TRIGGER fixture_reject_link');
- f.write('Z.md','New version [[Target]]');
- await f.cache.updateFileVerified('Z.md',context);
- await f.cache.linkIndexRun;
- assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Z.md',count:1}]);
+ const writer=new DatabaseSync(config.obsidianSharedCacheDbPath);
+ const index=f.cache.markdownLinks;
+ const reconcile=index.reconcileBatch.bind(index);
+ let blocked,published;
+ const lockHit=new Promise(resolve=>{blocked=resolve;});
+ const rebuilt=new Promise(resolve=>{published=resolve;});
+ let attempt=0;
+ index.reconcileBatch=(cursor,accept,write)=>reconcile(cursor,accept,async paths=>{
+  if (++attempt===1) {
+   writer.exec('BEGIN IMMEDIATE');
+   try {
+    await write(paths);
+    blocked(undefined);
+   } catch(error) {
+    blocked(error);
+    throw error;
+   } finally {
+    writer.exec('ROLLBACK');
+   }
+  }
+  await write(paths);
+  published();
+ });
+ try {
+  await f.cache.buildVaultCache();
+  const failure=await lockHit;
+  assert.match(failure?.message ?? '',/markdown_link_storage_failed/);
+  assert.equal(failure.kind,'busy');
+  assert.equal(f.cache.db.prepare('SELECT count(*) AS n FROM markdown_link_files').get().n,0);
+  await f.cache.linkIndexRun;
+  f.cache.linkIndexRetryTimer.ref();
+  await rebuilt;
+  await f.cache.linkIndexRun;
+  const target=await f.read();
+  assert.equal(target.indexCoverage,undefined);
+  assert.deepEqual(target.backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Z.md',count:1}]);
+ } finally {writer.close();}
 }));
 
 test('a stuck parse times out and the next note still gets indexed',{timeout:25_000},()=>linkFixture(async f=>{
- f.write('Poison.md','['.repeat(40_000)+'](Target.md)'+']'.repeat(40_000));
+ f.write('Poison.md','['.repeat(16_000)+'](Target.md)'+']'.repeat(16_000));
  f.write('Z.md','[[Target]]');
  await f.cache.buildVaultCache();
  await f.cache.linkIndexRun;
  const failed=await f.cache.readFilesystemNoteLinks('Poison.md',20,context);
  assert.equal(failed.indexCoverage.sourceComplete,false);
  assert.deepEqual(failed.indexCoverage.limitedSources,[{path:'Poison.md',reason:'timeout'}]);
+ assert.ok(f.cache.db.prepare("SELECT retry_at FROM markdown_link_files WHERE path='/Poison.md'").get().retry_at > 0);
  assert.deepEqual(failed.outgoing,[]);
  const target=await f.read();
  assert.deepEqual(target.backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Z.md',count:1}]);
  assert.equal(target.indexCoverage.backlinksComplete,false);
-}));
+},{...defaultLinkExtraction,parseTimeoutMs:100}));
+
+test('a timed-out table keeps its links through bounded extraction and can be retried after restart',()=>linkFixture(async f=>{
+ const rows=4500;
+ f.write('Table.md','| a | b |\n|---|---|\n'+'| [[Target]] | [b](Other.md) |\n'.repeat(rows));
+ await f.cache.buildVaultCache();
+ await f.cache.linkIndexRun;
+ const read=()=>f.cache.readFilesystemNoteLinks('Table.md',2,context);
+ const first=await read();
+ assert.equal(first.coverage.outgoing.total,2*rows);
+ assert.equal(first.indexCoverage.sourceComplete,false);
+ await f.reopen();
+ const retry=f.cache.db.prepare("SELECT retry_at FROM markdown_link_files WHERE path='/Table.md'");
+ assert.ok(retry.get().retry_at>0);
+ f.cache.db.exec("UPDATE markdown_link_files SET retry_at=0 WHERE path='/Table.md'");
+ await f.cache.buildVaultCache();
+ await f.cache.linkIndexRun;
+ assert.equal((await read()).coverage.outgoing.total,2*rows);
+ assert.ok(retry.get().retry_at>0);
+},{...defaultLinkExtraction,parseTimeoutMs:100}));
 
 test('a note that exhausts its worker is marked limited and later notes still get backlinks',()=>linkFixture(async f=>{
  f.write('Poison.md','[x](Target.md) '.repeat(40_000));
@@ -483,12 +536,15 @@ test('wildcard link coverage reports at most 20 responsible sources and the full
  const limitedSources=paths.slice(0,20).map(path=>({path,reason:'cap'}));
  assert.deepEqual(indexCoverage,{reason:'bounded_large_note_extraction',sourceComplete:true,
   backlinksComplete:false,limitedSourceCount:paths.length,limitedSources});
- const {error}=publicMcpToolErrorPayload(incompleteHeadlessLinkCoverageError(indexCoverage),{
-  operation:'test',toolName:'obsidian_note_move_plan',params:{},
+ await assert.rejects(processObsidianNoteLinks({filePath:'Target.md',requireComplete:true},context,undefined,f.cache),failure=>{
+  const {error}=publicMcpToolErrorPayload(failure,{
+   operation:'test',toolName:'obsidian_note_links',params:{requireComplete:true},
+  });
+  assert.equal(error.details.reasonCode,'headless_link_coverage_incomplete');
+  assert.equal(error.details.limitedSourceCount,paths.length);
+  assert.deepEqual(error.details.limitedSources,limitedSources);
+  return true;
  });
- assert.equal(error.details.reasonCode,'headless_link_coverage_incomplete');
- assert.equal(error.details.limitedSourceCount,paths.length);
- assert.deepEqual(error.details.limitedSources,limitedSources);
 },{...defaultLinkExtraction,largeNoteBytes:4096,maxReferences:1}));
 
 test('healthz responds while the worker handles a five MiB note',()=>linkFixture(async f=>{

@@ -41,16 +41,22 @@ function coverage(total: number, returned: number) {
 
 type LinkCount = { link_path: string; count: number };
 type Target = { path: string; ambiguous?: true };
-const INDEX_REVISION = "v12:";
+const INDEX_REVISION = "v13:";
 const MAX_CANDIDATE_PATHS = 32768;
-export type LinkIndexSource = { path: string; hash: string; skipReason?: Exclude<LinkSourceLimitReason, "cap"> };
+export type LinkIndexSource = {
+  path: string; hash: string; size: number; attempts: number; bounded?: true;
+  skipReason?: Exclude<LinkSourceLimitReason, "cap">; skipHints?: true;
+};
+export class LinkParseFailure extends Error {
+  constructor(readonly ordinal: number) { super("markdown_link_parse_failed"); }
+}
 type IndexedSource = LinkIndexSource & {
-  ordinal: number;
   complete: boolean;
   limitReason?: LinkSourceLimitReason;
   references: MarkdownLinkReference[];
   possible?: Set<string>;
   possibleAnywhere?: true;
+  retryAttempt?: number;
 };
 
 /** Store unresolved spellings on disk; resolve against the current file set at read time.
@@ -65,6 +71,8 @@ export class MarkdownLinkIndex {
   private readonly currentSource;
   private readonly limitedSource;
   private readonly unboundedSources;
+  private readonly retryTime;
+  private readonly deferRetry;
   private readonly candidatesDelete;
   private readonly candidateInsert;
   private readonly limitedIncoming;
@@ -72,10 +80,11 @@ export class MarkdownLinkIndex {
   private readonly filesByBasename;
   private readonly revision;
 
-  constructor(private readonly db: DatabaseSync, private readonly options = defaultLinkExtraction) {
+  constructor(private readonly db: DatabaseSync, private readonly options = defaultLinkExtraction, initialize = true) {
     const { largeNoteBytes, sectionBytes, maxReferences } = options;
-    this.revision = `${INDEX_REVISION}${largeNoteBytes}:${sectionBytes}:${maxReferences}:`;
-    db.exec(`
+    this.revision = `${INDEX_REVISION}${largeNoteBytes}:${sectionBytes}:${maxReferences}:${options.parseTimeoutMs ?? 10_000}:`;
+    if (initialize) {
+      db.exec(`
       CREATE TABLE IF NOT EXISTS markdown_link_files (
         path TEXT PRIMARY KEY REFERENCES file_cache(path) ON DELETE CASCADE,
         folded_path TEXT NOT NULL,
@@ -83,7 +92,9 @@ export class MarkdownLinkIndex {
         hash TEXT NOT NULL,
         complete INTEGER NOT NULL DEFAULT 1,
         possible_anywhere INTEGER NOT NULL DEFAULT 0,
-        limit_reason TEXT
+        limit_reason TEXT,
+        retry_at INTEGER,
+        retry_attempt INTEGER NOT NULL DEFAULT 0
       );
       CREATE INDEX IF NOT EXISTS idx_markdown_link_folded_path ON markdown_link_files(folded_path);
       CREATE INDEX IF NOT EXISTS idx_markdown_link_basename ON markdown_link_files(basename);
@@ -118,6 +129,8 @@ export class MarkdownLinkIndex {
       ["complete", "INTEGER NOT NULL DEFAULT 1"],
       ["possible_anywhere", "INTEGER NOT NULL DEFAULT 0"],
       ["limit_reason", "TEXT"],
+      ["retry_at", "INTEGER"],
+      ["retry_attempt", "INTEGER NOT NULL DEFAULT 0"],
     ] as const) {
       const hasColumn = () => db.prepare("PRAGMA table_info(markdown_link_files)").all()
         .some((column) => column.name === name);
@@ -135,13 +148,17 @@ export class MarkdownLinkIndex {
         ON markdown_link_files(path) WHERE complete = 0;
       CREATE INDEX IF NOT EXISTS idx_markdown_link_unknown
         ON markdown_link_files(path) WHERE possible_anywhere = 1;
+      CREATE INDEX IF NOT EXISTS idx_markdown_link_retry
+        ON markdown_link_files(retry_at) WHERE retry_at IS NOT NULL;
     `);
+    }
     this.fileUpsert = db.prepare(`
-      INSERT INTO markdown_link_files (path, folded_path, basename, hash, complete, possible_anywhere, limit_reason)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO markdown_link_files (path, folded_path, basename, hash, complete, possible_anywhere, limit_reason, retry_at, retry_attempt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(path) DO UPDATE SET hash = excluded.hash, complete = excluded.complete,
-        possible_anywhere = excluded.possible_anywhere, limit_reason = excluded.limit_reason
-      WHERE markdown_link_files.hash <> excluded.hash
+        possible_anywhere = excluded.possible_anywhere, limit_reason = excluded.limit_reason,
+        retry_at = excluded.retry_at, retry_attempt = excluded.retry_attempt
+      WHERE markdown_link_files.hash <> excluded.hash OR markdown_link_files.retry_at IS NOT NULL
     `);
     this.refsDelete = db.prepare("DELETE FROM markdown_link_refs WHERE source = ?");
     this.refInsert = db.prepare(`
@@ -153,24 +170,37 @@ export class MarkdownLinkIndex {
     this.staleRowsAfterPath = this.db.prepare(`
       SELECT file.path, file.size FROM file_cache AS file
       LEFT JOIN markdown_link_files AS indexed USING(path)
-      WHERE file.path > ? AND (indexed.hash IS NULL OR indexed.hash <> ? || file.hash)
+      WHERE file.path > ? AND (indexed.hash IS NULL OR indexed.hash <> ? || file.hash OR indexed.retry_at <= ?)
       ORDER BY file.path LIMIT 64
     `);
     this.staleSource = db.prepare(`
-      SELECT requested.key AS ordinal, file.path, file.hash, file.content, file.size
+      SELECT requested.key AS ordinal, file.path, file.hash, file.content, file.size,
+        CASE WHEN indexed.hash = ? || file.hash THEN indexed.retry_attempt ELSE 0 END AS retry_attempt
       FROM json_each(?) AS requested
       CROSS JOIN file_cache AS file ON file.path = json_extract(requested.value, '$.path')
       LEFT JOIN markdown_link_files AS indexed ON indexed.path = file.path
       WHERE file.hash = json_extract(requested.value, '$.hash')
-        AND (indexed.hash IS NULL OR indexed.hash <> ? || file.hash)
+        AND (indexed.hash IS NULL OR indexed.hash <> ? || file.hash OR indexed.retry_at <= ?)
     `);
     this.sourceHashes = db.prepare(`
-      SELECT file.path, file.hash FROM json_each(?) AS requested
+      SELECT file.path, file.hash, file.size,
+        CASE WHEN indexed.hash = ? || file.hash THEN indexed.retry_attempt ELSE 0 END AS retry_attempt
+      FROM json_each(?) AS requested
       CROSS JOIN file_cache AS file ON file.path = requested.value
+      LEFT JOIN markdown_link_files AS indexed ON indexed.path = file.path
     `);
     this.currentSource = db.prepare("SELECT 1 FROM file_cache WHERE path = ? AND hash = ?");
     this.limitedSource = db.prepare("SELECT limit_reason FROM markdown_link_files WHERE path = ? AND complete = 0");
     this.unboundedSources = db.prepare("SELECT path FROM markdown_link_files WHERE possible_anywhere = 1");
+    this.retryTime = db.prepare(`
+      SELECT min(indexed.retry_at) AS due FROM markdown_link_files AS indexed
+      JOIN file_cache AS file USING(path) WHERE indexed.retry_at IS NOT NULL AND indexed.hash = ? || file.hash
+    `);
+    this.deferRetry = db.prepare(`
+      UPDATE markdown_link_files SET retry_at = ?, retry_attempt = ?
+      WHERE path = ? AND hash = ? AND retry_at IS NOT NULL
+        AND EXISTS (SELECT 1 FROM markdown_link_refs WHERE source = markdown_link_files.path)
+    `);
     this.limitedIncoming = db.prepare(`
       SELECT refs.source, refs.link_path
       FROM markdown_link_files AS source INDEXED BY idx_markdown_link_limited
@@ -200,6 +230,11 @@ export class MarkdownLinkIndex {
     return true;
   }
 
+  nextRetryTime(): number | undefined {
+    const time = this.retryTime.get(this.revision)?.due;
+    return typeof time === "number" ? time : undefined;
+  }
+
   async reconcileBatch(
     afterPath: string,
     acceptPath: (path: string) => boolean,
@@ -208,7 +243,7 @@ export class MarkdownLinkIndex {
     const paths: string[] = [];
     let bytes = 0;
     let last: string | undefined;
-    for (const row of this.staleRowsAfterPath.iterate(afterPath, this.revision)) {
+    for (const row of this.staleRowsAfterPath.iterate(afterPath, this.revision, Date.now())) {
       const filePath = row.path as string;
       if (acceptPath(filePath)) {
         const size = row.size as number;
@@ -271,54 +306,68 @@ export class MarkdownLinkIndex {
   }
 
   describeSources(paths: readonly string[]): LinkIndexSource[] {
-    return this.sourceHashes.all(JSON.stringify(paths)).map((row) => ({
+    return this.sourceHashes.all(this.revision, JSON.stringify(paths)).map((row) => ({
       path: row.path as string,
       hash: row.hash as string,
+      size: row.size as number,
+      attempts: row.retry_attempt as number,
     }));
   }
 
   indexSources(sources: readonly LinkIndexSource[], onSource: (ordinal: number) => void): void {
     const parsed: IndexedSource[] = [];
-    for (const row of this.staleSource.iterate(JSON.stringify(sources), this.revision)) {
+    for (const row of this.staleSource.iterate(this.revision, JSON.stringify(sources), this.revision, Date.now())) {
       const ordinal = row.ordinal as number;
       onSource(ordinal);
-      const content = row.content as string;
-      const skipReason = sources[ordinal].skipReason;
-      const result = skipReason
-        ? { references: [], complete: false, limitReason: skipReason }
-        : (row.size as number) > this.options.largeNoteBytes
+      try {
+        parsed.push(this.extractSource(sources[ordinal], row.content as string, row.retry_attempt as number));
+      } catch {
+        throw new LinkParseFailure(ordinal);
+      }
+    }
+    onSource(-1);
+    this.commitSources(parsed);
+  }
+
+  private extractSource(request: LinkIndexSource, content: string, retryAttempt: number): IndexedSource {
+    const { skipReason, bounded, size, skipHints } = request;
+    const result = skipReason
+      ? { references: [], complete: false, limitReason: skipReason }
+      : bounded
+        ? extractBoundedLinkSource(content, {
+            ...this.options,
+            sectionBytes: Math.min(this.options.sectionBytes, 8192),
+            maxReferences: size <= this.options.largeNoteBytes ? 32768 : this.options.maxReferences,
+          }, true)
+        : size > this.options.largeNoteBytes
           ? extractBoundedLinkSource(content, this.options)
           : { references: extractMarkdownLinkReferences(content), complete: true };
-      const source: IndexedSource = { ...sources[ordinal], ordinal, ...result };
-      if (!source.complete) {
-        source.possible = new Set();
-        for (const candidate of potentialLinkPaths(content)) {
-          source.possible.add(candidate);
-          if (source.possible.size > MAX_CANDIDATE_PATHS || /&(?:[a-z]+|#x?[\da-f]+);/iu.test(candidate)) {
-            // We cannot rule out any target when hints themselves exceed
-            // budget or an unparsed character entity changes the spelling.
-            source.possibleAnywhere = true;
-            source.possible = undefined;
-            break;
-          }
+    const source: IndexedSource = { ...request, ...result };
+    if (skipReason === "timeout" || (bounded && !source.complete))
+      source.retryAttempt = retryAttempt + 1;
+    if (skipHints) {
+      source.possibleAnywhere = true;
+    } else if (!source.complete) {
+      source.possible = new Set();
+      for (const candidate of potentialLinkPaths(content)) {
+        source.possible.add(candidate);
+        if (source.possible.size > MAX_CANDIDATE_PATHS || /&(?:[a-z]+|#x?[\da-f]+);/iu.test(candidate)) {
+          // Hints exceed budget or an unparsed entity changes the spelling.
+          source.possibleAnywhere = true;
+          source.possible = undefined;
+          break;
         }
       }
-      parsed.push(source);
     }
-    this.commitSources(parsed, onSource);
+    return source;
   }
 
-  markSourceLimited(source: LinkIndexSource, limitReason: LinkSourceLimitReason): void {
-    this.commitSources([{ ...source, ordinal: -1, references: [], complete: false, limitReason, possibleAnywhere: true }]);
-  }
-
-  private commitSources(sources: readonly IndexedSource[], onSource?: (ordinal: number) => void): void {
+  private commitSources(sources: readonly IndexedSource[]): void {
     if (!sources.length) return;
     // Parsing holds no write lock. Compare hashes again before publishing.
     this.db.exec("BEGIN IMMEDIATE");
     try {
       for (const source of sources) {
-        onSource?.(source.ordinal);
         if (this.currentSource.get(source.path, source.hash)) this.replaceSource(source);
       }
       this.db.exec("COMMIT");
@@ -328,10 +377,14 @@ export class MarkdownLinkIndex {
     }
   }
 
-  private replaceSource({ path: filePath, hash, complete, references, possible, possibleAnywhere, limitReason }: IndexedSource): void {
+  private replaceSource({ path: filePath, hash, complete, references, possible, possibleAnywhere, limitReason, retryAttempt, skipReason }: IndexedSource): void {
     const basename = basenameKey(filePath);
-    if (!this.fileUpsert.run(filePath, filePath.toLowerCase(), basename, this.revision + hash,
-      Number(complete), Number(!!possibleAnywhere), limitReason ?? null).changes) return;
+    const indexedHash = this.revision + hash;
+    const retryAt = retryAttempt === undefined ? null : Date.now() + 60_000 * 2 ** Math.min(retryAttempt - 1, 4);
+    if (skipReason && retryAt !== null &&
+        this.deferRetry.run(retryAt, retryAttempt!, filePath, indexedHash).changes) return;
+    if (!this.fileUpsert.run(filePath, filePath.toLowerCase(), basename, indexedHash,
+      Number(complete), Number(!!possibleAnywhere), limitReason ?? null, retryAt, retryAttempt ?? 0).changes) return;
     this.refsDelete.run(filePath);
     this.candidatesDelete.run(filePath);
     for (const [ordinal, reference] of references.entries()) {

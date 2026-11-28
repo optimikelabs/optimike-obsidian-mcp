@@ -648,6 +648,8 @@ for (const [field, reason] of [["reason", "create_markdown_invalid"], ["reasonCo
 {
   const limitedSources = [
     { path: "Notes/Source.md", reason: "oom", content: marker },
+    { path: "Note: x.md", reason: "region" },
+    { path: "Notes/Literal\\name.md", reason: "cap" },
     { path: `C:/${marker}.md`, reason: "cap" },
     { path: `../${marker}.md`, reason: "region" },
     { path: "Notes/Other.md", reason: marker },
@@ -657,8 +659,11 @@ for (const [field, reason] of [["reason", "create_markdown_invalid"], ["reasonCo
     const wire = publicMcpToolErrorPayload(new McpError(BaseErrorCode.VALIDATION_ERROR, marker, {
       reasonCode, limitedSources, limitedSourceCount: limitedSources.length,
     }), { operation: "test", params: {} });
-    assert.deepEqual(wire.error.details.limitedSources,
-      reasonCode === "headless_link_coverage_incomplete" ? [{ path: "Notes/Source.md", reason: "oom" }] : undefined);
+    assert.deepEqual(wire.error.details.limitedSources, reasonCode === "headless_link_coverage_incomplete" ? [
+      { path: "Notes/Source.md", reason: "oom" },
+      { path: "Note: x.md", reason: "region" },
+      { path: "Notes/Literal\\name.md", reason: "cap" },
+    ] : undefined);
     assert.doesNotMatch(JSON.stringify(wire), new RegExp(marker, "u"));
   }
 }

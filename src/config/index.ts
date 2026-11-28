@@ -154,6 +154,7 @@ const EnvSchema = z
       .default("auto"),
     OBSIDIAN_CACHE_CONCURRENCY: z.coerce.number().int().positive().default(8),
     OBSIDIAN_LINK_LARGE_NOTE_BYTES: z.coerce.number().int().min(4096).max(1024 * 1024).default(256 * 1024),
+    OBSIDIAN_LINK_PARSE_TIMEOUT_MS: z.coerce.number().int().min(100).max(120_000).default(10_000),
     OBSIDIAN_LINK_SECTION_BYTES: z.coerce.number().int().min(1024).max(128 * 1024).default(64 * 1024),
     OBSIDIAN_LINK_MAX_REFERENCES: z.coerce.number().int().positive().max(32768).default(8192),
     OBSIDIAN_LINK_BATCH_BYTES: z.coerce.number().int().min(4096).max(1024 * 1024).default(256 * 1024),
@@ -559,6 +560,7 @@ export const config = {
   obsidianCacheConcurrency: env.OBSIDIAN_CACHE_CONCURRENCY,
   obsidianLinkExtraction: {
     largeNoteBytes: env.OBSIDIAN_LINK_LARGE_NOTE_BYTES,
+    parseTimeoutMs: env.OBSIDIAN_LINK_PARSE_TIMEOUT_MS,
     sectionBytes: env.OBSIDIAN_LINK_SECTION_BYTES,
     maxReferences: env.OBSIDIAN_LINK_MAX_REFERENCES,
     batchBytes: env.OBSIDIAN_LINK_BATCH_BYTES,

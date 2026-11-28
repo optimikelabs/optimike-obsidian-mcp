@@ -90,11 +90,12 @@ function* walk(root: Nodes): IterableIterator<{ node: Nodes; parent: Nodes }> {
   }
 }
 
-function opaqueSpans(root: Nodes, source: string): Span[] {
+function opaqueSpans(root: Nodes, source: string, htmlOnly = false): Span[] {
   const spans: Span[] = [];
   const destinations: Span[] = [];
   const tagsByParent = new WeakMap<Nodes, Map<string, number[]>>();
   for (const { node, parent } of walk(root)) {
+    if (htmlOnly && node.type !== "html") continue;
     const start = node.position?.start.offset;
     const end = node.position?.end.offset;
     if (start === undefined || end === undefined) continue;
@@ -125,7 +126,7 @@ function opaqueSpans(root: Nodes, source: string): Span[] {
     }
   }
   const codeOrHtml = spanFilter(spans.sort((a, b) => a.start - b.start));
-  if (!source.includes("$")) return spans;
+  if (htmlOnly || !source.includes("$")) return spans;
   for (const { start, end } of wikiLinks(source, spanFilter(spans))) {
     destinations.push({ start, end });
   }
@@ -156,6 +157,10 @@ function opaqueSpans(root: Nodes, source: string): Span[] {
     }
   }
   return spans.concat(formulas).sort((a, b) => a.start - b.start);
+}
+
+export function markdownHtmlSpans(source: string): Span[] {
+  return opaqueSpans(parseMarkdown(source), source, true);
 }
 
 /** Call with increasing start offsets. */

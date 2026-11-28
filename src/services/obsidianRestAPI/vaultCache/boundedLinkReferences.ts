@@ -1,4 +1,4 @@
-import { extractMarkdownLinkReferences, type MarkdownLinkReference } from "./markdownLinkReferences.js";
+import { extractMarkdownLinkReferences, markdownHtmlSpans, type MarkdownLinkReference } from "./markdownLinkReferences.js";
 import type { LinkSourceLimitReason } from "../../headlessLinkCoverage.js";
 
 export type LinkExtractionOptions = {
@@ -6,6 +6,7 @@ export type LinkExtractionOptions = {
   sectionBytes: number;
   maxReferences: number;
   batchBytes: number;
+  parseTimeoutMs?: number;
 };
 
 export const LARGE_LINK_SOURCE_BYTES = 256 * 1024;
@@ -15,9 +16,10 @@ export const defaultLinkExtraction: LinkExtractionOptions = {
   sectionBytes: 64 * 1024,
   maxReferences: 8192,
   batchBytes: 256 * 1024,
+  parseTimeoutMs: 10_000,
 };
 
-type Boundary = { offset: number; bytes: number; line: number };
+type Boundary = { offset: number; bytes: number; line: number; listPrefix?: string };
 type Region = { start: Boundary; end: Boundary; omit?: boolean };
 type LinkSection = { start: Boundary; end: Boundary; safe: boolean };
 export type BoundedLinkExtraction = { references: MarkdownLinkReference[] } & (
@@ -116,11 +118,36 @@ function* boundaryTokens(line: string) {
   }
 }
 
+/** Ask the same Markdown parser about HTML in paragraphs containing a
+ * comment delimiter. Avoid parsing the entire note just to classify HTML. */
+function* htmlSpans(content: string, budget: number) {
+  let start = startOfSource;
+  let end = start;
+  function* spans() {
+    if (end.bytes - start.bytes > budget) return;
+    const paragraph = content.slice(start.offset, end.offset);
+    if (!paragraph.includes("<") || !paragraph.includes("%%")) return;
+    for (const span of markdownHtmlSpans(paragraph)) {
+      yield { start: start.offset + span.start, end: start.offset + span.end };
+    }
+  }
+  for (const line of lines(content)) {
+    if (/^[ \t]*$/u.test(line.text)) {
+      yield* spans();
+      start = line.end;
+    }
+    end = line.end;
+  }
+  yield* spans();
+}
+
 function protectedRegions(content: string, hardLimit: number) {
   const regions: Region[] = [];
   const hasDelimiters = content.includes("%%") || content.includes("$");
   const code = inlineCode(content, hardLimit);
+  const htmlTokens = htmlSpans(content, hardLimit);
   let inline = hasDelimiters && content.includes("`") ? code.next().value : undefined;
+  let htmlToken = content.includes("%%") && content.includes("<") ? htmlTokens.next().value : undefined;
   let previousBlank = true;
   let fence: { start: Boundary; marker: string; topLevel: boolean } | undefined;
   let html: { start: Boundary; close: RegExp } | undefined;
@@ -178,7 +205,8 @@ function protectedRegions(content: string, hardLimit: number) {
       while (inline && inline[1] <= absolute) inline = code.next().value;
       if (inline && inline[0] <= absolute) continue;
       if (token === "%%") {
-        if (!marker.inLiteral) comment = { start, offset: absolute };
+        while (htmlToken && htmlToken.end <= absolute) htmlToken = htmlTokens.next().value;
+        if (!marker.inLiteral && (!htmlToken || htmlToken.start > absolute)) comment = { start, offset: absolute };
         continue;
       }
       const width = token.length;
@@ -204,7 +232,7 @@ function protectedRegions(content: string, hardLimit: number) {
   return { regions, visibleEnd: comment?.offset };
 }
 
-function* sections(content: string, sectionSize: number, hardLimit: number, regions: Region[]): IterableIterator<LinkSection> {
+function* sections(content: string, sectionSize: number, hardLimit: number, regions: Region[], recoverLists: boolean): IterableIterator<LinkSection> {
   let start = startOfSource;
   let prior: Boundary | undefined;
   let safe: Boundary | undefined;
@@ -213,8 +241,15 @@ function* sections(content: string, sectionSize: number, hardLimit: number, regi
   let skippedUntil = 0;
   let previousBlank = true;
   let end = start;
+  let listMarker: string | undefined;
   for (const line of lines(content)) {
     const at = line.start;
+    if (recoverLists) {
+      const marker = /^(?: {0,3})([-+*]|\d{1,9}[.)])([ \t]+)\S/u.exec(line.text);
+      if (marker) listMarker = marker[0].slice(0, -1) + "x\n";
+      else if (listMarker && /^(?: {4}|\t)/u.test(line.text)) at.listPrefix = listMarker;
+      else if (/^\S/u.test(line.text)) listMarker = undefined;
+    }
     end = line.end;
     const afterBlank = previousBlank;
     previousBlank = /^[ \t]*$/u.test(line.text);
@@ -257,18 +292,20 @@ function* sections(content: string, sectionSize: number, hardLimit: number, regi
 export function extractBoundedLinkSource(
   content: string,
   { sectionBytes, maxReferences }: LinkExtractionOptions = defaultLinkExtraction,
+  recoverLists = false,
 ): BoundedLinkExtraction {
   const references: MarkdownLinkReference[] = [];
   const hardLimit = 4 * sectionBytes;
   const protectedSource = protectedRegions(content, hardLimit);
-  let complete = protectedSource.visibleEnd === undefined;
-  if (!complete) content = content.slice(0, protectedSource.visibleEnd);
+  let complete = true;
+  if (protectedSource.visibleEnd !== undefined) content = content.slice(0, protectedSource.visibleEnd);
   let sectionCount = 0;
-  for (const { start, end, safe } of sections(content, sectionBytes, hardLimit, protectedSource.regions)) {
+  for (const { start, end, safe } of sections(content, sectionBytes, hardLimit, protectedSource.regions, recoverLists)) {
     sectionCount++;
     const wikiOnly = end.bytes - start.bytes > hardLimit;
     if (!safe || wikiOnly) complete = false;
-    const parsed = extractMarkdownLinkReferences(content.slice(start.offset, end.offset), {
+    const prefix = wikiOnly ? "" : start.listPrefix ?? "";
+    const parsed = extractMarkdownLinkReferences(prefix + content.slice(start.offset, end.offset), {
       readFrontmatter: start.offset === 0 && !wikiOnly,
       wikiOnly,
       maxReferences: maxReferences - references.length + 1,
@@ -277,8 +314,8 @@ export function extractBoundedLinkSource(
       if (references.length === maxReferences) return { references, complete: false, limitReason: "cap" };
       if (reference.position) {
         for (const point of [reference.position.start, reference.position.end]) {
-          point.offset += start.offset;
-          point.line += start.line;
+          point.offset += start.offset - prefix.length;
+          point.line += start.line - Number(!!prefix);
         }
       }
       references.push(reference);

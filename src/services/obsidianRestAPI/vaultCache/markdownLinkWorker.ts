@@ -1,15 +1,22 @@
 import { DatabaseSync } from "node:sqlite";
 import { parentPort, Worker, workerData } from "node:worker_threads";
-import { MarkdownLinkIndex, type LinkIndexSource } from "./markdownLinkIndex.js";
+import { LinkParseFailure, MarkdownLinkIndex, type LinkIndexSource } from "./markdownLinkIndex.js";
 import type { LinkExtractionOptions } from "./boundedLinkReferences.js";
 
 const entry = new URL(import.meta.url);
 const workerKind = "filesystem-markdown-links";
-const batchFailed = "markdown_link_batch_failed";
-const SOURCE_TIMEOUT_MS = 10_000;
 type Batch = { sources: LinkIndexSource[]; active: SharedArrayBuffer };
 type Progress = { ordinal: number; generation: number };
-type WorkerMessage = Progress | boolean;
+type StorageFailureKind = "busy" | "storage";
+type WorkerMessage = Progress | true | { kind: "parse"; ordinal: number } | { kind: StorageFailureKind };
+export class LinkStorageFailure extends Error {
+  constructor(readonly kind: StorageFailureKind = "storage") { super("markdown_link_storage_failed"); }
+}
+
+function storageFailureKind(error: unknown): StorageFailureKind {
+  const code = (error as { errcode?: number } | null)?.errcode ?? 0;
+  return (code & 255) === 5 || (code & 255) === 6 ? "busy" : "storage";
+}
 
 class SourceTimeout extends Error {
   constructor(readonly ordinal: number) {
@@ -34,7 +41,6 @@ export class MarkdownLinkWorker {
 
   private async indexBatch(sources: LinkIndexSource[]): Promise<void> {
     const active = new Int32Array(new SharedArrayBuffer(2 * Int32Array.BYTES_PER_ELEMENT));
-    let retriedBatch = false;
     while (sources.length && !this.closed) {
       Atomics.store(active, 0, sources.length === 1 ? 0 : -1);
       Atomics.store(active, 1, 0);
@@ -45,50 +51,23 @@ export class MarkdownLinkWorker {
         return;
       } catch (error) {
         if (this.closed) throw error;
-        if (error instanceof Error && error.message === batchFailed) {
-          if (!retriedBatch) {
-            retriedBatch = true;
-            continue;
-          }
-          if (sources.length > 1) {
-            const middle = Math.floor(sources.length / 2);
-            await this.indexBatch(sources.slice(0, middle));
-            await this.indexBatch(sources.slice(middle));
-            return;
-          }
-          const source = sources[0];
-          if (!source.skipReason) await this.indexBatch([{ ...source, skipReason: "region" }]);
-          else this.index.markSourceLimited(source, source.skipReason);
-          return;
-        }
-
         const timedOut = error instanceof SourceTimeout;
-        const ordinal = timedOut ? error.ordinal : Atomics.load(active, 0);
+        const parseFailed = error instanceof LinkParseFailure;
+        const oom = (error as NodeJS.ErrnoException).code === "ERR_WORKER_OUT_OF_MEMORY";
+        const ordinal = timedOut || parseFailed ? error.ordinal : Atomics.load(active, 0);
         const source = sources[ordinal];
-        if (!source || (!timedOut && (error as NodeJS.ErrnoException).code !== "ERR_WORKER_OUT_OF_MEMORY")) throw error;
-        await this.stopWorker();
+        if (!source || (!timedOut && !oom && !parseFailed) || source.skipHints) throw error;
+        if (!parseFailed) await this.stopWorker();
         if (this.closed) return;
-        if (timedOut) {
-          if (!source.skipReason) {
-            // A shorter pass can still collect possible backlink targets.
-            // It has the same deadline and never publishes extracted links.
-            await this.indexBatch([{ ...source, skipReason: "timeout" }]);
-          } else {
-            this.index.markSourceLimited(source, source.skipReason);
-          }
-        } else if (sources.length > 1) {
-          // Retry an OOM source in isolation before blaming it for the heap
-          // used by its batch. A timed-out parse needs no full retry.
+        if (oom && sources.length > 1) {
           await this.indexBatch([source]);
-        } else if (!source.skipReason) {
-          source.skipReason = "oom";
-          retriedBatch = false;
-          continue;
+        } else if (timedOut && !source.bounded && !source.skipReason) {
+          await this.indexBatch([{ ...source, bounded: true }]);
         } else {
-          this.index.markSourceLimited(source, source.skipReason);
+          const skipReason = source.skipReason ?? (timedOut ? "timeout" : oom ? "oom" : "region");
+          await this.indexBatch([{ ...source, skipReason, ...(source.skipReason && { skipHints: true }) }]);
         }
         sources.splice(ordinal, 1);
-        retriedBatch = false;
       } finally {
         worker.unref();
       }
@@ -104,11 +83,16 @@ export class MarkdownLinkWorker {
           reject,
           progress: ({ ordinal, generation }) => {
             clearTimeout(deadline);
+            const source = sources[ordinal];
+            if (!source) return;
+            const base = this.options.parseTimeoutMs ?? 10_000;
+            const budget = Math.min(120_000,
+              base * (1 + Math.min(source.attempts, 3)) + Math.min(3 * base, Math.floor(source.size / 1024) * 25));
             deadline = setTimeout(() => {
               // The worker can already have advanced while its next progress
               // message is queued on the main thread.
               if (Atomics.load(active, 1) === generation) reject(new SourceTimeout(ordinal));
-            }, SOURCE_TIMEOUT_MS);
+            }, source.bounded ? Math.max(budget, 5_000) : budget);
           },
         };
         worker.postMessage({ sources, active: active.buffer } satisfies Batch);
@@ -134,9 +118,10 @@ export class MarkdownLinkWorker {
     worker.on("message", (message: WorkerMessage) => {
       if (this.worker !== worker) return;
       const pending = this.pending;
-      if (typeof message !== "boolean") pending?.progress(message);
-      else if (message) pending?.resolve();
-      else pending?.reject(new Error(batchFailed));
+      if (message === true) pending?.resolve();
+      else if ("generation" in message) pending?.progress(message);
+      else if (message.kind === "parse") pending?.reject(new LinkParseFailure(message.ordinal));
+      else pending?.reject(new LinkStorageFailure(message.kind));
     });
     const failed = (error: Error) => {
       if (this.worker !== worker) return;
@@ -144,7 +129,8 @@ export class MarkdownLinkWorker {
       this.pending = undefined;
       pending?.reject(error);
     };
-    worker.on("error", failed);
+    worker.on("error", (error: NodeJS.ErrnoException) =>
+      failed(error.code === "ERR_SQLITE_ERROR" ? new LinkStorageFailure(storageFailureKind(error)) : error));
     worker.on("exit", () => {
       failed(new Error("markdown_link_worker_exited"));
       if (this.worker === worker) this.worker = undefined;
@@ -166,7 +152,7 @@ if (parentPort && workerData?.kind === workerKind) {
   const port = parentPort;
   const db = new DatabaseSync(workerData.databasePath);
   db.exec("PRAGMA busy_timeout = 5000; PRAGMA synchronous = NORMAL; PRAGMA cache_size = -2048;");
-  const links = new MarkdownLinkIndex(db, workerData.options as LinkExtractionOptions);
+  const links = new MarkdownLinkIndex(db, workerData.options as LinkExtractionOptions, false);
   port.on("message", ({ sources, active }: Batch) => {
     try {
       const state = new Int32Array(active);
@@ -176,8 +162,10 @@ if (parentPort && workerData?.kind === workerKind) {
         port.postMessage({ ordinal, generation } satisfies Progress);
       });
       port.postMessage(true);
-    } catch {
-      port.postMessage(false);
+    } catch (error) {
+      port.postMessage(error instanceof LinkParseFailure
+        ? { kind: "parse", ordinal: error.ordinal } satisfies WorkerMessage
+        : { kind: storageFailureKind(error) } satisfies WorkerMessage);
     }
   });
 }

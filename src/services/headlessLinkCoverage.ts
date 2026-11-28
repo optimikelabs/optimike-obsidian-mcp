@@ -13,9 +13,9 @@ export function isLinkSourceLimitReason(value: unknown): value is LinkSourceLimi
 /** Existing vault names may be nonportable. Accept only decoded, relative Markdown paths. */
 export function isLimitedLinkSourcePath(value: unknown): value is string {
   return typeof value === "string" && value.length <= 4096 &&
-    !/^(?:[a-z][a-z\d+.-]*:|\/)/iu.test(value) &&
-    !/[\\\u0000-\u001f\u007f-\u009f]/u.test(value) && /\.md$/iu.test(value) &&
-    value.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..");
+    !/^(?:[a-z]:(?! )|[\\/]|[a-z][a-z\d+.-]*:\/\/)/iu.test(value) &&
+    !/[\u0000-\u001f\u007f-\u009f]/u.test(value) && /\.md$/iu.test(value) &&
+    !/(?:^|[\\/])\.{1,2}(?:[\\/]|$)/u.test(value) && !value.includes("//");
 }
 
 export function incompleteHeadlessLinkCoverageError({ limitedSourceCount, limitedSources }: LimitedLinkSources): McpError {
