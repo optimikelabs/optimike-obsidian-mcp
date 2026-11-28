@@ -75,7 +75,9 @@ export async function registerBasesQueryTool(
                     publicMcpToolErrorPayload(error, {
                       operation: "HandleBasesQuery",
                       toolName: TOOL_NAME,
-                      params,
+                      // Local refusals use fixed reasons. Raw filter strings can
+                      // exceed the diagnostic input budget and hide that reason.
+                      params: obsidianService ? params : { hasInput: true },
                     }),
                     null,
                     2,

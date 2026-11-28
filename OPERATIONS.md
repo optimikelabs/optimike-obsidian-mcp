@@ -203,6 +203,9 @@ The final server can expose different capabilities depending on which Obsidian p
     `{"and":[...]}`, `{"or":[...]}`, or `{"not":...}`. Each group has a
     single logical key. Leaves can be local property maps, comparisons such
     as `type == "project"`, or bare truthy properties such as `active`.
+    String leaves are limited to 1,024 characters. Date and timestamp
+    properties retain their YAML text. Filters use vault-relative
+    `file.path` values, and equality and membership also accept a leading slash.
     Unknown leaf forms, empty operator objects, and arrays of operator
     objects return `VALIDATION_ERROR`. Formula references in filters
     and sorts are rejected even with `property_only: true`

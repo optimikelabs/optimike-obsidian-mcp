@@ -1,6 +1,6 @@
 import path from "node:path";
 import { readdir, readFile } from "node:fs/promises";
-import { load } from "js-yaml";
+import { CORE_SCHEMA, load } from "js-yaml";
 import { config } from "./../config/index.js";
 import type { VaultCacheService } from "./obsidianRestAPI/vaultCache/index.js";
 import type {
@@ -64,7 +64,7 @@ function extractFrontmatter(content: string): Record<string, unknown> {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/u);
   if (!match) return {};
   try {
-    const parsed = load(match[1]);
+    const parsed = load(match[1], { schema: CORE_SCHEMA });
     return isRecord(parsed) ? parsed : {};
   } catch {
     return {};

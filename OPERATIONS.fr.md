@@ -204,7 +204,10 @@ Le serveur final peut exposer des capacités différentes selon les plugins Obsi
     conditions avec `{"and":[...]}`, `{"or":[...]}` ou `{"not":...}`.
     Chaque groupe a une seule clé logique. Une feuille peut être une table de
     propriétés locale, une comparaison comme `type == "project"` ou une
-    propriété évaluée comme booléen, par exemple `active`. Les formes inconnues,
+    propriété évaluée comme booléen, par exemple `active`. Une feuille textuelle
+    est limitée à 1 024 caractères. Les dates et horodatages gardent leur texte YAML.
+    Les filtres utilisent des chemins `file.path` relatifs au coffre. L’égalité
+    et l’appartenance acceptent aussi un slash initial. Les formes inconnues,
     objets opérateurs vides et tableaux d’objets opérateurs renvoient
     `VALIDATION_ERROR`. Les références à des formules dans les filtres et tris
     sont refusées même avec `property_only: true`
