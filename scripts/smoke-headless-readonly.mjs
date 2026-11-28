@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import "./test-support/isolated-state.mjs";
+import assert from "node:assert/strict";
 import {
   mkdtemp,
   rm,
@@ -29,6 +31,8 @@ if (
   throw new Error(`Unsupported smoke mode: ${modeArg}`);
 }
 const runtimeMode = modeArg === "hybrid-live" ? "hybrid" : modeArg;
+const hiddenNotes = [".gemini/Context.md", "notes/.hidden/Context.md", "notes/.draft.md"];
+const explicitlyIncludedNote = "notes/.hidden/Included.md";
 
 async function withTimeout(promise, label) {
   let timer;
@@ -74,6 +78,11 @@ async function createTempVault() {
   await mkdir(path.join(vaultRoot, "Canvases"), { recursive: true });
   await mkdir(path.join(vaultRoot, "tmp", "reports"), { recursive: true });
   await mkdir(path.join(vaultRoot, ".obsidian"), { recursive: true });
+  for (const file of [...hiddenNotes, explicitlyIncludedNote]) {
+    const target = path.join(vaultRoot, file);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, "Synthetic note with searchable keyword alphasmoke.\n", "utf8");
+  }
   await writeFile(
     path.join(vaultRoot, "Projects", "Headless.md"),
     [
@@ -312,7 +321,7 @@ async function main() {
       OBSIDIAN_VAULT: vaultRoot,
       OBSIDIAN_CACHE_SOURCE: "filesystem",
       OBSIDIAN_SHARED_CACHE_DB_PATH: cachePath,
-      OBSIDIAN_VAULT_EXCLUDE_PATTERNS: "tmp/**,**/tmp/**",
+      OBSIDIAN_VAULT_EXCLUDE_PATTERNS: `tmp/**,**/tmp/**,!${explicitlyIncludedNote}`,
       OBSIDIAN_ENABLE_CACHE: "true",
       MCP_WRITE_MODE:
         modeArg === "headless-guarded" || modeArg === "headless-filesystem"
@@ -656,6 +665,35 @@ async function main() {
       "global search",
     );
     assertTextIncludes(search, "Root.md", "global search");
+
+    if (modeArg === "headless-readonly") {
+      assertTextIncludes(list, explicitlyIncludedNote, "list explicitly included note");
+      assertTextIncludes(search, explicitlyIncludedNote, "search explicitly included note");
+      const listText = JSON.stringify(list.content);
+      const searchText = JSON.stringify(search.content);
+      const visibility = {};
+      for (const filePath of [...hiddenNotes, explicitlyIncludedNote]) {
+        const exactRead = await withTimeout(
+          client.callTool({
+            name: "obsidian_read_note",
+            arguments: { filePath, format: "markdown" },
+          }),
+          `read ${filePath}`,
+        );
+        visibility[filePath] = {
+          listed: listText.includes(filePath),
+          found: searchText.includes(filePath),
+          readable: !exactRead.isError,
+        };
+      }
+      const excluded = { listed: false, found: false, readable: false };
+      assert.deepEqual(visibility, {
+        [hiddenNotes[0]]: excluded,
+        [hiddenNotes[1]]: excluded,
+        [hiddenNotes[2]]: excluded,
+        [explicitlyIncludedNote]: { listed: true, found: true, readable: true },
+      });
+    }
 
     const excludedSearch = await withTimeout(
       client.callTool({

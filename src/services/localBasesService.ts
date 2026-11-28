@@ -151,9 +151,11 @@ export class LocalBasesService {
         const relativePathForPolicy = normalizeVaultRelativePath(
           path.relative(config.obsidianVaultPath!, absolutePath),
         );
-        if (
-          isVaultPathExcluded(relativePathForPolicy, this.vaultExclusionMatcher)
-        ) {
+        if (isVaultPathExcluded(
+          relativePathForPolicy,
+          this.vaultExclusionMatcher,
+          entry.isDirectory(),
+        )) {
           continue;
         }
         if (entry.isDirectory()) {
