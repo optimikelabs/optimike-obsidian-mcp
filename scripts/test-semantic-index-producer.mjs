@@ -51,12 +51,16 @@ async function fixture(t) {
         beforeEncode = undefined;
         await callback();
       }
+      const cuda = health.document_device === "cuda";
       const results = items.map(item => transformRow({
-        device: health.document_device,
         vector: parseInt(hash(item.input)[0], 16) % 2 ? [0, 1] : [1, 0],
-        tokens: 3, truncated: false, prefix_applied: false, input_sha256: hash(item.input),
+        tokens: 3,
+        truncated: false,
+        // BitNet's native CPU encoder returns the worker result. Device and
+        // provenance fields are added to the audit log, not the response.
+        ...(cuda && { device: "cuda" }),
       }));
-      res.end(JSON.stringify({ model, results }));
+      res.end(JSON.stringify({ model, results, ...(!cuda && { embeddings: results.map(row => row.vector) }) }));
     } catch (error) {
       res.statusCode = 500;
       res.end(JSON.stringify({ error: error.message }));
@@ -265,7 +269,7 @@ test("encoding identity drift requires a full rebuild and wrong weight identity 
   assert.equal(await f.current(), second.generation);
 });
 
-test("overlapping excluded blocks cannot leak heading text, and CPU uses the single-document route", async t => {
+test("CPU accepts native rows without device metadata and removes excluded heading text", async t => {
   const f = await fixture(t);
   f.health.document_device = "cpu";
   await f.put("included.md", "# Parent\n\nVisible\n## Omit\n\nSecret text\n# Omit\n\nFirst secret\n# Omit\n\nDuplicate secret\n# Next\n\nOther text");
@@ -287,6 +291,8 @@ test("truncated or invalid vectors never become active", async t => {
   await f.fail(/truncated or incompatible/u);
   f.transformRow(row => ({ ...row, vector: [0, 0] }));
   await f.fail(/Invalid BitNet vector/u);
+  f.transformRow(row => ({ ...row, device: undefined }));
+  await f.fail(/truncated or incompatible/u);
   assert.equal(await f.current(), first.generation);
 });
 
