@@ -103,11 +103,11 @@ function* boundaryTokens(line: string) {
     const offset = match.index;
     while (literals[cursor] && literals[cursor].index + literals[cursor][0].length <= offset) cursor++;
     const literal = literals[cursor];
-    if (literal && literal.index <= offset) continue;
+    const inLiteral = !!literal && literal.index <= offset;
     const token = match[0];
     if (token === "%%") {
-      if (line[offset - 1] !== "\\") yield { token, offset };
-    } else if (token.length <= 2) {
+      if (line[offset - 1] !== "\\") yield { token, offset, inLiteral };
+    } else if (!inLiteral && token.length <= 2) {
       if (!escapedAt(line, offset)) yield { token, offset };
     }
   }
@@ -118,12 +118,11 @@ function protectedRegions(content: string, hardLimit: number) {
   const hasDelimiters = content.includes("%%") || content.includes("$");
   const code = inlineCode(content, hardLimit);
   let inline = hasDelimiters && content.includes("`") ? code.next().value : undefined;
-  let complete = true;
   let previousBlank = true;
   let fence: { start: Boundary; marker: string; topLevel: boolean } | undefined;
   let html: { start: Boundary; close: RegExp } | undefined;
   let frontmatter = /^\uFEFF?---(?:\r\n?|\n)/u.test(content);
-  let comment: Boundary | undefined;
+  let comment: { start: Boundary; offset: number } | undefined;
   let formula: { start: Boundary; width: number } | undefined;
   let last = startOfSource;
   for (const { start, end, text } of lines(content)) {
@@ -153,11 +152,6 @@ function protectedRegions(content: string, hardLimit: number) {
       }
       continue;
     }
-    if (comment && start.bytes - comment.bytes >= hardLimit) {
-      regions.push({ start: comment, end: start });
-      comment = undefined;
-      complete = false;
-    }
     if (!comment) {
       if (marker && (marker[1][0] !== "`" || !marker[2].includes("`"))) {
         fence = { start, marker: marker[1], topLevel: afterBlank && text.startsWith(marker[1]) };
@@ -170,37 +164,41 @@ function protectedRegions(content: string, hardLimit: number) {
       }
     }
     if (!hasDelimiters) continue;
-    for (const { token, offset } of boundaryTokens(text)) {
+    for (const marker of boundaryTokens(text)) {
+      const { token, offset } = marker;
       const absolute = start.offset + offset;
+      if (comment && token === "%%") {
+        regions.push({ start: comment.start, end });
+        comment = undefined;
+        continue;
+      }
       while (inline && inline[1] <= absolute) inline = code.next().value;
       if (inline && inline[0] <= absolute) continue;
       if (token === "%%") {
-        if (comment) {
-          regions.push({ start: comment, end });
-          comment = undefined;
-        } else {
-          comment = start;
-        }
+        if (!marker.inLiteral) comment = { start, offset: absolute };
         continue;
       }
-      if (comment) continue;
       const width = token.length;
       const usableClose = width === 2 || (/\S/u.test(text[offset - 1] ?? "") && !/\d/u.test(text[offset + width] ?? ""));
       if (formula?.width === width && usableClose) {
         if (width === 2) regions.push({ start: formula.start, end });
         formula = undefined;
-      } else if (!formula && (width === 2 || /\S/u.test(text[offset + width] ?? ""))) {
+        // A comment opener inside a paired formula is literal.
+        comment = undefined;
+      } else if (!comment && !formula && (width === 2 || /\S/u.test(text[offset + width] ?? ""))) {
         formula = { start, width };
       }
     }
     if (formula?.width === 1) formula = undefined;
   }
-  const unclosed = frontmatter ? startOfSource : fence?.start ?? html?.start ?? comment;
+  // Cutting inside an unclosed comment would let a later section reparse its
+  // hidden tail as Markdown. Truncating at the opener preserves prefix offsets.
+  const unclosed = frontmatter ? startOfSource : fence?.start ?? html?.start;
   if (unclosed) {
     regions.push({ start: unclosed, end: last, omit: fence?.topLevel && last.bytes - unclosed.bytes > hardLimit });
   }
   regions.sort((a, b) => a.start.offset - b.start.offset || b.end.offset - a.end.offset);
-  return { regions, complete };
+  return { regions, visibleEnd: comment?.offset };
 }
 
 function* sections(content: string, sectionSize: number, hardLimit: number, regions: Region[]): IterableIterator<LinkSection> {
@@ -260,7 +258,8 @@ export function extractBoundedLinkSource(
   const references: MarkdownLinkReference[] = [];
   const hardLimit = 4 * sectionBytes;
   const protectedSource = protectedRegions(content, hardLimit);
-  let complete = protectedSource.complete;
+  let complete = protectedSource.visibleEnd === undefined;
+  if (!complete) content = content.slice(0, protectedSource.visibleEnd);
   let sectionCount = 0;
   for (const { start, end, safe } of sections(content, sectionBytes, hardLimit, protectedSource.regions)) {
     sectionCount++;

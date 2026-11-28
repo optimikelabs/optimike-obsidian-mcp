@@ -37,7 +37,7 @@ function coverage(total: number, returned: number) {
 
 type LinkCount = { link_path: string; count: number };
 type Target = { path: string; ambiguous?: true };
-const INDEX_REVISION = "v10:";
+const INDEX_REVISION = "v11:";
 const MAX_CANDIDATE_PATHS = 32768;
 export type LinkIndexSource = { path: string; hash: string; skipParse?: true };
 type IndexedSource = LinkIndexSource & {
@@ -359,6 +359,9 @@ export class MarkdownLinkIndex {
     const outgoing: NoteLinkObservation[] = [];
     const unresolved: NoteLinksProjection["unresolved"] = [];
     const backlinks: NoteLinksProjection["backlinks"] = [];
+    const sourceConfidence = (source: string) =>
+      this.limitedSource.get(source) ? { confidence: "uncertain" as const } : {};
+    const outgoingConfidence = sourceConfidence(filePath);
 
     const total = this.db.prepare("SELECT count(*) AS count FROM markdown_link_refs WHERE source = ?")
       .get(filePath)!.count as number;
@@ -369,6 +372,7 @@ export class MarkdownLinkIndex {
       const target = this.resolve(filePath, reference.linkPath);
       outgoing.push({
         ...reference,
+        ...outgoingConfidence,
         resolution: target
           ? { status: "resolved", targetPath: target.path.slice(1), ...(target.ambiguous ? { ambiguous: true } : {}) }
           : { status: "unresolved" },
@@ -386,7 +390,7 @@ export class MarkdownLinkIndex {
     `).iterate(filePath) as Iterable<LinkCount & { unresolved_key: string }>) {
       if (this.resolve(filePath, row.link_path)) continue;
       unresolvedTotal++;
-      if (unresolved.length < limit) unresolved.push({ linkText: row.unresolved_key, count: row.count });
+      if (unresolved.length < limit) unresolved.push({ linkText: row.unresolved_key, count: row.count, ...outgoingConfidence });
     }
 
     let backlinkTotal = 0;
@@ -395,7 +399,7 @@ export class MarkdownLinkIndex {
     const addBacklink = () => {
       if (!source || count === 0) return;
       backlinkTotal++;
-      if (backlinks.length < limit) backlinks.push({ sourcePath: source.slice(1), count });
+      if (backlinks.length < limit) backlinks.push({ sourcePath: source.slice(1), count, ...sourceConfidence(source) });
     };
     for (const row of this.db.prepare(`
       SELECT source AS path, link_path, count(*) AS count FROM markdown_link_refs

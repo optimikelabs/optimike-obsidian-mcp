@@ -35,16 +35,24 @@ test('bounded sections preserve list continuations and wikilinks on oversized li
 test('inline literals and an unmatched dollar pair do not hide later sections',()=>{
  const tail='\n\nParagraph [[Visible]].'.repeat(250);
  for (const prefix of ['Use `%%` to comment.','Use `code\n%%\ncode` here.',
-  'Cost $$ in prose.', 'Use `$$` then $[[Hidden]]$.', '$$\n[[Hidden]]\n$$']){
+  'Cost $$ in prose.', 'Use `$$` then $[[Hidden]]$.', '$$\n[[Hidden]]\n$$', '$$\n%%\n$$']){
   const markdown=prefix+tail;
   const options={...defaultLinkExtraction,sectionBytes:1024};
   assert.deepEqual(extractBoundedLinkSource(markdown,options),
    {complete:true,references:extractMarkdownLinkReferences(markdown)});
  }
- const opaque='%%\n\n'+('line\n\n'.repeat(1024))+'[[Visible]]';
- const result=extractBoundedLinkSource(opaque,{...defaultLinkExtraction,sectionBytes:1024});
- assert.equal(result.complete,false);
- assert.deepEqual(result.references.map(ref=>ref.linkPath),['Visible']);
+});
+test('a long unclosed comment hides its entire tail and preserves earlier positions',()=>{
+ for (const opaque of [
+  '[[Visible]] %%\r\n\r\n'+'[[Hidden]] inside a comment\r\n\r\n'.repeat(17_518),
+  'x'.repeat(250*1024)+' [[Visible]] %%\n'+'[[Hidden]] inside a comment\n'.repeat(500),
+ ]) {
+  const result=extractBoundedLinkSource(opaque);
+  assert.equal(result.complete,false);
+  assert.equal(result.references.length,1);
+  assert.deepEqual(result.references,extractMarkdownLinkReferences(opaque));
+  assert.deepEqual(result.references.map(ref=>ref.linkPath),['Visible']);
+ }
 });
 test('comment delimiters in code leave adjacent links visible',()=>{
  assert.deepEqual(linkTexts('Use `%%` to open [[A]]\n\nClose it with `%%`. Also [[B]].\n\n```\na %% b\n```\n[[Visible]]\n%% [[Hidden]] %% [[After]]'),['A','B','Visible','After']);
@@ -380,7 +388,7 @@ test('restart resumes a committed partial link index without exposing it',()=>li
  assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Z.md',count:1}]);
 }));
 
-test('an indexing error rolls back the whole batch and a later link request retries it',()=>linkFixture(async f=>{
+test('a recurring batch failure isolates the failing note and publishes the other sources',()=>linkFixture(async f=>{
  f.write('Z.md','[[Target]]');
  f.cache.db.exec(`
   CREATE TRIGGER fixture_reject_link BEFORE INSERT ON markdown_link_refs
@@ -389,12 +397,28 @@ test('an indexing error rolls back the whole batch and a later link request retr
  `);
  await f.cache.buildVaultCache();
  await f.cache.linkIndexRun;
- assert.equal(f.cache.db.prepare('SELECT count(*) AS count FROM markdown_link_files').get().count,0);
+ const failed=await f.cache.readFilesystemNoteLinks('Z.md',20,context);
+ assert.equal(failed.indexCoverage.sourceComplete,false);
+ assert.deepEqual(failed.outgoing,[]);
+ assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1}]);
  f.cache.db.exec('DROP TRIGGER fixture_reject_link');
- assert.equal(await f.cache.readFilesystemNoteContent('A.md',context),'[[Target]]');
- await assert.rejects(f.read(),isIndexPending);
+ f.write('Z.md','New version [[Target]]');
+ await f.cache.updateFileVerified('Z.md',context);
  await f.cache.linkIndexRun;
  assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Z.md',count:1}]);
+}));
+
+test('a stuck parse times out and the next note still gets indexed',{timeout:25_000},()=>linkFixture(async f=>{
+ f.write('Poison.md','['.repeat(40_000)+'](Target.md)'+']'.repeat(40_000));
+ f.write('Z.md','[[Target]]');
+ await f.cache.buildVaultCache();
+ await f.cache.linkIndexRun;
+ const failed=await f.cache.readFilesystemNoteLinks('Poison.md',20,context);
+ assert.equal(failed.indexCoverage.sourceComplete,false);
+ assert.deepEqual(failed.outgoing,[]);
+ const target=await f.read();
+ assert.deepEqual(target.backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Z.md',count:1}]);
+ assert.equal(target.indexCoverage.backlinksComplete,false);
 }));
 
 test('a note that exhausts its worker is marked limited and later notes still get backlinks',()=>linkFixture(async f=>{
@@ -425,14 +449,18 @@ test('incremental rebuilds reuse the worker while publishing new backlinks',()=>
 }));
 
 test('configured budgets retain a limited source and scope its backlinks across a restart',()=>linkFixture(async f=>{
- f.write('A.md',('paragraph '.repeat(50)+'\n\n').repeat(10)+'[[Other]] [[Other]] [[Target]]');
+ f.write('A.md',('paragraph '.repeat(50)+'\n\n').repeat(10)+'[[Other]] [[Missing]] [[Target]]');
  f.write('Other.md','Other');
  f.write('Unrelated.md','Unrelated');
  await f.cache.buildVaultCache();
  await f.cache.linkIndexRun;
  await f.reopen();
  const source=await f.cache.readFilesystemNoteLinks('A.md',20,context);
- assert.deepEqual(source.outgoing.map(ref=>ref.linkPath),['Other']);
+ assert.deepEqual(source.outgoing.map(ref=>[ref.linkPath,ref.confidence]),
+  [['Other','uncertain'],['Missing','uncertain']]);
+ assert.deepEqual(source.unresolved,[{linkText:'Missing',count:1,confidence:'uncertain'}]);
+ assert.deepEqual((await f.cache.readFilesystemNoteLinks('Other.md',20,context)).backlinks,
+  [{sourcePath:'A.md',count:1,confidence:'uncertain'}]);
  assert.deepEqual(source.indexCoverage,{reason:'bounded_large_note_extraction',
   sourceComplete:false,backlinksComplete:true,limitedSourceCount:1});
  const target=await f.read();
@@ -440,7 +468,7 @@ test('configured budgets retain a limited source and scope its backlinks across 
  assert.deepEqual(target.indexCoverage,{reason:'bounded_large_note_extraction',
   sourceComplete:true,backlinksComplete:false,limitedSourceCount:1});
  assert.equal((await f.cache.readFilesystemNoteLinks('Unrelated.md',20,context)).indexCoverage,undefined);
-},{largeNoteBytes:4096,sectionBytes:1024,maxReferences:1,batchBytes:4096}));
+},{largeNoteBytes:4096,sectionBytes:1024,maxReferences:2,batchBytes:4096}));
 
 test('healthz responds while the worker handles a five MiB note',()=>linkFixture(async f=>{
  const oversizedCode='hidden [[Target]]\n'.repeat(307_000);
