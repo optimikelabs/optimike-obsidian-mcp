@@ -12,6 +12,34 @@ Plugin compagnon pour **optimike-obsidian-mcp**. Il ajoute une vue headless « B
 
 La CI exécute les tests, construit le plugin et publie ces deux fichiers installables. Le package MCP vérifie également qu’ils sont bien présents avant distribution.
 
+## Capture native utilisée par les tests
+
+La [fixture synthétique](src/fixtures/bases-native-1.15.1.json) est un extrait
+d’une capture sous Obsidian **1.15.1** avec Bases actif. Le banc a lancé
+Obsidian Desktop avec un profil temporaire, un coffre de notes synthétiques
+et le fuseau `Europe/Paris`. Après vérification du profil, du coffre et de
+son indexation, il a figé l’horloge JavaScript au `2026-03-29T00:30:00.000Z`.
+
+- Pour Top et Label, le banc a appelé le handler `base:query` avec le
+  chemin de la Base, le nom de la vue et `format: "json"`. Ces deux cas
+  utilisent `Notes/a.md`, `Notes/b.md`, `Notes/c.md` et `Other/z.md`,
+  les formules `link(file, file.name)` et `file.name + "!"`, et une vue
+  limitée à deux notes dans `Notes`. Label ajoute le nom de colonne `Label`.
+- Pour les diagnostics, le banc a appelé les fonctions du Bridge sur quatre
+  notes `Data/Diag/a.md` à `Data/Diag/d.md` avec le même handler natif.
+  La fixture conserve les statuts et les échantillons projetés par le Bridge.
+  Les cas du rejeu MCP reprennent les messages des cellules natives et les
+  statuts correspondants. Par exemple, `file.name.LOWER()` donne des noms de
+  notes et une formule vide donne `all_null`.
+
+La capture UTC du même banc a donné les mêmes valeurs pour les cas retenus.
+Pour actualiser la référence, refaire une capture avec la version cible dans
+un profil isolé, puis examiner les écarts. Depuis la racine,
+`npm run check:bases-bridge` compare le handler simulé à la référence 1.15.1.
+`npm run test:governed-base` lance aussi ces tests et utilise la fixture
+pour le rejeu MCP. Les compteurs d’appels, les pannes injectées et les limites
+de pagination testent le comportement du Bridge en simulation.
+
 ## Endpoints exposés
 
 Préfixe officiel (recommandé) :
@@ -161,10 +189,14 @@ est `bases_formula_patch_*`, pas l’envoi de YAML arbitraire.
 
 - `evaluate: true` → `source: "engine"`. Le moteur d’Obsidian (même chemin que
   `/engine/evaluate`, avec les mêmes canaris) sélectionne d’abord les lignes de
-  la vue, sans calculer de colonne de formule : filtres globaux et de vue, tri
-  et limite de la vue (une formule sur laquelle la vue filtre ou trie est
-  calculée par le moteur, comme quand Obsidian affiche la vue). `filter` et
-  `sort` de la requête s’appliquent ensuite côté Bridge, puis la pagination.
+  la vue avec les filtres globaux, les filtres de vue et la limite de la vue.
+  Le moteur calcule les formules utilisées par les filtres de vue pour
+  sélectionner les lignes.
+  Le Bridge transmet aussi la configuration du tri de vue au handler natif.
+  Dans la capture 1.15.1, les tris ascendant et descendant sur `note.priority`
+  et le tri descendant sur `file.name` ont tous rendu les notes dans l’ordre
+  `a`, `b`, `c`, `d`. `filter` et `sort` de la requête s’appliquent ensuite
+  côté Bridge, puis la pagination.
   Le moteur ne calcule les formules que pour les lignes de la page demandée, à
   partir des octets exacts de la Base décrits par `baseSnapshot`. Seuls un
   `filter` ou un `sort` de la requête sur `formula.*` font calculer toutes les
