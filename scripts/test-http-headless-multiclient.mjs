@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -10,6 +11,7 @@ import {
   readFile,
   readdir,
   rm,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -19,6 +21,7 @@ import { SignJWT } from "jose";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const jwtSecret =
   "headless-multiclient-test-secret-must-be-at-least-32-characters";
+const newestMarkdownMtime = 1_700_000_001;
 
 async function hashDirectory(root) {
   const hash = createHash("sha256");
@@ -261,6 +264,13 @@ async function createPilotVault(sandbox) {
     ].join("\n"),
     "utf8",
   );
+  for (const [file, mtime] of [
+    ["Reference.md", newestMarkdownMtime - 1],
+    ["Projects/Pilot.md", newestMarkdownMtime],
+    ["Pilot.base", newestMarkdownMtime + 1],
+  ]) {
+    await utimes(path.join(vaultPath, file), mtime, mtime);
+  }
   return vaultPath;
 }
 
@@ -561,7 +571,14 @@ try {
     "obsidian_runtime_status",
   );
   assertToolIncludes(runtime, "headless-readonly", "runtime status");
-  assertToolIncludes(runtime, "filesystem", "runtime provenance");
+  const runtimeStatus = JSON.parse(toolText(runtime));
+  assert.deepEqual(runtimeStatus.headlessRead, {
+    source: "filesystem-replica",
+    upstreamSync: "unknown",
+    refreshing: false,
+    newestFileMtimeMs: newestMarkdownMtime * 1000,
+  });
+  assert.ok(runtimeStatus.sharedCache.lastRefreshAt > 0);
 
   const notes = await callTool(
     clientA,
@@ -590,6 +607,13 @@ try {
     },
   );
   assertToolIncludes(search, "Projects/Pilot.md", "global search");
+  for (const result of [notes, note, search]) {
+    assert.deepEqual(JSON.parse(toolText(result)).provenance, {
+      source: "headless-cache",
+      upstreamSync: "unknown",
+      lastRefreshAt: runtimeStatus.sharedCache.lastRefreshAt,
+    });
+  }
 
   const tasks = await callTool(clientB, backend.baseUrl, "list_all_tasks", {
     path: "/",

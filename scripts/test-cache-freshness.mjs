@@ -1,8 +1,12 @@
+import "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { test, after } from "node:test";
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport, McpServer } from "@modelcontextprotocol/server";
 const root = mkdtempSync(path.join(os.tmpdir(), "optimike-cache-freshness-"));
 Object.assign(process.env, {
   OBSIDIAN_RUNTIME_MODE: "headless-readonly",
@@ -16,6 +20,12 @@ const { VaultCacheService } = await import(
   "../dist/services/obsidianRestAPI/vaultCache/service.js"
 );
 const { config } = await import("../dist/config/index.js");
+const { registerObsidianReadNoteTool } = await import(
+  "../dist/mcp-server/tools/obsidianReadNoteTool/index.js"
+);
+const { collectRuntimeStatus, projectPublicRuntimeStatus } = await import(
+  "../dist/services/runtimeState.js"
+);
 const context = {
   requestId: "cache-freshness-test",
   timestamp: new Date(0).toISOString(),
@@ -45,6 +55,94 @@ after(async () => {
   else cache.db.close();
   rmSync(root, { recursive: true, force: true });
 });
+
+async function connectReadNote(t, obsidianService, vaultCacheService) {
+  const server = new McpServer({ name: "cache-read-test", version: "0" });
+  const client = new Client({ name: "cache-read-client", version: "0" });
+  t.after(async () => {
+    await client.close();
+    await server.close();
+  });
+  await registerObsidianReadNoteTool(server, obsidianService, vaultCacheService);
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  return client;
+}
+
+test("headless read labels a cold request that overlaps the first filesystem scan", async (t) => {
+  const previousSource = config.obsidianCacheSource;
+  const previousDb = config.obsidianSharedCacheDbPath;
+  config.obsidianCacheSource = "filesystem";
+  config.obsidianSharedCacheDbPath = path.join(root, "first-read.sqlite");
+  const instance = new VaultCacheService(undefined);
+  const note = "FirstRead.md";
+  writeFileSync(path.join(root, note), "filesystem fixture");
+  const scanning = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const readdir = fs.readdir;
+  t.mock.method(fs, "readdir", async (directory, options) => {
+    if (directory === root) {
+      scanning.resolve();
+      await release.promise;
+    }
+    return readdir(directory, options);
+  });
+
+  const status = async () => projectPublicRuntimeStatus(await collectRuntimeStatus(instance));
+  let read;
+  try {
+    const client = await connectReadNote(t, undefined, instance);
+    const cold = await status();
+    assert.equal(cold.sharedCache.lastRefreshAt, undefined);
+    assert.equal(cold.headlessRead.refreshing, false);
+    assert.equal(cold.headlessRead.newestFileMtimeMs, null);
+
+    read = client.callTool({ name: "obsidian_read_note", arguments: { filePath: note } });
+    await Promise.race([scanning.promise, read]);
+    const duringScan = await status();
+    assert.equal(duringScan.headlessRead.refreshing, true);
+    assert.equal(duringScan.sharedCache.lastRefreshAt, undefined);
+
+    release.resolve();
+    const result = await read;
+    assert.equal(result.isError, false);
+    const payload = JSON.parse(result.content[0].text);
+    assert.equal(payload.content, "filesystem fixture");
+    assert.deepEqual(payload.provenance, {
+      source: "headless-cache",
+      upstreamSync: "unknown",
+      lastRefreshAt: (await status()).sharedCache.lastRefreshAt,
+      refreshing: true,
+      partial: true,
+    });
+  } finally {
+    release.resolve();
+    await read?.catch(() => undefined);
+    await instance.close();
+    config.obsidianCacheSource = previousSource;
+    config.obsidianSharedCacheDbPath = previousDb;
+  }
+});
+
+test("live note reads preserve the existing response body", async (t) => {
+  const previousMode = config.obsidianRuntimeMode;
+  config.obsidianRuntimeMode = "live";
+  try {
+    const client = await connectReadNote(t, rest, cache);
+    const result = await client.callTool({
+      name: "obsidian_read_note",
+      arguments: { filePath: "Note.md" },
+    });
+    assert.equal(result.isError, false);
+    assert.deepEqual(JSON.parse(result.content[0].text), { content });
+    const status = projectPublicRuntimeStatus(await collectRuntimeStatus(cache));
+    assert.equal("headlessRead" in status, false);
+  } finally {
+    config.obsidianRuntimeMode = previousMode;
+  }
+});
+
 test("REST incremental updates cannot read excluded notes", async () => {
   const before = fetches;
   await cache.updateCacheForFile("Private/secret.md", context);

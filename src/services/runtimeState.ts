@@ -199,6 +199,12 @@ type PublicRuntimeStatus = {
   ok: boolean;
   transport: string;
   runtimeMode: string;
+  headlessRead?: {
+    source: "filesystem-replica";
+    upstreamSync: "unknown";
+    refreshing: boolean;
+    newestFileMtimeMs: number | null;
+  };
   runtime: {
     packageVersion: string;
     nodeVersion: string;
@@ -496,6 +502,8 @@ export function projectPublicRuntimeStatus(
   const dist = asRecord(runtime.dist);
   const degradedMode = asRecord(value.degradedMode);
   const writePolicy = asRecord(value.writePolicy);
+  const runtimeMode = allowedValue(value.runtimeMode, PUBLIC_RUNTIME_MODES) ?? "unknown";
+  const headlessRead = asRecord(value.headlessRead);
   const readOnlyTools = Array.isArray(degradedMode.readOnlyWhenRestUnavailable)
     ? degradedMode.readOnlyWhenRestUnavailable
     : [];
@@ -503,8 +511,15 @@ export function projectPublicRuntimeStatus(
   return {
     ok: booleanOr(value.ok, true),
     transport: allowedValue(value.transport, PUBLIC_TRANSPORTS) ?? "unknown",
-    runtimeMode:
-      allowedValue(value.runtimeMode, PUBLIC_RUNTIME_MODES) ?? "unknown",
+    runtimeMode,
+    ...(runtimeMode.startsWith("headless-") ? {
+      headlessRead: {
+        source: "filesystem-replica" as const,
+        upstreamSync: "unknown" as const,
+        refreshing: booleanOr(headlessRead.refreshing),
+        newestFileMtimeMs: optionalNumber(headlessRead.newestFileMtimeMs) ?? null,
+      },
+    } : {}),
     runtime: {
       packageVersion: publicVersion(runtime.packageVersion) ?? "unknown",
       nodeVersion: publicVersion(runtime.nodeVersion) ?? "unknown",
@@ -641,6 +656,12 @@ export async function collectRuntimeStatus(
     transport: config.mcpTransportType,
     runtimeMode: config.obsidianRuntimeMode,
     runtime: collectRuntimeFingerprint(),
+    ...(config.obsidianRuntimeMode.startsWith("headless-") ? {
+      headlessRead: {
+        refreshing: vaultCacheService?.getRefreshEvidence().refreshing ?? false,
+        newestFileMtimeMs: vaultCacheService?.getNewestFileMtimeMs() ?? null,
+      },
+    } : {}),
     sharedCache: {
       ...(vaultCacheService?.getStats() ?? {
         dbPath: config.obsidianSharedCacheDbPath,

@@ -32,6 +32,35 @@ OBSIDIAN_VAULT_EXCLUDE_PATTERNS="tmp/**,**/tmp/**,**/screenshots/**,**/*screensh
 SEMANTIC_SEARCH_PREWARM=false
 ```
 
+## Provenance des lectures de notes
+
+Dans les trois modes headless, `obsidian_runtime_status` indique le mode
+d’exécution et renvoie `headlessRead.source: "filesystem-replica"`. Le serveur
+lit depuis son cache local sans connexion à Obsidian Desktop.
+`headlessRead.refreshing` signale un scan en attente ou en cours.
+`headlessRead.newestFileMtimeMs` contient la date de modification la plus
+récente parmi les fichiers Markdown indexés, ou `null` si l’index est vide.
+`sharedCache.lastRefreshAt` indique le dernier rafraîchissement réussi et
+reste absent jusqu’au premier succès. Les deux dates sont exprimées en
+millisecondes depuis l’époque Unix.
+
+`obsidian_read_note`, `obsidian_list_notes` et `obsidian_global_search`
+renvoient un objet `provenance` pour les lectures réussies et les erreurs de
+disponibilité lorsque le cache headless est activé, y compris en mode
+compact. Il contient `source: "headless-cache"` et `lastRefreshAt` tel
+qu’observé au moment de produire la réponse (`null` sans rafraîchissement
+réussi). Les outils continuent d’attendre que le cache soit prêt.
+`partial: true` signale une requête qui a rencontré un cache indisponible ou
+qui a chevauché un rafraîchissement. `refreshing: true` signale un
+rafraîchissement observé pendant la requête, même s’il s’est terminé avant la
+réponse. Le scan met à jour les fichiers un par un, sans garantie
+transactionnelle entre fichiers.
+
+Le statut et la provenance indiquent tous deux `upstreamSync: "unknown"`.
+Un rafraîchissement local réussi établit que le serveur a indexé sa copie
+locale. L’état et la fraîcheur de la synchronisation amont se vérifient
+séparément.
+
 ## Validation
 
 ```bash

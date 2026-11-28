@@ -159,6 +159,7 @@ export class VaultCacheService {
   private isCacheReady = false;
   private isBuilding = false;
   private lastRefreshStartedAt: number | null = null;
+  private refreshGeneration = 0;
   private lastRefreshCompletedAt: number | null = null;
   private lastRefreshDurationMs: number | null = null;
   private lastRefreshError: string | null = null;
@@ -297,6 +298,22 @@ export class VaultCacheService {
 
   public getCachedFileCount(): number {
     return this.metadataCache.size;
+  }
+
+  public getRefreshEvidence() {
+    return {
+      lastRefreshAt: this.readMetadataNumber("last_refresh_at") ?? null,
+      refreshing: Boolean(this.isBuilding || this.refreshRun || this.refreshRequested),
+      ready: this.isPubliclyReady(),
+      generation: this.refreshGeneration,
+    };
+  }
+
+  public getNewestFileMtimeMs(): number | null {
+    const row = this.db.prepare("SELECT MAX(mtime) AS mtime FROM file_cache").get() as
+      | { mtime: number | null }
+      | undefined;
+    return row?.mtime ?? null;
   }
 
   public getStats(): Record<string, unknown> {
@@ -720,6 +737,7 @@ export class VaultCacheService {
     isInitialBuild ||= this.lastRefreshError !== null || !this.isCacheReady ||
       (previousState !== "complete" && previousState !== "pending-events");
     this.isBuilding = true;
+    this.refreshGeneration++;
     const uncertaintyAtStart = this.uncertaintyGeneration;
     this.lastRefreshStartedAt = Date.now();
     this.lastRefreshCompletedAt = null;

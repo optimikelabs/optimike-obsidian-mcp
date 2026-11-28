@@ -30,6 +30,32 @@ OBSIDIAN_VAULT_EXCLUDE_PATTERNS="tmp/**,**/tmp/**,**/screenshots/**,**/*screensh
 SEMANTIC_SEARCH_PREWARM=false
 ```
 
+## Note read provenance
+
+In all three headless modes, `obsidian_runtime_status` identifies the runtime
+mode and reports `headlessRead.source: "filesystem-replica"`. The server reads
+from its local filesystem cache without a live Obsidian connection.
+`headlessRead.refreshing` shows whether a scan is queued or running.
+`headlessRead.newestFileMtimeMs` is the latest modification time among indexed
+Markdown files, or `null` for an empty index. `sharedCache.lastRefreshAt` is
+the last successful cache refresh time and is omitted before the first success.
+Both timestamps use milliseconds since the Unix epoch.
+
+`obsidian_read_note`, `obsidian_list_notes` and `obsidian_global_search`
+include one `provenance` object on successful reads and cache availability
+errors when the headless cache is enabled, including in compact mode.
+It contains `source: "headless-cache"` and `lastRefreshAt` as observed
+when the response is assembled (`null` without a successful refresh). The
+tools retain their normal readiness waits. `partial: true` flags a request
+that encountered an unready cache or overlapped a refresh. `refreshing: true`
+flags a refresh observed during the request, even if it completed before the
+reply. The scan updates files individually, so the response has no
+transactional guarantee across files.
+
+Status and note read provenance both report `upstreamSync: "unknown"`. A
+successful local refresh establishes that the server indexed its local copy.
+Upstream synchronization health and recency require separate evidence.
+
 ## Validation
 
 ```bash

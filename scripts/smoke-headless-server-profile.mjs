@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import "./test-support/isolated-state.mjs";
+import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/client";
@@ -156,6 +158,7 @@ async function main() {
     if (status.writePolicy?.mode !== "readonly") {
       throw new Error(`Unexpected write policy: ${status.writePolicy?.mode}`);
     }
+    assert.equal(status.headlessRead?.upstreamSync, "unknown");
 
     const list = jsonOf(
       await withTimeout(
@@ -178,18 +181,17 @@ async function main() {
       throw new Error("No markdown file found within recursionDepth=3.");
     }
 
-    const readText = textOf(
-      await withTimeout(
-        client.callTool({
-          name: "obsidian_read_note",
-          arguments: { filePath: readPath, format: "markdown" },
-        }),
-        "obsidian_read_note",
-      ),
+    const readResult = await withTimeout(
+      client.callTool({
+        name: "obsidian_read_note",
+        arguments: { filePath: readPath, format: "markdown" },
+      }),
+      "obsidian_read_note",
     );
-    if (!readText.trim()) {
-      throw new Error(`Read-back was empty for ${readPath}`);
-    }
+    assert.equal(readResult.isError, false);
+    const read = jsonOf(readResult, "obsidian_read_note");
+    assert.equal(typeof read.content, "string");
+    assert.equal(read.provenance?.source, "headless-cache");
 
     const tasks = jsonOf(
       await withTimeout(
