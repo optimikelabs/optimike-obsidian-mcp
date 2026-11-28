@@ -469,6 +469,9 @@ test("an exact headless note read is complete before the cached provenance becom
     assert.deepEqual(response.provenance, {
       source: "filesystem",
       upstreamSync: "unknown",
+      lastSuccessfulPullAt: null,
+      lagSecondsUpperBound: null,
+      evidenceSource: null,
       refreshing: true,
       partial: false,
     });
