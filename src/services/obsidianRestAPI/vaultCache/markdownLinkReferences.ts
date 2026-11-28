@@ -312,9 +312,11 @@ function collectMarkdownLinks(body: string) {
 
 export function extractMarkdownLinkReferences(
   content: string,
-  { forceMarkdownTree = false } = {},
+  { forceMarkdownTree = false, readFrontmatter = true } = {},
 ): MarkdownLinkReference[] {
-  const { body, frontmatter } = readMarkdownFrontmatter(content);
+  const { body, frontmatter } = readFrontmatter
+    ? readMarkdownFrontmatter(content)
+    : { body: content, frontmatter: {} };
   const references: MarkdownLinkReference[] = [];
   for (const [key, value] of Object.entries(frontmatter)) {
     const pending = [value];
