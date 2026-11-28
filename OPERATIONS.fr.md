@@ -486,6 +486,10 @@ Les [générations externes](docs/semantic-vector-cache-encoding.md#external-sma
 utilisent le pointeur et l’identifiant de génération pour actualiser le cache.
 Un chargement à froid vérifie les deux fichiers de vecteurs, y compris lors
 d’une recherche de notes seules ou du préchauffage.
+Utiliser un seul mode sémantique par cache SQLite partagé. Attribuer des
+valeurs `OBSIDIAN_SHARED_CACHE_DB_PATH` distinctes aux backends qui utilisent
+le pointeur externe et `SMART_ENV_DIR`. Leurs snapshots se remplacent dans une
+base commune, ce qui provoque des lectures à froid répétées.
 
 ### Recherche par sections
 
@@ -754,7 +758,8 @@ Vérifie :
 - l’état runtime via `obsidian_runtime_status`
 
 En mode externe, le fichier UTF-8 `CURRENT` contient un identifiant comme
-`g42`. Le serveur lit `generations/g42` à côté du pointeur. Préparer la
+`g42` suivi d’un unique retour à la ligne LF ou CRLF. Un BOM UTF-8 est accepté.
+Le serveur lit `generations/g42` à côté du pointeur. Préparer la
 génération complète sur le même volume, puis remplacer le pointeur par
 renommage atomique. Garder la génération précédente immuable et lisible
 jusqu’à la fin des requêtes qui ont pu la sélectionner. Si le pointeur,

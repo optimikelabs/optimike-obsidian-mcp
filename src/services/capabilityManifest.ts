@@ -117,6 +117,7 @@ export type CapabilityNextAction =
   | "enable_semantic_search"
   | "enable_query_embedding"
   | "refresh_semantic_index"
+  | "check_semantic_publication"
   | "retry_capability_probe"
   | "wait_for_semantic_index"
   | "configure_query_embedder"
@@ -209,6 +210,7 @@ export interface CapabilityManifestProjectionInput {
   transport: "stdio" | "http";
   cacheReady: boolean;
   semanticEnabled: boolean;
+  semanticExternal?: boolean;
   queryEmbeddingEnabled: boolean;
   semanticIndex: NormalizedProbe<{
     vectorCount: number;
@@ -629,7 +631,9 @@ function semanticCapability(
           ? "semantic_query_unverified"
           : "semantic_embedder_unavailable",
     !validated
-      ? "refresh_semantic_index"
+      ? input.semanticExternal
+        ? "check_semantic_publication"
+        : "refresh_semantic_index"
       : embedderReady
         ? "none"
         : queryUnverified
@@ -1416,8 +1420,8 @@ export async function collectCapabilityManifest(options: {
     "semanticCache",
     "enabled",
   );
-  const semanticSourceUnavailable =
-    record(record(options.runtimeStatus).semanticCache).reasonCode === "semantic_index_unavailable";
+  const semanticCache = record(record(options.runtimeStatus).semanticCache);
+  const semanticSourceUnavailable = semanticCache.reasonCode === "semantic_index_unavailable";
   const localRestProbe =
     options.probes?.localRest ??
     (options.obsidianService
@@ -1550,6 +1554,7 @@ export async function collectCapabilityManifest(options: {
     transport: config.mcpTransportType,
     cacheReady: runtimeBoolean(options.runtimeStatus, "sharedCache", "ready"),
     semanticEnabled,
+    semanticExternal: semanticCache.source === "external",
     queryEmbeddingEnabled: config.enableQueryEmbedding,
     semanticIndex,
     semanticIndexLoading,

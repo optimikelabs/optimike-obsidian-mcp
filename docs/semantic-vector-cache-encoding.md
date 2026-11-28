@@ -20,7 +20,9 @@ Bounded runtime diagnostics distinguish deadline expiration from an unreachable 
 
 Set `SMART_ENV_GENERATION_POINTER` on the MCP server to the absolute path of
 a UTF-8 file such as `/srv/semantic-index/CURRENT`. It contains one generation
-ID, for example `g42\n` (a final newline is optional). IDs start with an ASCII
+ID followed by exactly one LF or CRLF, for example `g42\n`. A UTF-8 BOM is
+accepted. The line terminator is required so a partial write cannot select an
+existing generation whose ID is a prefix. IDs start with an ASCII
 letter or digit and contain at most 64 letters, digits, underscores or hyphens.
 Use a fresh ID for each publication and avoid reserved Windows device names.
 The reader looks for `generations/<id>` next to the pointer. Put the pointer
@@ -28,6 +30,11 @@ and generation files on the same volume, outside the vault, as regular files
 without redirects. With the variable unset, the existing `SMART_ENV_DIR`
 behavior applies. A configured but unreadable or invalid pointer makes semantic
 search unavailable even if `SMART_ENV_DIR` is also set.
+
+Use one semantic mode per shared SQLite cache. When running external-pointer
+and `SMART_ENV_DIR` backends side by side, give them separate
+`OBSIDIAN_SHARED_CACHE_DB_PATH` values. Their semantic snapshots replace each
+other in a shared database, causing repeated cold reads.
 
 Each generation uses the usual `smart_env.json`, model registry
 `embedding_models/embedding_models.ajson` and source records
