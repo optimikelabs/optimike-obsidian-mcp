@@ -410,7 +410,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "obsidian_search_replace",
     "notes.direct.common",
     "notes-core",
-    GUARDED_NOTE_MODES,
+    LIVE_MODES,
     {
       surfaceClass: "direct",
       annotationClass: "destructive",
@@ -452,7 +452,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "obsidian_manage_frontmatter",
     "metadata.direct.frontmatter",
     "frontmatter-direct",
-    GUARDED_NOTE_MODES,
+    LIVE_MODES,
     {
       surfaceClass: "direct",
       annotationClass: "destructive",

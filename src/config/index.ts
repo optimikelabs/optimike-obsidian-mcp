@@ -616,6 +616,10 @@ export const config = {
       `obsidian-note-replace-${noteReplaceProfileId}.sqlite`,
     ),
   headlessGovernedJournalPath: env.MCP_HEADLESS_GOVERNED_JOURNAL_PATH,
+  headlessGovernedStateDirectory: path.join(
+    process.env.LOCALAPPDATA || process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state"),
+    "optimike-obsidian-mcp", "headless-governed",
+  ),
   obsidianNoteReplaceExecutionLeaseMs:
     env.MCP_OBSIDIAN_NOTE_REPLACE_EXECUTION_LEASE_MS,
   obsidianPlannedRetentionMs: env.MCP_OBSIDIAN_PLANNED_RETENTION_DAYS * 24 * 60 * 60 * 1000,

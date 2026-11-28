@@ -72,7 +72,7 @@ Les profils modernes ne masquent une voie directe que lorsque la famille gouvern
 
 - `live` / `hybrid` live : exposer `obsidian_frontmatter_patch_{plan,apply,status,recover}` et masquer `obsidian_manage_frontmatter` ;
 - `live` / `hybrid` live : exposer `obsidian_text_patch_{plan,apply,status,recover}` et masquer `obsidian_update_note` / `obsidian_search_replace` seulement lorsque le quartet est complet ;
-- `headless-guarded` / `headless-filesystem` : la famille Frontmatter gouvernée est absente, donc `obsidian_manage_frontmatter` reste le fallback borné ;
+- `headless-guarded` / `headless-filesystem` exposent les familles gouvernées de patch de texte et de frontmatter. Les outils directs `obsidian_search_replace` et `obsidian_manage_frontmatter` sont réservés au mode live, y compris avec le profil `full`.
 - les helpers Canvas directs de `headless-filesystem` restent disponibles uniquement lorsque la famille Canvas live gouvernée est structurellement absente ;
 - `bases_upsert_config` n’est jamais un fallback de formule et reste réservé à `full`.
 

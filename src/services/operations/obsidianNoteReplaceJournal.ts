@@ -82,6 +82,11 @@ export type ObsidianNoteReplacePlan = {
     stagedSha256?: string;
     stagedContent?: string;
     publicationConfirmed?: true;
+    localStage?: true;
+    backupVerified?: true;
+    witnessesCleaned?: true;
+    restorePending?: true;
+    displacedObservation?: { sha256: string; bytesBase64: string };
     // Private evidence. null means publication was followed by absence.
     divergentObservation?: { sha256: string; bytesBase64: string } | null;
   };
@@ -716,16 +721,46 @@ export class ObsidianNoteReplaceJournal {
   }
 
   recordFilesystemStage(operationId: string, attemptId: string, stagedIdentity: string, stagedSha256: string, stagedContent?: string): void {
-    this.updateFilesystemAttempt(operationId, attemptId, { stagedIdentity, stagedSha256, stagedContent });
+    this.updateFilesystemAttempt(operationId, attemptId, { stagedIdentity, stagedSha256, stagedContent,
+      ...(stagedContent === undefined ? {} : { localStage: true }) });
   }
 
   confirmFilesystemPublication(operationId: string, attemptId: string): void {
     this.updateFilesystemAttempt(operationId, attemptId, { publicationConfirmed: true });
   }
 
-  recordFilesystemDivergence(operationId: string, observation: { sha256: string; bytesBase64: string } | null): void {
+  recordFilesystemDivergence(operationId: string, observation: { sha256: string; bytesBase64: string } | null,
+    displacedObservation?: { sha256: string; bytesBase64: string }): void {
     this.transitionInternal(operationId, ["applying", "outcome_unknown"], "outcome_unknown",
-      "headless_postflight_diverged", undefined, true, undefined, undefined, { divergentObservation: observation });
+      "headless_postflight_diverged", undefined, true, undefined, undefined, { divergentObservation: observation, displacedObservation });
+  }
+
+  settleUnpublishedFilesystem(operationId: string, status: "conflict" | "failed"): void {
+    this.transitionInternal(operationId, ["applying", "outcome_unknown"], status,
+      "headless_not_published", undefined, true, undefined);
+  }
+
+  recordFilesystemRestorationNeeded(operationId: string): void {
+    this.transitionInternal(operationId, ["applying", "outcome_unknown"], "outcome_unknown",
+      "headless_displaced_note_needs_restoration", undefined, true, undefined, undefined, { restorePending: true });
+  }
+
+  verifyFilesystemBackup(operationId: string): void {
+    const row = this.get(operationId);
+    if (!row?.filesystem || !["applying", "outcome_unknown"].includes(row.status)) throw new ObsidianNoteReplaceConcurrencyError();
+    const updated = { ...row, filesystem: { ...row.filesystem, backupVerified: true } };
+    const result = this.db.prepare("UPDATE obsidian_note_replace_plans SET payload_json = ? WHERE operation_id = ? AND payload_json = ?")
+      .run(JSON.stringify(updated), operationId, JSON.stringify(row));
+    if (Number(result.changes) !== 1) throw new ObsidianNoteReplaceConcurrencyError();
+  }
+
+  confirmFilesystemWitnessCleanup(operationId: string): void {
+    const row = this.get(operationId);
+    if (!row?.filesystem || row.filesystem.divergentObservation === undefined) throw new ObsidianNoteReplaceConcurrencyError();
+    const updated = { ...row, filesystem: { ...row.filesystem, witnessesCleaned: true } };
+    const result = this.db.prepare("UPDATE obsidian_note_replace_plans SET payload_json = ? WHERE operation_id = ? AND payload_json = ?")
+      .run(JSON.stringify(updated), operationId, JSON.stringify(row));
+    if (Number(result.changes) !== 1) throw new ObsidianNoteReplaceConcurrencyError();
   }
 
   private updateFilesystemAttempt(operationId: string, attemptId: string, evidence: Partial<NonNullable<ObsidianNoteReplacePlan["filesystem"]>>): void {
@@ -1051,7 +1086,12 @@ export class ObsidianNoteReplaceJournal {
            AND updated_at < ?`,
       )
       .run(cutoff);
-    if (Number(result.changes) > 0 || Number(expired.changes) > 0) {
+    const expiredDivergences = this.db.prepare(`DELETE FROM obsidian_note_replace_plans
+      WHERE status = 'outcome_unknown' AND updated_at < ?
+        AND json_type(payload_json, '$.filesystem.divergentObservation') IS NOT NULL
+        AND (json_extract(payload_json, '$.filesystem.witnessesCleaned') = 1
+          OR json_type(payload_json, '$.filesystem.localStage') IS NULL)`).run(cutoff);
+    if (Number(result.changes) > 0 || Number(expired.changes) > 0 || Number(expiredDivergences.changes) > 0) {
       this.walCheckpointRequired = true;
       this.checkpointSensitiveFrames();
     }

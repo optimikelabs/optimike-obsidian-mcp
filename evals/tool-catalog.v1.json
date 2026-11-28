@@ -362,14 +362,12 @@
       "obsidian_global_search",
       "obsidian_list_notes",
       "obsidian_list_pending_operations",
-      "obsidian_manage_frontmatter",
       "obsidian_note_create_apply",
       "obsidian_note_create_plan",
       "obsidian_note_create_status",
       "obsidian_read_note",
       "obsidian_runtime_maintenance",
       "obsidian_runtime_status",
-      "obsidian_search_replace",
       "obsidian_text_patch_apply",
       "obsidian_text_patch_plan",
       "obsidian_text_patch_recover",
@@ -436,7 +434,6 @@
       "obsidian_list_notes",
       "obsidian_list_pending_operations",
       "obsidian_manage_canvas",
-      "obsidian_manage_frontmatter",
       "obsidian_manage_tags",
       "obsidian_move_note",
       "obsidian_note_create_apply",
@@ -453,7 +450,6 @@
       "obsidian_read_note",
       "obsidian_runtime_maintenance",
       "obsidian_runtime_status",
-      "obsidian_search_replace",
       "obsidian_text_patch_apply",
       "obsidian_text_patch_plan",
       "obsidian_text_patch_recover",
@@ -1336,14 +1332,12 @@
           "obsidian_global_search",
           "obsidian_list_notes",
           "obsidian_list_pending_operations",
-          "obsidian_manage_frontmatter",
           "obsidian_note_create_apply",
           "obsidian_note_create_plan",
           "obsidian_note_create_status",
           "obsidian_read_note",
           "obsidian_runtime_maintenance",
           "obsidian_runtime_status",
-          "obsidian_search_replace",
           "obsidian_text_patch_apply",
           "obsidian_text_patch_plan",
           "obsidian_text_patch_recover",
@@ -1410,7 +1404,6 @@
           "obsidian_list_notes",
           "obsidian_list_pending_operations",
           "obsidian_manage_canvas",
-          "obsidian_manage_frontmatter",
           "obsidian_manage_tags",
           "obsidian_move_note",
           "obsidian_note_create_apply",
@@ -1427,7 +1420,6 @@
           "obsidian_read_note",
           "obsidian_runtime_maintenance",
           "obsidian_runtime_status",
-          "obsidian_search_replace",
           "obsidian_text_patch_apply",
           "obsidian_text_patch_plan",
           "obsidian_text_patch_recover",
@@ -4165,9 +4157,7 @@
       "annotationClass": "destructive",
       "registrationModes": [
         "live",
-        "hybrid-live",
-        "headless-guarded",
-        "headless-filesystem"
+        "hybrid-live"
       ],
       "profiles": [
         "full"
@@ -4175,9 +4165,7 @@
       "profileModes": {
         "full": [
           "live",
-          "hybrid-live",
-          "headless-guarded",
-          "headless-filesystem"
+          "hybrid-live"
         ]
       },
       "replacement": {
@@ -5152,9 +5140,7 @@
       "annotationClass": "destructive",
       "registrationModes": [
         "live",
-        "hybrid-live",
-        "headless-guarded",
-        "headless-filesystem"
+        "hybrid-live"
       ],
       "profiles": [
         "full"
@@ -5162,9 +5148,7 @@
       "profileModes": {
         "full": [
           "live",
-          "hybrid-live",
-          "headless-guarded",
-          "headless-filesystem"
+          "hybrid-live"
         ]
       },
       "replacement": {

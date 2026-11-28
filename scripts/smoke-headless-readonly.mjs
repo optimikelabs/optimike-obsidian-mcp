@@ -525,18 +525,11 @@ async function main() {
     for (const name of liveOnly) {
       if (
         modeArg === "hybrid-live" ||
-        (modeArg === "headless-guarded" &&
-          [
-            "obsidian_update_note",
-            "obsidian_search_replace",
-            "obsidian_manage_frontmatter",
-          ].includes(name)) ||
+        (modeArg === "headless-guarded" && name === "obsidian_update_note") ||
         (modeArg === "headless-filesystem" &&
           [
             "obsidian_update_note",
             "obsidian_delete_note",
-            "obsidian_search_replace",
-            "obsidian_manage_frontmatter",
             "obsidian_manage_tags",
             "obsidian_move_note",
             "obsidian_batch_frontmatter",
@@ -782,47 +775,6 @@ async function main() {
         "guarded update",
       );
       assertTextIncludes(update, "Guarded append smoke", "guarded update");
-
-      const replace = await withTimeout(
-        client.callTool({
-          name: "obsidian_search_replace",
-          arguments: {
-            targetType: "filePath",
-            targetIdentifier: "Projects/Headless.md",
-            replacements: [
-              {
-                search: "Guarded append smoke",
-                replace: "Guarded replace smoke",
-              },
-            ],
-            returnContent: true,
-          },
-        }),
-        "guarded search replace",
-      );
-      assertTextIncludes(
-        replace,
-        "Guarded replace smoke",
-        "guarded search replace",
-      );
-
-      const frontmatter = await withTimeout(
-        client.callTool({
-          name: "obsidian_manage_frontmatter",
-          arguments: {
-            filePath: "Projects/Headless.md",
-            operation: "set",
-            key: "headless_guarded_smoke",
-            value: true,
-          },
-        }),
-        "guarded frontmatter",
-      );
-      assertTextIncludes(
-        frontmatter,
-        "headless_guarded_smoke",
-        "guarded frontmatter",
-      );
 
       if (modeArg === "headless-filesystem") {
         const tagsAdd = await withTimeout(

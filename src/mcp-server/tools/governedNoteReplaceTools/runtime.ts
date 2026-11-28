@@ -58,9 +58,8 @@ import {
   type PendingOperationRowsPage,
 } from "../../../services/operations/obsidianNoteReplaceJournal.js";
 import { RestAtomicWriteBackend } from "../../../services/operations/restAtomicWriteBackend.js";
-import { FilesystemNoteBackend, filesystemJournalPath } from "../../../services/operations/filesystemNoteBackend.js";
+import { defaultFilesystemJournal, FilesystemNoteBackend, filesystemJournalPath } from "../../../services/operations/filesystemNoteBackend.js";
 import { FilesystemRevert } from "../../../services/operations/filesystemRevert.js";
-import { dirname, join } from "node:path";
 import {
   AdministrativeClosureService,
   type AdministrativeClosureReasonCode,
@@ -1113,7 +1112,7 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
     completionMode: SettlementCompletionMode = "verified",
   ): Promise<OperationReceipt> {
     const plan = this.required(reference);
-    if (plan.status === "outcome_unknown") {
+    if (plan.status === "outcome_unknown" || (plan.filesystem && plan.status === "applying")) {
       assertCurrentWritePolicy("recover", plan.path, plan.nextContent);
     }
     const operation = this.backend.withContext({ kind: "recover", path: plan.path, requireNativeFormat: !!plan.frontmatterFormat }, () =>
@@ -1227,9 +1226,7 @@ export function createGovernedNoteReplaceRuntime(
     config.obsidianRuntimeMode === "headless-filesystem") && config.obsidianVaultPath;
   if (!obsidianService && !headless) return undefined;
   const journalPath = headless
-    ? filesystemJournalPath(headless, config.headlessGovernedJournalPath ??
-        join(dirname(config.obsidianSharedCacheDbPath), `headless-governed-${config.vaultInstructionsVaultId}.sqlite`),
-      config.headlessGovernedJournalPath ? undefined : config.obsidianNoteReplaceJournalPath + ".headless")
+    ? config.headlessGovernedJournalPath ? filesystemJournalPath(headless, config.headlessGovernedJournalPath) : defaultFilesystemJournal(headless)
     : config.obsidianNoteReplaceJournalPath;
 
   const journal = new ObsidianNoteReplaceJournal(

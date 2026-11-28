@@ -49,11 +49,11 @@ without them. See
 - `headless-readonly`: read/search/tasks/semantic/runtime/format validation and
   local readonly Bases fallback. Operon tools can only serve a previously
   validated stale snapshot.
-- `headless-guarded`: `headless-readonly` plus bounded filesystem writes for
-  note append/prepend, exact search-replace, and frontmatter `set`. Operon remains
-  read-only.
-- `headless-filesystem`: `headless-guarded` plus explicit local filesystem
-  features: tags, admin move/archive/delete, batch frontmatter, minimal Bases
+- `headless-guarded`: `headless-readonly` plus governed text and frontmatter
+  patches, durable note creation, the operations cockpit and bounded direct
+  note append/prepend. Operon remains read-only.
+- `headless-filesystem`: `headless-guarded` plus governed note replacement and
+  revert, tags, admin move/archive/delete, batch frontmatter, minimal Bases
   writes, and JSON Canvas helpers. Operon remains read-only.
 
 ### Local REST API 5.x contract

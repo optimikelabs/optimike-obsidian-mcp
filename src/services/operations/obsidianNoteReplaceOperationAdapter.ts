@@ -251,6 +251,7 @@ export type ObsidianNoteReplaceAdapterOptions = {
   filesystem?: {
     seal(path: string, content: string, source: AtomicWriteReadResponse): Promise<{ content: string; policyDigest: string }>;
     matchesEffect(plan: ObsidianNoteReplacePlan): Promise<boolean>;
+    recoverStage?(plan: ObsidianNoteReplacePlan): Promise<void>;
   };
 };
 
@@ -539,7 +540,8 @@ function receipt(
   const terminal = current.phase === "terminal";
   const recoverable =
     plan.status === "applying" ||
-    (plan.status === "outcome_unknown" && plan.filesystem?.divergentObservation === undefined);
+    (plan.status === "outcome_unknown" && plan.filesystem?.divergentObservation === undefined &&
+      (!plan.filesystem?.stagedIdentity || plan.filesystem.restorePending === true));
   const digest = planDigest(profile, plan);
   const settlementCheckAt =
     plan.modifiedTimeSettlementPolicy &&
@@ -957,6 +959,10 @@ export class ObsidianNoteReplaceOperationAdapter
     if (this.options.filesystem && plan.filesystem?.stagedIdentity) {
       // Reconciliation may prove the first effect. It may never replay a
       // publication attempt, even if the old bytes have reappeared.
+      if (plan.filesystem.restorePending && plan.filesystem.divergentObservation === undefined) {
+        await this.options.filesystem.recoverStage?.(plan);
+        return this.status(reference);
+      }
       return receipt(this.profile, plan);
     }
     plan = this.beginModifiedTimeSettlementObservationOrReload(plan);

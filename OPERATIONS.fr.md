@@ -106,7 +106,7 @@ Cette politique protège le cache Optimike, la recherche, Tasks et le fallback l
 - `live` : mode complet par défaut. Requiert Obsidian Desktop + Local REST API + `OBSIDIAN_API_KEY`.
 - `hybrid` : Local REST API optionnelle et non bloquante. Si l’API est configurée, les tools live sont exposées ; sinon `OBSIDIAN_VAULT` est requis et la surface cache/filesystem reste disponible.
 - `headless-readonly` : requiert `OBSIDIAN_VAULT`; ne requiert ni Obsidian Desktop, ni Local REST API, ni `OBSIDIAN_API_KEY`; expose lecture, liste, recherche, Tasks, sémantique, runtime et fallback local Bases en lecture seule.
-- `headless-guarded` ajoute les patches gouvernés du texte et du frontmatter, la création durable et le cockpit à la surface de lecture headless. Le profil d’outils `full` conserve les opérations Markdown directes bornées.
+- `headless-guarded` ajoute les patches gouvernés du texte et du frontmatter, la création durable et le cockpit à la surface de lecture headless. Le profil d’outils `full` conserve l’ajout direct borné en début ou en fin de note. La gestion gouvernée des dates exige un fuseau horaire explicite compatible. Voir le [profil serveur headless](docs/headless-server-profile.fr.md).
 - `headless-filesystem` ajoute le remplacement complet gouverné et le retour arrière. Il couvre aussi les tags, le déplacement, l’archivage et la suppression avec `expectedHash` ou `expectedMtime`, le frontmatter par lot, ainsi que les écritures Bases et Canvas minimales.
 
 Le [profil serveur headless](docs/headless-server-profile.fr.md#écritures-markdown-gouvernées)

@@ -481,6 +481,7 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "atomic_write_creation_property_missing",
   "date_preparation_unverified",
   "headless_date_policy_unavailable",
+  "headless_date_save_interval",
   "headless_note_path_spelling",
   "date_preparation_bridge_upgrade_required",
   "date_preparation_fdm_pending",
@@ -707,7 +708,9 @@ function safeDiagnosticFields(
 
 function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
   if (reasonCode === "headless_date_policy_unavailable")
-    return "Headless governed writes require readable, unambiguous Frontmatter Date Manager settings.";
+    return "Headless governed writes require supported Frontmatter Date Manager settings and an explicit timezone matching the process.";
+  if (reasonCode === "headless_date_save_interval")
+    return "The date manager's minimum save interval has not elapsed. Plan the write again after the interval.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_tool_arguments")
     return "Invalid tool arguments. See validationIssues for the field and reason.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === BASE_FORMULA_ENGINE_REFUSAL)

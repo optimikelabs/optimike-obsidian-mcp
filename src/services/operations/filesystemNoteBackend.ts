@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, realpathSync, statSync, type BigIntStats } from "node:fs";
-import { lstat, open, readFile, readdir, rm } from "node:fs/promises";
+import { link, lstat, open, readFile, readdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
@@ -9,20 +9,20 @@ import { load } from "js-yaml";
 import { config } from "../../config/index.js";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { requestContextService } from "../../utils/index.js";
-import { renameWithPrecondition, VaultFileService } from "../vaultFileService.js";
+import { VaultFileService } from "../vaultFileService.js";
 import { nativeNotePath } from "../nativeNoteMoveContract.js";
 import { createPolicyDigest, type NoteCreateApply, type NoteCreatePolicy } from "../noteCreateContract.js";
 import type { AtomicWriteReadRequest, AtomicWriteCasRequest, AtomicWriteReadResponse, AtomicWriteStatusResponse } from "../obsidianRestAPI/types.js";
 import { frontmatterEnvelope } from "../obsidianFrontmatterFormat.js";
-import { compileFrontmatterPatch } from "../frontmatterPatchCompiler.js";
 import { operationDigest } from "./contract.js";
-import { materializeFilesystemDates, normalizeDateKey, readFilesystemDatePolicy, sealFilesystemDates } from "./filesystemDatePolicy.js";
+import { materializeFilesystemDates, normalizeDateKey, readFilesystemDatePolicy, renderFilesystemDates, sealFilesystemDates } from "./filesystemDatePolicy.js";
 import type { AtomicWriteBackend } from "./obsidianNoteReplaceOperationAdapter.js";
 import type { NoteCreateBackend } from "./noteCreateOperationAdapter.js";
 import type { ObsidianNoteReplacePlan, ObsidianNoteReplaceJournal } from "./obsidianNoteReplaceJournal.js";
 
 export const FILESYSTEM_AUTHORITY = "headless-filesystem" as const;
 const absent = (error: unknown) => (error as NodeJS.ErrnoException)?.code === "ENOENT";
+const occupied = (error: unknown) => (error as NodeJS.ErrnoException)?.code === "EEXIST";
 const hash = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
 // NTFS may preserve a replaced entry's creation time (file name tunneling).
 const identity = (s: BigIntStats) => process.platform === "win32" ?
@@ -31,6 +31,26 @@ const emptyCreatePolicy: NoteCreatePolicy = { version: 1, utcOffsetMinutes: 0, f
 const frontmatter = (content: string): Record<string, unknown> =>
   (load(frontmatterEnvelope(content)?.yaml ?? "") ?? {}) as Record<string, unknown>;
 
+type DiskSnapshot = { bytes: Buffer; size: number; sha256: string; stat: BigIntStats };
+const evidence = ({ bytes, sha256 }: DiskSnapshot) => ({ sha256, bytesBase64: bytes.toString("base64") });
+
+async function syncDirectory(directory: string) {
+  if (process.platform === "win32") return;
+  const handle = await open(directory, "r");
+  try { await handle.sync(); } finally { await handle.close(); }
+}
+
+async function renameWithPrecondition(source: string, target: string, recheck: () => Promise<void>) {
+  for (let attempt = 0; ; attempt += 1) {
+    await recheck();
+    try { await rename(source, target); return; } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (process.platform !== "win32" || attempt >= 30 || (code !== "EPERM" && code !== "EBUSY")) throw error;
+      await delay(100);
+    }
+  }
+}
+
 function conflict(message: string) {
   return new McpError(BaseErrorCode.CONFLICT, message);
 }
@@ -38,6 +58,19 @@ function conflict(message: string) {
 function within(root: string, target: string) {
   const relative = path.relative(root, target);
   return relative === "" || (!path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(".." + path.sep));
+}
+
+function vaultIdentity(root: string) {
+  return operationDigest({ backend: FILESYSTEM_AUTHORITY,
+    root: process.platform === "win32" ? root.toLowerCase() : root,
+    identity: identity(statSync(root, { bigint: true })) });
+}
+
+export function defaultFilesystemJournal(vaultRoot: string) {
+  const root = realpathSync.native(vaultRoot);
+  const name = vaultIdentity(root) + ".sqlite";
+  const fallback = path.join(config.headlessGovernedStateDirectory, name);
+  return filesystemJournalPath(root, path.join(path.dirname(config.obsidianSharedCacheDbPath), name), fallback);
 }
 
 /** Resolve existing ancestors before creating state so a configured junction
@@ -97,23 +130,19 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
 
   constructor(vaultRoot: string, journalPath: string, private readonly journal: ObsidianNoteReplaceJournal,
     private readonly now = Date.now, private readonly afterPublish?: () => void) {
-    this.root = realpathSync(vaultRoot);
-    this.bindingFingerprint = this.vaultIdentity();
+    this.root = realpathSync.native(vaultRoot);
+    this.bindingFingerprint = vaultIdentity(this.root);
     this.writer = new VaultFileService(this.root);
-    this.locks = new PathLocks(filesystemJournalPath(this.root, journalPath + ".locks"));
+    this.locks = new PathLocks(filesystemJournalPath(this.root,
+      path.join(config.headlessGovernedStateDirectory, this.bindingFingerprint + ".locks")));
     this.removedDirectory = filesystemJournalPath(this.root, journalPath + ".removed");
   }
 
-  private vaultIdentity() {
-    return operationDigest({ backend: FILESYSTEM_AUTHORITY, root: this.root,
-      identity: identity(statSync(this.root, { bigint: true })) });
-  }
-
   private assertVault() {
-    if (this.vaultIdentity() !== this.bindingFingerprint) throw conflict("The headless vault identity changed.");
+    if (vaultIdentity(this.root) !== this.bindingFingerprint) throw conflict("The headless vault identity changed.");
   }
 
-  private async physical(relative: string, allowAbsent = false, exactSpelling = false) {
+  private async physical(relative: string, allowAbsent = false, exactSpelling = false, allowShared = false) {
     this.assertVault();
     const parts = relative.split("/");
     let target = this.root;
@@ -126,7 +155,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
         if (last && allowAbsent && absent(error)) return target;
         throw error;
       }
-      if (entry.isSymbolicLink() || (last ? !entry.isFile() || entry.nlink !== 1 : !entry.isDirectory())) {
+      if (entry.isSymbolicLink() || (last ? !entry.isFile() || (!allowShared && entry.nlink !== 1) : !entry.isDirectory())) {
         throw new McpError(BaseErrorCode.FORBIDDEN, "Governed filesystem paths require ordinary files and directories.");
       }
       // On Windows, realpath can return an alias or another spelling of an
@@ -139,12 +168,12 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
     return target;
   }
 
-  private target(relative: string, allowAbsent = false) {
+  private target(relative: string, allowAbsent = false, allowShared = false) {
     try { nativeNotePath(relative); } catch {
       throw new McpError(BaseErrorCode.VALIDATION_ERROR, "A visible vault-relative Markdown path is required.");
     }
     this.writer.resolveVaultPath(relative, this.context);
-    return this.physical(relative, allowAbsent, true);
+    return this.physical(relative, allowAbsent, true, allowShared);
   }
 
   private async policy() {
@@ -187,15 +216,24 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
   }
 
   private async diskSnapshot(relative: string) {
-    const filename = await this.target(relative);
+    return this.rawSnapshot(await this.target(relative));
+  }
+
+  private async rawSnapshot(filename: string): Promise<DiskSnapshot> {
+    const entry = await lstat(filename, { bigint: true });
+    if (!entry.isFile()) throw conflict("The publication witness is no longer a regular file.");
     const handle = await open(filename, "r");
     try {
       const stat = await handle.stat({ bigint: true });
-      if (!stat.isFile() || stat.size > 5 * 1024 * 1024) throw conflict("The note is too large or is no longer a regular file.");
+      if (!stat.isFile() || identity(stat) !== identity(entry) || stat.size > 5 * 1024 * 1024) throw conflict("The note is too large or changed identity.");
       const bytes = await handle.readFile();
       if (bytes.length > 5 * 1024 * 1024) throw conflict("The note grew beyond the verification limit.");
       return { bytes, size: bytes.length, sha256: hash(bytes), stat };
     } finally { await handle.close(); }
+  }
+
+  private observe(filename: string) {
+    return this.rawSnapshot(filename).catch(error => { if (absent(error)) return undefined; throw error; });
   }
 
   private async snapshot(relative: string) {
@@ -228,20 +266,29 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
   }
 
   private pathLock(relative: string) {
-    return path.join(this.root, relative.normalize("NFC").toLowerCase());
+    return relative.normalize("NFC").toLowerCase();
   }
 
   async matchesEffect(plan: ObsidianNoteReplacePlan) {
     return this.locks.run(this.pathLock(plan.path), () => this.verifyPublication(plan));
   }
 
-  private async verifyPublication(plan: ObsidianNoteReplacePlan) {
+  async recoverStage(plan: ObsidianNoteReplacePlan) {
+    await this.locks.run(this.pathLock(plan.path), () => this.verifyPublication(plan, true));
+  }
+
+  private async verifyPublication(plan: ObsidianNoteReplacePlan, restore = false) {
     if (plan.bindingFingerprint !== this.bindingFingerprint) return false;
     const current = this.journal.get(plan.operationId);
     if (current?.status === "committed") return true;
     if (current?.status !== "applying" && current?.status !== "outcome_unknown") return false;
     const staged = current.filesystem;
-    if (!staged?.stagedIdentity || !staged.stagedSha256 || staged.divergentObservation !== undefined) return false;
+    if (!staged?.stagedIdentity || !staged.stagedSha256) return false;
+    if (staged.divergentObservation !== undefined) {
+      if (staged.localStage && !staged.witnessesCleaned) await this.cleanupDivergence(current);
+      return false;
+    }
+    if (staged.localStage) return this.reconcileLocalStage(current, restore);
     const observed = await this.diskSnapshot(plan.path).catch(error => { if (absent(error)) return undefined; throw error; });
     const sameIdentity = observed !== undefined && identity(observed.stat) === staged.stagedIdentity;
     if (sameIdentity && observed.sha256 === staged.stagedSha256) return true;
@@ -254,10 +301,91 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
     return false;
   }
 
+  private witnesses(target: string, operationId: string) {
+    const prefix = path.join(path.dirname(target), `.mcp-write-${operationId}`);
+    return { temp: prefix + ".tmp", backup: prefix + ".bak" };
+  }
+
+  private async cleanupDivergence(plan: ObsidianNoteReplacePlan) {
+    const proof = plan.filesystem!;
+    const target = await this.target(plan.path, true, true);
+    const { temp, backup } = this.witnesses(target, plan.operationId);
+    const stage = await this.observe(temp);
+    const displaced = await this.observe(backup);
+    if (stage && identity(stage.stat) !== proof.stagedIdentity) return;
+    if (displaced && displaced.sha256 !== proof.displacedObservation?.sha256) return;
+    if (stage) await rm(temp, { force: true });
+    if (displaced) await rm(backup, { force: true });
+    await syncDirectory(path.dirname(target));
+    this.journal.confirmFilesystemWitnessCleanup(plan.operationId);
+  }
+
+  private async reconcileLocalStage(plan: ObsidianNoteReplacePlan, restore: boolean) {
+    const proof = plan.filesystem!;
+    const target = await this.target(plan.path, true, true);
+    const { temp, backup } = this.witnesses(target, plan.operationId);
+    const stage = await this.observe(temp);
+    if (stage && identity(stage.stat) !== proof.stagedIdentity) throw conflict("The stage witness changed identity.");
+    let displaced = await this.observe(backup);
+    let observed = await this.observe(target);
+    const stagedAtTarget = observed !== undefined && identity(observed.stat) === proof.stagedIdentity;
+    const cleanup = async () => {
+      if (stage) await rm(temp, { force: true });
+      if (displaced) await rm(backup, { force: true });
+      await syncDirectory(path.dirname(target));
+    };
+    const recordDivergence = async () => {
+      if (displaced) displaced = await this.observe(backup) ?? displaced;
+      this.journal.recordFilesystemDivergence(plan.operationId, observed ? evidence(observed) : null,
+        displaced ? evidence(displaced) : undefined);
+      await this.cleanupDivergence(this.journal.get(plan.operationId)!);
+      return false;
+    };
+    if (stagedAtTarget) {
+      const links = observed!.stat.nlink;
+      const ownsLinks = links === (stage ? 2n : 1n);
+      const backupMatches = displaced ? displaced.sha256 === plan.beforeSha256 :
+        proof.backupVerified || plan.projection?.kind === "obsidian.note.create";
+      if (!ownsLinks || observed!.sha256 !== proof.stagedSha256 || !backupMatches) return recordDivergence();
+      if (displaced && !proof.backupVerified) this.journal.verifyFilesystemBackup(plan.operationId);
+      if (displaced && (await this.observe(backup))?.sha256 !== plan.beforeSha256) return recordDivergence();
+      await cleanup();
+      // Re-read after detaching our aliases. A new external file wins.
+      observed = await this.observe(target);
+      if (observed && observed.sha256 === proof.stagedSha256 && identity(observed.stat) === proof.stagedIdentity && observed.stat.nlink === 1n) return true;
+      return recordDivergence();
+    }
+    if (proof.publicationConfirmed) return recordDivergence();
+    if (displaced) {
+      if (!observed) {
+        if (!restore) {
+          if (!proof.restorePending) this.journal.recordFilesystemRestorationNeeded(plan.operationId);
+          return false;
+        }
+        try { await link(backup, target); } catch (error) { if (!occupied(error)) throw error; }
+        observed = await this.observe(target);
+      }
+      if (!observed || identity(observed.stat) !== identity(displaced.stat)) return recordDivergence();
+    }
+    await cleanup();
+    this.journal.settleUnpublishedFilesystem(plan.operationId, "conflict");
+    return false;
+  }
+
   async sealRevert(relative: string, source: string | undefined, expectedHash: string) {
-    const current = await this.snapshot(relative);
+    const current = await this.snapshot(relative).catch(error => {
+      if (absent(error)) throw conflict("The note no longer exists.");
+      throw error;
+    });
     if (current.sha256 !== expectedHash) throw conflict("The note no longer matches the original operation's after proof.");
     const policy = await this.policy();
+    if (source === undefined) {
+      const directory = filesystemJournalPath(this.root, this.removedDirectory);
+      mkdirSync(directory, { recursive: true, mode: 0o700 });
+      if ((await lstat(directory, { bigint: true })).dev !== current.stat.dev) {
+        throw new McpError(BaseErrorCode.FORBIDDEN, "Reverting creation requires journal storage on the same filesystem as the vault.");
+      }
+    }
     let content = source ?? "";
     if (source !== undefined) {
       const original = frontmatter(source);
@@ -279,7 +407,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
             const bom = content.startsWith("\uFEFF") ? "\uFEFF" : "";
             content = `${bom}---${eol}---${eol}${content.slice(bom.length)}`;
           }
-          content = compileFrontmatterPatch(content, [{ op: "set", key, value }]).nextContent;
+          content = renderFilesystemDates(content, [{ op: "set", key, value }]);
         }
       }
       content = sealFilesystemDates(policy, relative, content, this.now(),
@@ -351,22 +479,61 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
   private async publish(plan: ObsidianNoteReplacePlan, expectedHash?: string) {
     const relative = plan.path;
     return this.locks.run(this.pathLock(relative), async () => {
-      await this.target(relative, true);
+      const target = await this.target(relative, true);
       if (!plan.filesystem || plan.bindingFingerprint !== this.bindingFingerprint ||
           hash(plan.nextContent) !== plan.afterSha256) throw conflict("The headless filesystem seal is invalid.");
       const policy = await this.policy();
       if (policy.digest !== plan.filesystem.policyDigest) throw conflict("The date policy changed after planning.");
-      const content = materializeFilesystemDates(policy, relative, plan.nextContent, this.now(), expectedHash === undefined);
+      const content = materializeFilesystemDates(policy, relative, plan.nextContent, this.now(), plan.filesystem.beforeContent);
       const sha256 = hash(content);
       if (sha256 === expectedHash) throw conflict("The sealed write would leave the note unchanged.");
-      const beforePublish = async (staged: BigIntStats) => {
-        await this.target(relative, true);
-        if ((await this.policy()).digest !== plan.filesystem?.policyDigest) throw conflict("The date policy changed after planning.");
+      const before = await this.observe(target);
+      if (before?.sha256 !== expectedHash) throw conflict("The note changed since planning.");
+      if (!before) await this.writer.assertNewFileName(relative, target);
+      const { temp, backup } = this.witnesses(target, plan.operationId);
+      const attempt = plan.executionOwner!.attemptId;
+      const file = await open(temp, "wx", before ? Number(before.stat.mode & 0o777n) : 0o600);
+      let journaled = false;
+      try {
+        await file.writeFile(content, "utf8");
+        await file.sync();
+        const staged = await file.stat({ bigint: true });
         if (staged.ino === 0n) throw conflict("The filesystem cannot prove the identity of staged bytes.");
-        this.journal.recordFilesystemStage(plan.operationId, plan.executionOwner!.attemptId, identity(staged), sha256, content);
-      };
-      const confirmPublication = () => this.journal.confirmFilesystemPublication(plan.operationId, plan.executionOwner!.attemptId);
-      await this.writer.publishSealedNote(relative, content, expectedHash, beforePublish, confirmPublication, this.context);
+        await file.close();
+        await syncDirectory(path.dirname(target));
+        if ((await this.policy()).digest !== policy.digest) throw conflict("The date policy changed after planning.");
+        this.journal.recordFilesystemStage(plan.operationId, attempt, identity(staged), sha256, content);
+        journaled = true;
+      } finally {
+        await file.close();
+        if (!journaled) await rm(temp, { force: true });
+      }
+      if (before) {
+        try {
+          await renameWithPrecondition(target, backup, async () => {
+            if ((await this.diskSnapshot(relative).catch(error => { if (absent(error)) return undefined; throw error; }))?.sha256 !== expectedHash) {
+              throw conflict("The note changed before publication.");
+            }
+          });
+        } catch (error) {
+          await rm(temp, { force: true });
+          this.journal.settleUnpublishedFilesystem(plan.operationId,
+            error instanceof McpError && error.code === BaseErrorCode.CONFLICT ? "conflict" : "failed");
+          throw error;
+        }
+        if ((await this.rawSnapshot(backup)).sha256 !== expectedHash) {
+          await this.verifyPublication(plan, true);
+          throw conflict("The displaced note changed before publication.");
+        }
+      }
+      try { await link(temp, target); } catch (error) {
+        if (!occupied(error)) throw error;
+        await this.verifyPublication(plan, true);
+        throw conflict("Another writer recreated the note before publication.");
+      }
+      await rm(temp);
+      this.journal.confirmFilesystemPublication(plan.operationId, attempt);
+      await syncDirectory(path.dirname(target));
       this.afterPublish?.();
       if (!await this.verifyPublication(plan)) throw new Error("The headless postflight could not verify the published file.");
       return { sha256, size: Buffer.byteLength(content, "utf8") };
@@ -399,11 +566,13 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
     if (policy.keys.some(key => keys.includes(normalizeDateKey(key)))) {
       throw new McpError(BaseErrorCode.FORBIDDEN, "The date manager owns the configured timestamp properties.");
     }
-    const fields = policy.managed(relative) ? [
-      ...(policy.fdm.enableCreateTime ? [{ propertyName: policy.fdm.headerCreated, role: "created" }] : []),
+    const sealed = sealFilesystemDates(policy, relative, content, this.now());
+    const properties = frontmatter(sealed);
+    const fields = [
+      { propertyName: policy.fdm.headerCreated, role: "created" },
       { propertyName: policy.fdm.headerUpdated, role: "modified" },
-    ] : [];
-    return { content: sealFilesystemDates(policy, relative, content, this.now()), policyDigest: policy.digest, fields };
+    ].filter(field => Object.hasOwn(properties, field.propertyName));
+    return { content: sealed, policyDigest: policy.digest, fields };
   }
 
   async create(request: NoteCreateApply, plan?: ObsidianNoteReplacePlan) {

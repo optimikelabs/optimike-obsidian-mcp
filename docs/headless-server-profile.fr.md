@@ -71,7 +71,7 @@ Seulement après validation du profil serveur en lecture seule :
 1. Passer une copie ou un vault dédié en `OBSIDIAN_RUNTIME_MODE=headless-guarded`.
 2. Garder `MCP_WRITE_MODE=guarded`.
 3. Créer uniquement un nouveau brouillon sandbox.
-4. Exiger `expectedHash` ou `expectedMtime` pour les modifications suivantes.
+4. Sceller les modifications suivantes avec les outils de patch gouvernés.
 5. Confirmer que hash périmé et path traversal sont bloqués.
 
 Avant un test d'écriture, créer un snapshot du vault dédié :
@@ -107,34 +107,36 @@ qui permettent d’écrire. `headless-filesystem` ajoute `obsidian_note_replace_
 et `obsidian_operation_revert_*`. Les familles de notes reprennent les mêmes
 appels plan, apply, status et recover qu’en live. La création utilise plan,
 apply et status.
+La recherche avec remplacement directe et l’édition directe d’une propriété
+frontmatter sont réservées au mode live.
 
 Le plan lie le coffre et le SHA-256 des octets lus sur disque, ou l’absence du
 chemin pour une création. Apply réutilise la référence scellée et la clé
 d’idempotence. L’autorité filesystem sérialise les processus qui partagent le
-verrou local. Elle synchronise le fichier temporaire, revérifie la cible juste
-avant publication et publie atomiquement. Une modification Sync visible à ce
-contrôle provoque un conflit. Sous Windows, l’autorité réessaie jusqu’à quatre
-fois si le renommage renvoie `EPERM` ou `EBUSY` et vérifie de nouveau le hash
-avant chaque tentative. Le reçu identifie `headless-filesystem` et exige une
-relecture vérifiée sur disque.
+verrou local. Elle synchronise le fichier temporaire, déplace le fichier
+courant vers une sauvegarde dans le même dossier et vérifie son hash. La
+publication utilise un lien physique exclusif. Le chemin peut être brièvement
+absent pendant le remplacement. Une édition arrivée juste avant le renommage
+reste dans la sauvegarde et produit un conflit. Si un programme recrée le
+fichier entre-temps, le lien exclusif le préserve. Sous Windows, l’autorité
+réessaie pendant environ trois secondes sur `EPERM` ou `EBUSY` et vérifie de
+nouveau le hash avant chaque tentative.
 
-Un programme externe peut encore intervenir entre la dernière lecture du hash
-et le renommage. Si son écriture est entièrement écrasée dans cet intervalle,
-elle peut ne laisser aucune trace observable. Si la relecture après publication
-détecte un fichier différent, l’opération reste `outcome_unknown`. Le journal
-privé conserve le contenu d’origine, les octets publiés et ceux observés à la
-relecture. Status et recover préservent la modification externe. En
-`headless-filesystem` avec `MCP_WRITE_MODE=full`, un plan de retour arrière peut
-rétablir l’état d’origine si le hash courant correspond toujours au hash externe
-enregistré. Relisez la modification externe avant d’appliquer le retour arrière.
+Le contrôle final revérifie la sauvegarde et relit le fichier publié. Le reçu
+identifie `headless-filesystem`. En cas de divergence observée, l’opération
+reste `outcome_unknown` et le journal conserve les versions disponibles lors
+de la vérification. Un programme qui garde l’ancien fichier ouvert peut
+encore le modifier après le dernier contrôle de la sauvegarde. En mode
+d’écriture `full`, un retour arrière séparé compare le hash courant à celui
+observé et enregistré. Relisez l’état enregistré avant de l’appliquer.
 
 Placez le cache partagé hors du coffre. Le journal est créé à côté du cache
-par défaut, ou dans le répertoire d’état local si le cache est dans le coffre.
-`MCP_HEADLESS_GOVERNED_JOURNAL_PATH` accepte un chemin absolu hors du coffre.
-Les processus qui coopèrent partagent ce journal et son répertoire de verrous
-sur un stockage local. Le journal conserve les versions antérieures privées
-pendant la rétention des opérations terminées (30 jours). Protégez-le comme
-les données du coffre.
+par défaut, d’après l’identité du coffre quel que soit le mode headless, ou
+dans le répertoire d’état local si le cache est dans le coffre. Le verrou par
+coffre est dans l’état local indépendamment du chemin du journal. Les processus
+qui coopèrent partagent cet état. `MCP_HEADLESS_GOVERNED_JOURNAL_PATH` accepte
+un chemin absolu hors du coffre. Le journal conserve les versions antérieures
+et les divergences traitées pendant 30 jours. Protégez-le comme les données du coffre.
 
 Gardez les réglages `.obsidian` disponibles avec la liste des extensions
 actives et les réglages de Frontmatter Date Manager. L’autorité lit les noms
@@ -142,18 +144,22 @@ de propriétés, le format local pris en charge (minute ou seconde) et les
 règles d’exclusion dans l’ordre. Elle respecte les dossiers Templates et
 Templater. La création prend l’heure de l’application pour une note neuve, ou la date
 de naissance du fichier quand une note existante n’a pas encore ce champ.
-Réglez `TZ` sur le fuseau horaire voulu pour le coffre. Le plan scelle la
-politique de dates. Apply renseigne la modification d’après
-l’horloge du serveur et enregistre le hash exact avant publication. L’agent
-ne fournit aucune de ces valeurs. Des réglages absents ou ambigus ferment la voie d’écriture.
+Définissez `TZ` si l’extension hérite du fuseau horaire du système. Si elle
+déclare un fuseau, le processus doit utiliser le même. L’autorité écrit les
+dates YAML sans guillemets et respecte le périmètre de détection des changements,
+l’exclusion de Canvas.md et le réglage Excalidraw. Si une modification doit
+actualiser la date avant la fin de l’intervalle configuré, le plan est refusé.
+L’agent ne fournit aucune des valeurs gérées par l’extension. Des réglages
+absents ou non pris en charge ferment la voie d’écriture.
 Le compilateur headless valide le YAML local et préserve le BOM et les fins
 de ligne. En live, Desktop fournit la sérialisation YAML et les types natifs.
 
-Après une interruption, appelez status avec la référence d’origine. Recover
-peut reprendre une écriture si le journal montre qu’elle n’a pas atteint la mise
-en attente de publication. À partir de cette étape, status et recover ne peuvent
-certifier l’effet qu’avec la preuve enregistrée sur disque. Pour annuler une
-écriture terminée, planifiez un retour arrière en
+Après une interruption, appelez status avec la référence d’origine. Il peut
+clore une écriture jamais publiée ou nettoyer le lien temporaire après une
+création. Si le fichier courant se trouve encore dans sa sauvegarde, recover
+le rétablit par un lien exclusif et signale un conflit. Une écriture déjà
+préparée ne se rejoue pas. Pour annuler une écriture terminée, planifiez un
+retour arrière en
 indiquant le chemin et la référence d’origine, puis appliquez ce nouveau plan.
 Le hash doit toujours correspondre au résultat de l’écriture d’origine.
 Une note existante retrouve son contenu antérieur avec la politique de dates

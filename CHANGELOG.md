@@ -20,8 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Preserve the published and observed versions when a headless postflight
   detects a concurrent external edit. Keep the result uncertain and allow a
   separately sealed revert against the observed hash in full write mode.
-- Validate governed path spelling from actual directory entries and recheck the
-  sealed hash when retrying a temporarily blocked rename on Windows.
+- Protect headless publication from external edits with a verified displaced
+  file and exclusive linking. Reconcile interrupted staging and creation,
+  retry sharing violations on Windows and share locks by vault.
+- Honor explicit timezone, YAML date types, date change tracking and minimum
+  update intervals in governed headless writes. Route direct search/replace
+  and single-property frontmatter edits to the governed headless tools.
 - Serialize headless filesystem mutations per file within a server process.
   Recheck the content hash or target absence before replacement and discard the
   temporary file on conflict. Reject stale Canvas edits and Canvas or Base

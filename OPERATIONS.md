@@ -106,7 +106,7 @@ This policy protects Optimike cache, search, Tasks, and local Bases fallback beh
 - `live`: default full-power mode. Requires Obsidian Desktop + Local REST API + `OBSIDIAN_API_KEY`.
 - `hybrid`: Local REST API is optional and non-blocking. If API credentials are configured, live tools are exposed; otherwise `OBSIDIAN_VAULT` is required and the server keeps the cache/filesystem read surface available.
 - `headless-readonly`: requires `OBSIDIAN_VAULT`; does not require Obsidian Desktop, Local REST API, or `OBSIDIAN_API_KEY`; exposes read/list/search/tasks/semantic/runtime tools plus readonly local Bases fallback.
-- `headless-guarded`: same headless read surface plus governed body and frontmatter patches, durable creation and the operation cockpit. The `full` tool profile retains bounded direct Markdown operations.
+- `headless-guarded`: same headless read surface plus governed body and frontmatter patches, durable creation and the operation cockpit. The `full` tool profile retains bounded direct append/prepend. Governed date management requires an explicit compatible timezone. See the [headless server profile](docs/headless-server-profile.md).
 - `headless-filesystem`: same as `headless-guarded`, plus governed whole-note replacement and revert. Additional filesystem features include tags, admin move/archive/delete with `expectedHash` or `expectedMtime`, batch frontmatter, minimal Bases writes and JSON Canvas helpers.
 
 For the governed filesystem journal, date policy and cross-process locking,

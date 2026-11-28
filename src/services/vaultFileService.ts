@@ -1,9 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
-  link,
   lstat,
   mkdir,
-  open,
   readdir,
   readFile,
   realpath,
@@ -12,9 +10,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import type { BigIntStats } from "node:fs";
 import path from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { dump, load } from "js-yaml";
 import { config } from "../config/index.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
@@ -44,22 +40,6 @@ const retryLock = Symbol("retryLock");
 
 function hasFsCode(error: unknown, code: string): boolean {
   return (error as NodeJS.ErrnoException | undefined)?.code === code;
-}
-
-/** A Windows reader can temporarily deny rename. Recheck the sealed input
- * on every attempt so waiting cannot authorize a write over new content. */
-export async function renameWithPrecondition(source: string, target: string, recheck: () => Promise<void>) {
-  for (let attempt = 0; ; attempt += 1) {
-    await recheck();
-    try {
-      await rename(source, target);
-      return;
-    } catch (error) {
-      if (process.platform !== "win32" || attempt >= 4 ||
-          (!hasFsCode(error, "EPERM") && !hasFsCode(error, "EBUSY"))) throw error;
-      await delay(25 * (attempt + 1));
-    }
-  }
 }
 
 async function withFileLocks<T>(
@@ -403,7 +383,6 @@ export class VaultFileService {
     filePath: string,
     snapshotHash: string | undefined,
     context: RequestContext,
-    rawSha256 = false,
   ): Promise<void> {
     const absolutePath = this.resolveVaultPath(filePath, context);
     try {
@@ -411,10 +390,8 @@ export class VaultFileService {
         await lstat(absolutePath);
       } else {
         await this.assertRealPathInsideVault(absolutePath, context);
-        const observed = rawSha256
-          ? createHash("sha256").update(await readFile(absolutePath)).digest("hex")
-          : hashContent(await readFile(absolutePath, "utf8"));
-        if (observed === snapshotHash) return;
+        const content = await readFile(absolutePath, "utf8");
+        if (hashContent(content) === snapshotHash) return;
       }
     } catch (error) {
       if (hasFsCode(error, "ENOENT")) {
@@ -436,81 +413,30 @@ export class VaultFileService {
     snapshotHash: string | undefined,
     context: RequestContext,
   ): Promise<VaultFileReadResult> {
-    await this.publishFile(filePath, content, snapshotHash, context);
-    return this.read(filePath, context);
-  }
-
-  private async publishFile(
-    filePath: string,
-    content: string,
-    snapshotHash: string | undefined,
-    context: RequestContext,
-    beforePublish?: (staged: BigIntStats) => Promise<void>,
-    confirmPublication?: () => void,
-  ): Promise<void> {
     const absolutePath = this.resolveVaultPath(filePath, context);
     const parent = path.dirname(absolutePath);
     await this.resolveRealPathForWrite(parent, context);
     await this.assertNewFileName(filePath, absolutePath);
-    if (!beforePublish) await mkdir(parent, { recursive: true });
+    await mkdir(parent, { recursive: true });
     await this.assertRealPathInsideVault(parent, context);
-    const tempPath = beforePublish
-      ? path.join(parent, `.mcp-write-${randomBytes(16).toString("hex")}.tmp`)
-      : `${absolutePath}.${randomBytes(8).toString("hex")}.tmp`;
+    const tempPath = `${absolutePath}.${randomBytes(8).toString("hex")}.tmp`;
     try {
-      if (beforePublish) {
-        const mode = snapshotHash === undefined ? 0o600 : (await stat(absolutePath)).mode & 0o777;
-        const file = await open(tempPath, "wx", mode);
-        try {
-          await file.writeFile(content, "utf8");
-          await file.sync();
-        } finally {
-          await file.close();
-        }
-      } else {
-        await writeFile(tempPath, content, { encoding: "utf8", flag: "wx" });
-      }
+      await writeFile(tempPath, content, { encoding: "utf8", flag: "wx" });
     } catch (error) {
       if (!hasFsCode(error, "EEXIST")) await rm(tempPath, { force: true });
       throw error;
     }
     try {
-      if (beforePublish) await beforePublish(await stat(tempPath, { bigint: true }));
       // This recheck narrows the race with external writers. Another process
       // can still change the target between the snapshot check and the rename.
       await this.assertRealPathInsideVault(parent, context);
-      if (beforePublish && snapshotHash === undefined) {
-        // Publishing via an exclusive link makes absent-only creation atomic
-        // even against a writer that does not use our path lock.
-        await link(tempPath, absolutePath).catch(error => {
-          if (!hasFsCode(error, "EEXIST")) throw error;
-          throw new McpError(BaseErrorCode.CONFLICT, "The create target appeared before publication.");
-        });
-      } else if (beforePublish) {
-        await renameWithPrecondition(tempPath, absolutePath,
-          () => this.assertUnchanged(filePath, snapshotHash, context, true));
-      } else {
-        await this.assertUnchanged(filePath, snapshotHash, context);
-        await rename(tempPath, absolutePath);
-      }
-      confirmPublication?.();
-      if (beforePublish && process.platform !== "win32") {
-        const directory = await open(parent, "r");
-        try { await directory.sync(); } finally { await directory.close(); }
-      }
-    } finally {
+      await this.assertUnchanged(filePath, snapshotHash, context);
+      await rename(tempPath, absolutePath);
+    } catch (error) {
       await rm(tempPath, { force: true });
+      throw error;
     }
-  }
-
-  /** Filesystem effect point used by the durable note adapter, under its
-   * cross-process lock. expectedHash undefined means exclusive creation. */
-  async publishSealedNote(filePath: string, content: string, expectedHash: string | undefined,
-    beforePublish: (staged: BigIntStats) => Promise<void>, confirmPublication: () => void, context: RequestContext) {
-    return this.withLockedFiles([filePath], context, async () => {
-      await this.assertUnchanged(filePath, expectedHash, context, true);
-      await this.publishFile(filePath, content, expectedHash, context, beforePublish, confirmPublication);
-    });
+    return this.read(filePath, context);
   }
 
   async updateWholeFile(
