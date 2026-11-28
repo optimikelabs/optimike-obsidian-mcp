@@ -88,7 +88,8 @@ The family is live/hybrid-live only and has no recover or undo operation. Missin
   top-level `sha256` of the returned Markdown encoded as UTF-8.
 - `obsidian_note_links`: live/hybrid-live only. Observe a bounded semantic neighborhood from Obsidian Desktop public `MetadataCache` APIs: outgoing links, embeds and frontmatter links with effective resolution; requested subpaths with heading/block validity when demonstrable; unresolved aggregates; and backlinks reconstructed from resolved relations. It reports provenance, truncation, explicit collection availability, a best-effort non-atomic snapshot and cache freshness as `unknown` when the public API cannot prove it. An unavailable source cache reports `coverage.outgoing.total: null` rather than fabricating zero links. It performs no write and makes no graph-preservation claim.
 - `obsidian_list_notes`: list notes and folders, using REST or cache/filesystem.
-- `obsidian_global_search`: text/regex search across cached vault content.
+- `obsidian_global_search` searches live or cached vault content. With
+  `useRegex: true`, `^` and `$` match the start and end of each line.
 - `obsidian_update_note`: live REST note update for an explicit `filePath` or
   the live `activeFile`, or guarded headless append/prepend for an explicit
   `filePath` in filesystem modes.

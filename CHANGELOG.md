@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `bases_query` rejects unsupported request filter nodes before selecting rows and reports their position. A bare string yields `VALIDATION_ERROR`. Bases Bridge 1.3.1 applies property tables with the same operators as the headless scanner. Upgrade the Bridge to use property tables over REST. (#211)
 - Request filter expressions now reject unquoted comparison values with spaces, slashes or brackets, property names with spaces, and empty expression leaves. Quote string values and use a property table for names with spaces. Empty value arrays, `in` lists, and `and`/`or` groups are also rejected. Live property tables can compare rendered formula text against numeric or boolean operands. (#211)
+- `obsidian_global_search` matches regex anchors `^` and `$` at the start and end of each line in both live and headless modes.
 
 ### Added
 

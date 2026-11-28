@@ -177,6 +177,9 @@ Handoff delivery is a transport contract, not a runtime-mode write capability:
 | `hybrid` API unavailable        | `list_all_tasks`, `obsidian_global_search`, `obsidian_list_notes`, `obsidian_read_note`, `obsidian_runtime_maintenance`, `obsidian_runtime_status`, `obsidian_validate_format`, `query_tasks`, `smart_semantic_search`                                                                                                                                                                                                                         |
 | `hybrid` API available / `live` | Read/search/tasks/runtime/semantic tools including live-only `obsidian_note_links`, governed note replacement, text patch, Frontmatter, Base formula and Canvas `plan/apply/status/recover`, governed note deletion `obsidian_note_delete_plan/apply/status` (`operational` and `full`, see [governed note deletion](governed-note-delete.md)), governed Base and Canvas creation `bases_create_plan/apply/status` and `obsidian_canvas_create_plan/apply/status` (`authoring`, `operational` and `full`, see [governed Base and Canvas creation](governed-file-create.md)), plus REST write tools and Bases Bridge tools: `bases_check`, `bases_create`, `bases_functions`, `bases_get_schema`, `bases_list`, `bases_query`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_delete_note`, `obsidian_manage_frontmatter`, `obsidian_manage_tags`, `obsidian_search_replace`, `obsidian_update_note` |
 
+With `useRegex: true`, `obsidian_global_search` matches `^` and `$` at the start
+and end of each line in both live and headless modes.
+
 ## Native note move M3
 
 `obsidian_note_move_plan/apply/status` is live-only, requires an independent native-move Bridge grant and full write mode, and reuses the process-owned journal. The native outcome and bounded semantic postflight are separate. No recover, no undo, no global graph transaction. [Contract and remaining Pilot2 gate](native-note-move-m3.md).
