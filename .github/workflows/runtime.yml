@@ -76,6 +76,8 @@ jobs:
       - if: env.RUN_SUITE == 'true'
         run: npm run test:runtime
       - if: env.RUN_SUITE == 'true'
+        run: npm run test:semantic-index-producer
+      - if: env.RUN_SUITE == 'true'
         run: npm run test:external-roots
       - if: env.RUN_SUITE == 'true'
         run: npm run test:operation-runtime

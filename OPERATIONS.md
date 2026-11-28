@@ -466,6 +466,9 @@ Examples:
 
 At startup, the backend prewarms semantic search by loading the semantic snapshot and sending a small embedding request to the configured provider. With the built-in model, this background prewarm is where the model is first downloaded and loaded, so the first agent query does not wait for it. Disable it with `SEMANTIC_SEARCH_PREWARM=false`; override the warmup text with `SEMANTIC_SEARCH_PREWARM_TEXT`.
 
+The [standalone semantic index producer](docs/semantic-index-producer.md) builds
+Smart Environment v3 generations outside the vault without Obsidian Desktop.
+
 ### Section search
 
 `granularity: sections` or `both` loads the section vectors on the first such query, never at prewarm: a runtime that only searches notes keeps its previous memory footprint. The section vectors stay in memory as one float32 array for the life of the process. The first cold load reads the Smart Connections source records once for both notes and sections; afterwards, the section references come from the shared store and only the vectors are read again from `smart_blocks/<model fingerprint>`. The section cache is refreshed when the source records, the active model or that block vector file (modification time or size) change, with the same TTL as notes. Each section result reads its note to verify its lines, even without `with_snippets`. Finding a moved section is bounded per request (200,000 hashed lines); past that bound, the remaining moved sections report `lines_verified: false` (a section still at its indexed lines stays verified). The search never looks past the end of the note.

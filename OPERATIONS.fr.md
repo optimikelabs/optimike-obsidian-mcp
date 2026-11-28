@@ -482,6 +482,9 @@ Exemples :
 
 Au démarrage, le backend préchauffe la recherche sémantique en chargeant le snapshot et en envoyant une petite requête d’embedding au provider configuré. Avec le modèle intégré, c’est ce préchauffage en arrière-plan qui télécharge et charge le modèle la première fois : la première requête d’un agent ne l’attend pas. Désactivation possible avec `SEMANTIC_SEARCH_PREWARM=false` ; texte de warmup surchargeable avec `SEMANTIC_SEARCH_PREWARM_TEXT`.
 
+Le [producteur d’index sémantique autonome](docs/semantic-index-producer.fr.md)
+prépare des générations Smart Environment v3 hors du coffre, sans Obsidian Desktop.
+
 ### Recherche par sections
 
 `granularity: sections` ou `both` charge les vecteurs de sections à la première requête de ce type, jamais au préchauffage : un runtime qui ne cherche que des notes garde son empreinte mémoire précédente. Les vecteurs de sections restent en mémoire dans un seul tableau float32 pendant toute la vie du processus. Le premier chargement à froid lit une seule fois les enregistrements sources de Smart Connections pour les notes et les sections ; ensuite, les références des sections viennent du store partagé et seuls les vecteurs sont relus dans `smart_blocks/<empreinte du modèle>`. Le cache des sections se rafraîchit quand les enregistrements sources, le modèle actif ou ce fichier de vecteurs de blocs (date de modification ou taille) changent, avec le même TTL que les notes. Chaque résultat de section lit sa note pour vérifier ses lignes, même sans `with_snippets`. La recherche d’une section déplacée est bornée par requête (200 000 lignes hachées) ; au-delà, les sections déplacées restantes indiquent `lines_verified: false` (une section encore à ses lignes indexées reste vérifiée). La recherche ne va jamais au-delà de la fin de la note.

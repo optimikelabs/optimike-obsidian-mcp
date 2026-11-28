@@ -8,3 +8,7 @@ Copyright 2025 Casey Hand, licensed under the Apache License, Version 2.0.
 
 Both works are distributed under the Apache License, Version 2.0.
 See the LICENSE file for the full license text.
+
+The semantic index producer includes the jsbrains Markdown block parser
+(https://github.com/brianpetro/jsbrains), Copyright (c) Brian Joseph Petro,
+under the MIT License. See scripts/semantic-index/vendor/MIT_LICENSE.
