@@ -10,7 +10,6 @@ export type MarkdownLinkReference = Pick<
   "kind" | "linkText" | "linkPath" | "subpath" | "original" | "displayText" | "frontmatterKey" | "position"
 >;
 
-const wikiLink = /(?<!\\)(!)?\[\[([^\[\]\r\n|]+)(?:\|([^\[\]\r\n]*))?\]\]/gu;
 const scheme = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/iu;
 const htmlTag = /^<(\/?)([a-z][\w:-]*)(?=[\s/>])(?:"[^"]*"|'[^']*'|[^<>"'])*>$/iu;
 const markdownSyntax = gfm();
@@ -33,6 +32,35 @@ const markdownOptions = {
 };
 
 type Span = { start: number; end: number };
+type LocatedReference = Span & { reference: MarkdownLinkReference };
+
+// Markdown links, autolinks and opaque Markdown constructs may take
+// precedence over wikilinks. Plain text with only wikilinks needs no AST.
+const needsMarkdownTree = /[`<$\t(]| {4}|~~~|\]\s*:|https?:\/\/|www\./iu;
+
+function* wikiLinks(
+  source: string,
+  blocksOpener?: (start: number, end: number) => boolean,
+): IterableIterator<Span & { embed: boolean; target: string; alias?: string }> {
+  const opener = /(?<!\\)(!)?\[\[([^\[\]\r\n|]+)(\]\]|\|)/gu;
+  const terminator = /\]\]|[\r\n]/gu;
+  let match: RegExpExecArray | null;
+  while ((match = opener.exec(source)) !== null) {
+    if (blocksOpener?.(match.index, match.index + 1)) continue;
+    let alias: string | undefined;
+    if (match[3] === "|") {
+      terminator.lastIndex = opener.lastIndex;
+      const close = terminator.exec(source);
+      // If the alias never closes, later openers on the same line cannot
+      // close either. Advance once instead of rescanning the whole suffix.
+      if (!close) return;
+      opener.lastIndex = terminator.lastIndex;
+      if (close[0] !== "]]") continue;
+      alias = source.slice(match.index + match[0].length, close.index);
+    }
+    yield { start: match.index, end: opener.lastIndex, embed: !!match[1], target: match[2], alias };
+  }
+}
 
 function parseMarkdown(source: string) {
   // Bare emails are external to the vault graph. Keep GFM URL tokenization,
@@ -88,8 +116,8 @@ function opaqueSpans(root: Nodes, source: string): Span[] {
   }
   const codeOrHtml = spanFilter(spans.sort((a, b) => a.start - b.start));
   if (!source.includes("$")) return spans;
-  for (const match of source.matchAll(wikiLink)) {
-    destinations.push({ start: match.index, end: match.index + match[0].length });
+  for (const { start, end } of wikiLinks(source, spanFilter(spans))) {
+    destinations.push({ start, end });
   }
   const inDestination = spanFilter(destinations.sort((a, b) => a.start - b.start));
   const formulas: Span[] = [];
@@ -193,28 +221,7 @@ function displayLabel(node: Nodes): string {
   return "alt" in node ? node.alt ?? "" : "";
 }
 
-export function extractMarkdownLinkReferences(content: string): MarkdownLinkReference[] {
-  const { body, frontmatter } = readMarkdownFrontmatter(content);
-  const references: MarkdownLinkReference[] = [];
-  for (const [key, value] of Object.entries(frontmatter)) {
-    const pending = [value];
-    const seen = new WeakSet<object>();
-    while (pending.length) {
-      const item = pending.pop();
-      if (typeof item === "string") {
-        for (const match of item.matchAll(wikiLink)) {
-          const reference = makeReference("frontmatter", match[2], match[0], match[3]);
-          if (reference) references.push({ ...reference, frontmatterKey: key });
-        }
-      } else if (item && typeof item === "object" && !seen.has(item)) {
-        seen.add(item);
-        const values = Object.values(item);
-        for (let i = values.length - 1; i >= 0; i--) pending.push(values[i]);
-      }
-    }
-  }
-
-  if (!body.includes("[")) return references;
+function collectMarkdownLinks(body: string) {
   // Only inspect the unmasked tree if a comment delimiter might be inside
   // code, an HTML element or math. In plain Markdown we can mask before parsing.
   const needsOpaqueSpans = /[`<$\t]| {4}|~~~/u;
@@ -231,7 +238,7 @@ export function extractMarkdownLinkReferences(content: string): MarkdownLinkRefe
     }
   }
   const isOpaque = spanFilter(blocked.slice());
-  const located: Array<{ start: number; end: number; reference: MarkdownLinkReference }> = [];
+  const located: LocatedReference[] = [];
   const definitions = new Map<string, Definition>();
   const indirectLinks: Array<Extract<Nodes, { type: "linkReference" | "imageReference" }>> = [];
   for (const { node } of walk(root)) {
@@ -267,13 +274,39 @@ export function extractMarkdownLinkReferences(content: string): MarkdownLinkRefe
       definition.url, body.slice(start, end), displayLabel(node), true);
     if (reference) located.push({ start, end, reference });
   }
+  return { source, blocked, located };
+}
+
+export function extractMarkdownLinkReferences(content: string): MarkdownLinkReference[] {
+  const { body, frontmatter } = readMarkdownFrontmatter(content);
+  const references: MarkdownLinkReference[] = [];
+  for (const [key, value] of Object.entries(frontmatter)) {
+    const pending = [value];
+    const seen = new WeakSet<object>();
+    while (pending.length) {
+      const item = pending.pop();
+      if (typeof item === "string") {
+        for (const { start, end, target, alias } of wikiLinks(item)) {
+          const reference = makeReference("frontmatter", target, item.slice(start, end), alias);
+          if (reference) references.push({ ...reference, frontmatterKey: key });
+        }
+      } else if (item && typeof item === "object" && !seen.has(item)) {
+        seen.add(item);
+        const values = Object.values(item);
+        for (let i = values.length - 1; i >= 0; i--) pending.push(values[i]);
+      }
+    }
+  }
+
+  if (!body.includes("[")) return references;
+  const { source, blocked, located } = needsMarkdownTree.test(body)
+    ? collectMarkdownLinks(body)
+    : { source: body.includes("%%") ? maskComments(body, []) : body, blocked: [], located: [] };
 
   const isBlocked = spanFilter(blocked.sort((a, b) => a.start - b.start));
-  for (const match of source.matchAll(wikiLink)) {
-    const start = match.index;
-    const end = start + match[0].length;
+  for (const { start, end, embed, target, alias } of wikiLinks(source, isBlocked)) {
     if (isBlocked(start, end)) continue;
-    const reference = makeReference(match[1] ? "embed" : "link", match[2], body.slice(start, end), match[3]);
+    const reference = makeReference(embed ? "embed" : "link", target, body.slice(start, end), alias);
     if (reference) located.push({ start, end, reference });
   }
 

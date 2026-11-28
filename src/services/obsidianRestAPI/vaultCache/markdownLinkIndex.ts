@@ -18,7 +18,7 @@ function coverage(total: number, returned: number) {
 
 type LinkCount = { link_path: string; count: number };
 type Target = { path: string; ambiguous?: true };
-const INDEX_REVISION = "v5:";
+const INDEX_REVISION = "v6:";
 
 /** Store unresolved spellings on disk; resolve against the current file set at read time.
  * Adding/removing an ambiguous destination can then affect unchanged sources. */
@@ -26,6 +26,7 @@ export class MarkdownLinkIndex {
   private readonly fileUpsert;
   private readonly refsDelete;
   private readonly refInsert;
+  private readonly staleRowsAfterPath;
   private readonly targetsByFoldedPath;
   private readonly filesByBasename;
 
@@ -69,6 +70,12 @@ export class MarkdownLinkIndex {
       INSERT INTO markdown_link_refs (source, ordinal, basename, link_path, link_text, reference)
       VALUES (?, ?, ?, ?, ?, ?)
     `);
+    this.staleRowsAfterPath = this.db.prepare(`
+      SELECT file.path, file.hash, file.content FROM file_cache AS file
+      LEFT JOIN markdown_link_files AS indexed USING(path)
+      WHERE file.path > ? AND (indexed.hash IS NULL OR indexed.hash <> ? || file.hash)
+      ORDER BY file.path LIMIT 16
+    `);
     this.targetsByFoldedPath = db.prepare(`
       SELECT path FROM markdown_link_files WHERE folded_path = ?
       UNION SELECT path FROM markdown_link_excluded_targets WHERE folded_path = ?
@@ -92,15 +99,9 @@ export class MarkdownLinkIndex {
   }
 
   reconcileBatch(afterPath: string, acceptPath: (path: string) => boolean): string | undefined {
-    const rows = this.db.prepare(`
-      SELECT file.path, file.hash, file.content FROM file_cache AS file
-      LEFT JOIN markdown_link_files AS indexed USING(path)
-      WHERE file.path > ? AND (indexed.hash IS NULL OR indexed.hash <> ? || file.hash)
-      ORDER BY file.path LIMIT 16
-    `);
     const deadline = performance.now() + 8;
     let last: string | undefined;
-    for (const row of rows.iterate(afterPath, INDEX_REVISION)) {
+    for (const row of this.staleRowsAfterPath.iterate(afterPath, INDEX_REVISION)) {
       last = row.path as string;
       if (acceptPath(last)) this.update(last, row.hash as string, row.content as string);
       if (performance.now() >= deadline) break;
