@@ -532,7 +532,7 @@ test("bootstrap imports fresh rows and encodes stale, transformed and tombstoned
   assert.equal(f.requests.length, 0);
 });
 
-test("bootstrap records published rows when the encoder skips a note with an importable section", async t => {
+test("bootstrap records readable rows and protects active notes when a refresh refuses their encoding", async t => {
   const f = await fixture(t);
   const desktop = await smartEnvFixture(f);
   f.transformRow((row, item) => item.source_path === "excluded.md"
@@ -543,7 +543,35 @@ test("bootstrap records published rows when the encoder skips a note with an imp
   assert.equal(bootstrap.imported.sections, 2);
   assert.equal(stats.notes + stats.sections, stats.imported + stats.encoded);
   const loaded = await f.load(receipt.generation);
+  assert.ok(!loaded.notes.some(row => row.notePath === "excluded.md"));
   assert.ok(!loaded.blocks.refs.some(row => row.notePath === "excluded.md"));
+
+  await f.put("fresh.md", note("Changed after the bootstrap"));
+  f.transformRow((row, item) => ["excluded.md", "fresh.md"].includes(item.source_path)
+    ? { ...row, truncated: true, tokens: f.health.max_tokens } : row);
+  await f.fail(/Deletion limit exceeded \(1 of 3 active notes not publishable\)/u, "--exclude-heading", "Private");
+  assert.equal(await f.current(), receipt.generation);
+  assert.deepEqual(await readdir(path.join(f.index, "generations")), [receipt.generation]);
+  const refresh = await f.run("--exclude-heading", "Private", "--allow-deletions");
+  const refreshed = await f.load(refresh.generation);
+  assert.equal(refresh.deletions, 1);
+  assert.ok(!refreshed.notes.some(row => row.notePath === "fresh.md"));
+  assert.ok(!refreshed.blocks.refs.some(row => row.notePath === "fresh.md"));
+});
+
+test("bootstrap applies the producer's strict source size cutoff to note candidates", async t => {
+  const f = await fixture(t);
+  const desktop = await smartEnvFixture(f);
+  const args = ["bootstrap", "--from-smart-env", desktop, "--min-note-chars", String(note("fresh").length)];
+  const preview = await f.run(...args, "--verify-only");
+  assert.deepEqual(preview.excludedNotes, { invalidPath: 0, invalidUtf8: 0, belowMinSize: 1 });
+  const receipt = await f.run(...args);
+  const manifest = await f.manifest(receipt.generation);
+  const loaded = await f.load(receipt.generation);
+  assert.deepEqual(manifest.skipped, [{ path: "fresh.md", reason: "note_below_min_size" }]);
+  assert.equal(manifest.bootstrap.imported.notes, 2);
+  assert.ok(!loaded.notes.some(row => row.notePath === "fresh.md"));
+  assert.ok(f.requests.every(item => !item.source_path.startsWith("fresh.md")));
 });
 
 test("bootstrap queues all rows when the Smart Env fingerprint differs", async t => {
@@ -576,7 +604,7 @@ test("bootstrap verification-only measures coverage without encoding misses or p
   assert.deepEqual(receipt.sectionSelection, {
     shared: 3, smartEnvOnly: 1, producerOnly: 7, smartEnvOutsideCorpus: 1,
   });
-  assert.deepEqual(receipt.excludedNotes, { invalidPath: 0, invalidUtf8: 1 });
+  assert.deepEqual(receipt.excludedNotes, { invalidPath: 0, invalidUtf8: 1, belowMinSize: 0 });
   assert.equal(f.requests.length, 6);
   await assert.rejects(f.current(), { code: "ENOENT" });
   assert.deepEqual(await readdir(path.join(f.index, "generations")), []);

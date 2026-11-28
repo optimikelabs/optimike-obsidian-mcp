@@ -88,6 +88,12 @@ Si Smart Connections a des titres exclus, les notes sont réencodées. Une
 limite prudente en octets UTF-8 réserve une marge pour la tokenisation. Toute
 ligne incompatible, trop longue ou invalide passe par l’encodage normal.
 
+L’amorçage applique les seuils de taille du producteur aux notes et aux blocs.
+Le rapport compte les notes dont la taille en octets est inférieure ou égale
+au seuil parmi les exclusions. Les décomptes publiés portent sur les lignes
+que le lecteur strict peut charger. Si le vecteur d’une note est écarté,
+ses sections sont également absentes de la génération publiée.
+
 Avant d’encoder le reste, le producteur réencode un échantillon déterministe,
 réparti autant que possible entre notes et sections. Il prend 1 % des
 vecteurs candidats, avec un plancher de 20 et un plafond de 40. En dessous de

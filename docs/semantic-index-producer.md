@@ -87,6 +87,11 @@ note vectors are encoded again. A conservative UTF-8 size bound leaves room
 for tokenizer overhead. Unmatched, oversized or invalid rows enter the
 normal encoding path.
 
+Bootstrap uses the producer's note and block size rules. The verification
+report counts notes at or below the byte cutoff as exclusions. Published
+counts include only rows that the strict reader can load. When the note
+vector is omitted, its sections are omitted from the published generation.
+
 Before encoding any remaining rows, the producer re-encodes a deterministic
 sample balanced across notes and sections where possible. The sample is 1%,
 bounded to 20–40 rows when at least 20 qualify. Smaller sets are checked in
