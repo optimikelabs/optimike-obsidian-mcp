@@ -88,11 +88,13 @@ Pour valider sur un vrai coffre, garder `OBSIDIAN_SHARED_CACHE_DB_PATH` hors du 
 
 Le serveur embarque une politique d’exclusion pour les scans runtime filesystem. Elle évite d’indexer le bruit opérationnel et les artefacts de validation :
 
-- `.obsidian`, `.trash`, `.git`
-- `.tmp`, `tmp`, `node_modules`
+- Fichiers et dossiers dont le nom commence par un point, à toute profondeur, dont `.obsidian`, `.trash`, `.git` et `.tmp`
+- `tmp` et `node_modules`
 - dossiers de screenshots, dossiers build/cache, fichiers SQLite/DB et fichiers log
 
-Ajouter des règles locales avec `OBSIDIAN_VAULT_EXCLUDE_PATTERNS`, au format gitignore séparé par virgules ou retours ligne. Exemple :
+En mode headless, les listes, recherches et lectures de notes par chemin omettent les fichiers Markdown cachés. Au démarrage, le cache partagé retire les entrées déjà indexées que la politique en vigueur exclut. Ce comportement suit la visibilité par défaut de [l’API Vault d’Obsidian](https://docs.obsidian.md/Plugins/Vault).
+
+Ajouter des règles locales avec `OBSIDIAN_VAULT_EXCLUDE_PATTERNS`, au format gitignore séparé par virgules ou retours ligne. Une règle `!` peut inclure explicitement un chemin caché, par exemple `!.private/Shared.md`. Depuis un checkout neuf, compiler le serveur avant de lancer la vérification des exclusions.
 
 ```bash
 OBSIDIAN_VAULT_EXCLUDE_PATTERNS="tmp/**,**/tmp/**,Efforts/Archives/**"

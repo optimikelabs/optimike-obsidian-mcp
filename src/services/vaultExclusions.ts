@@ -43,13 +43,32 @@ export function normalizeVaultRelativePath(filePath: string): string {
 }
 
 export function createVaultExclusionMatcher(patterns: string[]) {
-  return ignore().add(patterns);
+  return {
+    rules: ignore().add(patterns),
+    hasReinclusions: patterns.some((pattern) => pattern.startsWith("!")),
+  };
 }
 
 export function isVaultPathExcluded(
   filePath: string,
-  matcher: ReturnType<typeof ignore>,
+  matcher: ReturnType<typeof createVaultExclusionMatcher>,
+  isDirectory = false,
 ): boolean {
   const normalized = normalizeVaultRelativePath(filePath);
-  return normalized.length > 0 && matcher.ignores(normalized);
+  if (!normalized) return false;
+
+  const match = matcher.rules.test(normalized);
+  if (match.ignored || match.unignored) return match.ignored;
+
+  // A negation may name a descendant without naming its parent. In that case
+  // leave directory traversal open and apply the default to each file instead.
+  if (isDirectory && matcher.hasReinclusions) return false;
+
+  const segments = normalized.split("/");
+  return segments.some((segment, index) => {
+    if (!segment.startsWith(".")) return false;
+    if (!matcher.hasReinclusions || index === segments.length - 1) return true;
+    const directory = segments.slice(0, index + 1).join("/") + "/";
+    return !matcher.rules.test(directory).unignored;
+  });
 }

@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Whole-note replacement can now refuse edits that arrive between the caller's source read and plan creation. Pass the new `sha256` from `obsidian_read_note` as `expectedBeforeSha256` to `obsidian_note_replace_plan`. A stale base or required date preparation refuses without writing or sealing a plan. Apply still compares the sealed hash at the write boundary. (#221)
 
+- Headless note listings, searches, and reads by path omit dot-prefixed Markdown files and files under dot-prefixed directories by default. Explicit re-inclusions still apply, and the shared cache removes previously indexed excluded rows on startup (#227).
+
 ### Added
 
 - Headless note reads, listings, and global search report cache provenance and flag requests that overlap a refresh. Runtime status reports the newest indexed Markdown modification time and explicitly marks upstream synchronization as unknown.

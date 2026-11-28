@@ -756,6 +756,7 @@ export class VaultCacheService {
       !isVaultPathExcluded(
         folder ? candidate + "/" : candidate,
         this.vaultExclusionMatcher,
+        folder,
       )
     );
   }
@@ -1264,8 +1265,9 @@ export class VaultCacheService {
           throw new Error("invalid_inventory_entry");
         }
         const fullPath = path.posix.join(normalizedPath, entry);
-        if (isVaultPathExcluded(fullPath, this.vaultExclusionMatcher)) continue;
-        if (entry.endsWith("/")) {
+        const isDirectory = entry.endsWith("/");
+        if (isVaultPathExcluded(fullPath, this.vaultExclusionMatcher, isDirectory)) continue;
+        if (isDirectory) {
           const subDirFiles = await this.listAllMarkdownFiles(
             fullPath,
             opContext,
@@ -1354,7 +1356,11 @@ export class VaultCacheService {
         const relativePath = normalizeVaultRelativePath(
           path.relative(vaultRoot, path.join(directory, entry.name)),
         );
-        if (isVaultPathExcluded(relativePath, this.vaultExclusionMatcher)) {
+        if (isVaultPathExcluded(
+          relativePath,
+          this.vaultExclusionMatcher,
+          entry.isDirectory(),
+        )) {
           continue;
         }
         const fullPath = path.join(directory, entry.name);

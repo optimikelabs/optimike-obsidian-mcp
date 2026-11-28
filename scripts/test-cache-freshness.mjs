@@ -596,14 +596,16 @@ test("startup removes excluded persisted rows from direct SQL consumers", async 
   config.obsidianSharedCacheDbPath = dbPath;
   let instance = new VaultCacheService(rest);
   try {
-    instance.db.prepare("INSERT INTO file_cache VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .run("/Private/secret.md", 1, 2, 6, "fixture", "- [ ] private sentinel", 1);
+    const insert = instance.db.prepare("INSERT INTO file_cache VALUES (?, ?, ?, ?, ?, ?, ?)");
+    for (const file of ["/Private/secret.md", "/.hidden/stale.md", "/Visible.md"]) {
+      insert.run(file, 1, 2, 8, "fixture", "sentinel", 1);
+    }
     await instance.close();
     instance = new VaultCacheService(rest);
     const observer = new DatabaseSync(dbPath);
     try {
-      assert.equal(observer.prepare("SELECT count(*) AS n FROM file_cache WHERE path = ?")
-        .get("/Private/secret.md").n, 0);
+      const paths = observer.prepare("SELECT path FROM file_cache ORDER BY path").all();
+      assert.deepEqual(paths.map((row) => row.path), ["/Visible.md"]);
     } finally { observer.close(); }
   } finally { await instance.close(); config.obsidianSharedCacheDbPath = previous; }
 });
