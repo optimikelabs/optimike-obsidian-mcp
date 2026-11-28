@@ -26,11 +26,15 @@ skips any block that overlaps them. Set these options on each invocation. Linked
 entries require an explicit path exclusion. Directory traversal across devices
 is refused.
 
+The jsbrains `SmartSource.should_embed` rule selects notes whose file size in
+bytes exceeds `--min-note-chars` (300 by default, including when set to 0).
 Note inputs use the vault-relative breadcrumb followed by `:\n` and the
 Markdown. Block inputs use the parent breadcrumb followed by a newline and the
 original inclusive line range. The producer uses the pinned jsbrains parser and
 `SmartBlock.should_embed` rule. Set `--min-block-chars` to match the Smart
-Connections block setting for the corpus (250 by default). A parent is
+Connections block setting for the corpus (300 by default). For a Smart
+Connections configuration with note and block minimums of 200 and 250, pass
+`--min-note-chars 200 --min-block-chars 250`. A parent is
 omitted when selected descendants meet both edge lines defined by jsbrains.
 Frontmatter and excluded heading ranges are omitted from block search.
 CUDA uses `/bitnet/embed-batch` with up to four items across notes. CPU uses
@@ -42,7 +46,9 @@ characters per token. The producer sends the exact input and lets the BitNet
 tokenizer enforce its context (`max_tokens` from health, 32,768 in the current
 bridge). When the bridge truncates an input or reports a size or context
 refusal, the producer omits that input instead of publishing a partial vector.
-If a note is omitted, its blocks are omitted too. The manifest and CLI output
+The strict external reader requires a note vector for each source record, so
+an omitted note's blocks are also omitted even when they fit the context.
+The manifest and CLI output
 list skipped paths or blocks with their reasons, including invalid UTF-8
 and paths the strict reader cannot load. Filesystem read errors abort the run.
 
@@ -56,11 +62,13 @@ point-in-time source view is required, with a dedicated index root for that
 snapshot.
 
 Before encoding, compare the active generation's paths with the new inventory.
-Refuse publication if more than 10% or more than 50 active paths are missing.
+Before sealing, compare those paths with the notes that will actually publish.
+Refuse publication if more than 10% or more than 50 active paths would be lost.
 Use `--max-deletion-percent` and `--max-deletions` to configure the limits.
-Renames and newly excluded paths count as missing. Use `--allow-deletions` for
-one run after verifying that the removals are intentional. Content refusals
-are reported separately from missing paths.
+Renames, newly excluded paths, invalid paths and active notes refused for
+invalid UTF-8 or by BitNet count toward the thresholds. The configured note
+size rule reports `note_below_min_size` and its skips are exempt. Use
+`--allow-deletions` for one run after verifying that the losses are intentional.
 
 ## Publication and recovery
 

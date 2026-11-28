@@ -17,6 +17,9 @@ const hash = input => createHash("sha256").update(input).digest("hex");
 const note = text => `# Heading\n\n${text}\n`;
 const strict = process.env.SEMANTIC_INDEX_STRICT_READER &&
   (await import(pathToFileURL(path.resolve(process.env.SEMANTIC_INDEX_STRICT_READER)))).readSmartEnvV3;
+const producerTimeout = Number(process.env.SEMANTIC_INDEX_TEST_TIMEOUT_MS ?? 20_000);
+assert.ok(Number.isInteger(producerTimeout) && producerTimeout > 0 && producerTimeout <= 2 ** 31 - 1,
+  "SEMANTIC_INDEX_TEST_TIMEOUT_MS must be a positive timer delay in milliseconds");
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(tmpdir(), "semantic-index-test-"));
@@ -86,8 +89,9 @@ async function fixture(t) {
     const { promise, resolve } = Promise.withResolvers();
     const child = execFile(process.execPath, [
       cli, "--vault", vault, "--index", index, "--endpoint", `http://127.0.0.1:${server.address().port}`,
-      "--model", model, "--revision", "fixture-revision", "--model-sha256", weights, "--min-block-chars", "0", ...args,
-    ], { timeout: 20_000, windowsHide: true }, (error, stdout, stderr) => resolve({ error, stdout, stderr }));
+      "--model", model, "--revision", "fixture-revision", "--model-sha256", weights,
+      "--min-note-chars", "1", "--min-block-chars", "0", ...args,
+    ], { timeout: producerTimeout, windowsHide: true }, (error, stdout, stderr) => resolve({ error, stdout, stderr }));
     return { child, result: promise };
   }
   async function run(...args) {
@@ -327,6 +331,46 @@ test("a readable partial vault cannot drop nine of ten active notes without appr
   const second = await f.run("--allow-deletions");
   assert.equal(second.deletions, 9);
   assert.deepEqual((await f.load(second.generation)).notes.map(row => row.notePath), ["note-0.md"]);
+});
+
+for (const [label, replaceBody, truncate] of [
+  ["invalid UTF-8", Buffer.from([0xe9, 0x20]), false],
+  ["BitNet truncation", note("Changed input exceeds the context"), true],
+]) {
+  test(`mass ${label} trips the deletion guard after encoding and before a generation is sealed`, async t => {
+    const f = await fixture(t);
+    await f.put("keep.md", note("Keep this note"));
+    for (let i = 0; i < 10; i++) await f.put(`changed-${i}.md`, note("Original input"));
+    const first = await f.run();
+    for (let i = 0; i < 10; i++) await f.put(`changed-${i}.md`, replaceBody);
+    if (truncate) {
+      f.transformRow((row, item) => item.source_path.startsWith("changed-")
+        ? { ...row, truncated: true, tokens: f.health.max_tokens } : row);
+    }
+    await f.fail(/Deletion limit exceeded \(10 of 11 active notes not publishable\)/u);
+    assert.equal(await f.current(), first.generation);
+    assert.deepEqual(await readdir(path.join(f.index, "generations")), [first.generation]);
+    const second = await f.run("--allow-deletions");
+    assert.equal(second.deletions, 10);
+    assert.equal(second.skipped.length, 10);
+    assert.ok(second.skipped.every(item => item.reason === (truncate ? "document_too_long" : "invalid_utf8")));
+    assert.deepEqual((await f.load(second.generation)).notes.map(row => row.notePath), ["keep.md"]);
+  });
+}
+
+test("jsbrains note selection compares a strict byte minimum and does not count size-policy skips as deletions", async t => {
+  const f = await fixture(t);
+  await f.put("shrunk.md", "s".repeat(301));
+  await f.put("multi.md", "é".repeat(151));
+  await f.put("equal.md", "é".repeat(150));
+  const first = await f.run("--min-note-chars", "0");
+  assert.deepEqual((await f.load(first.generation)).notes.map(row => row.notePath), ["multi.md", "shrunk.md"]);
+  assert.deepEqual(first.skipped, [{ path: "equal.md", reason: "note_below_min_size" }]);
+  await f.put("shrunk.md", "s".repeat(300));
+  const second = await f.run("--min-note-chars", "0");
+  assert.equal(second.deletions, 0);
+  assert.ok(second.skipped.some(item => item.path === "shrunk.md" && item.reason === "note_below_min_size"));
+  assert.deepEqual((await f.load(second.generation)).notes.map(row => row.notePath), ["multi.md"]);
 });
 
 test("a truncated input, HTTP context refusal and invalid UTF-8 are reported while valid notes publish", async t => {

@@ -14,7 +14,8 @@ import { inventory, parserRevision, readSource, resolveRoots, sha256, sourcePart
 const help = `Usage: optimike-semantic-index --vault DIR --index DIR --endpoint ORIGIN
        --model ID --revision REV --model-sha256 SHA256 [--rebuild]
        [--exclude-path RELATIVE/PATH]... [--exclude-heading TITLE]...
-       [--min-block-chars 250] [--max-deletion-percent 10] [--max-deletions 50]
+       [--min-note-chars 300] [--min-block-chars 300]
+       [--max-deletion-percent 10] [--max-deletions 50]
        [--allow-deletions]
 
 Build and publish a Smart Environment v3 document index outside the vault.
@@ -110,6 +111,11 @@ async function populate(staging, vault, scan, client, manifest, previous, hashes
         skipped.push({ path: relative, reason: "invalid_utf8" });
         continue;
       }
+      // SmartSource.should_embed compares the file's byte size to min_chars.
+      if (bytes.length <= chunking.minNoteChars) {
+        skipped.push({ path: relative, reason: "note_below_min_size" });
+        continue;
+      }
       const { tags, note, blocks } = sourceParts(relative, text, chunking.excludedHeadings, chunking.minBlockChars);
       const source = { sha256: digest, tags, note: null, blocks: Object.create(null) };
       window.push({ relative, source, note, blocks });
@@ -144,15 +150,18 @@ async function build(options, vault, index, client) {
   }
   requireNotes(scan.files.size);
   const activePaths = Object.keys(previous?.manifest.sources ?? {});
-  const deletions = activePaths.filter(relative => !scan.files.has(relative) && !scan.unsafePaths.has(relative)).length;
-  if (!options["allow-deletions"] && (deletions > options["max-deletions"] ||
-      deletions * 100 > activePaths.length * options["max-deletion-percent"])) {
-    throw Error(`Deletion limit exceeded (${deletions} of ${activePaths.length} active notes missing). Verify the vault before using --allow-deletions`);
+  function guardDeletions(count, detail) {
+    if (!options["allow-deletions"] && (count > options["max-deletions"] ||
+        count * 100 > activePaths.length * options["max-deletion-percent"])) {
+      throw Error(`Deletion limit exceeded (${count} of ${activePaths.length} active notes ${detail}). Verify the vault before using --allow-deletions`);
+    }
   }
+  guardDeletions(activePaths.filter(relative => !scan.files.has(relative)).length, "missing or reader-incompatible");
   const chunking = {
-    version: "bitnet-markdown-v2",
+    version: "bitnet-markdown-v3",
     jsbrains: parserRevision,
     notes: "breadcrumb + full Markdown, removing excluded heading lines",
+    minNoteChars: options["min-note-chars"] || 300,
     sections: "SmartBlock.should_embed selection outside frontmatter and excluded heading ranges",
     minBlockChars: options["min-block-chars"],
     overLength: "skip inputs that exceed the BitNet context",
@@ -188,6 +197,9 @@ async function build(options, vault, index, client) {
   try {
     for (const directory of directories) await mkdir(path.join(staging, directory), { mode: 0o700 });
     const digests = await populate(staging, vault, scan, client, manifest, reusable, hashes);
+    const belowMinimum = new Set(skipped.filter(item => item.reason === "note_below_min_size").map(item => item.path));
+    const deletions = activePaths.filter(relative => !manifest.sources[relative] && !belowMinimum.has(relative)).length;
+    guardDeletions(deletions, "not publishable");
     requireNotes(manifest.stats.notes);
     await sealGeneration(staging, manifest);
     const persisted = await readManifest(staging, id);
@@ -237,7 +249,8 @@ async function main() {
     "allow-deletions": { type: "boolean" },
     "max-deletions": { type: "string", default: "50" },
     "max-deletion-percent": { type: "string", default: "10" },
-    "min-block-chars": { type: "string", default: "250" },
+    "min-note-chars": { type: "string", default: "300" },
+    "min-block-chars": { type: "string", default: "300" },
     "exclude-path": { type: "string", multiple: true, default: [] },
     "exclude-heading": { type: "string", multiple: true, default: [] },
   } });
@@ -253,7 +266,7 @@ async function main() {
   }
   if (options["exclude-heading"].some(title => !title.trim())) throw Error("Heading exclusions must be nonempty");
   for (const [key, max] of [["max-deletions", Number.MAX_SAFE_INTEGER], ["max-deletion-percent", 100],
-    ["min-block-chars", Number.MAX_SAFE_INTEGER]]) {
+    ["min-note-chars", Number.MAX_SAFE_INTEGER], ["min-block-chars", Number.MAX_SAFE_INTEGER]]) {
     const value = Number(options[key]);
     if (!/^\d+$/u.test(options[key]) || !Number.isSafeInteger(value) || value > max) {
       throw Error(`--${key} must be an integer from 0 to ${max}`);
