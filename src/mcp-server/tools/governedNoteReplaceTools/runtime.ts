@@ -1254,13 +1254,14 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
     reference: string,
     idempotencyKey: string,
     completionMode: SettlementCompletionMode = "verified",
+    validateReplay?: () => Promise<void>,
   ): Promise<OperationReceipt> {
     const plan = this.required(reference);
     if (plan.status === "outcome_unknown" || (plan.filesystem && plan.status === "applying")) {
       assertCurrentWritePolicy("recover", plan.path, plan.nextContent);
     }
     const operation = this.backend.withContext({ kind: "recover", path: plan.path, requireNativeFormat: !!plan.frontmatterFormat }, () =>
-      this.adapter.recover(reference, idempotencyKey, completionMode),
+      this.adapter.recover(reference, idempotencyKey, completionMode, validateReplay),
     );
     return this.refreshCacheAfterCommit(plan, operation, true);
   }

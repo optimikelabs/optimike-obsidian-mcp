@@ -184,9 +184,12 @@ avec absence transitoire est activé pour d’autres outils. L’application exi
 
 Lancer une simulation et utiliser une autre clé d’idempotence pour
 l’application. La simulation peut sceller un aperçu sous `MCP_WRITE_MODE=readonly`
-sans modifier le coffre. Une transition vers le statut courant renvoie
-`noChange` et un objet `fieldValues` vide. En cas de perte de réponse, relire le résultat avec la même
-requête et sa clé d’application, ou réconcilier la référence renvoyée. La
+sans modifier le coffre. Une transition vers le statut courant ou l’effacement
+d’un champ absent renvoie `noChange` et un objet `fieldValues` vide. En cas de
+perte de réponse, relire le résultat avec la même requête et sa clé d’application,
+ou réconcilier la référence renvoyée. Si un autre appareil modifie la note
+après une interruption avant la mise en place des octets à publier, la reprise
+enregistre un `CONFLICT` définitif et préserve la modification. La
 révision issue de la lecture lie les octets de la note et la configuration.
 Une modification concurrente déclenche `CONFLICT`. Les reçus indiquent
 `source: "filesystem"`. Les dates de la tâche utilisent
@@ -199,8 +202,8 @@ reliées à d’autres tâches, ainsi que les transitions susceptibles de décle
 un déplacement, un archivage, un désépinglage ou une mise à jour de la
 numérotation des projets. La création de tâches-fichiers, le routage
 automatique, les modèles, les champs complexes et les propriétés non gérées
-exigent Desktop. Les dates-heures de début et de fin, l’estimation et les
-modifications de champs scalaires sur une tâche avec un créneau enregistré
+exigent Desktop. Les dates-heures de début et de fin, l’estimation et toute
+mise à jour d’une tâche avec un début ou une fin de créneau enregistrés
 exigent aussi Desktop. Operon peut en déduire une date planifiée, une heure de
 fin et d’autres effets de workflow. Voir les [règles de planification d’Operon 4.6.0](https://github.com/hasanyilmaz/operon/blob/4.6.0/src/core/scheduling-rules.ts).
 Les profils de compatibilité signalent aussi cette exigence

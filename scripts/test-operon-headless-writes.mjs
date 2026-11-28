@@ -22,6 +22,7 @@ const textPath = "Synthetic\u00a0note.md";
 const filePath = "Synthetic file task.md";
 const racePath = "Race.md";
 const interruptedPath = "Interrupted.md";
+const changedAfterCrashPath = "Changed after crash.md";
 const phonePath = "Phone.md";
 const statuses = [
   { id: "work_open", label: "Open" }, { id: "work_active", label: "Active" },
@@ -39,9 +40,11 @@ const beforeSources = new Map([
   ["Description.md", before.replace("target1", "descrip")],
   ["Tags.md", before.replace("target1", "tags001")],
   ["Timed.md", initialFile.replace("file001", "timed01").replace("\n---\n#", "\ndatetimeEnd: 2026-04-02T10:00\n---\n#")],
+  ["Timed inline.md", before.replace("target1", "timed02").replace(" {{datetimeCreated", " {{datetimeStart:: 2026-04-02T09:00}} {{datetimeCreated")],
   [racePath, before.replace("target1", "race001")],
   [phonePath, before.replace("target1", "phone01")],
   [interruptedPath, before.replace("target1", "crash01")],
+  [changedAfterCrashPath, before.replace("target1", "crash02")],
   ["Related.md", before.replace("target1", "rel0001").replace(" {{datetimeCreated", " {{blocking:: target2}} {{datetimeCreated") +
     before.replace("target1", "target2")],
   ["Repeat.md", before.replace("target1", "repeat1").replace(" {{datetimeCreated", " {{repeat:: every week}} {{datetimeCreated")],
@@ -281,10 +284,27 @@ try {
       { patch: { fields: { dateDue: "2026-04-03" } } }), "SERVICE_UNAVAILABLE");
     assert.equal(timed.reason, "operon_filesystem_live_required");
     await bytes("Timed.md", beforeSources.get("Timed.md"));
+    const timedInline = await task(first, "timed02");
+    for (const [key, patch] of [["timed-description", { description: "New description" }], ["timed-tags", { tags: ["synthetic"] }]]) {
+      const refused = await rejects(first, "operon_update_task", payload(timedInline, key, { patch }), "SERVICE_UNAVAILABLE");
+      assert.equal(refused.reason, "operon_filesystem_live_required");
+      await bytes("Timed inline.md", beforeSources.get("Timed inline.md"));
+    }
+    // The Bridge's status-only transition carries no companion changes to prepareUpdate.
+    assert.equal((await call(first, "operon_transition_task", payload(timedInline, "timed-status-only", { intent: "complete" }))).status, "applied");
+    assert.equal((await task(first, "timed02")).dates.scheduled, null);
     const cleared = await call(first, "operon_update_task", payload(fileTask, "clear-due",
       { patch: { fields: { dateDue: "" } } }));
     assert.equal(cleared.status, "applied");
     assert.equal((await task(first, "file001")).dates.due, null);
+    const clearedTask = await task(first, "file001");
+    const alreadyClearedBytes = await read(filePath);
+    const unchangedClear = await call(first, "operon_update_task", payload(clearedTask, "clear-absent-due",
+      { patch: { fields: { dateDue: "" } } }));
+    assert.equal(unchangedClear.noChange, true);
+    assert.deepEqual(unchangedClear.fieldValues, {});
+    assert.equal(unchangedClear.after.revision, clearedTask.revision);
+    assert.deepEqual(await read(filePath), alreadyClearedBytes);
 
     for (const [id, relative] of [["repeat1", "Repeat.md"], ["target2", "Related.md"]]) {
       const refused = await rejects(first, "operon_transition_task", payload(await task(first, id), `guard-${id}`, { intent: "complete" }), "SERVICE_UNAVAILABLE");
@@ -325,6 +345,20 @@ try {
     assert.equal(reusedRecoveryKey.reason, "idempotency_key_reused");
     assert.deepEqual((await call(resumed, "operon_list_pending_recoveries")).recoveries, []);
     assert.equal((await task(resumed, "crash01")).dates.modified, timestamp, "Recovery must publish the originally sealed task timestamp");
+
+    const crashBeforeEdit = await start("headless-filesystem", "tasks", { crash: true });
+    const interruptedInput = payload(await task(crashBeforeEdit, "crash02"), "crash-before-phone-edit", { intent: "complete" });
+    await assert.rejects(call(crashBeforeEdit, "operon_transition_task", interruptedInput), /closed/u);
+    const [interrupted] = (await call(resumed, "operon_list_pending_recoveries")).recoveries;
+    assert.ok(interrupted);
+    const phoneEdit = beforeSources.get(changedAfterCrashPath) + "Phone edited the note after interruption.\n";
+    await writeFile(path.join(vault, changedAfterCrashPath), phoneEdit, "utf8");
+    const conflictInput = { ...recoveryInput, recoveryRef: interrupted.recoveryRef, idempotencyKey: "recover-after-phone-edit" };
+    await rejects(resumed, "operon_recover_mutation", conflictInput, "CONFLICT");
+    assert.deepEqual((await call(resumed, "operon_list_pending_recoveries")).recoveries, []);
+    await rejects(resumed, "operon_recover_mutation", conflictInput, "CONFLICT");
+    await rejects(resumed, "operon_transition_task", interruptedInput, "CONFLICT");
+    await bytes(changedAfterCrashPath, phoneEdit);
 
     const configPath = ".obsidian/plugins/operon/data.json";
     const fileBeforeRouting = await read(filePath);

@@ -187,8 +187,9 @@ fallback for other notes is configured. Apply requires
 
 Run a dry-run first and use a different idempotency key for apply. A dry-run
 can seal a preview under `MCP_WRITE_MODE=readonly` without changing the vault.
-A same-status transition returns `noChange` with empty `fieldValues`. For an
-update or transition, pass the filesystem revision from the current task read.
+A same-status transition or a clear on an absent field returns `noChange` with
+empty `fieldValues`. For an update or transition, pass the filesystem revision
+from the current task read.
 It binds the note bytes and settings. A concurrent edit causes `CONFLICT`.
 The writer seals the exact bytes in the shared note journal and writes task
 timestamps in `OPTIMIKE_VAULT_TIMEZONE`. Set it to the timezone of the devices
@@ -196,12 +197,14 @@ running Obsidian, where Operon uses the process's local time. The note's own mod
 follows the governed date policy. Receipts use `source: "filesystem"`.
 If the acknowledgement is lost, repeat the identical request with its apply
 key to read the established result or reconcile the returned recovery reference.
+If another device edits the note after an interruption before staging, recovery
+records a terminal `CONFLICT` and preserves the edit.
 
 The filesystem writer refuses repeating, tracked or related tasks and
 transitions that can unpin, move or archive a task or update project serials. File creation, automatic inline
 routing, templates, rich fields and unmanaged properties require Desktop.
-Start/end datetimes, estimates and scalar field edits on tasks with stored time
-slots require Desktop because Operon can derive scheduled dates, end times and
+Start/end datetimes, estimates and any update to a task with stored start or end
+times require Desktop because Operon can derive scheduled dates, end times and
 additional workflow effects. See the [Operon 4.6.0 scheduling rules](https://github.com/hasanyilmaz/operon/blob/4.6.0/src/core/scheduling-rules.ts).
 Compatibility profiles retain explicit Desktop-required refusals for adoption
 (Tasks metadata conversion), periodic creation and scheduling (Daily/Weekly

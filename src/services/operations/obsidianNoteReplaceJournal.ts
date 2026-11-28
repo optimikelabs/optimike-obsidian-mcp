@@ -924,6 +924,12 @@ export class ObsidianNoteReplaceJournal {
       reason, undefined, true, undefined);
   }
 
+  settleUnstagedFilesystemRecovery(operationId: string): ObsidianNoteReplacePlan {
+    return this.transitionInternal(operationId, ["outcome_unknown"], "conflict",
+      "The note changed before the interrupted operation reached publication.", undefined, false, undefined,
+      undefined, undefined, true);
+  }
+
   settleFilesystemLockBusy(plan: ObsidianNoteReplacePlan): void {
     const current = this.get(plan.operationId);
     const attemptId = plan.executionOwner?.attemptId;
@@ -1182,10 +1188,14 @@ export class ObsidianNoteReplaceJournal {
     settlementEvidence: ModifiedTimeSettlementEvidence | undefined,
     effectProof?: OperationProof,
     filesystemUpdate?: Partial<NonNullable<ObsidianNoteReplacePlan["filesystem"]>>,
+    requireUnstagedFilesystem = false,
   ): ObsidianNoteReplacePlan {
     this.maybePurgeTerminalPlans();
     const current = this.get(operationId);
     if (!current || !expected.includes(current.status)) {
+      throw new ObsidianNoteReplaceConcurrencyError();
+    }
+    if (requireUnstagedFilesystem && (!current.filesystem || current.filesystem.stagedIdentity)) {
       throw new ObsidianNoteReplaceConcurrencyError();
     }
     if (next === "committed" && current.filesystem?.divergentObservation !== undefined) {

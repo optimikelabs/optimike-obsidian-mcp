@@ -169,8 +169,8 @@ export class FilesystemOperonMutations {
     if (params.patch.properties) return unsupportedFilesystemMutation("Unmanaged file properties require the native Operon property contract.");
     return this.edit("operon_update_task", params, (view, task) => {
       // Operon normalizes existing time slots even during other field edits.
-      if (params.patch.fields && (task.dates.datetimeStart || task.dates.datetimeEnd)) {
-        return unsupportedFilesystemMutation("Updating fields on a task with a time slot requires native scheduling normalization.");
+      if (task.dates.datetimeStart || task.dates.datetimeEnd) {
+        return unsupportedFilesystemMutation("Updating a task with a time slot requires native scheduling normalization.");
       }
       return { description: params.patch.description, tags: params.patch.tags, fields: scalarFields(params.patch.fields, view.configuration) };
     });
@@ -205,7 +205,7 @@ export class FilesystemOperonMutations {
       const edit = change(view, task!, timestamp);
       if (edit.noChange) return { content, operonId: task!.operonId, noChange: true };
       const next = editTaskSource(content, task!, view.configuration, edit);
-      if (next === content) return invalid("The Operon edit would leave the task unchanged.");
+      if (next === content) return { content, operonId: task!.operonId, noChange: true };
       edit.fields.datetimeModified = timestamp;
       return { content: editTaskSource(content, task!, view.configuration, edit), operonId: task!.operonId };
     });
@@ -308,13 +308,15 @@ export class FilesystemOperonMutations {
     this.notes.bindOperonRecoveryKey(sealed.operationId, journalKey(params.idempotencyKey));
     const before = await this.notes.status(ref);
     if (before.outcome === "committed") return this.result(before, params, true);
-    await this.requireAtomicExchange();
-    const view = await this.reader.mutationSnapshot();
-    if (view.mutationBinding !== sealed.projection!.proof.mutationBinding) conflict("Operon settings or runtime state changed since the original plan was sealed.");
-    const beforeTask = OperonTaskSchema.safeParse(sealed.projection!.proof.before);
-    if (beforeTask.success) ensureStandalone(view, exactTask(view, beforeTask.data.operonId, beforeTask.data.revision));
-    else if (view.snapshot.tasks.some(task => task.operonId === sealed.projection!.proof.operonId)) conflict("The new task identity is already in use.");
-    return this.result(await this.notes.recover(ref, sealed.idempotencyKey), params, false);
+    const receipt = await this.notes.recover(ref, sealed.idempotencyKey, "verified", async () => {
+      await this.requireAtomicExchange();
+      const view = await this.reader.mutationSnapshot();
+      if (view.mutationBinding !== sealed.projection!.proof.mutationBinding) conflict("Operon settings or runtime state changed since the original plan was sealed.");
+      const beforeTask = OperonTaskSchema.safeParse(sealed.projection!.proof.before);
+      if (beforeTask.success) ensureStandalone(view, exactTask(view, beforeTask.data.operonId, beforeTask.data.revision));
+      else if (view.snapshot.tasks.some(task => task.operonId === sealed.projection!.proof.operonId)) conflict("The new task identity is already in use.");
+    });
+    return this.result(receipt, params, false);
   }
 
   private requireUnscopedRecovery() {

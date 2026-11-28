@@ -959,6 +959,7 @@ export class ObsidianNoteReplaceOperationAdapter
     reference: string,
     idempotencyKey: string,
     completionMode: SettlementCompletionMode = "verified",
+    validateReplay?: () => Promise<void>,
   ): Promise<OperationReceipt> {
     let plan = this.required(reference, idempotencyKey);
     if (plan.status === "committed") return receipt(this.profile, plan);
@@ -1032,6 +1033,17 @@ export class ObsidianNoteReplaceOperationAdapter
       );
     }
     if (read.sha256 !== plan.beforeSha256) {
+      if (this.options.filesystem && plan.projection?.kind === FILESYSTEM_OPERON_PROJECTION) {
+        // Operon publication requires a durable staging witness. Without one,
+        // different bytes prove a pre-publication conflict, not an uncertain write.
+        try {
+          const conflict = this.journal.settleUnstagedFilesystemRecovery(plan.operationId);
+          return receipt(this.profile, conflict);
+        } catch (error) {
+          if (!(error instanceof ObsidianNoteReplaceConcurrencyError)) throw error;
+          return receipt(this.profile, this.required(reference));
+        }
+      }
       return receipt(
         this.profile,
         this.uncertain(
@@ -1040,6 +1052,7 @@ export class ObsidianNoteReplaceOperationAdapter
         ),
       );
     }
+    await validateReplay?.();
     let applying: ObsidianNoteReplacePlan;
     try {
       applying = this.journal.transition(
