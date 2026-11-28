@@ -140,30 +140,32 @@ export function suggestFunctionNames(name: string, candidates: Iterable<string>)
     .map((entry) => entry.candidate);
 }
 
-type Registry = Map<BaseFunctionType, Set<string>>;
+// Obsidian's global and instance lookups fold case. Keep the registered
+// spelling as the value for display and suggestions.
+type Registry = Map<BaseFunctionType, Map<string, string>>;
 
 function registryByType(functions: BaseFunctionDescriptor[]): Registry {
   const registry: Registry = new Map();
   for (const fn of functions) {
-    if (!registry.has(fn.on)) registry.set(fn.on, new Set());
-    registry.get(fn.on)!.add(fn.name);
+    if (!registry.has(fn.on)) registry.set(fn.on, new Map());
+    registry.get(fn.on)!.set(fn.name.toLowerCase(), fn.name);
   }
   return registry;
 }
 
 /** Functions callable on a receiver type: its own plus the generic Any ones. */
-function namesFor(registry: Registry, on: BaseFunctionType): Set<string> {
-  if (on === "Global") return new Set(registry.get("Global") ?? []);
-  return new Set([
-    ...(registry.get(on) ?? []),
+function namesFor(registry: Registry, on: BaseFunctionType): ReadonlyMap<string, string> {
+  if (on === "Global") return registry.get("Global") ?? new Map();
+  return new Map([
     ...(registry.get("Any") ?? []),
     ...(registry.get("Value") ?? []),
+    ...(registry.get(on) ?? []),
   ]);
 }
 
-function methodTypesDefining(registry: Registry, name: string): BaseFunctionType[] {
+function methodTypesDefining(registry: Registry, lookupName: string): BaseFunctionType[] {
   return BASE_FUNCTION_TYPES.filter(
-    (type) => type !== "Global" && registry.get(type)?.has(name),
+    (type) => type !== "Global" && registry.get(type)?.has(lookupName),
   );
 }
 
@@ -171,25 +173,26 @@ export function diagnoseFunctions(expression: string, functions: BaseFunctionDes
   const registry = registryByType(functions);
   const unknownFunctions: PublicFormulaCheck["formulas"][number]["unknownFunctions"] = [];
   for (const call of formulaFunctionCalls(expression)) {
+    const lookupName = call.name.toLowerCase();
     if (!call.receiver) {
-      if (!registry.get("Global")?.has(call.name)) {
-        unknownFunctions.push({ name: call.name, on: "Global", definedOn: methodTypesDefining(registry, call.name) });
+      if (!registry.get("Global")?.has(lookupName)) {
+        unknownFunctions.push({ name: call.name, on: "Global", definedOn: methodTypesDefining(registry, lookupName) });
       }
       continue;
     }
-    const definedOn = methodTypesDefining(registry, call.name);
+    const definedOn = methodTypesDefining(registry, lookupName);
     if (call.receiver === "any") {
       if (definedOn.length === 0) unknownFunctions.push({ name: call.name, on: "any", definedOn });
-    } else if (!namesFor(registry, call.receiver).has(call.name)) {
+    } else if (!namesFor(registry, call.receiver).has(lookupName)) {
       unknownFunctions.push({ name: call.name, on: call.receiver, definedOn });
     }
   }
   const first = unknownFunctions[0];
   const scope: BaseFunctionType | undefined =
     first && first.on !== "any" ? first.on : undefined;
-  const valid = scope ? [...namesFor(registry, scope)].sort() : undefined;
+  const valid = scope ? [...namesFor(registry, scope).values()].sort() : undefined;
   const pool = valid ?? [...new Set(
-    BASE_FUNCTION_TYPES.filter((type) => type !== "Global").flatMap((type) => [...(registry.get(type) ?? [])]),
+    BASE_FUNCTION_TYPES.filter((type) => type !== "Global").flatMap((type) => [...(registry.get(type)?.values() ?? [])]),
   )];
   return {
     unknownFunctions: unknownFunctions.slice(0, MAX_UNKNOWN_FUNCTIONS),

@@ -24,7 +24,12 @@ let writes = 0;
 let engineEnabled = false;
 // The Bases list itself fails when the Bases Bridge is absent (404) or broken.
 let basesListStatus = 200;
-const ENGINE_RESULTS = new Map(Object.entries(nativeCapture.formulaChecks));
+const ENGINE_RESULTS = new Map([
+  ...Object.entries(nativeCapture.formulaChecks),
+  ["file.name.LOWER() + fooBar(1)", ["runtime_error", 'Error: Cannot find function "fooBar"']],
+  ["NUMBER(1) + file.name.ROUND()", ["runtime_error", 'Error: Cannot find function "ROUND" on type String']],
+  ["file.name.LOWER()", ["ok"]],
+]);
 // Registry as the Bridge sends it: generic value methods on `Any`, and
 // `doc: null` for functions without a description.
 const REGISTRY = [
@@ -366,13 +371,17 @@ try {
   const missingFormula = await refusal("bases_formula_patch_plan", "formula.inexistante + 1", "engine-refuse-3");
   assert.deepEqual(missingFormula.unknownFunctions, []);
 
-  const wrongType = await refusal("bases_formula_patch_plan", "file.name.round()", "engine-refuse-4");
-  assert.deepEqual(wrongType.unknownFunctions, [{ name: "round", on: "String", definedOn: ["Number"] }]);
-  assert.equal(wrongType.validFunctions.on, "String");
-  assert.ok(wrongType.validFunctions.names.includes("lower") && wrongType.validFunctions.names.includes("toString"));
-
   const nearMiss = await refusal("bases_config_patch_plan", "file.name.lowr()", "engine-refuse-5");
   assert.deepEqual(nearMiss.suggestions, ["lower"]);
+
+  const mixed = await refusal("bases_formula_patch_plan", "file.name.LOWER() + fooBar(1)", "engine-refuse-6");
+  assert.deepEqual(mixed.unknownFunctions, unknownGlobal.unknownFunctions, "LOWER is a known String method");
+  assert.deepEqual(mixed.suggestions, unknownGlobal.suggestions, "suggestions address the unknown global call");
+
+  const wrongType = await refusal("bases_formula_patch_plan", "NUMBER(1) + file.name.ROUND()", "engine-refuse-4");
+  assert.deepEqual(wrongType.unknownFunctions, [{ name: "ROUND", on: "String", definedOn: ["Number"] }]);
+  assert.equal(wrongType.validFunctions.on, "String");
+  assert.ok(wrongType.validFunctions.names.includes("lower") && wrongType.validFunctions.names.includes("toString"));
 
   const prototypeKey = await refusal("bases_formula_patch_plan", "file.toString.foo()", "engine-refuse-7");
   assert.deepEqual(
