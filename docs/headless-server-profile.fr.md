@@ -93,6 +93,10 @@ Seulement après le palier `headless-guarded`, passer une copie ou un vault déd
 5. Pour Canvas, limiter le contrat à la structure JSON Canvas : create, ajout de nœud texte, connexion de nœuds, validation.
 6. Valider avec `npm run smoke:headless-filesystem`.
 
+Voir [Modes runtime](../OPERATIONS.fr.md#modes-runtime) pour l’ordre des écritures
+sur un même fichier, la détection des conflits et le risque de concurrence
+avec d’autres processus.
+
 Ne jamais utiliser cette phase pour modifier des notes de production existantes tant que le profil serveur n’a pas son propre rollback et monitoring.
 
 ## Décision go/no-go serveur

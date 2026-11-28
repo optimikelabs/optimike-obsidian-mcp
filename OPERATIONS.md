@@ -109,6 +109,16 @@ This policy protects Optimike cache, search, Tasks, and local Bases fallback beh
 - `headless-guarded`: same headless read surface plus guarded filesystem writes for `obsidian_update_note`, `obsidian_search_replace`, and `obsidian_manage_frontmatter`. Note updates are append/prepend only; overwrite remains blocked by guarded policy. Readonly local Bases fallback is also available.
 - `headless-filesystem`: same as `headless-guarded`, plus explicit filesystem features for sandbox/dedicated vaults: frontmatter/inline tags, local tag index/audit and dry-run rename, admin move/archive/delete operations with `expectedHash` or `expectedMtime`, batch frontmatter with dry-run, `.base` YAML create/config, Bases rows as Markdown frontmatter `set` operations, and minimal JSON Canvas helpers.
 
+The filesystem writer shared by `headless-guarded` and `headless-filesystem`
+serializes mutations of the same resolved file within one server process.
+An update that changes the content invalidates the previous `expectedHash`.
+Concurrent appends within the writer preserve each caller's text even without
+a precondition. Before replacing a file, the writer rechecks the content hash
+it read, or that the target is still absent for a new file. A mismatch returns
+`CONFLICT` and discards the temporary file. Another process can still change
+the target between the last check and the rename, so coordinate independent
+writers separately.
+
 Operational rule: headless modes mean Optimike MCP over a synchronized Markdown vault. They do not load Obsidian community plugins or provide active file, command palette, or Bases Bridge without Desktop.
 
 Runtime smokes:
