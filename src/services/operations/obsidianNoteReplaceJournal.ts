@@ -88,6 +88,7 @@ export type ObsidianNoteReplacePlan = {
     witnessesCleaned?: true;
     exchangeRollback?: { identity: string; sha256: string; bytesBase64: string };
     displacedObservation?: { sha256: string; bytesBase64: string };
+    displacedEditRecoverable?: true;
     // Private evidence. null means publication was followed by absence.
     divergentObservation?: { sha256: string; bytesBase64: string } | null;
   };
@@ -122,10 +123,8 @@ export class ObsidianNoteReplaceConcurrencyError extends Error {
 }
 
 export function displacedFilesystemEdit(plan: ObsidianNoteReplacePlan) {
-  const proof = plan.filesystem;
-  const displaced = proof?.displacedObservation;
-  return plan.status === "outcome_unknown" && proof?.divergentObservation !== undefined &&
-    proof.localStageMode === "exchange" && displaced?.sha256 !== plan.beforeSha256 ? displaced : undefined;
+  return plan.status === "outcome_unknown" && plan.filesystem?.displacedEditRecoverable
+    ? plan.filesystem.displacedObservation : undefined;
 }
 
 export function noteReplaceIdempotencyConflict(): McpError {
@@ -739,9 +738,10 @@ export class ObsidianNoteReplaceJournal {
   }
 
   recordFilesystemDivergence(operationId: string, observation: { sha256: string; bytesBase64: string } | null,
-    displacedObservation?: { sha256: string; bytesBase64: string }): void {
-    this.transitionInternal(operationId, ["applying", "outcome_unknown"], "outcome_unknown",
-      "headless_postflight_diverged", undefined, true, undefined, undefined, { divergentObservation: observation, displacedObservation });
+    displacedObservation?: { sha256: string; bytesBase64: string }, disposition?: "conflict" | "restore-displaced"): void {
+    this.transitionInternal(operationId, ["applying", "outcome_unknown"], disposition === "conflict" ? "conflict" : "outcome_unknown",
+      "headless_postflight_diverged", undefined, true, undefined, undefined, { divergentObservation: observation, displacedObservation,
+        ...(disposition === "restore-displaced" ? { displacedEditRecoverable: true } : {}) });
   }
 
   settleUnpublishedFilesystem(operationId: string, status: "conflict" | "failed", reason = "headless_not_published"): void {
@@ -760,7 +760,8 @@ export class ObsidianNoteReplaceJournal {
 
   interruptedFilesystemReplacements(): string[] {
     const rows = this.db.prepare(`SELECT operation_id FROM obsidian_note_replace_plans
-      WHERE status IN ('applying', 'outcome_unknown')
+      WHERE (status IN ('applying', 'outcome_unknown') OR
+        (status = 'conflict' AND json_type(payload_json, '$.filesystem.divergentObservation') IS NOT NULL))
         AND json_extract(payload_json, '$.filesystem.localStage') = 1
         AND COALESCE(json_extract(payload_json, '$.projection.kind'), '') <> 'obsidian.note.create'
         AND json_type(payload_json, '$.filesystem.witnessesCleaned') IS NULL`).all();
@@ -1051,7 +1052,7 @@ export class ObsidianNoteReplaceJournal {
         : {}),
       ...(effectProof ? { effectProof } : {}),
       ...(current.filesystem ? { filesystem: { ...current.filesystem, ...filesystemUpdate,
-        ...(STABLE_TERMINAL.has(next) && current.filesystem.divergentObservation === undefined && !current.filesystem.exchangeRollback
+        ...(STABLE_TERMINAL.has(next) && current.filesystem.divergentObservation === undefined && filesystemUpdate?.divergentObservation === undefined && !current.filesystem.exchangeRollback
           ? { stagedContent: undefined } : {}) } } : {}),
       ...(STABLE_TERMINAL.has(next) ? { nextContent: "" } : {}),
       ...(failure ? { failure } : { failure: undefined }),

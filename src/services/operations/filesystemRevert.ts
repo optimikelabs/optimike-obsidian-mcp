@@ -49,13 +49,14 @@ export class FilesystemRevert {
     const divergent = source.status === "outcome_unknown" ? source.filesystem.divergentObservation : undefined;
     const displaced = displacedFilesystemEdit(source);
     const restoreDisplaced = displaced !== undefined;
+    if (divergent !== undefined && source.filesystem.localStageMode === "exchange" && !restoreDisplaced) {
+      refuse("The exchange has no verified displaced edit eligible for restoration.");
+    }
     if (prefix === PREFIX && !restoreDisplaced) refuse("This revert has no displaced edit to restore.");
     const before = restoreDisplaced
       ? new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Buffer.from(displaced.bytesBase64, "base64"))
       : source.filesystem.beforeContent;
-    const restoreIntoAbsence = restoreDisplaced && divergent === null;
-    const afterSha256 = source.status === "committed" ? source.filesystem.stagedSha256 : restoreIntoAbsence
-      ? operationDigest({ absent: source.path, binding: source.bindingFingerprint }) : divergent?.sha256;
+    const afterSha256 = source.status === "committed" ? source.filesystem.stagedSha256 : divergent?.sha256;
     if (!afterSha256) refuse("The filesystem has no after proof against which to seal the revert.");
     const restoreAbsence = source.projection?.kind === "obsidian.note.create";
     if (!restoreAbsence && before === undefined) refuse("The operation has no retained before image.");
@@ -67,8 +68,7 @@ export class FilesystemRevert {
       return this.status(PREFIX + replay.operationId);
     }
     this.authorize("plan", source.path, restoreAbsence || divergent !== undefined, before?.length);
-    const sealed = await this.backend.sealRevert(source.path, restoreAbsence ? undefined : before, afterSha256,
-      { restoreDisplaced, restoreIntoAbsence });
+    const sealed = await this.backend.sealRevert(source.path, restoreAbsence ? undefined : before, afterSha256, restoreDisplaced);
     if (sealed.bindingFingerprint !== source.bindingFingerprint) refuse("The vault differs from the original operation.");
     if (sealed.policyDigest !== source.filesystem.policyDigest) refuse("The protected date policy differs from the original operation.");
     const row = this.journal.create({
@@ -79,7 +79,8 @@ export class FilesystemRevert {
       requestDigest: operationDigest({ identity, before: afterSha256, after: sealed.afterSha256,
         policy: sealed.policyDigest, binding: sealed.bindingFingerprint }),
       projection: { contractVersion: 1, kind: KIND, publicIdempotencyKey: input.idempotencyKey, intentDigest: identity,
-        proof: { restoreAbsence, restoresAfterDivergence: divergent !== undefined, restoreDisplaced, restoreIntoAbsence } },
+        proof: { restoreAbsence, restoresAfterDivergence: divergent !== undefined, restoreDisplaced,
+          displacedEditVerified: restoreDisplaced } },
     });
     return this.receipt(row);
   }
@@ -106,6 +107,9 @@ export class FilesystemRevert {
     }
     if (row.status !== (recovery ? "outcome_unknown" : "planned")) return this.status(ref);
     const proof = row.projection!.proof;
+    if (proof.restoreDisplaced === true && proof.displacedEditVerified !== true) {
+      refuse("The revert was sealed before displaced edits were verified.");
+    }
     this.authorize(recovery ? "recover" : "apply", row.path,
       proof.restoreAbsence === true || proof.restoresAfterDivergence === true, row.nextContent.length);
     await this.backend.status();
@@ -136,7 +140,7 @@ export class FilesystemRevert {
       idempotencyKey: row.projection!.publicIdempotencyKey, planRef: PREFIX + row.operationId, planDigest: row.requestDigest,
       target: { kind: "vault-markdown-note", logicalRef: row.path },
       backend: { kind: FILESYSTEM_AUTHORITY, bindingFingerprint: row.bindingFingerprint },
-      beforeProof: { kind: row.projection!.proof.restoreIntoAbsence ? "observed-path-absence" : "note-sha256", digest: row.beforeSha256 },
+      beforeProof: { kind: "note-sha256", digest: row.beforeSha256 },
       ...(committed ? { afterProof: { kind: row.projection!.proof.restoreAbsence ? "observed-path-absence" : "note-sha256",
         digest: row.filesystem?.stagedSha256 ?? row.afterSha256 } } : {}),
       phase, outcome: phase === "terminal" ? row.status as OperationOutcome : null,

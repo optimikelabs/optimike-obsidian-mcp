@@ -133,12 +133,15 @@ Le contrôle final compare les octets déplacés au hash scellé et relit le fic
 identifie `headless-filesystem`. Si une édition externe a été déplacée et que la
 cible contient encore le fichier temporaire inchangé, un second échange atomique
 rétablit l’édition et clôt l’opération en `conflict`. Le journal conserve la
-version préparée. Si le second échange ne peut être vérifié, l’opération reste
-`outcome_unknown` et le journal garde les versions disponibles. Le motif
-`headless_displaced_edit` signale une édition conservée. En mode `full`,
+version préparée. Si une autre écriture intervient autour du second échange,
+le journal garde les versions disponibles. Le motif
+`headless_displaced_edit` signale un reçu `outcome_unknown` quand le fichier
+préparé est encore en place ou quand le second échange a lui-même déplacé une
+édition et que la cible rétablie est intacte. En mode `full`,
 utilisez `obsidian_operation_revert_plan/apply` avec la référence du plan initial
 pour rétablir l’édition déplacée octet pour octet. Le retour arrière lie le hash
-ou l’absence observée et refuse si la cible a changé depuis. Un programme qui
+observé. Si une édition plus récente est déjà dans la note, l’opération se clôt
+en `conflict` et garde les versions au journal sans proposer de retour arrière. Un programme qui
 garde l’ancien fichier ouvert peut encore l’écrire après son dernier contrôle.
 
 Placez le cache partagé hors du coffre. Le journal est créé à côté du cache
@@ -172,7 +175,8 @@ Après une interruption, appelez status avec la référence d’origine. Il peut
 clore une écriture jamais publiée ou nettoyer le lien temporaire après une
 création. Une interruption pendant l’échange natif laisse un fichier complet
 à la cible. Le démarrage réconcilie aussi son fichier temporaire journalisé avant
-de servir les outils. Avec l’ancienne séquence activée, le démarrage et le premier statut
+de servir les outils et retire les fichiers de sonde vides dont le nom correspond
+exactement au motif, à la racine et dans les dossiers visibles. Avec l’ancienne séquence activée, le démarrage et le premier statut
 rétablissent un original absent depuis sa sauvegarde par un lien exclusif et
 signalent un conflit. Une écriture déjà
 préparée ne se rejoue pas. Pour annuler une écriture terminée, planifiez un

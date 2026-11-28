@@ -48,6 +48,31 @@ async function injectAfterFilesystemEffect() {
   const { FilesystemRevert } = await import("../dist/services/operations/filesystemRevert.js");
   const { nativeFilesystemExchange } = await import("../dist/services/operations/filesystemAtomicExchange.js");
   const journal = new ObsidianNoteReplaceJournal(state);
+  if (mode === "probe-failure-cleanup") {
+    const originalRm = fsp.rm;
+    let failures = 0;
+    fsp.rm = async (filename, options) => {
+      if (path.basename(filename).startsWith(".mcp-exchange-")) {
+        failures += 1;
+        throw new Error("Synthetic probe cleanup failure");
+      }
+      return originalRm(filename, options);
+    };
+    syncBuiltinESMExports();
+    try {
+      const failing = () => () => { throw new Error("Synthetic primary probe failure"); };
+      const backend = new FilesystemNoteBackend(vault, state, journal, () => time, undefined, failing, failing);
+      const adapter = new ObsidianNoteReplaceOperationAdapter(backend, journal, undefined, { filesystem: backend });
+      await assert.rejects(adapter.plan({ path: raced, idempotencyKey: "double-probe-error", nextContent: published }),
+        /Synthetic primary probe failure/u);
+      assert.equal(failures, 2);
+    } finally {
+      fsp.rm = originalRm;
+      syncBuiltinESMExports();
+      journal.close();
+    }
+    return;
+  }
   if (mode === "crash-before-displacement") {
     const record = journal.recordFilesystemStage.bind(journal);
     journal.recordFilesystemStage = (...args) => { record(...args); process.exit(88); };
@@ -87,16 +112,25 @@ async function injectAfterFilesystemEffect() {
     };
   }
   syncBuiltinESMExports();
+  let exchanges = 0;
+  const injectExchange = () => {
+    if (!mode.endsWith("exchange")) return undefined;
+    return (target, stage) => {
+      exchanges += 1;
+      if (mode !== "crash-after-exchange" && exchanges === 1) writeFileSync(target, interference);
+      if (mode === "crash-before-second-exchange" && exchanges === 2) process.exit(92);
+      nativeFilesystemExchange()(target, stage);
+      if (mode === "crash-after-exchange") process.exit(91);
+      if (mode === "crash-after-second-exchange" && exchanges === 2) process.exit(93);
+    };
+  };
   const backend = new FilesystemNoteBackend(vault, state, journal, () => time, () => {
     if (mode === "crash-after-effect") process.exit(87);
     if (mode !== "external-after-effect") return;
     const external = path.join(vault, "Archive", ".external-replacement.tmp");
     writeFileSync(external, interference);
     renameSync(external, path.join(vault, postflightRace));
-  }, () => mode === "crash-after-exchange" ? (target, stage) => {
-    nativeFilesystemExchange()(target, stage);
-    process.exit(91);
-  } : undefined); // Other rename injections target the explicit legacy path.
+  }, injectExchange); // Other rename injections target the explicit legacy path.
   try {
     if (mode === "revert-plan-other-volume") {
       const before = await readFile(path.join(vault, "Created.md"));
@@ -326,8 +360,70 @@ async function checkAtomicExchange() {
     assert.equal(await readFile(filename, "utf8"), published);
     const reverts = new FilesystemRevert(backend, journal);
     const revert = await reverts.plan({ path: raced, operationRef: plan.planRef, idempotencyKey: "restore-phone" });
+    const oldPlan = journal.get(revert.operationId);
+    const oldProof = { ...oldPlan.projection.proof };
+    delete oldProof.displacedEditVerified;
+    const stale = journal.create({ ...oldPlan, idempotencyKey: "old-revert", projection: {
+      ...oldPlan.projection, proof: oldProof, publicIdempotencyKey: "old-revert",
+    } });
+    await assert.rejects(reverts.apply(`obsidian-operation-revert:v1:${stale.operationId}`, "old-revert"), { code: "CONFLICT" });
     assert.equal((await reverts.apply(revert.planRef, "restore-phone")).outcome, "committed");
     assert.equal(await readFile(filename, "utf8"), interference);
+
+    const third = initial.replace("Original body.", "Third party edit.");
+    const fourth = initial.replace("Original body.", "Fourth edit.");
+    const replace = (target, text) => { writeFileSync(target + ".sync", text); renameSync(target + ".sync", target); };
+    const cases = [
+      ["E", (target, stage) => { writeFileSync(target, third); exchange(target, stage); }, true],
+      ["F", (target, stage) => { replace(target, third); exchange(target, stage); }, true],
+      ["H", (target, stage) => { exchange(target, stage); writeFileSync(target, third); }, false],
+      ["I", (target, stage) => { exchange(target, stage); replace(target, third); }, false],
+      ["J", (target, stage) => { writeFileSync(stage, third); exchange(target, stage); }, false],
+      ["K", (target, stage) => { writeFileSync(target, third); exchange(target, stage); }, true],
+    ];
+    for (const [key, secondExchange, recoverable] of cases) {
+      await writeFile(filename, initial);
+      let count = 0;
+      const racing = injected(() => (target, stage) => {
+        if (++count === 2) return secondExchange(target, stage);
+        if (key === "K") replace(target, interference);
+        else writeFileSync(target, interference);
+        exchange(target, stage);
+      });
+      const source = await racing.plan({ path: raced, idempotencyKey: key, nextContent: published });
+      const receipt = await racing.apply(source.planRef, key);
+      assert.equal(receipt.outcome, recoverable ? "outcome_unknown" : "conflict", key);
+      assert.equal((await racing.status(source.planRef)).postflight.reason, recoverable ? "headless_displaced_edit" : undefined, key);
+      const evidence = JSON.stringify(journal.get(source.operationId).filesystem);
+      for (const version of [interference, third]) assert.ok(evidence.includes(Buffer.from(version).toString("base64")), key);
+      assert.equal(await readFile(filename, "utf8"), recoverable ? interference : third, key);
+      const restore = () => reverts.plan({ path: raced, operationRef: source.planRef, idempotencyKey: `revert-${key}` });
+      if (recoverable) {
+        const plan = await restore();
+        assert.equal((await reverts.apply(plan.planRef, `revert-${key}`)).outcome, "committed", key);
+      } else await assert.rejects(restore, { code: "CONFLICT" });
+      assert.equal(await readFile(filename, "utf8"), third, key);
+    }
+
+    for (const [key, mode, code, downtimeEdit] of [
+      ["before-second", "crash-before-second-exchange", 92, false],
+      ["after-second", "crash-after-second-exchange", 93, false],
+      ["downtime-edit", "crash-before-second-exchange", 92, true],
+    ]) {
+      await writeFile(filename, initial);
+      const source = await plain.plan({ path: raced, idempotencyKey: key, nextContent: published });
+      const worker = fork(new URL(import.meta.url), [mode, vault, state, source.planRef, key],
+        { stdio: ["ignore", "ignore", "inherit", "ipc"] });
+      assert.deepEqual(await once(worker, "exit"), [code, null], key);
+      if (downtimeEdit) await writeFile(filename, fourth);
+      await backend.restoreInterruptedReplacements();
+      const receipt = await plain.status(source.planRef);
+      assert.equal(receipt.outcome, "conflict", key);
+      assert.equal(receipt.postflight.reason, undefined, key);
+      await assert.rejects(reverts.plan({ path: raced, operationRef: source.planRef, idempotencyKey: `revert-${key}` }), { code: "CONFLICT" });
+      assert.equal(await readFile(filename, "utf8"), downtimeEdit ? fourth : interference, key);
+      assert.equal((await readdir(path.dirname(filename))).some(name => name.startsWith(".mcp-write-")), false, key);
+    }
 
     await writeFile(filename, initial);
     const deletedAfterExchange = injected(() => (target, stage) => {
@@ -336,12 +432,11 @@ async function checkAtomicExchange() {
       rmSync(target);
     });
     const deletion = await deletedAfterExchange.plan({ path: raced, idempotencyKey: "removed-after-exchange", nextContent: published });
-    assert.equal((await deletedAfterExchange.apply(deletion.planRef, "removed-after-exchange")).postflight.reason, "headless_displaced_edit");
+    assert.equal((await deletedAfterExchange.apply(deletion.planRef, "removed-after-exchange")).outcome, "conflict");
     assert.equal(existsSync(filename), false);
-    const restore = await reverts.plan({ path: raced, operationRef: deletion.planRef, idempotencyKey: "restore-absent" });
-    assert.equal(restore.beforeProof.kind, "observed-path-absence");
-    assert.equal((await reverts.apply(restore.planRef, "restore-absent")).outcome, "committed");
-    assert.equal(await readFile(filename, "utf8"), interference);
+    await assert.rejects(reverts.plan({ path: raced, operationRef: deletion.planRef, idempotencyKey: "restore-absent" }), { code: "CONFLICT" });
+    assert.equal(Buffer.from(journal.get(deletion.operationId).filesystem.displacedObservation.bytesBase64, "base64").toString(), interference);
+    await writeFile(filename, interference);
 
     const crashed = await plain.plan({ path: raced, idempotencyKey: "crash-exchange", nextContent: published });
     const worker = fork(new URL(import.meta.url), ["crash-after-exchange", vault, state, crashed.planRef, "crash-exchange"],
@@ -424,7 +519,18 @@ async function integration() {
   };
   try {
     await fixtures(vault);
+    const probeId = "00000000-0000-4000-8000-000000000001";
+    const orphan = `.mcp-exchange-${probeId}-a.tmp`;
+    const nonempty = `.mcp-exchange-${probeId}-b.tmp`;
+    const unrelated = ".mcp-exchange-backup-a.tmp";
+    await writeFile(path.join(vault, orphan), "");
+    await writeFile(path.join(vault, "Archive", orphan), "");
+    await writeFile(path.join(vault, "Archive", nonempty), "preserve");
+    await writeFile(path.join(vault, "Archive", unrelated), "");
     const guarded = await start("headless-guarded");
+    for (const file of [orphan, `Archive/${orphan}`]) await assert.rejects(read(file), { code: "ENOENT" });
+    assert.equal(await read(`Archive/${nonempty}`), "preserve");
+    assert.equal(await read(`Archive/${unrelated}`), "");
     const first = await start("headless-filesystem");
     const second = await start("headless-filesystem");
     const journals = (await readdir(privateDirectory)).filter(name => /^[a-f0-9]{64}\.sqlite$/u.test(name));
@@ -435,6 +541,7 @@ async function integration() {
         { env: { ...env, OBSIDIAN_RUNTIME_MODE: "headless-filesystem" }, stdio: ["ignore", "ignore", "inherit", "ipc"] });
       assert.deepEqual(await once(worker, "exit"), [exit, null], mode);
     };
+    await inject("probe-failure-cleanup", "unused", "unused");
     for (const client of [guarded, first]) {
       const tools = (await client.listTools()).tools.map(tool => tool.name);
       for (const hidden of ["obsidian_search_replace", "obsidian_manage_frontmatter", "obsidian_update_note", "obsidian_manage_tags", "obsidian_batch_frontmatter", "bases_upsert_rows"]) {

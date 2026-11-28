@@ -128,12 +128,14 @@ Postflight verifies the displaced bytes against the sealed hash and re-reads the
 identify `headless-filesystem`. If an external edit was displaced and the target
 still contains the unchanged staged inode, a second atomic exchange restores the
 edit and ends in `conflict`. The journal retains the staged version. If the
-second exchange cannot be verified, the operation stays `outcome_unknown` and
-retains the available versions. `headless_displaced_edit` signals a retained edit.
-In full write mode, use
+second exchange races with another write, the journal retains the available
+versions. `headless_displaced_edit` identifies an `outcome_unknown` receipt
+when the initial stage is still in place or when the second exchange itself
+displaced a write and the restored target is intact. In full write mode, use
 `obsidian_operation_revert_plan/apply` with the original plan reference to
-restore the displaced edit byte-for-byte. The revert is sealed against the
-recorded target hash or absence and refuses if the target has since changed.
+restore that displaced edit byte-for-byte. The revert is sealed against the
+recorded target hash. If a newer edit already occupies the note, the operation
+ends in `conflict` and keeps the journal evidence without offering restoration.
 A process holding an old file open can still write to it after its final check.
 
 Put the shared cache outside the vault. The default governed journal is next
@@ -164,7 +166,9 @@ Desktop provides native YAML serialization and metadata types in live mode.
 After an interrupted apply, call status on the original reference. It can
 settle a write that never published, or reclaim the staged hard link after
 creation. An interrupted native exchange leaves a complete file at the target.
-Startup also reconciles its journaled temporary witness before serving tools.
+Startup also reconciles its journaled temporary witness before serving tools
+and removes empty files with the exact exchange-probe name pattern in the
+vault root and visible folders.
 For the opt-in legacy sequence, startup and the first status restore a missing
 original through an exclusive link and report a conflict. A staged write never replays.
 To undo a committed write, plan a revert using its original plan reference
