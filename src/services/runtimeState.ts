@@ -200,8 +200,9 @@ type PublicRuntimeStatus = {
   transport: string;
   runtimeMode: string;
   headlessRead?: {
-    source: "filesystem-replica";
+    source: "filesystem";
     upstreamSync: "unknown";
+    refreshOrigin?: "startup-snapshot" | "process-refresh";
     refreshing: boolean;
     newestFileMtimeMs: number | null;
   };
@@ -514,8 +515,12 @@ export function projectPublicRuntimeStatus(
     runtimeMode,
     ...(runtimeMode.startsWith("headless-") ? {
       headlessRead: {
-        source: "filesystem-replica" as const,
+        source: "filesystem" as const,
         upstreamSync: "unknown" as const,
+        refreshOrigin: allowedValue(headlessRead.refreshOrigin, [
+          "startup-snapshot",
+          "process-refresh",
+        ] as const),
         refreshing: booleanOr(headlessRead.refreshing),
         newestFileMtimeMs: optionalNumber(headlessRead.newestFileMtimeMs) ?? null,
       },
@@ -643,6 +648,8 @@ export async function collectRuntimeStatus(
   vaultCacheService: VaultCacheService | undefined,
   options: RuntimeStatusOptions = {},
 ): Promise<Record<string, unknown>> {
+  const headless = config.obsidianRuntimeMode.startsWith("headless-");
+  const refresh = headless ? vaultCacheService?.getRefreshEvidence() : undefined;
   const semanticCache = config.smartEnvDir ? getSemanticCacheService() : null;
   const sharedDb = readDbCounts();
   const integrity =
@@ -656,9 +663,10 @@ export async function collectRuntimeStatus(
     transport: config.mcpTransportType,
     runtimeMode: config.obsidianRuntimeMode,
     runtime: collectRuntimeFingerprint(),
-    ...(config.obsidianRuntimeMode.startsWith("headless-") ? {
+    ...(headless ? {
       headlessRead: {
-        refreshing: vaultCacheService?.getRefreshEvidence().refreshing ?? false,
+        refreshing: refresh?.refreshing ?? false,
+        refreshOrigin: refresh?.refreshOrigin,
         newestFileMtimeMs: vaultCacheService?.getNewestFileMtimeMs() ?? null,
       },
     } : {}),

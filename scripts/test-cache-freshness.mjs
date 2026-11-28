@@ -1,6 +1,6 @@
 import "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -110,9 +110,10 @@ test("headless read labels a cold request that overlaps the first filesystem sca
     const payload = JSON.parse(result.content[0].text);
     assert.equal(payload.content, "filesystem fixture");
     assert.deepEqual(payload.provenance, {
-      source: "headless-cache",
+      source: "filesystem",
       upstreamSync: "unknown",
       lastRefreshAt: (await status()).sharedCache.lastRefreshAt,
+      refreshOrigin: "process-refresh",
       refreshing: true,
       partial: true,
     });
@@ -140,6 +141,56 @@ test("live note reads preserve the existing response body", async (t) => {
     assert.equal("headlessRead" in status, false);
   } finally {
     config.obsidianRuntimeMode = previousMode;
+  }
+});
+
+test("another server's scan cannot advance the checkpoint of this process's index", async (t) => {
+  const previous = {
+    obsidianCacheSource: config.obsidianCacheSource,
+    obsidianSharedCacheDbPath: config.obsidianSharedCacheDbPath,
+    obsidianVaultPath: config.obsidianVaultPath,
+  };
+  const vault = mkdtempSync(path.join(root, "shared-index-"));
+  Object.assign(config, {
+    obsidianCacheSource: "filesystem",
+    obsidianSharedCacheDbPath: path.join(root, "shared-index.sqlite"),
+    obsidianVaultPath: vault,
+  });
+  const note = path.join(vault, "Note.md");
+  let now = 1_800_000_000_000;
+  t.mock.method(Date, "now", () => now);
+  function changeReplica(seconds) {
+    writeFileSync(note, "filesystem fixture");
+    utimesSync(note, seconds, seconds);
+    now += 1000;
+  }
+  function assertCheckpoint(cache, lastRefreshAt, mtime, refreshOrigin) {
+    assert.equal(cache.getRefreshEvidence().lastRefreshAt, lastRefreshAt);
+    assert.equal(cache.getRefreshEvidence().refreshOrigin, refreshOrigin);
+    assert.equal(cache.getStats().lastRefreshAt, lastRefreshAt);
+    assert.equal(cache.getNewestFileMtimeMs(), mtime * 1000);
+  }
+
+  const writer = new VaultCacheService(undefined);
+  let reader;
+  try {
+    changeReplica(1_700_000_001);
+    await writer.refreshCache(true);
+    const startupRefresh = now;
+    reader = new VaultCacheService(undefined);
+    changeReplica(1_700_000_002);
+    await writer.refreshCache(true);
+    assertCheckpoint(reader, startupRefresh, 1_700_000_001, "startup-snapshot");
+
+    await reader.refreshCache(true);
+    const localRefresh = now;
+    changeReplica(1_700_000_003);
+    await writer.refreshCache(true);
+    assertCheckpoint(reader, localRefresh, 1_700_000_002, "process-refresh");
+  } finally {
+    await reader?.close();
+    await writer.close();
+    Object.assign(config, previous);
   }
 });
 

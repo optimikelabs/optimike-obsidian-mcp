@@ -35,9 +35,10 @@ export async function noteReadResult(
     payload = {
       ...payload,
       provenance: {
-        source: "headless-cache",
+        source: "filesystem",
         upstreamSync: "unknown",
         lastRefreshAt: after.lastRefreshAt,
+        refreshOrigin: after.refreshOrigin,
         ...(refreshing ? { refreshing: true } : {}),
         ...(!before.ready || !after.ready || refreshing ? { partial: true } : {}),
       },

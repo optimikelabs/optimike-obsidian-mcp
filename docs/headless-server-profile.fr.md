@@ -35,30 +35,39 @@ SEMANTIC_SEARCH_PREWARM=false
 ## Provenance des lectures de notes
 
 Dans les trois modes headless, `obsidian_runtime_status` indique le mode
-d’exécution et renvoie `headlessRead.source: "filesystem-replica"`. Le serveur
+d’exécution et renvoie `headlessRead.source: "filesystem"`. Le serveur
 lit depuis son cache local sans connexion à Obsidian Desktop.
 `headlessRead.refreshing` signale un scan en attente ou en cours.
 `headlessRead.newestFileMtimeMs` contient la date de modification la plus
-récente parmi les fichiers Markdown indexés, ou `null` si l’index est vide.
-`sharedCache.lastRefreshAt` indique le dernier rafraîchissement réussi et
-reste absent jusqu’au premier succès. Les deux dates sont exprimées en
-millisecondes depuis l’époque Unix.
+récente parmi les fichiers Markdown indexés par ce processus, ou `null` si
+l’index est vide. `sharedCache.lastRefreshAt` indique le dernier
+rafraîchissement réussi connu de cet index. `headlessRead.refreshOrigin`
+indique s’il provient de ce processus (`"process-refresh"`) ou de l’état
+SQLite chargé au démarrage (`"startup-snapshot"`). Chaque processus conserve
+son propre repère pendant les scans des autres serveurs. Les deux dates sont
+exprimées en millisecondes depuis l’époque Unix.
 
 `obsidian_read_note`, `obsidian_list_notes` et `obsidian_global_search`
 renvoient un objet `provenance` pour les lectures réussies et les erreurs de
 disponibilité lorsque le cache headless est activé, y compris en mode
-compact. Il contient `source: "headless-cache"` et `lastRefreshAt` tel
-qu’observé au moment de produire la réponse (`null` sans rafraîchissement
-réussi). Les outils continuent d’attendre que le cache soit prêt.
-`partial: true` signale une requête qui a rencontré un cache indisponible ou
-qui a chevauché un rafraîchissement. `refreshing: true` signale un
-rafraîchissement observé pendant la requête, même s’il s’est terminé avant la
-réponse. Le scan met à jour les fichiers un par un, sans garantie
-transactionnelle entre fichiers.
+compact. Il contient `source: "filesystem"`, `refreshOrigin` quand
+l’origine est connue et `lastRefreshAt` (`null` sans rafraîchissement
+réussi). `partial: true` signifie que les résultats peuvent être incomplets.
+Ce champ apparaît aussi quand une requête attend la fin du premier scan.
+`refreshing: true` signale une activité de rafraîchissement pendant la
+requête, même si le scan se termine avant la réponse.
 
-Le statut et la provenance indiquent tous deux `upstreamSync: "unknown"`.
-Un rafraîchissement local réussi établit que le serveur a indexé sa copie
-locale. L’état et la fraîcheur de la synchronisation amont se vérifient
+Les lectures peuvent omettre des modifications apportées sur disque pendant
+la fenêtre `maintenant − lastRefreshAt`, y compris juste après un redémarrage
+qui réutilise l’état SQLite. Le scan traite les fichiers un par un. Leur âge
+peut différer de celui du dernier scan, et une lecture peut réunir des
+fichiers observés à des moments différents.
+
+Le statut MCP, les lectures de notes, `/readyz` et `/statusz` indiquent
+`upstreamSync: "unknown"`. Le statut HTTP conserve la classification
+`source` et ajoute `readSource: "filesystem"` pour les lectures headless.
+`freshnessScope: "local-cache"` limite les indicateurs HTTP d’âge et de
+péremption au cache local. L’état de la synchronisation amont se vérifie
 séparément.
 
 ## Validation

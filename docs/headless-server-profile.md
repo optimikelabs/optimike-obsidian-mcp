@@ -33,28 +33,36 @@ SEMANTIC_SEARCH_PREWARM=false
 ## Note read provenance
 
 In all three headless modes, `obsidian_runtime_status` identifies the runtime
-mode and reports `headlessRead.source: "filesystem-replica"`. The server reads
+mode and reports `headlessRead.source: "filesystem"`. The server reads
 from its local filesystem cache without a live Obsidian connection.
 `headlessRead.refreshing` shows whether a scan is queued or running.
 `headlessRead.newestFileMtimeMs` is the latest modification time among indexed
-Markdown files, or `null` for an empty index. `sharedCache.lastRefreshAt` is
-the last successful cache refresh time and is omitted before the first success.
+Markdown files in this process's index, or `null` for an empty index.
+`sharedCache.lastRefreshAt` is the last successful refresh known to that
+index. `headlessRead.refreshOrigin` identifies the evidence as
+`"process-refresh"` or `"startup-snapshot"`, loaded from SQLite at startup.
+Each process keeps its own checkpoint across other servers' scans.
 Both timestamps use milliseconds since the Unix epoch.
 
 `obsidian_read_note`, `obsidian_list_notes` and `obsidian_global_search`
 include one `provenance` object on successful reads and cache availability
 errors when the headless cache is enabled, including in compact mode.
-It contains `source: "headless-cache"` and `lastRefreshAt` as observed
-when the response is assembled (`null` without a successful refresh). The
-tools retain their normal readiness waits. `partial: true` flags a request
-that encountered an unready cache or overlapped a refresh. `refreshing: true`
-flags a refresh observed during the request, even if it completed before the
-reply. The scan updates files individually, so the response has no
-transactional guarantee across files.
+It contains `source: "filesystem"`, `refreshOrigin` when known, and
+`lastRefreshAt` (`null` without a successful refresh). `partial: true`
+means results may be incomplete. It also appears when a cold-cache request
+waits for a full scan. `refreshing: true` flags refresh activity during the
+request, including a scan that finishes before the reply.
 
-Status and note read provenance both report `upstreamSync: "unknown"`. A
-successful local refresh establishes that the server indexed its local copy.
-Upstream synchronization health and recency require separate evidence.
+Reads can miss changes made on disk during the `now − lastRefreshAt` window,
+including immediately after a restart that reuses its SQLite snapshot. Files
+are scanned individually. File ages can differ from the checkpoint age, and
+reads across files can reflect different moments.
+
+MCP status, note reads, `/readyz` and `/statusz` report
+`upstreamSync: "unknown"`. HTTP status retains its existing `source`
+classification and adds `readSource: "filesystem"` for the headless read
+path. `freshnessScope: "local-cache"` limits HTTP age and staleness fields to
+the local cache. Upstream synchronization health requires separate evidence.
 
 ## Validation
 

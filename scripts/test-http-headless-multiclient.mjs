@@ -459,6 +459,9 @@ try {
   assert.equal(readinessBody.ready, true);
   assert.equal(readinessBody.state, "ready");
   assert.equal(readinessBody.provenance.source, "filesystem");
+  assert.equal(readinessBody.provenance.readSource, "filesystem");
+  assert.equal(readinessBody.provenance.freshnessScope, "local-cache");
+  assert.equal(readinessBody.provenance.upstreamSync, "unknown");
   assert.equal(readinessBody.capabilities.liveObsidianReads, false);
   assert.equal(readinessBody.capabilities.filesystemReads, true);
   assert.equal(readinessBody.capabilities.mutations, false);
@@ -467,6 +470,7 @@ try {
   assert.equal(statusBody.state, "ready");
   assert.equal(statusBody.runtimeMode, "headless-readonly");
   assert.equal(statusBody.provenance.source, "filesystem");
+  assert.equal(statusBody.provenance.upstreamSync, "unknown");
   assert.equal(statusBody.capabilities.mutations, false);
   const serializedStatus = JSON.stringify(statusBody);
   for (const secret of [tokenA, tokenB, monitorToken, jwtSecret, vaultPath]) {
@@ -573,8 +577,9 @@ try {
   assertToolIncludes(runtime, "headless-readonly", "runtime status");
   const runtimeStatus = JSON.parse(toolText(runtime));
   assert.deepEqual(runtimeStatus.headlessRead, {
-    source: "filesystem-replica",
+    source: "filesystem",
     upstreamSync: "unknown",
+    refreshOrigin: "process-refresh",
     refreshing: false,
     newestFileMtimeMs: newestMarkdownMtime * 1000,
   });
@@ -609,9 +614,10 @@ try {
   assertToolIncludes(search, "Projects/Pilot.md", "global search");
   for (const result of [notes, note, search]) {
     assert.deepEqual(JSON.parse(toolText(result)).provenance, {
-      source: "headless-cache",
+      source: readinessBody.provenance.readSource,
       upstreamSync: "unknown",
       lastRefreshAt: runtimeStatus.sharedCache.lastRefreshAt,
+      refreshOrigin: "process-refresh",
     });
   }
 

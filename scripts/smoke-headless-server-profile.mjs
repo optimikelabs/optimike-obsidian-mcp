@@ -191,7 +191,7 @@ async function main() {
     assert.equal(readResult.isError, false);
     const read = jsonOf(readResult, "obsidian_read_note");
     assert.equal(typeof read.content, "string");
-    assert.equal(read.provenance?.source, "headless-cache");
+    assert.equal(read.provenance?.source, "filesystem");
 
     const tasks = jsonOf(
       await withTimeout(
