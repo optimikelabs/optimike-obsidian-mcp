@@ -51,6 +51,8 @@ snapshot.
 - `<index>/generations/<id>/` is an immutable Smart Environment v3 directory.
   Its `generation.json` records the vault binding, model and encoding profile,
   source hashes, input hashes, row references, counts and artifact checksums.
+  The external reader requires at least one note. An empty corpus blocks
+  publication and leaves any previous pointer in place.
 - The producer validates the staged generation and publishes it by renaming a
   sibling temporary pointer over `CURRENT`. A failed run can leave an unpublished
   directory. The previous pointer remains readable until replacement.
@@ -73,6 +75,7 @@ snapshot.
 On a server configured with `SMART_ENV_DIR`, set it to the concrete published
 generation directory at startup, `OBSIDIAN_VAULT` to the corresponding vault,
 and `OLLAMA_BASE_URL` to the compatible query endpoint. Refresh the reader
-configuration when adopting another generation. A pointer-aware reader can
-resolve `CURRENT` once per request and use that generation for all its reads
-and cache keys.
+configuration when adopting another generation. On a server that supports
+`SMART_ENV_GENERATION_POINTER`, set it to the absolute path to `CURRENT` and
+pin the matching query profile with `SMART_ENV_QUERY_FINGERPRINT`. Keep
+`OBSIDIAN_VAULT` and `OLLAMA_BASE_URL` set as above.

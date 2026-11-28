@@ -54,6 +54,8 @@ système de fichiers et lui dédier un dossier d’index.
   Le manifeste `generation.json` consigne l’identité du coffre, le modèle et son
   profil, les empreintes du corpus et des entrées, les références aux vecteurs,
   les comptes et les sommes de contrôle.
+  Le lecteur externe exige au moins une note. Un corpus vide bloque la
+  publication et préserve le pointeur précédent s’il existe.
 - Le producteur valide la génération puis renomme un pointeur temporaire situé
   à côté de `CURRENT` pour le remplacer atomiquement. Un échec peut laisser une
   génération non publiée. Le pointeur précédent reste lisible jusqu’au
@@ -76,6 +78,7 @@ système de fichiers et lui dédier un dossier d’index.
 Pour un serveur configuré avec `SMART_ENV_DIR`, indiquer au démarrage le dossier
 de la génération publiée, le coffre correspondant dans `OBSIDIAN_VAULT` et le
 service d’encodage de requêtes dans `OLLAMA_BASE_URL`. Mettre à jour la
-configuration du lecteur pour adopter une autre génération. Un lecteur qui gère
-le pointeur peut résoudre `CURRENT` une seule fois par requête et tenir compte de
-la génération dans toutes ses lectures et clés de cache.
+configuration du lecteur pour adopter une autre génération. Si le serveur gère
+`SMART_ENV_GENERATION_POINTER`, lui donner le chemin absolu de `CURRENT` et
+fixer le profil de requête correspondant avec `SMART_ENV_QUERY_FINGERPRINT`.
+Conserver `OBSIDIAN_VAULT` et `OLLAMA_BASE_URL` comme indiqué ci-dessus.

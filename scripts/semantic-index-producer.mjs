@@ -104,6 +104,9 @@ async function build(options, vault, index, client) {
   if (previous && previous.manifest.vaultBinding !== scan.binding) {
     throw Error("Vault root or volume differs from the active generation");
   }
+  if (!scan.files.size) {
+    throw Error("An external semantic generation requires at least one Markdown note");
+  }
   const chunking = {
     version: "bitnet-markdown-v1",
     jsbrains: parserRevision,

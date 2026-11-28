@@ -137,16 +137,27 @@ test("incremental rebuild reuses exact unchanged inputs, including blocks after 
   assert.ok(await f.manifest(first.generation));
 });
 
-test("a deleted note and its block references leave the next generation, including the last note", async t => {
+test("a deleted note and its block references leave the next generation", async t => {
   const f = await fixture(t);
   await f.put("remove.md", note("Remove me"));
+  await f.put("stay.md", note("Keep me"));
   const first = await f.run();
   await unlink(path.join(f.vault, "remove.md"));
   const second = await f.run();
   const loaded = await f.load(second.generation);
-  assert.deepEqual(loaded.notes, []);
-  assert.deepEqual(loaded.blocks.refs, []);
+  assert.deepEqual(loaded.notes.map(row => row.notePath), ["stay.md"]);
+  assert.ok(loaded.blocks.refs.length && loaded.blocks.refs.every(row => row.notePath === "stay.md"));
   assert.equal((await f.load(first.generation)).notes[0].notePath, "remove.md");
+});
+
+test("removing the last note preserves CURRENT because the external reader rejects empty generations", async t => {
+  const f = await fixture(t);
+  await f.put("last.md", note("Last note"));
+  const first = await f.run();
+  await unlink(path.join(f.vault, "last.md"));
+  await f.fail(/requires at least one Markdown note/u);
+  assert.equal(await f.current(), first.generation);
+  assert.equal((await f.load(first.generation)).notes[0].notePath, "last.md");
 });
 
 test("renaming drops old references and encodes the new breadcrumb instead of reusing old vectors", async t => {
