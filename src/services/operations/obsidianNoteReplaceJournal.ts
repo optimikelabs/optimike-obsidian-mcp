@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
-import type { OperationProof } from "./contract.js";
+import { HEADLESS_VAULT_LOCK_BUSY, type OperationProof } from "./contract.js";
 import type {
   ModifiedTimeSettlementEvidence,
   ModifiedTimeSettlementPolicy,
@@ -90,7 +90,8 @@ export type ObsidianNoteReplacePlan = {
     displacedObservation?: { sha256: string; bytesBase64: string };
     displacedEditRecoverable?: true;
     // Private evidence. null means publication was followed by absence.
-    divergentObservation?: { sha256: string; bytesBase64: string } | null;
+    divergentObservation?: { sha256: string; bytesBase64: string; modifiedAt?: string } | null;
+    replacesConcurrentEdit?: import("./contract.js").ConcurrentEditReplacement;
   };
   bindingFingerprint: string;
   status: ObsidianNoteReplaceStatus;
@@ -148,6 +149,15 @@ export class ObsidianNoteReplaceConcurrencyError extends Error {
 export function displacedFilesystemEdit(plan: ObsidianNoteReplacePlan) {
   return plan.status === "outcome_unknown" && plan.filesystem?.displacedEditRecoverable
     ? plan.filesystem.displacedObservation : undefined;
+}
+
+export function replacedConcurrentEdit(plan: ObsidianNoteReplacePlan) {
+  const observed = plan.filesystem?.divergentObservation;
+  if (displacedFilesystemEdit(plan)) {
+    return observed && observed.sha256 !== plan.filesystem?.stagedSha256
+      ? { sha256: observed.sha256, observedAt: plan.updatedAt, modifiedAt: observed.modifiedAt } : undefined;
+  }
+  return plan.filesystem?.replacesConcurrentEdit;
 }
 
 export function noteReplaceIdempotencyConflict(): McpError {
@@ -866,7 +876,7 @@ export class ObsidianNoteReplaceJournal {
     this.updateFilesystemAttempt(operationId, attemptId, { publicationConfirmed: true });
   }
 
-  recordFilesystemDivergence(operationId: string, observation: { sha256: string; bytesBase64: string } | null,
+  recordFilesystemDivergence(operationId: string, observation: Exclude<NonNullable<ObsidianNoteReplacePlan["filesystem"]>["divergentObservation"], undefined>,
     displacedObservation?: { sha256: string; bytesBase64: string }, disposition?: "conflict" | "restore-displaced"): void {
     this.transitionInternal(operationId, ["applying", "outcome_unknown"], disposition === "conflict" ? "conflict" : "outcome_unknown",
       "headless_postflight_diverged", undefined, true, undefined, undefined, { divergentObservation: observation, displacedObservation,
@@ -876,6 +886,18 @@ export class ObsidianNoteReplaceJournal {
   settleUnpublishedFilesystem(operationId: string, status: "conflict" | "failed", reason = "headless_not_published"): void {
     this.transitionInternal(operationId, ["applying", "outcome_unknown"], status,
       reason, undefined, true, undefined);
+  }
+
+  settleFilesystemLockBusy(plan: ObsidianNoteReplacePlan): void {
+    const current = this.get(plan.operationId);
+    const attemptId = plan.executionOwner?.attemptId;
+    if (!current || !attemptId || current.filesystem?.stagedIdentity) return;
+    const ownsAttempt = current.status === "applying" && current.executionOwner?.attemptId === attemptId;
+    const interruptedAttempt = current.status === "outcome_unknown" && current.executionStartedAtEpochMs === plan.executionStartedAtEpochMs &&
+      current.effectTracking?.attempts.at(-1)?.attemptId === attemptId;
+    if (ownsAttempt || interruptedAttempt) {
+      this.transitionInternal(plan.operationId, [current.status], "failed", HEADLESS_VAULT_LOCK_BUSY, attemptId, false, undefined);
+    }
   }
 
   recordFilesystemExchangeRollback(operationId: string, displaced: NonNullable<NonNullable<ObsidianNoteReplacePlan["filesystem"]>["exchangeRollback"]>): void {

@@ -34,6 +34,7 @@ This branch leaves `main` and the individual pull requests unaffected.
 | [#246](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/246) | `5b3edb76c2003e1370a448190f61aa4ac866cef9` | Ranked BM25 search over cached Markdown and hybrid search with lexical, note, and section signals |
 | [#247](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/247) | `9cdf0af6e82f56373c88e66f7d7c8c682f90c43e` | Retries Operon `GET /status` once after a socket reset, with fixture connection cleanup |
 | [#248](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/248) | `4c39df5bc0d2f2448439916ad3c35327133038e6` | Bounded link parsing, persisted retries, limited-source diagnostics and bounded smoke waits |
+| [#249](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/249) | `7ea61ba7dd822910de67187f533c1fdbe2460e70` | Explicit tool profile registration modes, reversible displaced-edit restoration, and retryable vault-lock contention |
 
 Run the read-only profile first. Test filesystem writes on a separate,
 disposable copy using synthetic notes. Write serialization is process-local.
@@ -99,11 +100,21 @@ tool catalogue and cycle checks verify those combined profiles. The tests
 retain the Sync guard check on the compatible filesystem move route after
 the old headless note-edit routes were retired.
 
-Known integration regression. In the runtime `tasks` profile,
-`obsidian_note_replace_plan` acts as the marker for live Operon tools.
-#245 also registers that plan in `headless-filesystem`. The marker then
-exposes live-only Operon tools in that headless catalogue.
-`test:operon-headless` catches the extra tools.
+### Résolution d'intégration #243 × #244 × #249
+
+The server, routing resource and stdio proxy use #249's explicit
+registration mode. The proxy reads it from the backend capability.
+The runtime and profile selector retain the separate `operonFilesystem`
+argument, defaulting to true for headless modes. Live-only Operon tools
+require a live registration mode. The move and trash recovery lifecycle
+uses `registrationMode === "headless-filesystem"` to select its four
+members, without inferring a mode from available tool names.
+The profile tests cover exact catalogue selection, malformed or missing
+capabilities, and frontmatter and link visibility across modes.
+
+#249's displaced-edit restore identifies the content it replaces and can
+be undone through a new governed revert plan. A vault lock occupied beyond
+the wait budget returns `headless_vault_lock_busy` as a retryable refusal.
 
 The merged replacement runtime retains #223's exact base-hash precondition
 and #220's proposal sealing and retention. It also retains #245's disk

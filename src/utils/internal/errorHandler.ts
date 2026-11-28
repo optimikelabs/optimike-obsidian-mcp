@@ -516,6 +516,7 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "date_preparation_unverified",
   "headless_date_policy_unavailable",
   "headless_atomic_exchange_unavailable",
+  "headless_vault_lock_busy",
   "headless_note_path_spelling",
   "headless_revert_target_missing",
   "date_preparation_bridge_upgrade_required",
@@ -808,6 +809,8 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
     return "Headless governed writes require supported Frontmatter Date Manager settings and OPTIMIKE_VAULT_TIMEZONE matching the process.";
   if (reasonCode === "headless_atomic_exchange_unavailable")
     return "This filesystem cannot atomically exchange an existing note. Use a supported filesystem or the live runtime.";
+  if (reasonCode === "headless_vault_lock_busy")
+    return "The headless vault lock is busy. No write was started. Retry with a new plan after the lock is released.";
   if (reasonCode === "headless_revert_target_missing") return "The note no longer exists.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_tool_arguments")
     return "Invalid tool arguments. See validationIssues for the field and reason.";

@@ -63,7 +63,9 @@ import {
 } from "./mcp-server/tools/externalRootsTools/registration.js";
 import {
   compileToolProfileNames,
+  profileModeFromCapability,
   selectAvailableToolProfileNames,
+  TOOL_PROFILE_MODE_CAPABILITY,
   type ToolProfileId,
 } from "./mcp-server/toolProfiles.js";
 import { resolveToolProfile } from "./mcp-server/toolProfileRuntime.js";
@@ -1249,7 +1251,7 @@ async function filteredBackendTools(
     selectAvailableToolProfileNames({
       profile: toolProfile,
       availableNames: result.tools.map((tool) => tool.name),
-      operonFilesystem: config.obsidianRuntimeMode.startsWith("headless-"),
+      registrationMode: profileModeFromCapability(backend.client.getServerCapabilities()?.experimental?.[TOOL_PROFILE_MODE_CAPABILITY]),
     }),
   );
   allowedToolNames = selected;

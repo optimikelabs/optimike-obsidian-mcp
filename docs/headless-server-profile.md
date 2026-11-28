@@ -293,6 +293,12 @@ displaced a write and the restored target is intact. In full write mode, use
 restore that displaced edit byte-for-byte. The revert is sealed against the
 recorded target hash. If a newer edit already occupies the note, the operation
 ends in `conflict` and keeps the journal evidence without offering restoration.
+When restoration would replace another concurrent edit, status and the revert
+plan identify it as `replacesConcurrentEdit` with its SHA-256 and observation
+timestamp. The filesystem modification timestamp is included when available.
+To restore the replaced edit later, pass the committed revert's `planRef` to
+`obsidian_operation_revert_plan`. The new plan checks the hash of the version
+currently installed before replacing it.
 A process holding an old file open can still write to it after its final check.
 
 Put the shared cache outside the vault. The default governed journal is next
@@ -302,6 +308,9 @@ in local state independently of the journal override. Cooperating processes
 must share local state. `MCP_HEADLESS_GOVERNED_JOURNAL_PATH` selects an absolute
 path outside the vault. Committed before images and settled divergence evidence
 follow the terminal retention period (30 days). Treat the journal like vault data.
+If the path lock stays busy for 15 seconds, apply returns the retryable reason
+`headless_vault_lock_busy`. Status shows `failed` and the attempt made no write.
+Use a fresh plan and idempotency key after the lock is released.
 
 Keep the vault's `.obsidian` configuration available, including its enabled
 plugins list and Frontmatter Date Manager settings. The authority reads

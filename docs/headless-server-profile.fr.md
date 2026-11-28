@@ -295,6 +295,12 @@ pour rétablir l’édition déplacée octet pour octet. Le retour arrière lie 
 observé. Si une édition plus récente est déjà dans la note, l’opération se clôt
 en `conflict` et garde les versions au journal sans proposer de retour arrière. Un programme qui
 garde l’ancien fichier ouvert peut encore l’écrire après son dernier contrôle.
+Si le retour arrière remplace une autre édition concurrente, le statut et le
+plan l’indiquent dans `replacesConcurrentEdit` avec son SHA-256 et son horodatage
+d’observation. L’heure de modification du fichier est fournie lorsqu’elle est
+disponible. Pour rétablir l’édition remplacée, passez le `planRef` du retour
+arrière appliqué à `obsidian_operation_revert_plan`. Le nouveau plan vérifie
+le hash de la version en place avant de la remplacer.
 
 Placez le cache partagé hors du coffre. Le journal est créé à côté du cache
 par défaut, d’après l’identité du coffre quel que soit le mode headless, ou
@@ -303,6 +309,10 @@ coffre est dans l’état local indépendamment du chemin du journal. Les proces
 qui coopèrent partagent cet état. `MCP_HEADLESS_GOVERNED_JOURNAL_PATH` accepte
 un chemin absolu hors du coffre. Le journal conserve les versions antérieures
 et les divergences traitées pendant 30 jours. Protégez-le comme les données du coffre.
+Si le verrou du chemin reste occupé pendant 15 secondes, apply renvoie le motif
+réessayable `headless_vault_lock_busy`. Le statut indique `failed` et la tentative
+n’a effectué aucune écriture. Une fois le verrou libéré, utilisez un nouveau
+plan et une nouvelle clé d’idempotence.
 
 Gardez les réglages `.obsidian` disponibles avec la liste des extensions
 actives et les réglages de Frontmatter Date Manager. L’autorité lit les noms

@@ -5,6 +5,7 @@ import {
   compileToolProfile,
   compileToolProfileNames,
   parseToolProfileId,
+  profileModeFromCapability,
   selectAvailableToolProfileNames,
 } from "../dist/mcp-server/toolProfiles.js";
 import { TOOL_REGISTRATION_MODES } from "../dist/mcp-server/toolSurfaceRegistry.js";
@@ -309,6 +310,7 @@ assert.deepEqual(selectedSnapshotTasks, tasksSnapshot);
 
 const selectedLiveTasks = selectAvailableToolProfileNames({
   profile: "tasks",
+  registrationMode: "live",
   availableNames: compileToolProfileNames({
     profile: "full",
     registrationMode: "live",
@@ -316,6 +318,26 @@ const selectedLiveTasks = selectAvailableToolProfileNames({
   }),
 });
 assert.deepEqual(selectedLiveTasks, tasksLive);
+
+for (const mode of TOOL_REGISTRATION_MODES) {
+  const expected = toolCatalog.profiles.tasks.modes[mode];
+  assert.deepEqual(compileToolProfileNames({ profile: "tasks", registrationMode: mode, availableStaticRequirements: WITH_CACHE }),
+    expected, `tasks/${mode} must match the exact checked-in catalogue`);
+  const registrationMode = profileModeFromCapability({ registrationMode: mode });
+  assert.equal(registrationMode, mode);
+  const availableNames = [...toolCatalog.profiles.full.modes[mode]];
+  if (!LIVE_ENGINE_MODES.has(mode)) {
+    availableNames.push("obsidian_note_replace_plan", "operon_get_diagnostics", "operon_create_task");
+  }
+  assert.deepEqual(selectAvailableToolProfileNames({ profile: "tasks", availableNames, registrationMode }),
+    expected, `tasks/${mode} must ignore live-only names advertised outside a live mode`);
+}
+
+for (const capability of [undefined, {}, { registrationMode: "headless-unknown" }, { registrationMode: true }]) {
+  const names = selectAvailableToolProfileNames({ profile: "tasks", availableNames: toolCatalog.profiles.full.modes["headless-filesystem"],
+    registrationMode: profileModeFromCapability(capability) });
+  assert.ok(!names.includes("operon_get_diagnostics") && !names.includes("operon_create_task"));
+}
 
 const noteMetadataReads = ["obsidian_get_frontmatter", "obsidian_note_links"];
 for (const profile of ["standard", "authoring", "tasks", "operational", "full"]) {

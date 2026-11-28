@@ -104,6 +104,8 @@ import { startHttpTransport } from "./transports/httpTransport.js";
 import { activeHttpRequestId } from "./transports/httpRequestState.js";
 import { connectStdioTransport } from "./transports/stdioTransport.js";
 import { registerToolRoutingResource } from "./resources/toolRoutingResource.js";
+import { resolveToolRegistrationMode } from "../services/capabilityManifest.js";
+import { TOOL_PROFILE_MODE_CAPABILITY } from "./toolProfiles.js";
 import {
   installVaultInstructionsGate,
   vaultInstructionsServerText,
@@ -1184,11 +1186,13 @@ async function createMcpServerInstance(
   const instructions = withToolSearchInstruction(
     await vaultInstructionsServerText(vaultInstructions),
   );
+  const registrationMode = resolveToolRegistrationMode(obsidianService);
   const server = new McpServer(
     { name: config.mcpServerName, version: config.mcpServerVersion },
     {
       capabilities: {
         logging: {}, // Server can receive logging/setLevel and send notifications/message
+        experimental: { [TOOL_PROFILE_MODE_CAPABILITY]: { registrationMode } },
         // Defer only opted-in modern resources until the public Skills boundary is installed.
         ...(!skillsActive ? { resources: { listChanged: true } } : {}),
         // Tools are registered after installing the public privacy boundary.
@@ -1223,7 +1227,7 @@ async function createMcpServerInstance(
       const registry = await configuredSkillRegistry(externalRootsService, resolveToolProfile(), servingContext);
       if (registry) installSkillsExtension(server.server, registry, { deferResourceRead: true });
     }
-    registerToolRoutingResource(server, isHeadlessReadonly || isHeadlessGuarded || isHeadlessFilesystem);
+    registerToolRoutingResource(server, registrationMode);
 
     // Register read/cache-friendly tools first. In headless-readonly, the REST
     // service is intentionally absent and these tools must use the shared cache.
