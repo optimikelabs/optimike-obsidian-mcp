@@ -645,6 +645,24 @@ for (const [field, reason] of [["reason", "create_markdown_invalid"], ["reasonCo
   assert.doesNotMatch(JSON.stringify(wire), /PRIVATE_SECRET_PATH|P0-BACKEND-ONLY-MARKER/u);
 }
 
+{
+  const limitedSources = [
+    { path: "Notes/Source.md", reason: "oom", content: marker },
+    { path: `C:/${marker}.md`, reason: "cap" },
+    { path: `../${marker}.md`, reason: "region" },
+    { path: "Notes/Other.md", reason: marker },
+    { get path() { throw Error("path getter was evaluated"); }, reason: "timeout" },
+  ];
+  for (const reasonCode of ["headless_link_coverage_incomplete", "invalid_frontmatter"]) {
+    const wire = publicMcpToolErrorPayload(new McpError(BaseErrorCode.VALIDATION_ERROR, marker, {
+      reasonCode, limitedSources, limitedSourceCount: limitedSources.length,
+    }), { operation: "test", params: {} });
+    assert.deepEqual(wire.error.details.limitedSources,
+      reasonCode === "headless_link_coverage_incomplete" ? [{ path: "Notes/Source.md", reason: "oom" }] : undefined);
+    assert.doesNotMatch(JSON.stringify(wire), new RegExp(marker, "u"));
+  }
+}
+
 for (const reason of ["frontmatter_native_render_invalid", "frontmatter_normalization_proof_mismatch", "text_patch_normalization_proof_mismatch", "note_source_proof_invalid", "frontmatter_envelope_invalid", "invalid_frontmatter"]) {
   const wire = publicMcpToolErrorPayload(new McpError(BaseErrorCode.VALIDATION_ERROR, marker, { reason, privateContent: marker }), { operation: "test", params: {} });
   assert.equal(wire.error.details.reasonCode, reason);

@@ -57,8 +57,8 @@ export class MarkdownLinkWorker {
             return;
           }
           const source = sources[0];
-          if (!source.skipParse) await this.indexBatch([{ ...source, skipParse: true }]);
-          else this.index.markSourceLimited(source);
+          if (!source.skipReason) await this.indexBatch([{ ...source, skipReason: "region" }]);
+          else this.index.markSourceLimited(source, source.skipReason);
           return;
         }
 
@@ -69,23 +69,23 @@ export class MarkdownLinkWorker {
         await this.stopWorker();
         if (this.closed) return;
         if (timedOut) {
-          if (!source.skipParse) {
+          if (!source.skipReason) {
             // A shorter pass can still collect possible backlink targets.
             // It has the same deadline and never publishes extracted links.
-            await this.indexBatch([{ ...source, skipParse: true }]);
+            await this.indexBatch([{ ...source, skipReason: "timeout" }]);
           } else {
-            this.index.markSourceLimited(source);
+            this.index.markSourceLimited(source, source.skipReason);
           }
         } else if (sources.length > 1) {
           // Retry an OOM source in isolation before blaming it for the heap
           // used by its batch. A timed-out parse needs no full retry.
           await this.indexBatch([source]);
-        } else if (!source.skipParse) {
-          source.skipParse = true;
+        } else if (!source.skipReason) {
+          source.skipReason = "oom";
           retriedBatch = false;
           continue;
         } else {
-          this.index.markSourceLimited(source);
+          this.index.markSourceLimited(source, source.skipReason);
         }
         sources.splice(ordinal, 1);
         retriedBatch = false;

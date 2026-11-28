@@ -3,6 +3,10 @@ import type { DatabaseSync } from "node:sqlite";
 import type { FilesystemNoteLinksResponse, NoteLinkObservation, NoteLinksProjection } from "../types.js";
 import { defaultLinkExtraction, extractBoundedLinkSource } from "./boundedLinkReferences.js";
 import { extractMarkdownLinkReferences, type MarkdownLinkReference } from "./markdownLinkReferences.js";
+import {
+  isLimitedLinkSourcePath, isLinkSourceLimitReason, LIMITED_LINK_SOURCE_LIMIT,
+  type LimitedLinkSources, type LinkSourceLimitReason,
+} from "../../headlessLinkCoverage.js";
 
 function markdownPath(linkPath: string): string {
   return linkPath.toLowerCase().endsWith(".md") ? linkPath : linkPath + ".md";
@@ -37,12 +41,13 @@ function coverage(total: number, returned: number) {
 
 type LinkCount = { link_path: string; count: number };
 type Target = { path: string; ambiguous?: true };
-const INDEX_REVISION = "v11:";
+const INDEX_REVISION = "v12:";
 const MAX_CANDIDATE_PATHS = 32768;
-export type LinkIndexSource = { path: string; hash: string; skipParse?: true };
+export type LinkIndexSource = { path: string; hash: string; skipReason?: Exclude<LinkSourceLimitReason, "cap"> };
 type IndexedSource = LinkIndexSource & {
   ordinal: number;
   complete: boolean;
+  limitReason?: LinkSourceLimitReason;
   references: MarkdownLinkReference[];
   possible?: Set<string>;
   possibleAnywhere?: true;
@@ -77,7 +82,8 @@ export class MarkdownLinkIndex {
         basename TEXT NOT NULL,
         hash TEXT NOT NULL,
         complete INTEGER NOT NULL DEFAULT 1,
-        possible_anywhere INTEGER NOT NULL DEFAULT 0
+        possible_anywhere INTEGER NOT NULL DEFAULT 0,
+        limit_reason TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_markdown_link_folded_path ON markdown_link_files(folded_path);
       CREATE INDEX IF NOT EXISTS idx_markdown_link_basename ON markdown_link_files(basename);
@@ -108,12 +114,16 @@ export class MarkdownLinkIndex {
       CREATE INDEX IF NOT EXISTS idx_excluded_link_folded_path ON markdown_link_excluded_targets(folded_path);
       CREATE INDEX IF NOT EXISTS idx_excluded_link_basename ON markdown_link_excluded_targets(basename);
     `);
-    for (const [name, defaultValue] of [["complete", 1], ["possible_anywhere", 0]] as const) {
+    for (const [name, definition] of [
+      ["complete", "INTEGER NOT NULL DEFAULT 1"],
+      ["possible_anywhere", "INTEGER NOT NULL DEFAULT 0"],
+      ["limit_reason", "TEXT"],
+    ] as const) {
       const hasColumn = () => db.prepare("PRAGMA table_info(markdown_link_files)").all()
         .some((column) => column.name === name);
       if (!hasColumn()) {
         try {
-          db.exec(`ALTER TABLE markdown_link_files ADD COLUMN ${name} INTEGER NOT NULL DEFAULT ${defaultValue}`);
+          db.exec(`ALTER TABLE markdown_link_files ADD COLUMN ${name} ${definition}`);
         } catch (error) {
           // A second process may have upgraded the shared table first.
           if (!hasColumn()) throw error;
@@ -127,10 +137,10 @@ export class MarkdownLinkIndex {
         ON markdown_link_files(path) WHERE possible_anywhere = 1;
     `);
     this.fileUpsert = db.prepare(`
-      INSERT INTO markdown_link_files (path, folded_path, basename, hash, complete, possible_anywhere)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO markdown_link_files (path, folded_path, basename, hash, complete, possible_anywhere, limit_reason)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(path) DO UPDATE SET hash = excluded.hash, complete = excluded.complete,
-        possible_anywhere = excluded.possible_anywhere
+        possible_anywhere = excluded.possible_anywhere, limit_reason = excluded.limit_reason
       WHERE markdown_link_files.hash <> excluded.hash
     `);
     this.refsDelete = db.prepare("DELETE FROM markdown_link_refs WHERE source = ?");
@@ -159,7 +169,7 @@ export class MarkdownLinkIndex {
       CROSS JOIN file_cache AS file ON file.path = requested.value
     `);
     this.currentSource = db.prepare("SELECT 1 FROM file_cache WHERE path = ? AND hash = ?");
-    this.limitedSource = db.prepare("SELECT 1 FROM markdown_link_files WHERE path = ? AND complete = 0");
+    this.limitedSource = db.prepare("SELECT limit_reason FROM markdown_link_files WHERE path = ? AND complete = 0");
     this.unboundedSources = db.prepare("SELECT path FROM markdown_link_files WHERE possible_anywhere = 1");
     this.limitedIncoming = db.prepare(`
       SELECT refs.source, refs.link_path
@@ -219,6 +229,21 @@ export class MarkdownLinkIndex {
   }
 
   readIndexCoverage(filePath: string): FilesystemNoteLinksResponse["indexCoverage"] {
+    const possibleSources = this.limitedBacklinkSources(filePath);
+    const sourceComplete = !this.limitedSource.get(filePath);
+    const backlinksComplete = possibleSources.size === 0;
+    if (sourceComplete && backlinksComplete) return undefined;
+    if (!sourceComplete) possibleSources.add(filePath);
+    return {
+      reason: "bounded_large_note_extraction",
+      sourceComplete,
+      backlinksComplete,
+      ...this.describeLimitedLinkSources(possibleSources),
+    };
+  }
+
+  /** Collect the full set before taking the bounded diagnostic sample. */
+  limitedBacklinkSources(filePath: string): Set<string> {
     const possibleSources = new Set<string>();
     const basename = basenameKey(filePath);
     for (const row of this.limitedIncoming.iterate(basename, basename)) {
@@ -228,15 +253,21 @@ export class MarkdownLinkIndex {
       }
     }
     for (const row of this.unboundedSources.iterate()) possibleSources.add(row.path as string);
-    const sourceComplete = !this.limitedSource.get(filePath);
-    const backlinksComplete = possibleSources.size === 0;
-    if (sourceComplete && backlinksComplete) return undefined;
-    return {
-      reason: "bounded_large_note_extraction",
-      sourceComplete,
-      backlinksComplete,
-      limitedSourceCount: possibleSources.size + Number(!sourceComplete && !possibleSources.has(filePath)),
-    };
+    return possibleSources;
+  }
+
+  describeLimitedLinkSources(paths: Iterable<string>): LimitedLinkSources {
+    const limitedSources: LimitedLinkSources["limitedSources"] = [];
+    const indexedPaths = [...new Set(paths)].sort();
+    for (const path of indexedPaths) {
+      if (limitedSources.length >= LIMITED_LINK_SOURCE_LIMIT) break;
+      const relative = path.slice(1);
+      if (path.startsWith("/") && isLimitedLinkSourcePath(relative)) {
+        const reason = this.limitedSource.get(path)?.limit_reason;
+        limitedSources.push({ path: relative, reason: isLinkSourceLimitReason(reason) ? reason : "region" });
+      }
+    }
+    return { limitedSourceCount: indexedPaths.length, limitedSources };
   }
 
   describeSources(paths: readonly string[]): LinkIndexSource[] {
@@ -252,8 +283,9 @@ export class MarkdownLinkIndex {
       const ordinal = row.ordinal as number;
       onSource(ordinal);
       const content = row.content as string;
-      const result = sources[ordinal].skipParse
-        ? { references: [], complete: false }
+      const skipReason = sources[ordinal].skipReason;
+      const result = skipReason
+        ? { references: [], complete: false, limitReason: skipReason }
         : (row.size as number) > this.options.largeNoteBytes
           ? extractBoundedLinkSource(content, this.options)
           : { references: extractMarkdownLinkReferences(content), complete: true };
@@ -276,8 +308,8 @@ export class MarkdownLinkIndex {
     this.commitSources(parsed, onSource);
   }
 
-  markSourceLimited(source: LinkIndexSource): void {
-    this.commitSources([{ ...source, ordinal: -1, references: [], complete: false, possibleAnywhere: true }]);
+  markSourceLimited(source: LinkIndexSource, limitReason: LinkSourceLimitReason): void {
+    this.commitSources([{ ...source, ordinal: -1, references: [], complete: false, limitReason, possibleAnywhere: true }]);
   }
 
   private commitSources(sources: readonly IndexedSource[], onSource?: (ordinal: number) => void): void {
@@ -296,10 +328,10 @@ export class MarkdownLinkIndex {
     }
   }
 
-  private replaceSource({ path: filePath, hash, complete, references, possible, possibleAnywhere }: IndexedSource): void {
+  private replaceSource({ path: filePath, hash, complete, references, possible, possibleAnywhere, limitReason }: IndexedSource): void {
     const basename = basenameKey(filePath);
     if (!this.fileUpsert.run(filePath, filePath.toLowerCase(), basename, this.revision + hash,
-      Number(complete), Number(!!possibleAnywhere)).changes) return;
+      Number(complete), Number(!!possibleAnywhere), limitReason ?? null).changes) return;
     this.refsDelete.run(filePath);
     this.candidatesDelete.run(filePath);
     for (const [ordinal, reference] of references.entries()) {

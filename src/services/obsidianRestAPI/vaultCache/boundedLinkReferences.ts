@@ -1,4 +1,5 @@
 import { extractMarkdownLinkReferences, type MarkdownLinkReference } from "./markdownLinkReferences.js";
+import type { LinkSourceLimitReason } from "../../headlessLinkCoverage.js";
 
 export type LinkExtractionOptions = {
   largeNoteBytes: number;
@@ -19,7 +20,9 @@ export const defaultLinkExtraction: LinkExtractionOptions = {
 type Boundary = { offset: number; bytes: number; line: number };
 type Region = { start: Boundary; end: Boundary; omit?: boolean };
 type LinkSection = { start: Boundary; end: Boundary; safe: boolean };
-export type BoundedLinkExtraction = { references: MarkdownLinkReference[]; complete: boolean };
+export type BoundedLinkExtraction = { references: MarkdownLinkReference[] } & (
+  { complete: true; limitReason?: never } | { complete: false; limitReason: LinkSourceLimitReason }
+);
 
 const fenceLine = /^[ \t>]*(?:(?:[-+*]|\d+[.)])[ \t]+)?(`{3,}|~{3,})(.*)$/u;
 const rawHtml = [
@@ -271,7 +274,7 @@ export function extractBoundedLinkSource(
       maxReferences: maxReferences - references.length + 1,
     });
     for (const reference of parsed) {
-      if (references.length === maxReferences) return { references, complete: false };
+      if (references.length === maxReferences) return { references, complete: false, limitReason: "cap" };
       if (reference.position) {
         for (const point of [reference.position.start, reference.position.end]) {
           point.offset += start.offset;
@@ -283,7 +286,7 @@ export function extractBoundedLinkSource(
   }
   // Reference-style Markdown may depend on a definition in another section.
   if (sectionCount > 1 && /^ {0,3}\[[^\]\r\n]+\]:/mu.test(content)) complete = false;
-  return { references, complete };
+  return complete ? { references, complete: true } : { references, complete: false, limitReason: "region" };
 }
 
 export function extractLargeLinkSource(content: string): MarkdownLinkReference[] {

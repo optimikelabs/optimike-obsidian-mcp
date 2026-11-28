@@ -271,8 +271,7 @@ export type FilesystemNoteLinksResponse = NoteLinksProjection & {
     reason: "bounded_large_note_extraction";
     sourceComplete: boolean;
     backlinksComplete: boolean;
-    limitedSourceCount: number;
-  };
+  } & import("../headlessLinkCoverage.js").LimitedLinkSources;
   cache: {
     available: true;
     consistency: "best_effort_non_atomic_snapshot";
