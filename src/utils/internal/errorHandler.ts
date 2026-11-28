@@ -486,6 +486,7 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "date_preparation_not_started",
   "note_replace_base_changed",
   "note_replace_date_preparation_required",
+  "note_replace_date_preparation_locked",
   "effect_attempt_limit_reached",
   "frontmatter_format_capability_missing",
   "frontmatter_format_changed",
@@ -722,9 +723,11 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
   if (reasonCode === "date_preparation_not_started")
     return "La préparation des dates n'a pas démarré ; rien n'a été modifié par cette préparation. Relisez la note puis relancez le plan.";
   if (reasonCode === "note_replace_base_changed")
-    return "The note changed since the source read. Read it again with obsidian_read_note and rebuild the replacement from that content and hash.";
+    return "La note a changé depuis la lecture initiale. Relisez-la avec obsidian_read_note et reconstruisez le remplacement à partir du contenu et de l’empreinte renvoyés.";
   if (reasonCode === "note_replace_date_preparation_required")
-    return "The note needs a creation date. Open and save it in Obsidian, wait for the date manager to finish, then read it again with obsidian_read_note and rebuild the replacement from that content and hash.";
+    return "La note doit recevoir une date de création. Ouvrez-la et enregistrez-la dans Obsidian, attendez que le gestionnaire de dates ait terminé, puis relisez-la avec obsidian_read_note et reconstruisez le remplacement à partir du contenu et de l’empreinte renvoyés.";
+  if (reasonCode === "note_replace_date_preparation_locked")
+    return "Une préparation de date précédente reste verrouillée. Demandez au propriétaire du coffre de la vérifier avec obsidian_operation_close et datePreparationPaths. Après résolution, relisez la note avec obsidian_read_note avant de reconstruire le remplacement.";
   if (reasonCode === "effect_attempt_limit_reached")
     return "La limite de tentatives de cette opération est atteinte. Consultez son statut avant toute nouvelle action ; ne rejouez pas un effet incertain.";
   if (reasonCode === "atomic_bridge_version_unsupported")

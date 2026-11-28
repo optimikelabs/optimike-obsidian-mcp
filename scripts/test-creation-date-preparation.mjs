@@ -170,7 +170,7 @@ try {
     assert.equal(refusal.code, "CONFLICT");
     assert.equal(refusal.details.reasonCode, "note_replace_date_preparation_required");
     assert.equal(refusal.details.mutationMayHaveApplied, false);
-    assert.match(refusal.message, /date manager.*read it again with obsidian_read_note/u);
+    assert.match(refusal.message, /gestionnaire de dates.*relisez-la avec obsidian_read_note/u);
     return true;
   },
     "strict replacement must refuse even a matching base when date preparation would modify it");

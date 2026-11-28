@@ -48,6 +48,13 @@ une empreinte attendue renvoie `CONFLICT` avec
 Obsidian, attendre le gestionnaire de dates, puis la relire avant de reconstruire
 le remplacement. Dans les deux cas, le refus laisse la note intacte.
 
+Si une préparation précédente conserve un verrou, le plan avec empreinte
+renvoie `note_replace_date_preparation_locked` et
+`mutationMayHaveApplied: false` pour la requête en cours. Le propriétaire
+résout la préparation précédente avec `obsidian_operation_close` et
+`datePreparationPaths`, puis l’appelant relit la note avant de reconstruire
+le remplacement.
+
 Sans `expectedBeforeSha256`, la lecture du Bridge fournit la base du plan et
 FDM peut d’abord dater une note non datée, comme décrit dans le contrat de patch
 de texte. Le serveur valide le remplacement et le frontmatter protégé, scelle

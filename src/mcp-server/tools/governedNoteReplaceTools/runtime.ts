@@ -473,8 +473,15 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
       { reasonCode: "date_preparation_unverified", mutationMayHaveApplied: true, ...(check ? { preparationCheck: check } : {}) });
     // Strict planning leaves any existing preparation fence for owner review.
     // Other callers may revoke and release one whose attempt never reached its effect point.
-    if (this.journal.hasDatePreparationFence(fenceKey) &&
-        (strictBase || !(await this.releaseUnstartedPreparation(fenceKey, source.bindingFingerprint)))) throw unverified();
+    if (this.journal.hasDatePreparationFence(fenceKey)) {
+      if (strictBase) {
+        throw new McpError(BaseErrorCode.CONFLICT, "A previous date preparation is still locked.", {
+          reasonCode: "note_replace_date_preparation_locked",
+          mutationMayHaveApplied: false,
+        });
+      }
+      if (!(await this.releaseUnstartedPreparation(fenceKey, source.bindingFingerprint))) throw unverified();
+    }
     if (expectedSource && (source.sha256 !== expectedSource.sha256 || source.bindingFingerprint !== expectedSource.bindingFingerprint))
       throw new McpError(BaseErrorCode.CONFLICT, "The note changed before date preparation.");
     const originalFormat = requireNativeFormat ? await inspectNativeFrontmatter(this.delegate, source.content, source.bindingFingerprint) : undefined;

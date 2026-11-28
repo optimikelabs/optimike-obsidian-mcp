@@ -46,6 +46,12 @@ hash returns `CONFLICT` with `note_replace_date_preparation_required`. Open and
 save the note in Obsidian, wait for the date manager, and read it again before
 rebuilding the replacement. Both refusals leave the note untouched.
 
+If a previous date preparation still holds a lock, strict planning returns
+`note_replace_date_preparation_locked` and `mutationMayHaveApplied: false` for
+the current request. The owner resolves the previous preparation with
+`obsidian_operation_close` and `datePreparationPaths`, then the caller reads
+the note again before rebuilding the replacement.
+
 When `expectedBeforeSha256` is omitted, the Bridge's planning read supplies
 the base, and FDM may first date an undated note as described in the text-patch
 contract. The server validates the replacement and protected frontmatter,

@@ -752,13 +752,27 @@ try {
   assert.equal(fake.casRequests, 0);
 
   fake.reset(`\uFEFF${INITIAL_CONTENT}`);
+  const bomRead = await call(session, "obsidian_read_note", { filePath: FIXTURE_PATH });
+  assert.equal(bomRead.payload.content, fake.content, "the fixture read preserves the UTF-8 BOM");
+  assert.equal(bomRead.payload.sha256, sha256(fake.content));
+  const bomRequest = {
+    path: FIXTURE_PATH,
+    nextContent: INITIAL_CONTENT.replace("before", "after"),
+    idempotencyKey: "unsupported-bom-source",
+  };
+  const bomConflict = await call(session, "obsidian_note_replace_plan", {
+    ...bomRequest,
+    expectedBeforeSha256: sha256(INITIAL_CONTENT),
+  }, true);
+  assert.equal(bomConflict.payload.error.code, "CONFLICT", "hashing as if the BOM were stripped must conflict");
+  assert.equal(bomConflict.payload.error.details.observedSha256, bomRead.payload.sha256,
+    "the read and the Bridge hash agree on the BOM-bearing bytes");
   const bomSourceAttempt = await call(
     session,
     "obsidian_note_replace_plan",
     {
-      path: FIXTURE_PATH,
-      nextContent: `\uFEFF${INITIAL_CONTENT.replace("before", "after")}`,
-      idempotencyKey: "unsupported-bom-source",
+      ...bomRequest,
+      expectedBeforeSha256: bomRead.payload.sha256,
     },
     true,
   );
@@ -1373,6 +1387,26 @@ try {
   await session.close();
 
   session = await startClient("full", "live");
+
+  fake.reset(INITIAL_CONTENT.replace(/\n/g, "\r\n"));
+  const crlfRead = await call(session, "obsidian_read_note", { filePath: FIXTURE_PATH, format: "json" });
+  assert.equal(crlfRead.payload.content.content, fake.content, "the fixture read preserves CRLF");
+  const crlfKey = "strict-crlf-source";
+  const crlfReplacement = INITIAL_CONTENT.replace("before", "after");
+  const crlfPlan = await call(session, "obsidian_note_replace_plan", {
+    path: FIXTURE_PATH,
+    nextContent: crlfReplacement,
+    idempotencyKey: crlfKey,
+    expectedBeforeSha256: crlfRead.payload.sha256,
+  });
+  assert.equal(crlfPlan.payload.beforeProof.details.sha256, crlfRead.payload.sha256,
+    "planning must seal the exact CRLF hash returned by the read");
+  const crlfApply = await call(session, "obsidian_note_replace_apply", {
+    planRef: crlfPlan.payload.planRef,
+    idempotencyKey: crlfKey,
+  });
+  assertTerminal(crlfApply.payload);
+  assert.equal(fake.content, crlfReplacement);
 
   fake.reset();
   const readA = await call(session, "obsidian_read_note", {

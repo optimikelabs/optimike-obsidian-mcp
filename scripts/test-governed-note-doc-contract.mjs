@@ -100,10 +100,17 @@ const releaseSection = markdownReleaseSection(
   changelog,
   "## [2.6.0] - 2026-08-14",
 );
+const unreleasedAdded = markdownReleaseSection(changelog, "## [Unreleased]")
+  .split(/^### /mu)
+  .find((section) => /^Added\r?\n/u.test(section)) ?? "";
 for (const tool of tools) {
   assert.ok(
     releaseSection.includes(`\`${tool}\``),
     `2.6.0 changelog section omits ${tool}`,
+  );
+  assert.ok(
+    !unreleasedAdded.includes(`\`${tool}\``),
+    `${tool} was introduced in 2.6.0 and must not be listed as newly added`,
   );
 }
 assert.match(liveCanary, /os\.tmpdir\(\)/);
