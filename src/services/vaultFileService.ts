@@ -17,6 +17,7 @@ import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import type { RequestContext } from "../utils/index.js";
 import { extractInlineTags } from "./markdownTags.js";
 import { assertNewNotePath, assertNoFoldedSibling } from "./noteNameMcp.js";
+import { assertHeadlessSyncWriteAllowed } from "./upstreamSyncEvidence.js";
 
 export type VaultFileReadResult = {
   path: string;
@@ -417,6 +418,7 @@ export class VaultFileService {
     const parent = path.dirname(absolutePath);
     await this.resolveRealPathForWrite(parent, context);
     await this.assertNewFileName(filePath, absolutePath);
+    await assertHeadlessSyncWriteAllowed(context);
     await mkdir(parent, { recursive: true });
     await this.assertRealPathInsideVault(parent, context);
     const tempPath = `${absolutePath}.${randomBytes(8).toString("hex")}.tmp`;
@@ -744,6 +746,7 @@ export class VaultFileService {
       }
       await this.assertNewFileName(targetPath, targetAbsolutePath);
       await this.resolveRealPathForWrite(targetParent, context);
+      await assertHeadlessSyncWriteAllowed(context);
       await mkdir(targetParent, { recursive: true });
       await this.assertRealPathInsideVault(targetParent, context);
 
@@ -763,6 +766,7 @@ export class VaultFileService {
       const current = await this.read(filePath, context);
       this.assertWritePreconditions(current, preconditions, context);
       const absolutePath = this.resolveVaultPath(filePath, context);
+      await assertHeadlessSyncWriteAllowed(context);
       await this.assertUnchanged(filePath, current.hash, context);
       await rm(absolutePath, { force: false });
       return current;

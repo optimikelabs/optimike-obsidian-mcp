@@ -13,6 +13,7 @@ import path from "node:path";
 import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import ignore from "ignore";
 import { config } from "../../../config/index.js";
+import { isSyncConflictPath, SYNC_CONFLICT_LIMIT } from "../../upstreamSyncEvidence.js";
 import {
   createVaultExclusionMatcher,
   DEFAULT_VAULT_EXCLUDE_PATTERNS,
@@ -377,6 +378,18 @@ export class VaultCacheService {
       newest = newest === null ? mtime : Math.max(newest, mtime);
     }
     return newest;
+  }
+
+  public getSyncConflicts() {
+    const syncConflictFiles: string[] = [];
+    let syncConflictCount = 0;
+    for (const key of this.metadataCache.keys()) {
+      const relative = normalizeVaultRelativePath(key);
+      if (!isSyncConflictPath(relative)) continue;
+      syncConflictCount++;
+      if (syncConflictFiles.length < SYNC_CONFLICT_LIMIT) syncConflictFiles.push(relative);
+    }
+    return { syncConflictFiles: syncConflictFiles.sort(), syncConflictCount };
   }
 
   public getStats(): Record<string, unknown> {

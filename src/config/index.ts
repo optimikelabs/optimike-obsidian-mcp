@@ -152,6 +152,10 @@ const EnvSchema = z
     OBSIDIAN_CACHE_SOURCE: z
       .enum(["auto", "rest", "filesystem"])
       .default("auto"),
+    OBSIDIAN_SYNC_HEARTBEAT_FILE: z.string().refine(path.isAbsolute).optional(),
+    OBSIDIAN_SYNC_CURRENT_SECONDS: z.coerce.number().int().positive().safe().default(180),
+    OBSIDIAN_SYNC_STALL_SECONDS: z.coerce.number().int().positive().safe().default(600),
+    OBSIDIAN_SYNC_WRITE_MAX_AGE_SECONDS: z.coerce.number().int().positive().safe().optional(),
     OBSIDIAN_CACHE_CONCURRENCY: z.coerce.number().int().positive().default(8),
     OBSIDIAN_VAULT_EXCLUDE_PATTERNS: z.string().optional(),
     OBSIDIAN_SHARED_CACHE_DB_PATH: z.string().optional(),
@@ -554,6 +558,10 @@ export const config = {
   obsidianEnableCache: env.OBSIDIAN_ENABLE_CACHE,
   obsidianApiSearchTimeoutMs: env.OBSIDIAN_API_SEARCH_TIMEOUT_MS,
   obsidianCacheSource: env.OBSIDIAN_CACHE_SOURCE,
+  upstreamSyncHeartbeatFile: env.OBSIDIAN_SYNC_HEARTBEAT_FILE,
+  upstreamSyncCurrentSeconds: env.OBSIDIAN_SYNC_CURRENT_SECONDS,
+  upstreamSyncStallSeconds: env.OBSIDIAN_SYNC_STALL_SECONDS,
+  upstreamSyncWriteMaxAgeSeconds: env.OBSIDIAN_SYNC_WRITE_MAX_AGE_SECONDS,
   obsidianCacheConcurrency: env.OBSIDIAN_CACHE_CONCURRENCY,
   obsidianVaultExcludePatterns: parseVaultExcludePatterns(
     env.OBSIDIAN_VAULT_EXCLUDE_PATTERNS,

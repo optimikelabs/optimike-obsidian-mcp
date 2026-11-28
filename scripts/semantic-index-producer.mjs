@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readFile, realpath, rename, rm, unlink } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, readFile, realpath, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { modelFingerprint, smartTextHash } from "../dist/services/smartEnvV3.js";
@@ -11,7 +11,9 @@ import {
   currentFile, jsonLine, readActiveGeneration, readManifest, readVector, sealGeneration, sourceFile,
   sourceLine, syncDirectory, validateGeneration, vectorFiles, writeSynced,
 } from "./semantic-index/generation.mjs";
-import { inventory, parserRevision, readSourceParts, resolveRoots, sha256, verifySources } from "./semantic-index/vault.mjs";
+import { inventory, parserRevision, readSource, readSourceParts, resolveRoots, sha256, verifyIncludedSources, verifySources } from "./semantic-index/vault.mjs";
+import { createVectorCache, runIndexService } from "./semantic-index/service.mjs";
+import { withProducerLease } from "./semantic-index/producer-lease.mjs";
 
 const help = `Usage: optimike-semantic-index --vault DIR --index DIR --endpoint ORIGIN
        --model ID --revision REV --model-sha256 SHA256 [--rebuild]
@@ -19,6 +21,10 @@ const help = `Usage: optimike-semantic-index --vault DIR --index DIR --endpoint 
        [--min-note-chars N] [--min-block-chars N]
        [--max-deletion-percent 10] [--max-deletions 50]
        [--allow-deletions]
+
+       optimike-semantic-index service <same options, except --rebuild and --allow-deletions>
+       [--poll-ms 15000] [--debounce-ms 5000]
+       [--keep-generations 2] [--max-generations 4] [--reader-grace-seconds 60]
 
        optimike-semantic-index bootstrap --from-smart-env DIR --vault DIR
        --index DIR --endpoint ORIGIN --model ID --revision REV
@@ -59,7 +65,7 @@ function previousRows(manifest) {
   return rows;
 }
 
-async function populate(staging, vault, scan, client, manifest, previous, hashes, imported) {
+async function populate(staging, vault, scan, client, manifest, previous, hashes, imported, signal, deferred, vectorCache) {
   const { fingerprint, stats, sources, chunking, model, skipped } = manifest;
   const files = vectorFiles(fingerprint);
   const digests = { notes: createHash("sha256"), sections: createHash("sha256") };
@@ -76,33 +82,45 @@ async function populate(staging, vault, scan, client, manifest, previous, hashes
     };
     const batchSize = manifest.identity.documentDevice === "cuda" ? 4 : 1;
     const prepare = (entry, part) => ({ ...part, relative: entry.relative, source: entry.source, inputSha256: sha256(part.input) });
+    const cacheKey = part => manifest.lockHash + ":" + part.inputSha256;
+    async function appendVector(row, kind) {
+      await output[kind].writeFile(row);
+      digests[kind].update(row);
+      return stats[kind]++;
+    }
     async function writeParts(parts, kind) {
       const importedRowFor = part => imported?.get(part.relative)?.get(part.key);
       for (let start = 0; start < parts.length; start += batchSize) {
+        signal.throwIfAborted();
         const batch = parts.slice(start, start + batchSize);
-        const misses = batch.filter(part => !importedRowFor(part) && !cached.has(part.inputSha256));
+        const reused = new Map(batch.map(part => [part.inputSha256, vectorCache?.get(cacheKey(part))]));
+        const misses = [...new Map(batch.filter(part => !importedRowFor(part) && !cached.has(part.inputSha256) &&
+          reused.get(part.inputSha256) === undefined).map(part => [part.inputSha256, part])).values()];
         const encoded = misses.length ? await client.encode(misses, manifest) : [];
-        let next = 0;
+        const fresh = new Map(misses.map((part, index) => {
+          vectorCache?.set(cacheKey(part), encoded[index]);
+          return [part.inputSha256, encoded[index]];
+        }));
         for (const part of batch) {
           const existing = cached.get(part.inputSha256);
           const importedRow = importedRowFor(part);
           if (importedRow && importedRow.inputSha256 !== part.inputSha256) {
             throw Error("Imported input changed during bootstrap");
           }
+          const reusedRow = reused.get(part.inputSha256);
           const row = importedRow?.vector ?? (existing
-            ? await readVector(input[existing.kind], existing.row, model.dimensions) : encoded[next++]);
+            ? await readVector(input[existing.kind], existing.row, model.dimensions)
+            : reusedRow === undefined ? fresh.get(part.inputSha256) : reusedRow);
           if (row === null) {
             skipped.push({ path: part.relative, reason: "document_too_long", ...(part.key && { blockKey: part.key }) });
             continue;
           }
-          await output[kind].writeFile(row);
-          digests[kind].update(row);
           const provenance = importedRow ? "sc-hash32" : existing?.provenance;
-          const ref = { row: stats[kind]++, readHash: smartTextHash(part.text), inputSha256: part.inputSha256,
+          const ref = { row: await appendVector(row, kind), readHash: smartTextHash(part.text), inputSha256: part.inputSha256,
             ...(provenance && { provenance }) };
           if (part.key) part.source.blocks[part.key] = { ...ref, lines: part.range };
           else part.source.note = ref;
-          const disposition = importedRow ? "imported" : existing ? "reused" : "encoded";
+          const disposition = importedRow ? "imported" : existing || reusedRow !== undefined ? "reused" : "encoded";
           stats[disposition]++;
           if (manifest.bootstrap && disposition !== "reused") manifest.bootstrap[disposition][kind]++;
         }
@@ -121,7 +139,38 @@ async function populate(staging, vault, scan, client, manifest, previous, hashes
     }
     let window = [];
     for (const [relative, expected] of scan.files) {
-      const { digest, parts, reason } = await readSourceParts(vault, relative, expected, chunking);
+      signal.throwIfAborted();
+      let sourceParts;
+      if (!deferred?.has(relative)) {
+        try {
+          sourceParts = await readSourceParts(vault, relative, expected, chunking);
+        } catch (error) {
+          if (!deferred || !["ENOENT", "SOURCE_DRIFT"].includes(error.code)) throw error;
+          deferred.add(relative);
+        }
+      }
+      if (!sourceParts) {
+        await writeWindow(window);
+        window = [];
+        const old = previous?.manifest.sources[relative];
+        if (!old) {
+          delete manifest.inventoryStamps[relative];
+          continue;
+        }
+        const copyPart = async (part, kind) => {
+          const row = await readVector(input[kind], part.row, model.dimensions);
+          stats.reused++;
+          return { ...part, row: await appendVector(row, kind) };
+        };
+        const source = { ...old, note: await copyPart(old.note, "notes"), blocks: Object.create(null) };
+        for (const [key, part] of Object.entries(old.blocks)) source.blocks[key] = await copyPart(part, "sections");
+        sources[relative] = source;
+        hashes.set(relative, old.sha256);
+        manifest.inventoryStamps[relative] = previous.manifest.inventoryStamps?.[relative] ?? "";
+        await metadata.writeFile(sourceLine(relative, source, fingerprint));
+        continue;
+      }
+      const { digest, parts, reason } = sourceParts;
       hashes.set(relative, digest);
       if (!parts) {
         skipped.push({ path: relative, reason });
@@ -141,7 +190,48 @@ async function populate(staging, vault, scan, client, manifest, previous, hashes
   return Object.fromEntries(Object.entries(digests).map(([kind, hash]) => [kind, hash.digest("hex")]));
 }
 
-async function build(options, vault, index, client, smartEnv) {
+async function deletionMarker(index, generation) {
+  if (!generation) return false;
+  const filename = path.join(index, "ALLOW_DELETIONS");
+  try {
+    const stat = await lstat(filename);
+    return stat.isFile() && stat.size <= 80 && await readFile(filename, "utf8") === generation + "\n";
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    return false;
+  }
+}
+
+async function consumeDeletionMarker(index, generation) {
+  if (!await deletionMarker(index, generation)) return false;
+  const claimed = path.join(index, ".ALLOW_DELETIONS-" + randomUUID());
+  try {
+    await rename(path.join(index, "ALLOW_DELETIONS"), claimed);
+    const stat = await lstat(claimed);
+    return stat.isFile() && stat.size <= 80 && await readFile(claimed, "utf8") === generation + "\n";
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    return false;
+  } finally {
+    await rm(claimed, { force: true });
+  }
+}
+
+function countDeletions(missing, previousSources, addedHashes) {
+  const additions = new Map();
+  for (const hash of addedHashes) additions.set(hash, (additions.get(hash) ?? 0) + 1);
+  let deletions = 0;
+  for (const relative of missing) {
+    const hash = previousSources[relative].sha256;
+    const available = additions.get(hash);
+    if (available) additions.set(hash, available - 1);
+    else deletions++;
+  }
+  return deletions;
+}
+
+async function build(options, vault, index, client, smartEnv, { service, signal, vectorCache }) {
+  signal.throwIfAborted();
   const id = "g-" + randomUUID();
   const generations = path.join(index, "generations");
   const staging = path.join(index, ".staging-" + id);
@@ -164,14 +254,31 @@ async function build(options, vault, index, client, smartEnv) {
     }
   }
   requireNotes(scan.files.size);
-  const activePaths = Object.keys(previous?.manifest.sources ?? {});
-  function guardDeletions(count, detail) {
-    if (!options["allow-deletions"] && (count > options["max-deletions"] ||
-        count * 100 > activePaths.length * options["max-deletion-percent"])) {
-      throw Error(`Deletion limit exceeded (${count} of ${activePaths.length} active notes ${detail}). Verify the vault before using --allow-deletions`);
+  const previousSources = previous?.manifest.sources ?? {};
+  const activePaths = Object.keys(previousSources);
+  let deletionOverride = options["allow-deletions"];
+  const exceedsLimit = count => count > options["max-deletions"] ||
+    count * 100 > activePaths.length * options["max-deletion-percent"];
+  async function guardDeletions(count, detail) {
+    if (deletionOverride || !exceedsLimit(count)) return;
+    signal.throwIfAborted();
+    if (service && await consumeDeletionMarker(index, previous?.manifest.generation)) {
+      deletionOverride = true;
+      return;
+    }
+    const option = service ? "creating the generation-bound ALLOW_DELETIONS marker" : "using --allow-deletions";
+    throw Object.assign(Error(`Deletion limit exceeded (${count} of ${activePaths.length} active notes ${detail}). Verify the vault before ${option}`),
+      { code: "DELETION_GUARD" });
+  }
+  const missing = activePaths.filter(relative => !scan.files.has(relative));
+  const added = [];
+  if (service && exceedsLimit(missing.length)) {
+    for (const [relative, stamp] of scan.files) {
+      signal.throwIfAborted();
+      if (!Object.hasOwn(previousSources, relative)) added.push(sha256(await readSource(vault, relative, stamp)));
     }
   }
-  guardDeletions(activePaths.filter(relative => !scan.files.has(relative)).length, "missing or reader-incompatible");
+  await guardDeletions(countDeletions(missing, previousSources, added), "missing or reader-incompatible");
   const profile = await client.profile();
   const chunking = {
     version: smartEnvSelection ? "smart-env-v3-selection-v2" : "bitnet-markdown-v3",
@@ -199,6 +306,7 @@ async function build(options, vault, index, client, smartEnv) {
     version: 1,
     generation: id,
     createdAt: new Date().toISOString(),
+    inventoryStamps: Object.fromEntries([...scan.files, ...scan.unsafePaths]),
     ...profile,
     chunking,
     vaultBinding: scan.binding,
@@ -231,7 +339,7 @@ async function build(options, vault, index, client, smartEnv) {
       if (options["verify-only"]) console.log(JSON.stringify(bootstrap.report));
       throw error;
     }
-    if (options["verify-only"]) return bootstrap.report;
+    if (options["verify-only"]) return { receipt: bootstrap.report };
     imported = bootstrap.rows;
     const { source, modelMatched, verification, sectionSelection } = bootstrap.report;
     manifest.bootstrap = {
@@ -241,44 +349,87 @@ async function build(options, vault, index, client, smartEnv) {
     manifest.stats.imported = 0;
   }
   const directories = ["smart_sources", "smart_blocks", "embedding_models"];
-  await mkdir(staging, { mode: 0o700 });
-  try {
-    for (const directory of directories) await mkdir(path.join(staging, directory), { mode: 0o700 });
-    const digests = await populate(staging, vault, scan, client, manifest, reusable, hashes, imported);
-    const belowMinimum = new Set(skipped.filter(item => item.reason === "note_below_min_size").map(item => item.path));
-    const deletions = activePaths.filter(relative => !manifest.sources[relative] && !belowMinimum.has(relative)).length;
-    guardDeletions(deletions, "not publishable");
-    requireNotes(manifest.stats.notes);
-    await sealGeneration(staging, manifest);
-    const persisted = await readManifest(staging, id);
-    if (persisted.vectors.notes.sha256 !== digests.notes || persisted.vectors.sections.sha256 !== digests.sections) {
-      throw Error("Persisted vectors do not match encoded rows");
-    }
-    await validateGeneration(staging, persisted);
-    for (const directory of directories) await syncDirectory(path.join(staging, directory));
-    await syncDirectory(staging);
-    await rename(staging, target);
-    await syncDirectory(generations);
+  const deferred = service ? new Set() : undefined;
+  const initialStamps = { ...manifest.inventoryStamps };
+  const initialSkipped = [...skipped];
+  const initialStats = { ...manifest.stats };
+  const previousHashes = previous?.manifest.inventoryHashes ??
+    Object.fromEntries(Object.entries(previousSources).map(([relative, source]) => [relative, source.sha256]));
 
-    await writeSynced(pending, id + "\n");
-    await verifyProfile();
-    await verifySources(vault, options["exclude-path"], scan, hashes, excludedByProfile);
+  for (;;) {
+    manifest.inventoryStamps = { ...initialStamps };
+    manifest.sources = Object.create(null);
+    manifest.skipped = [...initialSkipped];
+    manifest.stats = { ...initialStats };
+    hashes.clear();
+    await mkdir(staging, { mode: 0o700 });
+    let sealed = false;
+    let published = false;
     try {
-      await rename(pending, path.join(index, currentFile));
-    } catch (error) {
-      throw Error(`CURRENT replacement failed (${error.code}); the previous pointer was preserved`);
+      for (const directory of directories) await mkdir(path.join(staging, directory), { mode: 0o700 });
+      const digests = await populate(staging, vault, scan, client, manifest, reusable, hashes, imported, signal, deferred, vectorCache);
+      manifest.inventoryHashes = Object.fromEntries(hashes);
+      if (deferred?.size && (!manifest.stats.notes || (previous && hashes.size === Object.keys(previousHashes).length &&
+          [...hashes].every(([relative, digest]) => previousHashes[relative] === digest)))) {
+        throw Object.assign(Error("Waiting for a stable Markdown source"), { code: "SOURCE_DRIFT" });
+      }
+      const belowMinimum = new Set(manifest.skipped.filter(item => item.reason === "note_below_min_size").map(item => item.path));
+      const lost = activePaths.filter(relative => !manifest.sources[relative] && !belowMinimum.has(relative));
+      const newHashes = service ? Object.entries(manifest.sources)
+        .filter(([relative]) => !Object.hasOwn(previousSources, relative)).map(([, source]) => source.sha256) : [];
+      const deletions = countDeletions(lost, previousSources, newHashes);
+      await guardDeletions(deletions, "not publishable");
+      requireNotes(manifest.stats.notes);
+      manifest.builtAt = new Date().toISOString();
+      manifest.coverage = { indexedNotes: manifest.stats.notes, candidateNotes: scan.files.size + scan.unsafePaths.size,
+        indexedSections: manifest.stats.sections };
+      await sealGeneration(staging, manifest);
+      const persisted = await readManifest(staging, id);
+      if (persisted.vectors.notes.sha256 !== digests.notes || persisted.vectors.sections.sha256 !== digests.sections) {
+        throw Error("Persisted vectors do not match encoded rows");
+      }
+      await validateGeneration(staging, persisted);
+      for (const directory of directories) await syncDirectory(path.join(staging, directory));
+      await syncDirectory(staging);
+      await rename(staging, target);
+      sealed = true;
+      await syncDirectory(generations);
+
+      await writeSynced(pending, id + "\n");
+      await verifyProfile();
+      if (service) {
+        const included = Object.entries(manifest.sources)
+          .filter(([relative]) => !deferred.has(relative)).map(([relative, source]) => [relative, source.sha256]);
+        const drifted = await verifyIncludedSources(vault, scan.binding, included, signal);
+        if (drifted.size) {
+          for (const relative of drifted) deferred.add(relative);
+          continue;
+        }
+      } else {
+        await verifySources(vault, options["exclude-path"], scan, hashes, excludedByProfile);
+      }
+      signal.throwIfAborted();
+      try {
+        await rename(pending, path.join(index, currentFile));
+        published = true;
+      } catch (error) {
+        throw Error(`CURRENT replacement failed (${error.code}); the previous pointer was preserved`);
+      }
+      try {
+        await syncDirectory(index);
+      } catch (error) {
+        console.error("CURRENT was replaced, but syncing its directory failed:", error.code);
+        process.exitCode = 1;
+      }
+      return {
+        publication: { directory: target, manifest },
+        receipt: { generation: id, ...manifest.stats, deletions, skipped: manifest.skipped },
+      };
+    } finally {
+      if (sealed && !published) await rm(target, { recursive: true, force: true });
+      await rm(staging, { recursive: true, force: true });
+      await rm(pending, { force: true });
     }
-    try {
-      await syncDirectory(index);
-    } catch (error) {
-      console.error("CURRENT was replaced, but syncing its directory failed:", error.code);
-      process.exitCode = 1;
-    }
-    return { generation: id, ...manifest.stats, deletions, skipped: manifest.skipped };
-  } finally {
-    // Leave any sealed generation intact. Readers may still hold a previous CURRENT.
-    await rm(staging, { recursive: true, force: true });
-    await rm(pending, { force: true });
   }
 }
 
@@ -301,6 +452,11 @@ async function main() {
     "verify-only": { type: "boolean" },
     "max-samples": { type: "string" },
     "allow-selection-mismatch": { type: "boolean" },
+    "poll-ms": { type: "string" },
+    "debounce-ms": { type: "string" },
+    "keep-generations": { type: "string" },
+    "max-generations": { type: "string" },
+    "reader-grace-seconds": { type: "string" },
     "exclude-path": { type: "string", multiple: true, default: [] },
     "exclude-heading": { type: "string", multiple: true, default: [] },
   } });
@@ -309,10 +465,29 @@ async function main() {
     return;
   }
   const bootstrap = positionals.length === 1 && positionals[0] === "bootstrap";
+  const service = positionals.length === 1 && positionals[0] === "service";
   if (bootstrap ? !options["from-smart-env"]?.trim() || options.rebuild
-    : positionals.length || options["from-smart-env"] !== undefined || options["verify-only"] ||
+    : (!service && positionals.length) || (service && options.rebuild) ||
+      options["from-smart-env"] !== undefined || options["verify-only"] ||
       options["allow-selection-mismatch"]) {
     throw Error("Invalid bootstrap options. Run with --help");
+  }
+  if (service && options["allow-deletions"]) throw Error("Service mode requires a one-use ALLOW_DELETIONS marker");
+  for (const [name, fallback, minimum, maximum] of [
+    ["poll-ms", "15000", 50, 300_000], ["debounce-ms", "5000", 0, 300_000],
+    ["keep-generations", "2", 0, 1000], ["max-generations", "4", 2, 1002],
+    ["reader-grace-seconds", "60", 1, 604_800],
+  ]) {
+    const raw = options[name];
+    if (!service && raw !== undefined) throw Error(`--${name} requires service mode`);
+    const value = Number(raw ?? fallback);
+    if (!/^\d+$/u.test(raw ?? fallback) || value < minimum || value > maximum) {
+      throw Error(`--${name} must be an integer from ${minimum} to ${maximum}`);
+    }
+    options[name] = value;
+  }
+  if (options["keep-generations"] > options["max-generations"] - 2) {
+    throw Error("--keep-generations must leave room for CURRENT and its next generation");
   }
   if (options["max-samples"] !== undefined && (!bootstrap || !/^\d{2,3}$/u.test(options["max-samples"]) ||
       Number(options["max-samples"]) < 20 || Number(options["max-samples"]) > maxSampleLimit)) {
@@ -334,51 +509,52 @@ async function main() {
     }
     options[key] = value;
   }
-  const client = bitnetClient(options.endpoint, options.model, options.revision, options["model-sha256"]);
+  const controller = new AbortController();
+  const client = bitnetClient(options.endpoint, options.model, options.revision, options["model-sha256"], controller.signal);
   const { vault, index } = await resolveRoots(options.vault, options.index);
   const smartEnv = bootstrap ? (await resolveRoots(options["from-smart-env"], index)).vault : undefined;
   await mkdir(index, { recursive: true, mode: 0o700 });
   if (await realpath(index) !== index) throw Error("Index path changed during setup");
-  const lockPath = path.join(index, ".producer.lock");
-  let lock;
+  const stop = () => controller.abort();
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
   try {
-    lock = await open(lockPath, "wx", 0o600);
-  } catch (error) {
-    if (error.code === "EEXIST") {
-      let owner;
-      try {
-        const info = await lstat(lockPath);
-        if (info.isFile() && info.size <= 256) {
-          const { pid, startedAt } = JSON.parse(await readFile(lockPath, "utf8"));
-          if (Number.isSafeInteger(pid) && pid > 0 && typeof startedAt === "string" &&
-              /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(startedAt)) {
-            owner = ` (PID ${pid}, started ${startedAt})`;
-          }
-        }
-      } catch {
-        // A newly acquired or released lock may have no readable owner yet.
+    await withProducerLease(index, controller, async () => {
+      const generations = path.join(index, "generations");
+      await mkdir(generations, { recursive: true, mode: 0o700 });
+      if (!(await lstat(generations)).isDirectory() || await realpath(generations) !== generations) {
+        throw Error("Generations path must be a regular directory under the index root");
       }
-      throw Error("Index already has a producer lock" + (owner ?? ""));
-    }
-    throw error;
-  }
-  try {
-    await lock.writeFile(jsonLine({ pid: process.pid, startedAt: new Date().toISOString() }));
-    await lock.sync();
-    const generations = path.join(index, "generations");
-    await mkdir(generations, { recursive: true, mode: 0o700 });
-    if (!(await lstat(generations)).isDirectory() || await realpath(generations) !== generations) {
-      throw Error("Generations path must be a regular directory under the index root");
-    }
-    console.log(JSON.stringify(await build(options, vault, index, client, smartEnv)));
+      for (const entry of await readdir(index)) {
+        if (/^\.(?:(?:staging|CURRENT)-g-|(?:SERVICE|RETIREMENTS)\.json-|ALLOW_DELETIONS-|producer\.lock\.)[a-f0-9-]{36}$/u.test(entry)) {
+          await rm(path.join(index, entry), { recursive: true, force: true });
+        }
+      }
+      const signal = controller.signal;
+      if (service) {
+        const vectorCache = createVectorCache();
+        await runIndexService({
+          index, vault, active: await readActiveGeneration(index),
+          scan: active => inventory(vault, options["exclude-path"],
+            exclusionMatcher(active?.manifest.chunking.smartEnvSelection)),
+          build: async () => (await build(options, vault, index, client, undefined, { service, signal, vectorCache })).publication,
+          allowDeletions: active => deletionMarker(index, active?.manifest.generation),
+          pollMs: options["poll-ms"], debounceMs: options["debounce-ms"],
+          keep: options["keep-generations"], maxGenerations: options["max-generations"],
+          graceMs: options["reader-grace-seconds"] * 1000, controller,
+        });
+      } else {
+        console.log(JSON.stringify((await build(options, vault, index, client, smartEnv, { service, signal })).receipt));
+      }
+    });
   } finally {
-    await lock.close();
-    await unlink(lockPath);
+    process.off("SIGINT", stop);
+    process.off("SIGTERM", stop);
   }
 }
 
 main().catch(error => {
   // Filesystem errors include local paths. Emit only their code.
-  console.error("Semantic index producer:", error.code ?? error.message);
+  console.error("Semantic index producer:", /^(EMBEDDING_|SOURCE_DRIFT$|DELETION_GUARD$)/u.test(error.code ?? "") ? error.message : error.code ?? error.message);
   process.exitCode = 1;
 });

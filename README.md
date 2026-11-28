@@ -77,7 +77,7 @@ Unqualified `/mcp` now uses `standard`; `/mcp/full` remains the explicit complet
 
 Requirements:
 
-- Node.js `>=22.12.0`;
+- Node.js `>=22.13.0`;
 - Obsidian Desktop only for live features;
 - capability-specific plugins listed below.
 

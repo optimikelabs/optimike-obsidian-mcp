@@ -228,6 +228,8 @@ const SAFE_ERROR_DETAIL_FIELDS = new Set([
   "planRef",
   "recoveryRef",
   "reasonCode",
+  "upstreamSync",
+  "syncWriteRefusal",
   "validationIssues",
   "filterNode",
   // Bases engine refusal: bounded, schema-checked formula diagnosis.
@@ -489,6 +491,7 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "yaml_tag_unsupported",
 
   "semantic_index_unavailable",
+  "upstream_sync_write_blocked",
   "semantic_embedder_configuration_invalid",
   "semantic_query_embedding_failed",
   "semantic_query_vector_invalid",
@@ -645,6 +648,8 @@ function isSafeDiagnosticString(field: string, value: string): boolean {
   if (field === "preparationCheck") return isDatePreparationCheck(value);
   if (field === "reasonCode") return SAFE_PUBLIC_REASON_CODES.has(value);
   if (field === "filterNode") return isBaseQueryFilterNode(value);
+  if (field === "upstreamSync") return ["unknown", "current", "lagging", "stalled", "error"].includes(value);
+  if (field === "syncWriteRefusal") return ["evidence_unavailable", "pull_too_old", "stalled", "error"].includes(value);
   if (field === "hint") return isNoteNameHint(value) || isNativeMoveHint(value);
   // A suggestion is only released if it satisfies the shared name rule itself.
   if (CALLER_DERIVED_PUBLIC_FIELDS.has(field)) return checkNoteName(value, { extensions: null }).ok;
@@ -751,6 +756,8 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
     return "The shared note cache is processing pending file events. Retry obsidian_note_links after they settle.";
   if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "headless_link_cache_uncertain")
     return "The shared note cache needs a successful refresh. Retry obsidian_note_links after it completes.";
+  if (reasonCode === "upstream_sync_write_blocked")
+    return "Headless write blocked. Verify a recent successful upstream Sync pull, then retry.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_tool_arguments")
     return "Invalid tool arguments. See validationIssues for the field and reason.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === BASE_FORMULA_ENGINE_REFUSAL)

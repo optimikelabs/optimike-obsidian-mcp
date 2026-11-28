@@ -124,7 +124,7 @@ export function smartTextHash(text: string): string {
   return hash32(text).toString(36);
 }
 
-export function smartModelFingerprint(model: ModelRecord): string {
+export function modelFingerprint(model: ModelRecord): string {
   const key = JSON.stringify({
     provider_key: model.provider_key || "",
     model_key: model.model_key || "",
@@ -134,12 +134,9 @@ export function smartModelFingerprint(model: ModelRecord): string {
   return `mf_${hash32(key).toString(36)}`;
 }
 
-export { smartModelFingerprint as modelFingerprint };
+export { modelFingerprint as smartModelFingerprint };
 
-export async function readSmartEnvV3Model(
-  baseDir: string,
-  strict = false,
-): Promise<ModelRecord | null> {
+export async function readSmartEnvV3Model(baseDir: string, strict = false): Promise<ModelRecord | null> {
   let selected: string;
   try {
     const settings = JSON.parse(await fs.readFile(path.join(baseDir, "smart_env.json"), "utf8"));
@@ -302,6 +299,12 @@ export async function readSmartBlockVectors(
   };
 }
 
+/**
+ * One pass over the append-only source records yields the current note vector
+ * references and, when requested, the current block (section) references.
+ * Note and block bodies are parsed one line at a time and never retained.
+ * Returns null when the directory holds no Smart Environment v3 sources.
+ */
 export async function smartEnvV3SourceFiles(baseDir: string): Promise<string[]> {
   try {
     return (await fs.readdir(path.join(baseDir, "smart_sources")))
@@ -315,12 +318,11 @@ export async function smartEnvV3SourceFiles(baseDir: string): Promise<string[]> 
   }
 }
 
-/** Read current vector references without retaining note or section bodies. */
 export async function readSmartEnvV3References(
   baseDir: string,
   files: string[],
   fingerprint: string,
-  options: { blocks: boolean; strict?: boolean; externalGeneration?: boolean },
+  options: { blocks: boolean; strict?: boolean; validatedGeneration?: boolean },
 ): Promise<Map<string, SearchSource>> {
   const latest = new Map<string, SearchSource>();
   for (const file of files) {
@@ -345,7 +347,7 @@ export async function readSmartEnvV3References(
           latest.delete(key.slice("smart_sources:".length));
           continue;
         }
-        if (options.externalGeneration && (!source?.path ||
+        if (options.validatedGeneration && (!source?.path || key !== `smart_sources:${source.path}` ||
             !/\.md$/iu.test(source.path) || /[:\\\x00-\x1f]/u.test(source.path) ||
             source.path.split("/").some((segment) => !segment || segment === "." || segment === "..")))
           throw new Error("Invalid semantic generation note path");
@@ -362,7 +364,6 @@ export async function readSmartEnvV3References(
           ...(options.strict && { blockSelection: source.block_embedding_selection }),
         });
       } catch {
-        if (options.externalGeneration) throw new Error("Invalid semantic generation source entry");
         if (options.strict) throw new Error("Invalid Smart Environment source record");
         // A partial append must not prevent reading the other source records.
       }
@@ -390,17 +391,16 @@ export async function readSmartEnvV3(
   const model = await readSmartEnvV3Model(baseDir, Boolean(expected));
   const dimensions = Number(model?.dims || model?.dimensions || 0);
   if (!model?.model_key || !Number.isInteger(dimensions) || dimensions <= 0) return { notes: [] };
-  const fingerprint = smartModelFingerprint(model);
+  const fingerprint = modelFingerprint(model);
   if (expected && (fingerprint !== expected.fingerprint ||
       model.provider_key !== expected.model.provider_key ||
       model.model_key !== expected.model.model_key ||
       dimensions !== expected.model.dimensions ||
-      Number(model.max_tokens || 0) !== (expected.model.max_tokens ?? 0)))
+      Number(model.max_tokens || 0) !== (expected.model.max_tokens ?? 0))) {
     throw new Error("Semantic generation registry does not match its manifest");
+  }
   const latest = await readSmartEnvV3References(baseDir, files, fingerprint, {
-    blocks: options.blocks,
-    strict: Boolean(expected),
-    externalGeneration: Boolean(expected),
+    blocks: options.blocks, strict: Boolean(expected), validatedGeneration: Boolean(expected),
   });
   // A caller whose note snapshot already matches these files skips them.
   const vectors =

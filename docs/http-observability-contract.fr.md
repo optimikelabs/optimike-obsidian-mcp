@@ -31,7 +31,7 @@ Un service dégradé peut encore servir un sous-ensemble documenté. Un service 
 
 ### `GET /statusz`
 
-Statut détaillé authentifié. Il utilise la même protection pré-authentification par source, la même authentification et le même quota d’identité vérifiée que `/mcp`. Il ajoute uniquement des agrégats sur les sessions, l’admission et l’occupation des compteurs de quotas. Il ne renvoie jamais de token Bearer, d’identité client brute, de contenu documentaire, de chemin documentaire ou de chemin personnel du coffre.
+Statut détaillé authentifié. Il utilise la même protection pré-authentification par source, la même authentification et le même quota d’identité vérifiée que `/mcp`. Il ajoute des agrégats sur les sessions, l’admission et l’occupation des compteurs de quotas. En headless, il liste les conflits Sync indexés par chemin relatif au coffre. Un index sémantique externe ajoute le statut de la génération et des changements en attente. Les tokens Bearer, identités client brutes, contenus documentaires et chemins physiques du coffre restent privés.
 
 ## États de readiness
 
@@ -54,6 +54,10 @@ Le contrat distingue les sources suivantes :
 - `unknown`.
 
 Il expose aussi l’origine interne (`obsidian_api`, `filesystem`, `cache`, `snapshot` ou `unknown`), le timestamp d’observation, l’âge en millisecondes, la connaissance ou non de la fraîcheur et le statut stale.
+
+En headless, les deux endpoints ajoutent la preuve Sync amont à la provenance
+du cache local. Les codes HTTP de readiness restent liés à la disponibilité
+locale. Voir le [contrat Sync](headless-server-profile.fr.md#preuve-de-synchronisation-amont).
 
 Une source n’est jamais qualifiée de `live-obsidian` uniquement parce que le service tourne en mode `live`. Le transport sonde le service REST Obsidian configuré indépendamment du cache facultatif. Un probe authentifié, récent et réussi rend donc un profil live prêt même si le cache est désactivé. Une observation issue d’un cache prêt dont la vraie source de rafraîchissement est `rest` est aussi normalisée vers l’origine publique `obsidian_api` et doit rester dans le seuil de fraîcheur. Au-delà, la provenance devient `snapshot` et le service passe en dégradé. Un échec connu de rafraîchissement du cache est signalé sous forme de dégradation expurgée. Un fallback stale n’est jamais présenté comme live.
 

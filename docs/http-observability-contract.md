@@ -31,7 +31,7 @@ A degraded service is still capable of serving a documented subset. A critical s
 
 ### `GET /statusz`
 
-Authenticated detailed status. It uses the same pre-authentication source protection, authentication and verified-identity quota as `/mcp`. It adds aggregate controls for sessions, admission and rate-limit map occupancy. It never returns bearer tokens, raw client identities, document content, document paths or personal vault paths.
+Authenticated detailed status. It uses the same pre-authentication source protection, authentication and verified-identity quota as `/mcp`. It adds aggregate controls for sessions, admission and rate-limit map occupancy. Headless status lists indexed Sync conflicts as vault-relative paths. Configured external semantic indexes add generation and pending-change status. Bearer tokens, raw client identities, document content and physical vault paths stay private.
 
 ## Readiness states
 
@@ -54,6 +54,10 @@ The status contract uses these response-source classes:
 - `unknown`.
 
 It also exposes the internal origin (`obsidian_api`, `filesystem`, `cache`, `snapshot` or `unknown`), observation timestamp, age in milliseconds, whether freshness is known and whether the result is stale.
+
+In headless modes both endpoints can add upstream Sync evidence alongside the
+existing local-cache provenance. The evidence has no effect on HTTP readiness
+codes. See the [upstream Sync contract](headless-server-profile.md#upstream-sync-evidence).
 
 A source is never called `live-obsidian` solely because the service runs in `live` mode. The transport probes the configured Obsidian REST service independently of the optional cache. A successful, recent authenticated probe therefore makes a live profile ready even when caching is disabled. A ready cache observation whose real refresh source is `rest` is also normalized to the public `obsidian_api` origin and must remain inside the freshness threshold. When that observation ages past the threshold, provenance becomes `snapshot` and the service is degraded. A known cache refresh failure is reported as sanitized degradation. A stale fallback is never presented as live.
 

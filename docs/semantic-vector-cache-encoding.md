@@ -87,7 +87,9 @@ checks the returned vector's dimension and validity during search.
 Search pins the pointer once for the entire request. SQLite and in-memory
 snapshots are fenced by the generation and its observed files. An incomplete
 or incompatible generation returns a semantic error. Successful external
-searches return `generation_id`. `obsidian_runtime_status` reports
+searches return `generation_id`, `indexGeneration`, `indexBuiltAt` and
+`staleNotes`. The [producer service](semantic-index-producer.md#service-mode)
+defines the validity and scope of the freshness count. `obsidian_runtime_status` reports
 `semanticCache.source: "external"`, the resolved `generationId` when available,
 and semantic availability under `capabilityManifest`. Snippets and section
 line verification read current Markdown under the explicit `OBSIDIAN_VAULT`

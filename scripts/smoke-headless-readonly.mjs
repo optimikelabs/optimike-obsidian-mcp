@@ -14,6 +14,7 @@ import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { syncVaultBinding } from "../dist/services/syncVaultBinding.js";
 
 const timeoutMs = Number(process.env.MCP_SMOKE_TIMEOUT_MS ?? "60000");
 const modeArg =
@@ -229,6 +230,19 @@ async function createTempVault() {
 
 async function main() {
   const vaultRoot = await createTempVault();
+  const vaultBinding = await syncVaultBinding(vaultRoot);
+  const evidenceDir = await mkdtemp(path.join(os.tmpdir(), "optimike-sync-evidence-"));
+  const receipt = path.join(evidenceDir, "heartbeat.json");
+  const testSyncGuard = modeArg === "headless-guarded";
+  const writeReceipt = async (state, minutesAgo = 0, heartbeatMinutesAgo = 0) => {
+    const now = Date.now();
+    const pullAt = new Date(now - minutesAgo * 60_000).toISOString();
+    await writeFile(receipt, JSON.stringify({
+      version: 2, vaultBinding, state, heartbeatAt: new Date(now - heartbeatMinutesAgo * 60_000).toISOString(),
+      lastSuccessfulPull: { startedAt: pullAt, completedAt: pullAt },
+    }));
+  };
+  if (testSyncGuard) await writeReceipt("ok");
   const cachePath = path.join(
     vaultRoot,
     ".obsidian",
@@ -379,6 +393,11 @@ async function main() {
       OBSIDIAN_RUNTIME_MODE: runtimeMode,
       OBSIDIAN_VAULT: vaultRoot,
       OBSIDIAN_CACHE_SOURCE: "filesystem",
+      ...(testSyncGuard && {
+        OBSIDIAN_SYNC_HEARTBEAT_FILE: receipt,
+        OBSIDIAN_SYNC_STALL_SECONDS: "60",
+        OBSIDIAN_SYNC_WRITE_MAX_AGE_SECONDS: "300",
+      }),
       OBSIDIAN_SHARED_CACHE_DB_PATH: cachePath,
       OBSIDIAN_VAULT_EXCLUDE_PATTERNS: `tmp/**,**/tmp/**,!${explicitlyIncludedNote}`,
       OBSIDIAN_ENABLE_CACHE: "true",
@@ -1025,6 +1044,34 @@ async function main() {
     }
 
     if (modeArg === "headless-guarded" || modeArg === "headless-filesystem") {
+      if (testSyncGuard) {
+        const target = path.join(vaultRoot, "Projects", "Headless.md");
+        const before = await readFile(target, "utf8");
+        for (const [state, age, heartbeatAge, expectedState, refusal] of [
+          ["error", 0, 0, "error", "error"], ["ok", 6, 0, "lagging", "pull_too_old"],
+          ["running", 3, 2, "stalled", "stalled"],
+        ]) {
+          await writeReceipt(state, age, heartbeatAge);
+          const blocked = await withTimeout(client.callTool({
+            name: "obsidian_update_note",
+            arguments: {
+              targetType: "filePath", targetIdentifier: "Projects/Headless.md",
+              modificationType: "wholeFile", wholeFileMode: "append", content: "must not be written",
+            },
+          }), "Sync write guard");
+          assert.equal(blocked.isError, true);
+          const { details } = JSON.parse(blocked.content[0].text).error;
+          assert.equal(details.reasonCode, "upstream_sync_write_blocked");
+          assert.equal(details.upstreamSync, expectedState);
+          assert.equal(details.syncWriteRefusal, refusal);
+          const read = await withTimeout(client.callTool({
+            name: "obsidian_read_note", arguments: { filePath: "Projects/Headless.md", format: "markdown" },
+          }), "read with Sync write guard enabled");
+          assert.equal(read.isError, false);
+          assert.equal(await readFile(target, "utf8"), before);
+        }
+        await writeReceipt("ok");
+      }
       const update = await withTimeout(
         client.callTool({
           name: "obsidian_update_note",
@@ -1590,6 +1637,7 @@ async function main() {
     await rm(vaultRoot, { recursive: true, force: true }).catch(
       () => undefined,
     );
+    await rm(evidenceDir, { recursive: true, force: true });
   }
 }
 
