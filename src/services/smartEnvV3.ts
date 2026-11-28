@@ -118,7 +118,7 @@ export function smartTextHash(text: string): string {
   return hash32(text).toString(36);
 }
 
-function modelFingerprint(model: ModelRecord): string {
+export function modelFingerprint(model: ModelRecord): string {
   const key = JSON.stringify({
     provider_key: model.provider_key || "",
     model_key: model.model_key || "",
@@ -128,7 +128,7 @@ function modelFingerprint(model: ModelRecord): string {
   return `mf_${hash32(key).toString(36)}`;
 }
 
-async function activeModel(baseDir: string): Promise<ModelRecord | null> {
+export async function readSmartEnvV3Model(baseDir: string): Promise<ModelRecord | null> {
   let selected: string;
   try {
     const settings = JSON.parse(await fs.readFile(path.join(baseDir, "smart_env.json"), "utf8"));
@@ -151,9 +151,9 @@ async function activeModel(baseDir: string): Promise<ModelRecord | null> {
     const trimmed = line.trim().replace(/,$/, "");
     if (!trimmed) continue;
     try {
-      const records = JSON.parse(`{${trimmed}}`) as Record<string, ModelRecord>;
-      const model = records[`embedding_models:${selected}`];
-      if (model) active = model;
+      const records = JSON.parse(`{${trimmed}}`) as Record<string, ModelRecord | null>;
+      const key = `embedding_models:${selected}`;
+      if (Object.hasOwn(records, key)) active = records[key] ?? null;
     } catch {
       // Ignore a malformed registry entry without losing later append-only values.
     }
@@ -165,7 +165,7 @@ export async function detectSmartEnvQueryProvider(
   baseDir: string,
   expectedModel?: string,
 ): Promise<string | undefined> {
-  const model = await activeModel(baseDir);
+  const model = await readSmartEnvV3Model(baseDir);
   if (!model || (expectedModel && model.model_key !== expectedModel)) return undefined;
   return model.provider_key;
 }
@@ -294,39 +294,42 @@ export async function readSmartBlockVectors(
  * Note and block bodies are parsed one line at a time and never retained.
  * Returns null when the directory holds no Smart Environment v3 sources.
  */
-export async function readSmartEnvV3(
-  baseDir: string,
-  options: { blocks: boolean; notes?: boolean },
-): Promise<SmartEnvV3Index | null> {
-  const directory = path.join(baseDir, "smart_sources");
-  let files: string[];
+export async function smartEnvV3SourceFiles(baseDir: string): Promise<string[]> {
   try {
-    files = (await fs.readdir(directory))
+    return (await fs.readdir(path.join(baseDir, "smart_sources")))
       .filter((file) => /^smart_sources(?:_\d+)?\.ajson$/i.test(file))
       .sort((left, right) => {
         const shard = (name: string) => Number(name.match(/_(\d+)\.ajson$/i)?.[1] ?? 0);
         return shard(left) - shard(right);
       });
   } catch {
-    return null;
+    return [];
   }
-  if (!files.length) return null;
-  const model = await activeModel(baseDir);
-  const dimensions = Number(model?.dims || model?.dimensions || 0);
-  if (!model?.model_key || !Number.isInteger(dimensions) || dimensions <= 0) return { notes: [] };
-  const fingerprint = modelFingerprint(model);
+}
+
+export async function readSmartEnvV3References(
+  baseDir: string,
+  files: string[],
+  fingerprint: string,
+  options: { blocks: boolean; strict?: boolean },
+): Promise<Map<string, SearchSource>> {
   const latest = new Map<string, SearchSource>();
   for (const file of files) {
     const lines = readline.createInterface({
-      input: createReadStream(path.join(directory, file), { encoding: "utf8" }),
+      input: createReadStream(path.join(baseDir, "smart_sources", file), { encoding: "utf8" }),
       crlfDelay: Infinity,
     });
     for await (const line of lines) {
       const trimmed = line.trim().replace(/,$/, "");
-      if (!trimmed.startsWith('"smart_sources:')) continue;
+      if (!trimmed || (!options.strict && !trimmed.startsWith('"smart_sources:'))) continue;
       try {
         const records = JSON.parse(`{${trimmed}}`) as Record<string, SourceRecord | null>;
-        const [key, source] = Object.entries(records)[0] ?? [];
+        const entries = Object.entries(records);
+        const [key, source] = entries[0] ?? [];
+        if (options.strict && (entries.length !== 1 || !key?.startsWith("smart_sources:") ||
+            (source !== null && key !== `smart_sources:${source?.path}`))) {
+          throw new Error("Unexpected Smart Environment source record");
+        }
         // Smart Connections appends `"smart_sources:<path>": null` when a note
         // is deleted; the latest record wins, so the note leaves the index.
         if (source === null && key?.startsWith("smart_sources:")) {
@@ -345,16 +348,31 @@ export async function readSmartEnvV3(
             : undefined,
         });
       } catch {
+        if (options.strict) throw new Error("Invalid Smart Environment source record");
         // A partial append must not prevent reading the other source records.
       }
     }
   }
+  return latest;
+}
+
+export async function readSmartEnvV3(
+  baseDir: string,
+  options: { blocks: boolean; notes?: boolean },
+): Promise<SmartEnvV3Index | null> {
+  const files = await smartEnvV3SourceFiles(baseDir);
+  if (!files.length) return null;
+  const model = await readSmartEnvV3Model(baseDir);
+  const dimensions = Number(model?.dims || model?.dimensions || 0);
+  if (!model?.model_key || !Number.isInteger(dimensions) || dimensions <= 0) return { notes: [] };
+  const fingerprint = modelFingerprint(model);
+  const latest = await readSmartEnvV3References(baseDir, files, fingerprint, options);
   // A caller whose note snapshot already matches these files skips them.
   const vectors =
     options.notes === false
       ? []
       : await readNoteVectors(
-          path.join(directory, fingerprint),
+          path.join(baseDir, "smart_sources", fingerprint),
           latest,
           fingerprint,
           dimensions,

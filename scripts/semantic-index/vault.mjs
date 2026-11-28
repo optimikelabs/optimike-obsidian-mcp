@@ -128,6 +128,25 @@ export async function verifySources(vault, excludedPaths, initial, hashes) {
 }
 
 const breadcrumbs = value => value.split("/").join(" > ").replace(".md", "");
+export const noteInput = (relative, text) => breadcrumbs(relative) + ":\n" + text;
+const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+
+export async function readSourceParts(vault, relative, expected, chunking) {
+  const bytes = await readSource(vault, relative, expected);
+  const digest = sha256(bytes);
+  let text;
+  try {
+    text = decoder.decode(bytes);
+  } catch (error) {
+    if (error.code !== "ERR_ENCODING_INVALID_ENCODED_DATA") throw error;
+    return { digest, parts: null, reason: "invalid_utf8" };
+  }
+  // SmartSource.should_embed compares the file's byte size to min_chars.
+  if (bytes.length <= chunking.minNoteChars) {
+    return { digest, parts: null, reason: "note_below_min_size" };
+  }
+  return { digest, parts: sourceParts(relative, text, chunking.excludedHeadings, chunking.minBlockChars) };
+}
 
 function tagsFrom(text) {
   const frontmatter = /^---\r?\n([\s\S]*?)^---[^\S\r\n]*(?:\r?\n|$)/mu.exec(text);
@@ -191,5 +210,5 @@ export function sourceParts(relative, raw, excludedHeadings, minBlockChars) {
     const prefix = breadcrumbs((relative + key).split("#").slice(0, -1).join(" > "));
     blocks.push({ key, range, text, input: prefix + "\n" + text });
   }
-  return { tags: tagsFrom(text), note: { text: raw, input: breadcrumbs(relative) + ":\n" + text }, blocks };
+  return { tags: tagsFrom(text), note: { text: raw, input: noteInput(relative, text) }, blocks };
 }

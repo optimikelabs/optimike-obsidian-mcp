@@ -71,6 +71,43 @@ entrent dans le calcul. Les notes écartées par le seuil de taille sont
 signalées par `note_below_min_size` et exemptées. Utiliser `--allow-deletions`
 pour une exécution après avoir vérifié que les pertes sont voulues.
 
+## Amorçage depuis Smart Connections v3
+
+```text
+optimike-semantic-index bootstrap --from-smart-env <smart-env> --vault <coffre> --index <index> --endpoint <origine-bitnet> --model <id-modèle> --revision <révision-modèle> --model-sha256 <sha256-poids-attendu>
+```
+
+Utiliser un dossier d’index sans `CURRENT`, séparé du coffre et de Smart
+Environment. Les deux dossiers sources sont lus en lecture seule. Si Desktop
+indexe encore, utiliser un instantané stable de Smart Environment. L’import
+compare le fournisseur actif, l’identifiant du modèle, les dimensions, le
+budget de tokens et l’empreinte v3. Il vérifie l’empreinte de la note courante,
+la référence du vecteur et, pour une section, la clé du bloc, ses lignes
+inclusives et son empreinte. Une note doit avoir la même entrée sans filtrage.
+Si Smart Connections a des titres exclus, les notes sont réencodées. Une
+limite prudente en octets UTF-8 réserve une marge pour la tokenisation. Toute
+ligne incompatible, trop longue ou invalide passe par l’encodage normal.
+
+Avant d’encoder le reste, le producteur réencode un échantillon déterministe,
+réparti autant que possible entre notes et sections. Il prend 1 % des
+vecteurs candidats, avec un plancher de 20 et un plafond de 40. En dessous de
+20 candidats, il les contrôle tous. Utiliser un encodeur avec un cache de
+documents vierge. Si le bridge déclare un résultat issu du cache, le contrôle
+s’arrête. Le cosinus minimal doit atteindre 0,995 et la médiane 0,999.
+L’empreinte v3 ne permet pas d’identifier les poids d’origine ni de retrouver
+toutes les entrées historiques. L’échantillon mesure l’accord avec l’encodeur
+configuré. Le manifeste enregistre le résultat et les nombres de vecteurs
+importés et encodés par type.
+
+Ajouter `--verify-only` pour obtenir en JSON la couverture de l’import, les
+lignes à encoder et l’accord sur l’échantillon. Le rapport compare aussi les
+clés des sections aux références Smart Environment admissibles, y compris
+hors du corpus parcouru. Utiliser `--max-samples` avec une valeur de 20 à 40
+pour limiter un essai de vérification seule. Ce mode prend le verrou du
+producteur et peut créer le dossier d’index. Il n’encode pas les autres lignes
+et ne publie aucune génération.
+Le décompte des lignes à encoder précède les éventuels refus pour longueur.
+
 ## Publication et reprise
 
 - `<index>/CURRENT` contient l’identifiant de la génération active et un retour

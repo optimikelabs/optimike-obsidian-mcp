@@ -3,13 +3,14 @@ import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readFile, realpath, rename, rm, unlink } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { smartTextHash } from "../dist/services/smartEnvV3.js";
+import { modelFingerprint, smartTextHash } from "../dist/services/smartEnvV3.js";
 import { bitnetClient, isSha256 } from "./semantic-index/bitnet.mjs";
+import { scanBootstrap, verifyBootstrap } from "./semantic-index/bootstrap.mjs";
 import {
   currentFile, jsonLine, readActiveGeneration, readManifest, readVector, sealGeneration, sourceFile,
   sourceLine, syncDirectory, validateGeneration, vectorFiles, writeSynced,
 } from "./semantic-index/generation.mjs";
-import { inventory, parserRevision, readSource, resolveRoots, sha256, sourceParts, verifySources } from "./semantic-index/vault.mjs";
+import { inventory, parserRevision, readSourceParts, resolveRoots, sha256, verifySources } from "./semantic-index/vault.mjs";
 
 const help = `Usage: optimike-semantic-index --vault DIR --index DIR --endpoint ORIGIN
        --model ID --revision REV --model-sha256 SHA256 [--rebuild]
@@ -18,7 +19,15 @@ const help = `Usage: optimike-semantic-index --vault DIR --index DIR --endpoint 
        [--max-deletion-percent 10] [--max-deletions 50]
        [--allow-deletions]
 
+       optimike-semantic-index bootstrap --from-smart-env DIR --vault DIR
+       --index DIR --endpoint ORIGIN --model ID --revision REV
+       --model-sha256 SHA256 [--verify-only [--max-samples 20..40]]
+       [--exclude-path RELATIVE/PATH]... [--exclude-heading TITLE]...
+       [--min-note-chars 300] [--min-block-chars 300]
+
 Build and publish a Smart Environment v3 document index outside the vault.
+Bootstrap requires an index without CURRENT. --verify-only reports coverage
+and sample agreement without encoding the remaining rows or publishing.
 `;
 
 async function withFiles(callback) {
@@ -47,7 +56,7 @@ function previousRows(manifest) {
   return rows;
 }
 
-async function populate(staging, vault, scan, client, manifest, previous, hashes) {
+async function populate(staging, vault, scan, client, manifest, previous, hashes, imported) {
   const { fingerprint, stats, sources, chunking, model, skipped } = manifest;
   const files = vectorFiles(fingerprint);
   const digests = { notes: createHash("sha256"), sections: createHash("sha256") };
@@ -63,17 +72,22 @@ async function populate(staging, vault, scan, client, manifest, previous, hashes
       sections: await openFile(path.join(previous.directory, files.sections), "r"),
     };
     const batchSize = manifest.identity.documentDevice === "cuda" ? 4 : 1;
-    const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
     const prepare = (entry, part) => ({ ...part, relative: entry.relative, source: entry.source, inputSha256: sha256(part.input) });
     async function writeParts(parts, kind) {
+      const importedRowFor = part => imported?.get(part.relative)?.get(part.key);
       for (let start = 0; start < parts.length; start += batchSize) {
         const batch = parts.slice(start, start + batchSize);
-        const misses = batch.filter(part => !cached.has(part.inputSha256));
+        const misses = batch.filter(part => !importedRowFor(part) && !cached.has(part.inputSha256));
         const encoded = misses.length ? await client.encode(misses, manifest) : [];
         let next = 0;
         for (const part of batch) {
           const existing = cached.get(part.inputSha256);
-          const row = existing ? await readVector(input[existing.kind], existing.row, model.dimensions) : encoded[next++];
+          const importedRow = importedRowFor(part);
+          if (importedRow && importedRow.inputSha256 !== part.inputSha256) {
+            throw Error("Imported input changed during bootstrap");
+          }
+          const row = importedRow?.vector ?? (existing
+            ? await readVector(input[existing.kind], existing.row, model.dimensions) : encoded[next++]);
           if (row === null) {
             skipped.push({ path: part.relative, reason: "document_too_long", ...(part.key && { blockKey: part.key }) });
             continue;
@@ -83,7 +97,9 @@ async function populate(staging, vault, scan, client, manifest, previous, hashes
           const ref = { row: stats[kind]++, readHash: smartTextHash(part.text), inputSha256: part.inputSha256 };
           if (part.key) part.source.blocks[part.key] = { ...ref, lines: part.range };
           else part.source.note = ref;
-          stats[existing ? "reused" : "encoded"]++;
+          const disposition = importedRow ? "imported" : existing ? "reused" : "encoded";
+          stats[disposition]++;
+          if (manifest.bootstrap && disposition !== "reused") manifest.bootstrap[disposition][kind]++;
         }
       }
     }
@@ -100,23 +116,13 @@ async function populate(staging, vault, scan, client, manifest, previous, hashes
     }
     let window = [];
     for (const [relative, expected] of scan.files) {
-      const bytes = await readSource(vault, relative, expected);
-      const digest = sha256(bytes);
+      const { digest, parts, reason } = await readSourceParts(vault, relative, expected, chunking);
       hashes.set(relative, digest);
-      let text;
-      try {
-        text = decoder.decode(bytes);
-      } catch (error) {
-        if (error.code !== "ERR_ENCODING_INVALID_ENCODED_DATA") throw error;
-        skipped.push({ path: relative, reason: "invalid_utf8" });
+      if (!parts) {
+        skipped.push({ path: relative, reason });
         continue;
       }
-      // SmartSource.should_embed compares the file's byte size to min_chars.
-      if (bytes.length <= chunking.minNoteChars) {
-        skipped.push({ path: relative, reason: "note_below_min_size" });
-        continue;
-      }
-      const { tags, note, blocks } = sourceParts(relative, text, chunking.excludedHeadings, chunking.minBlockChars);
+      const { tags, note, blocks } = parts;
       const source = { sha256: digest, tags, note: null, blocks: Object.create(null) };
       window.push({ relative, source, note, blocks });
       if (window.length === batchSize) {
@@ -130,13 +136,14 @@ async function populate(staging, vault, scan, client, manifest, previous, hashes
   return Object.fromEntries(Object.entries(digests).map(([kind, hash]) => [kind, hash.digest("hex")]));
 }
 
-async function build(options, vault, index, client) {
+async function build(options, vault, index, client, smartEnv) {
   const id = "g-" + randomUUID();
   const generations = path.join(index, "generations");
   const staging = path.join(index, ".staging-" + id);
   const pending = path.join(index, ".CURRENT-" + id);
   const target = path.join(generations, id);
   const previous = await readActiveGeneration(index);
+  if (smartEnv && previous) throw Error("Bootstrap requires an index without CURRENT");
   const scan = await inventory(vault, options["exclude-path"]);
   if (previous && previous.manifest.vaultBinding !== scan.binding) {
     throw Error("Vault root or volume differs from the active generation");
@@ -170,7 +177,7 @@ async function build(options, vault, index, client) {
   };
   const profile = await client.profile();
   const lockHash = sha256(JSON.stringify({ ...profile, chunking }));
-  const fingerprint = "mf_" + smartTextHash(JSON.stringify(profile.model));
+  const fingerprint = modelFingerprint(profile.model);
   if (previous && !options.rebuild && (previous.manifest.lockHash !== lockHash ||
       previous.manifest.fingerprint !== fingerprint)) {
     throw Error("Encoding profile changed. Use --rebuild to encode every document under the new profile");
@@ -192,11 +199,35 @@ async function build(options, vault, index, client) {
     stats: { notes: 0, sections: 0, encoded: 0, reused: 0 },
   };
   const hashes = new Map();
+  async function verifyProfile() {
+    if (sha256(JSON.stringify({ ...await client.profile(), chunking })) !== lockHash) {
+      throw Error("BitNet identity changed during build");
+    }
+  }
+  let imported;
+  if (smartEnv) {
+    const bootstrap = await scanBootstrap(smartEnv, vault, scan, manifest);
+    try {
+      await verifyBootstrap(bootstrap, vault, scan, client, manifest, Number(options["max-samples"] ?? 40));
+      await verifyProfile();
+    } catch (error) {
+      if (options["verify-only"]) console.log(JSON.stringify(bootstrap.report));
+      throw error;
+    }
+    if (options["verify-only"]) return bootstrap.report;
+    imported = bootstrap.rows;
+    const { source, modelMatched, verification, sectionSelection } = bootstrap.report;
+    manifest.bootstrap = {
+      source, modelMatched, imported: { notes: 0, sections: 0 }, encoded: { notes: 0, sections: 0 },
+      verification, sectionSelection,
+    };
+    manifest.stats.imported = 0;
+  }
   const directories = ["smart_sources", "smart_blocks", "embedding_models"];
   await mkdir(staging, { mode: 0o700 });
   try {
     for (const directory of directories) await mkdir(path.join(staging, directory), { mode: 0o700 });
-    const digests = await populate(staging, vault, scan, client, manifest, reusable, hashes);
+    const digests = await populate(staging, vault, scan, client, manifest, reusable, hashes, imported);
     const belowMinimum = new Set(skipped.filter(item => item.reason === "note_below_min_size").map(item => item.path));
     const deletions = activePaths.filter(relative => !manifest.sources[relative] && !belowMinimum.has(relative)).length;
     guardDeletions(deletions, "not publishable");
@@ -213,9 +244,7 @@ async function build(options, vault, index, client) {
     await syncDirectory(generations);
 
     await writeSynced(pending, id + "\n");
-    if (sha256(JSON.stringify({ ...await client.profile(), chunking })) !== lockHash) {
-      throw Error("BitNet identity changed during build");
-    }
+    await verifyProfile();
     await verifySources(vault, options["exclude-path"], scan, hashes);
     try {
       await rename(pending, path.join(index, currentFile));
@@ -237,7 +266,7 @@ async function build(options, vault, index, client) {
 }
 
 async function main() {
-  const { values: options } = parseArgs({ options: {
+  const { values: options, positionals } = parseArgs({ allowPositionals: true, options: {
     help: { type: "boolean", short: "h" },
     vault: { type: "string" },
     index: { type: "string" },
@@ -251,12 +280,24 @@ async function main() {
     "max-deletion-percent": { type: "string", default: "10" },
     "min-note-chars": { type: "string", default: "300" },
     "min-block-chars": { type: "string", default: "300" },
+    "from-smart-env": { type: "string" },
+    "verify-only": { type: "boolean" },
+    "max-samples": { type: "string" },
     "exclude-path": { type: "string", multiple: true, default: [] },
     "exclude-heading": { type: "string", multiple: true, default: [] },
   } });
   if (options.help) {
     console.log(help);
     return;
+  }
+  const bootstrap = positionals.length === 1 && positionals[0] === "bootstrap";
+  if (bootstrap ? !options["from-smart-env"]?.trim() || options.rebuild
+    : positionals.length || options["from-smart-env"] !== undefined || options["verify-only"]) {
+    throw Error("Invalid bootstrap options. Run with --help");
+  }
+  if (options["max-samples"] !== undefined && (!bootstrap || !options["verify-only"] ||
+      !/^(?:[23][0-9]|40)$/u.test(options["max-samples"]))) {
+    throw Error("--max-samples requires bootstrap --verify-only and an integer from 20 to 40");
   }
   if (["vault", "index", "endpoint", "model", "revision"].some(key => !options[key]?.trim()) ||
       !isSha256(options["model-sha256"])) throw Error("Missing or invalid required option. Run with --help");
@@ -275,6 +316,7 @@ async function main() {
   }
   const client = bitnetClient(options.endpoint, options.model, options.revision, options["model-sha256"]);
   const { vault, index } = await resolveRoots(options.vault, options.index);
+  const smartEnv = bootstrap ? (await resolveRoots(options["from-smart-env"], index)).vault : undefined;
   await mkdir(index, { recursive: true, mode: 0o700 });
   if (await realpath(index) !== index) throw Error("Index path changed during setup");
   const lockPath = path.join(index, ".producer.lock");
@@ -308,7 +350,7 @@ async function main() {
     if (!(await lstat(generations)).isDirectory() || await realpath(generations) !== generations) {
       throw Error("Generations path must be a regular directory under the index root");
     }
-    console.log(JSON.stringify(await build(options, vault, index, client)));
+    console.log(JSON.stringify(await build(options, vault, index, client, smartEnv)));
   } finally {
     await lock.close();
     await unlink(lockPath);
