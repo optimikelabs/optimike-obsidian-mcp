@@ -162,7 +162,7 @@ function assertOperationText(value: string, field: string): void {
   }
 }
 
-function canonicalizeOperations(operations: unknown): TextPatchOperation[] {
+export function canonicalizeTextPatchOperations(operations: unknown): TextPatchOperation[] {
   if (!Array.isArray(operations) || operations.length === 0) {
     fail("At least one text patch operation is required.", "empty_patch");
   }
@@ -404,7 +404,7 @@ export function compileTextPatch(
 ): CompiledTextPatch {
   validatePath(path);
   const markdown = parseMarkdown(content);
-  const canonicalOperations = canonicalizeOperations(operations);
+  const canonicalOperations = canonicalizeTextPatchOperations(operations);
   let body = markdown.body;
   const authorizedRanges: TextPatchAuthorizedRange[] = [];
 

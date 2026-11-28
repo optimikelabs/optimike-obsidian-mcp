@@ -1,11 +1,27 @@
 /**
- * Closed, content-free refusal codes of the governed text patch compiler that
+ * Closed, content-free refusal codes of governed text patches that
  * may reach MCP clients. Without them every compiler refusal arrived as a bare
  * "The request could not be validated." (06/11/2026: a replace_literal on a
  * "- [ ]" line, read by the agent as a malformed plan). Values are literal
- * codes from textPatchCompiler.ts; the sealed text itself is never echoed.
+ * codes; the sealed text itself is never echoed.
  */
 export const TEXT_PATCH_REFUSAL_MESSAGES = {
+  proposal_input_invalid:
+    "A version 1 proposal needs a body patch, source binding and base digest, with idempotencyKey optimike:proposal:v1:<id>. This key prefix is reserved for proposals.",
+  proposal_authority_mismatch:
+    "The proposal belongs to a different Atomic Write authority. Import it on its original authority.",
+  proposal_identity_conflict:
+    "This proposal ID already identifies a different patch, target, base or authority. Keep the original ID with its original intent.",
+  proposal_date_preparation_required:
+    "The note needs a creation date. Import made no changes. Have the vault owner date the note, then capture a new proposal from the resulting bytes.",
+  proposal_date_management_unverified:
+    "The live Bridge cannot verify the target's creation-date requirements. Ask the vault owner to check its date integration.",
+  proposal_date_preparation_locked:
+    "A previous date preparation still blocks this target. Resolve that lock before retrying the same proposal.",
+  target_not_found:
+    "The target is missing on the proposal's authority. Retry the same proposal if the target becomes available.",
+  proposal_changed_during_seal:
+    "The note changed while the proposal was being sealed. Retry the same proposal against its original base.",
   task_line_touched:
     "Text patches never create, edit, reorder or extend a Markdown task line (- [ ] …) or an Operon task line. Change tasks with the operon_* tools (for example operon_transition_task to complete one), and patch only the surrounding text.",
   literal_not_found:
