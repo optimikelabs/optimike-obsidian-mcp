@@ -21,7 +21,10 @@ test('HTTP fixture bypasses hostile ambient proxies', {timeout:30000}, async()=>
     const code=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve);});
     assert.equal(forwarded,0,'a loopback fixture request reached ambient proxy');
     assert.equal(code,0,output);
-    assert.match(output,/^# tests 23$/m,'child must actually execute the HTTP fixture');
-    assert.match(output,/^# pass 23$/m,'all child cases must pass under hostile proxies');
+    assert.match(output, /^ok \d+ - rich paths are encoded per segment and JSON reads use the native media type$/m);
+    const executed = output.match(/^# tests ([1-9]\d*)$/m)?.[1];
+    const passed = output.match(/^# pass (\d+)$/m)?.[1];
+    assert.ok(executed, 'child must actually execute the HTTP fixture');
+    assert.equal(passed, executed, 'all child cases must pass under hostile proxies');
   } finally {clearTimeout(timer);proxy.closeAllConnections();await new Promise(resolve=>proxy.close(resolve));}
 });

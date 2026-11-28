@@ -21,10 +21,11 @@ export async function getFileContent(
   filePath: string,
   format: "markdown" | "json" = "markdown",
   context: RequestContext,
+  pathEncoding?: "literal",
 ): Promise<string | NoteJson> {
   const acceptHeader =
     format === "json" ? "application/vnd.olrapi.note+json" : "text/markdown";
-  const encodedPath = encodeVaultPath(filePath); // Use the new encoding function
+  const encodedPath = encodeVaultPath(filePath, pathEncoding);
   return _request<string | NoteJson>(
     {
       method: "GET",
@@ -125,31 +126,9 @@ export async function listFiles(
   _request: RequestFunction,
   dirPath: string,
   context: RequestContext,
+  pathEncoding?: "literal",
 ): Promise<string[]> {
-  // Normalize path: remove leading/trailing slashes for consistency, except for root
-  let pathSegment = dirPath.trim();
-
-  // Explicitly handle root path variations ('', '/') by setting pathSegment to empty.
-  // This ensures that the final URL constructed later will be '/vault/', which the API
-  // uses to list the root directory contents.
-  if (pathSegment === "" || pathSegment === "/") {
-    pathSegment = ""; // Use empty string to signify root for URL construction
-  } else {
-    // For non-root paths:
-    // 1. Remove any leading/trailing slashes to prevent issues like '/vault//path/' or '/vault/path//'.
-    // 2. URI-encode *each component* of the remaining path segment to handle special characters safely.
-    pathSegment = pathSegment
-      .replace(/^\/+|\/+$/g, "")
-      .split("/")
-      .map(encodeURIComponent)
-      .join("/");
-  }
-
-  // Construct the final URL for the API request:
-  // - If pathSegment is not empty (i.e., it's a specific directory), format as '/vault/{encoded_path}/'.
-  // - If pathSegment IS empty (signifying the root), format as '/vault/'.
-  // The trailing slash is important for directory listing endpoints in this API.
-  const url = pathSegment ? `/vault/${pathSegment}/` : "/vault/";
+  const url = `/vault${encodeVaultPath(dirPath, pathEncoding)}/`;
 
   const response = await _request<FileListResponse>(
     {

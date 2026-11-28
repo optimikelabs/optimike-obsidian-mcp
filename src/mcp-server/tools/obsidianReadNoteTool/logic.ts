@@ -8,6 +8,7 @@ import {
 import { extractInlineTags } from "../../../services/markdownTags.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
+import { normalizeVaultSlashes, toVaultPath } from "../../../utils/obsidian/obsidianApiUtils.js";
 import {
   createFormattedStatWithTokenCount,
   logger,
@@ -102,6 +103,8 @@ type FormattedStat = {
  * This object is typically serialized to JSON and sent back to the client.
  */
 export interface ObsidianReadNoteResponse {
+  /** Vault-relative physical spelling, when different and known from the filesystem. */
+  diskPath?: string;
   /**
    * The content of the file in the requested format.
    * If format='markdown', this is a string.
@@ -156,6 +159,21 @@ export const processObsidianReadNote = async (
 
   const shouldRetryNotFound = (err: unknown) =>
     err instanceof McpError && err.code === BaseErrorCode.NOT_FOUND;
+  const vaultPath = toVaultPath(originalFilePath);
+  if (vaultPath.split("/").some((segment) => segment === "." || segment === "..")) {
+    throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Expected a vault path without dot segments.");
+  }
+
+  const readJson = async (filePath: string, readContext: RequestContext): Promise<NoteJson> => {
+    const exact = normalizeVaultSlashes(filePath);
+    const normalized = toVaultPath(exact);
+    try {
+      return await obsidianService!.getFileContent(exact, "json", readContext, "literal") as NoteJson;
+    } catch (error) {
+      if (!shouldRetryNotFound(error) || normalized === exact) throw error;
+      return obsidianService!.getFileContent(normalized, "json", readContext, "literal") as Promise<NoteJson>;
+    }
+  };
 
   const readFromSharedCache = async (
     requestedPath: string,
@@ -180,7 +198,12 @@ export const processObsidianReadNote = async (
     }
 
     effectiveFilePath = matchedPath;
-    const noteJson = buildNoteJsonFromCache(matchedPath, cacheEntry);
+    const diskPath = matchedPath.replace(/^\//u, "");
+    const normalizedPath = toVaultPath(diskPath);
+    const useAlias = normalizedPath !== diskPath &&
+      vaultCacheService.findMatchingPath(normalizedPath) === matchedPath;
+    const noteJson = buildNoteJsonFromCache(useAlias ? normalizedPath : diskPath, cacheEntry);
+    const pathDetails = useAlias && vaultCacheService.isFilesystemBacked() ? { diskPath } : {};
     const formattedStat = needsFormattedStat ? await createFormattedStatWithTokenCount(
       noteJson.stat,
       noteJson.content ?? "",
@@ -194,12 +217,14 @@ export const processObsidianReadNote = async (
 
     if (requestedFormat === "json") {
       return {
+        ...pathDetails,
         content: noteJson,
         stats: formattedStat ?? undefined,
       };
     }
 
     return {
+      ...pathDetails,
       content: noteJson.content ?? "",
       stats: includeStat ? formattedStat ?? undefined : undefined,
     };
@@ -229,12 +254,7 @@ export const processObsidianReadNote = async (
         readContext,
       );
       noteJson = await retryWithDelay(
-        () =>
-          obsidianService.getFileContent(
-            originalFilePath,
-            "json",
-            readContext,
-          ) as Promise<NoteJson>,
+        () => readJson(originalFilePath, readContext),
         {
           operationName: "readFileWithRetry",
           context: readContext,
@@ -272,9 +292,9 @@ export const processObsidianReadNote = async (
 
         try {
           // Use POSIX path functions as vault paths are typically /-separated
-          const dirname = path.posix.dirname(originalFilePath);
+          const dirname = path.posix.dirname(vaultPath);
           const filenameLower = path.posix
-            .basename(originalFilePath)
+            .basename(vaultPath)
             .toLowerCase();
           // Handle case where the file is in the vault root (dirname is '.')
           const dirToList = dirname === "." ? "/" : dirname;
@@ -284,7 +304,7 @@ export const processObsidianReadNote = async (
             fallbackContext,
           );
           const filesInDir = await retryWithDelay(
-              () => obsidianService!.listFiles(dirToList, fallbackContext),
+              () => obsidianService!.listFiles(dirToList, fallbackContext, "literal"),
             {
               operationName: "listFilesForReadFallback",
               context: fallbackContext,
@@ -298,7 +318,7 @@ export const processObsidianReadNote = async (
           const matches = filesInDir.filter(
             (f) =>
               !f.endsWith("/") && // Ensure it's a file, not a directory entry ending in /
-              path.posix.basename(f).toLowerCase() === filenameLower,
+              toVaultPath(path.posix.basename(f)).toLowerCase() === filenameLower,
           );
 
           if (matches.length === 1) {
@@ -312,12 +332,7 @@ export const processObsidianReadNote = async (
 
             // Retry reading the file content using the corrected path
             noteJson = await retryWithDelay(
-              () =>
-                obsidianService!.getFileContent(
-                  effectiveFilePath,
-                  "json",
-                  fallbackContext,
-                ) as Promise<NoteJson>,
+              () => readJson(effectiveFilePath, fallbackContext),
               {
                 operationName: "readFileWithFallbackRetry",
                 context: fallbackContext,

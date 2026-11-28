@@ -17,6 +17,14 @@ let delayStatus = false;
 const timers = new Set();
 const note = { path: 'Rich/Note.md', content: '# Heading\nbody',
   stat: { ctime: 1000, mtime: 2000, size: 7 }, tags: [], frontmatter: {} };
+const aliasDir = 'Alias Folder';
+const aliasNames = [
+  ['Wide Space.md', 'Wide\u00a0Space.md'],
+  ['Narrow Space.md', 'Narrow\u202fSpace.md'],
+  ['Caf\u00e9.md', 'Cafe\u0301.md'],
+  [' Leading.md', '\u00a0Leading.md'],
+];
+const aliasFiles = aliasNames.map(([name]) => name);
 const server = createServer(async (req, res) => {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
@@ -24,6 +32,17 @@ const server = createServer(async (req, res) => {
   requests.push({ method: req.method, url: req.url, headers: req.headers, body });
   if (req.headers.authorization !== 'Bearer ' + secret) {
     res.writeHead(401, {'Content-Type':'application/json'}).end(JSON.stringify({message: sentinel}));
+    return;
+  }
+  const vaultPath = decodeURIComponent(req.url ?? '');
+  if (req.method === 'GET' && vaultPath.startsWith('/vault/Alias')) {
+    const filePath = vaultPath.slice('/vault/'.length);
+    const payload = filePath === aliasDir + '/' ? { files: aliasFiles }
+      : aliasFiles.some(name => filePath === aliasDir + '/' + name) &&
+        req.headers.accept === 'application/vnd.olrapi.note+json'
+        ? { ...note, path: filePath } : null;
+    res.writeHead(payload ? 200 : 404, { 'Content-Type': 'application/json' })
+      .end(JSON.stringify(payload ?? { message: 'Not found' }));
     return;
   }
   const errorStatus = /status-(\d+)\.md/.exec(req.url ?? '');
@@ -63,6 +82,8 @@ Object.assign(process.env, { NO_PROXY:'*', no_proxy:'*',
 });
 const {ObsidianRestApiService} = await import('../dist/services/obsidianRestAPI/service.js');
 const {BaseErrorCode} = await import('../dist/types-global/errors.js');
+const {processObsidianReadNote} = await import('../dist/mcp-server/tools/obsidianReadNoteTool/logic.js');
+const {processObsidianListNotes, ObsidianListNotesInputSchema} = await import('../dist/mcp-server/tools/obsidianListNotesTool/logic.js');
 const api = new ObsidianRestApiService();
 const context = {requestId:'rest-contract', timestamp:new Date(0).toISOString(), operation:'test'};
 
@@ -93,6 +114,25 @@ test('rich paths are encoded per segment and JSON reads use the native media typ
 test('root listing and HEAD metadata stay compatible', async () => {
   assert.deepEqual(await api.listFiles('/', context), ['Rich/','Note.md']);
   assert.deepEqual(await api.getFileMetadata('Note.md', context), {ctime:1000,mtime:2000,size:7});
+});
+test('Obsidian JSON reads accept physical Unicode names and the paths returned by list', async () => {
+  const read = (filePath, format = 'json') =>
+    processObsidianReadNote({ filePath, format, includeStat: false }, context, api);
+  const list = (dirPath) => processObsidianListNotes(
+    ObsidianListNotesInputSchema.parse({ dirPath, responseMode: 'compact' }), context, api);
+  const listed = await list(aliasDir);
+  for (const [name, diskName] of aliasNames) {
+    const path = aliasDir + '/' + name;
+    assert.ok(listed.entries.some(entry => entry.path === path));
+    assert.equal((await read(path)).content.path, path);
+    const physical = await read(aliasDir + '/' + diskName);
+    assert.equal(physical.content.path, path);
+    assert.equal(Object.hasOwn(physical, 'diskPath'), false);
+  }
+  const byDiskDirectory = await list('Alias\u00a0Folder');
+  assert.deepEqual(byDiskDirectory.entries, listed.entries);
+  const folded = await read('Alias\u00a0Folder\\wide\u00a0space.md', 'markdown');
+  assert.equal(folded.content, note.content);
 });
 test('active JSON read exposes the resolved file through NoteJson', async () => {
   assert.deepEqual(await api.getActiveFile('json', context), note);

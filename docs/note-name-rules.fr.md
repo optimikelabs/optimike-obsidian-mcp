@@ -28,6 +28,25 @@ casse ou forme Unicode. Accents, tirets longs, apostrophes typographiques, `·`,
 `&`, parenthèses, emoji et écritures non latines sont valides. ZWJ/ZWNJ ne sont acceptés
 qu'entre lettres ou emoji (séquences d'emoji, persan, écritures indiennes).
 
+## Lire les noms existants
+
+`obsidian_read_note` accepte le chemin exact et peut réessayer avec le chemin
+utilisé par Obsidian. Ce dernier utilise des barres obliques, remplace U+00A0 et
+U+202F par un espace ordinaire et applique la forme Unicode NFC.
+`obsidian_list_notes` accepte aussi les deux graphies d'un dossier sans ambiguïté.
+Voir [l'API `normalizePath` d'Obsidian](https://github.com/obsidianmd/obsidian-api/blob/master/obsidian.d.ts#L6471-L6487).
+
+Depuis un cache alimenté par le système de fichiers, les lectures JSON et les listes
+compactes renvoient le chemin Obsidian relatif au coffre lorsqu'il identifie une
+seule entrée. Si deux chemins sur disque ont la même graphie dans Obsidian, les
+résultats gardent leurs graphies exactes sur disque. Quand le chemin physique
+diffère du chemin Obsidian, les lectures renvoient `diskPath` à la racine de la
+réponse dans les deux formats, et chaque entrée de liste compacte a son propre
+`diskPath`. Utilisez ce champ pour accéder au fichier sur disque. Les listes en
+arbre affichent les noms enregistrés dans le cache. Local REST fournit le chemin
+Obsidian et ne communique pas le chemin physique. Les cibles d'écriture restent
+soumises aux règles ci-dessus.
+
 ## D'où vient chaque contrainte
 
 Les sources sont celles du [document anglais](note-name-rules.md#where-each-constraint-comes-from) :
