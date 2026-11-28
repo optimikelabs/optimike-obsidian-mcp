@@ -119,14 +119,21 @@ export class PathLocks {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
   }
 
-  async run<T>(key: string, write: () => Promise<T>, waitMs = 15_000): Promise<T> {
-    const lockPath = path.join(this.directory, hash(key).slice(0, 2) + ".sqlite");
+  private lockPath(key: string) {
+    return path.join(this.directory, hash(key).slice(0, 2) + ".sqlite");
+  }
+
+  async tryRun<T>(key: string, write: () => Promise<T>): Promise<T> {
     if (path.relative(this.directory, realpathSync.native(this.directory))) throw new Error("The headless lock directory changed.");
     try {
-      const entry = lstatSync(lockPath);
+      const entry = lstatSync(this.lockPath(key));
       if (!entry.isFile() || entry.nlink !== 1) throw new Error("The headless lock is not an ordinary file.");
     } catch (error) { if (!absent(error)) throw error; }
-    const db = new DatabaseSync(lockPath);
+    return this.run(key, write, 0);
+  }
+
+  async run<T>(key: string, write: () => Promise<T>, waitMs = 15_000): Promise<T> {
+    const db = new DatabaseSync(this.lockPath(key));
     try {
       const deadline = Date.now() + waitMs;
       for (;;) {

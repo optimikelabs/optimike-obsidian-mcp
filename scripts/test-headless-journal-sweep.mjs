@@ -3,6 +3,8 @@ import { execFileSync, fork, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -95,6 +97,25 @@ async function testSweep() {
     symlinkSync(state, path.join(vault, "Linked"), process.platform === "win32" ? "junction" : "dir");
     for (const file of [unknown, unrelated, probe, recentProbe, outOfScope, viaLink]) writeFileSync(file, "");
     for (const file of [probe, viaLink]) utimesSync(file, old / 1000, old / 1000);
+    // The sweep needs an explicit path check. Ordinary writers should still
+    // be able to use SQLite when an OS metadata query hits a sharing violation.
+    const lockDirectory = filesystemLockDirectory(vault, binding);
+    const locks = new PathLocks(lockDirectory);
+    const originalLstat = fs.lstatSync;
+    fs.lstatSync = (filename, ...options) => {
+      if (path.dirname(String(filename)) === lockDirectory) {
+        throw Object.assign(new Error("Synthetic sharing violation"), { code: "EPERM" });
+      }
+      return originalLstat(filename, ...options);
+    };
+    syncBuiltinESMExports();
+    try {
+      assert.equal(await locks.run(filesystemPathLock("Locked.md"), async () => "acquired"), "acquired");
+      await assert.rejects(locks.tryRun(filesystemPathLock("Locked.md"), async () => assert.fail("Unverified lock")), { code: "EPERM" });
+    } finally {
+      fs.lstatSync = originalLstat;
+      syncBuiltinESMExports();
+    }
     assert.equal(spawnSync(process.execPath, [script], { env }).status, 1, "The sweep requires an explicit action");
     assert.equal(existsSync(probe), true);
 

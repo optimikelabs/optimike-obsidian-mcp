@@ -167,7 +167,7 @@ export async function sweepHeadlessJournal(vault: string, journal: string, planD
         ? filesystemProbeLock(root, path.dirname(path.join(root, candidate.path)))
         : filesystemPathLock(candidate.path);
       try {
-        await locks.run(key, async () => {
+        await locks.tryRun(key, async () => {
           if (vaultIdentity(root) !== target.binding) throw new Error("The vault identity changed.");
           db.exec("BEGIN IMMEDIATE");
           try {
@@ -191,7 +191,7 @@ export async function sweepHeadlessJournal(vault: string, journal: string, planD
             db.exec("ROLLBACK");
             throw error;
           }
-        }, 0);
+        });
       } catch (error) {
         if (!isHeadlessVaultLockBusy(error)) throw error;
         skipped += 1;
