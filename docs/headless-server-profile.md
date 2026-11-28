@@ -155,8 +155,8 @@ to it and uses the vault identity across writable modes. It falls back to local
 state when the cache is inside the vault. The per-vault lock directory lives
 in local state independently of the journal override. Cooperating processes
 must share local state. `MCP_HEADLESS_GOVERNED_JOURNAL_PATH` selects an absolute
-path outside the vault. Committed before images and settled divergence evidence
-follow the terminal retention period (30 days). Treat the journal like vault data.
+path outside the vault. Treat the journal like vault data. Terminal filesystem
+rows become eligible for the opt-in sweep after 30 days.
 If the path lock stays busy for 15 seconds, apply returns the retryable reason
 `headless_vault_lock_busy`. Status shows `failed` and the attempt made no write.
 Use a fresh plan and idempotency key after the lock is released.
@@ -181,9 +181,7 @@ Desktop provides native YAML serialization and metadata types in live mode.
 After an interrupted apply, call status on the original reference. It can
 settle a write that never published, or reclaim the staged hard link after
 creation. An interrupted native exchange leaves a complete file at the target.
-Startup also reconciles its journaled temporary witness before serving tools
-and removes empty files with the exact exchange-probe name pattern in the
-vault root and visible folders.
+Startup also reconciles its journaled temporary witness before serving tools.
 For the opt-in legacy sequence, startup and the first status restore a missing
 original through an exclusive link and report a conflict. A staged write never replays.
 To undo a committed write, plan a revert using its original plan reference
@@ -191,6 +189,28 @@ and path, then apply the new plan. The current hash must match the original
 operation's after hash. Existing notes restore the retained content with
 date policy applied. Undoing a creation restores path absence and requires
 `MCP_WRITE_MODE=full` and journal storage on the same filesystem as the vault.
+
+### Local journal maintenance
+
+Run this from the installation directory with the same vault, headless mode,
+journal and local state configuration as the server.
+
+```sh
+node dist/headless-journal-maintenance.js --dry-run
+node dist/headless-journal-maintenance.js --apply <planDigest>
+```
+
+Review the list before supplying its digest. The sweep runs only on request.
+It drops terminal journal entries older than 30 days and their exact staging
+witnesses when the journal proves it retains the same bytes. In the vault, it
+only considers `.mcp-write-<operation UUID>.tmp`, `.mcp-write-<operation UUID>.bak`
+and empty `.mcp-exchange-<probe UUID>-a.tmp` or `-b.tmp` files older than 24 hours.
+Outside the vault, it uses the configured journal and its own `.removed` directory.
+It skips symbolic links, recent probes, unproven witnesses, planned, applying or
+uncertain operations, and entries whose lock shard is busy.
+
+After a crash or stale preview, run a new dry-run. The sweep retains the journal
+entry until its verified duplicate witnesses have been removed.
 
 ## Server Go/No-Go
 

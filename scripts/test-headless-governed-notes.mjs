@@ -287,7 +287,7 @@ async function checkDivergenceRetention(directory) {
     assert.equal(journal.get(plan.operationId).status, "outcome_unknown", "Uncleaned witnesses remain attributable");
     journal.confirmFilesystemWitnessCleanup(plan.operationId);
     now += 110;
-    assert.equal(journal.get(plan.operationId), undefined, "Settled divergence follows terminal retention");
+    assert.equal(journal.get(plan.operationId).status, "outcome_unknown", "Pending divergent evidence outlives terminal retention");
   } finally { journal.close(); }
 }
 
@@ -601,7 +601,7 @@ async function integration() {
     await writeFile(path.join(vault, "Archive", nonempty), "preserve");
     await writeFile(path.join(vault, "Archive", unrelated), "");
     const guarded = await start("headless-guarded");
-    for (const file of [orphan, `Archive/${orphan}`]) await assert.rejects(read(file), { code: "ENOENT" });
+    for (const file of [orphan, `Archive/${orphan}`]) assert.equal(await read(file), "", "Startup does not sweep unjournaled probes");
     assert.equal(await read(`Archive/${nonempty}`), "preserve");
     assert.equal(await read(`Archive/${unrelated}`), "");
     const first = await start("headless-filesystem");
