@@ -77,7 +77,10 @@ const defaultCrossRuntimeNames = new Set(registrationModes.flatMap(registrationM
 const configuredCrossRuntimeNames = new Set(registrationModes.flatMap(registrationMode =>
   compileToolNames({ registrationMode, availableStaticRequirements: ["vault-cache", "asset-policy"] }),
 ));
-assert.equal(cycle.expectedSurface.crossRuntime, defaultCrossRuntimeNames.size,
+// The frozen cycle inventory predates the two headless-only recovery tools.
+const headlessRecoveryNames = ["obsidian_note_delete_recover", "obsidian_note_move_recover"];
+assert.ok(headlessRecoveryNames.every(name => defaultCrossRuntimeNames.has(name)));
+assert.equal(cycle.expectedSurface.crossRuntime, defaultCrossRuntimeNames.size - headlessRecoveryNames.length,
   "Cycle surface records the default-off cross-runtime contract");
 assert.equal(TOOL_SURFACE_REGISTRY.length, configuredCrossRuntimeNames.size,
   "Conditional registry union must remain exhaustively reachable when optional requirements are present");
@@ -101,7 +104,8 @@ const milestoneNames = new Set(cycle.milestones.flatMap(({ tools }) => tools));
 for (const registrationMode of nonLiveModes) {
   const nonLive = compileToolNames({ registrationMode, availableStaticRequirements: ["vault-cache"] });
   assert.deepEqual(nonLive.filter((name) => milestoneNames.has(name)),
-    registrationMode.startsWith("headless-") ? expectedMilestoneTools.M2 : [], registrationMode);
+    registrationMode === "headless-filesystem" ? [...expectedMilestoneTools.M2, ...expectedMilestoneTools.M3].sort()
+      : registrationMode.startsWith("headless-") ? expectedMilestoneTools.M2 : [], registrationMode);
   const withoutCache = compileToolNames({ registrationMode, availableStaticRequirements: [] });
   assert.deepEqual(withoutCache.filter((name) => milestoneNames.has(name)), [], `${registrationMode} without cache`);
 }

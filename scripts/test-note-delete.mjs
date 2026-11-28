@@ -247,8 +247,8 @@ try {
   assert.ok(!names("operational").includes("obsidian_delete_note"), "the direct delete is hidden in operational");
   assert.ok(names("full").includes("obsidian_delete_note"), "the direct delete stays available in full");
   const headless = compileToolProfileNames({ profile: "operational", registrationMode: "headless-filesystem", availableStaticRequirements: ["vault-cache"] });
-  assert.ok(headless.includes("obsidian_delete_note") && !headless.includes("obsidian_note_delete_plan"),
-    "without a Bridge-backed runtime the direct tool remains the only route");
+  assert.ok(headless.includes("obsidian_note_delete_recover") && !headless.includes("obsidian_delete_note"),
+    "a complete filesystem lifecycle suppresses the direct delete in operational");
 
   console.log("PASS governed note deletion: sealed hash, trash-only, backlinks, CAS refusals, replay, lost reply, exposure");
 } finally {

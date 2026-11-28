@@ -2,13 +2,14 @@ import type { Definition, Nodes } from "mdast";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfm } from "micromark-extension-gfm";
 import { gfmFromMarkdown } from "mdast-util-gfm";
+import { isPair, parseDocument, Scalar, visit } from "yaml";
 import { readMarkdownFrontmatter } from "../../readMarkdownFrontmatter.js";
 import type { NoteLinkObservation } from "../types.js";
 
 export type MarkdownLinkReference = Pick<
   NoteLinkObservation,
   "kind" | "linkText" | "linkPath" | "subpath" | "original" | "displayText" | "frontmatterKey" | "position"
->;
+> & { edit?: { start: number; end: number; syntax: "wiki" | "markdown" | "definition" | "yaml"; quote?: string } };
 
 const wikiLink = /(?<!\\)(!)?\[\[([^\[\]\r\n|]+)(?:\|([^\[\]\r\n]*))?\]\]/gu;
 const scheme = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/iu;
@@ -193,9 +194,11 @@ function displayLabel(node: Nodes): string {
   return "alt" in node ? node.alt ?? "" : "";
 }
 
-export function extractMarkdownLinkReferences(content: string): MarkdownLinkReference[] {
-  const { body, frontmatter } = readMarkdownFrontmatter(content);
+export function extractMarkdownLinkReferences(content: string, editable = false): MarkdownLinkReference[] {
+  const { body: rawBody, frontmatter } = readMarkdownFrontmatter(content);
+  const body = rawBody.replace(/^\uFEFF/u, "");
   const references: MarkdownLinkReference[] = [];
+  const bodyOffset = content.length - body.length;
   for (const [key, value] of Object.entries(frontmatter)) {
     const pending = [value];
     const seen = new WeakSet<object>();
@@ -211,6 +214,39 @@ export function extractMarkdownLinkReferences(content: string): MarkdownLinkRefe
         const values = Object.values(item);
         for (let i = values.length - 1; i >= 0; i--) pending.push(values[i]);
       }
+    }
+  }
+
+  if (editable && references.length && bodyOffset) {
+    const yamlStart = content.indexOf("\n") + 1;
+    const yamlEnd = content.lastIndexOf("\n---", bodyOffset - 4) + 1;
+    const yaml = content.slice(yamlStart, yamlEnd);
+    const candidates = new Map<string, NonNullable<MarkdownLinkReference["edit"]>[]>();
+    visit(parseDocument(yaml), {
+      Scalar(key, node, ancestors) {
+        if (key === "key" || typeof node.value !== "string" || !node.range ||
+            (node.type !== Scalar.QUOTE_SINGLE && node.type !== Scalar.QUOTE_DOUBLE)) return;
+        const property = ancestors.find(isPair)?.key;
+        if (!(property instanceof Scalar) || typeof property.value !== "string") return;
+        const start = node.range[0] + 1;
+        const raw = yaml.slice(start, node.range[1] - 1);
+        const decoded = [...node.value.matchAll(wikiLink)];
+        const literal = [...raw.matchAll(wikiLink)];
+        if (decoded.length !== literal.length) return;
+        for (const [index, match] of literal.entries()) {
+          if (decoded[index][0] !== match[0]) continue;
+          const id = JSON.stringify([property.value, match[0]]);
+          const entries = candidates.get(id) ?? [];
+          const offset = yamlStart + start + match.index;
+          entries.push({ start: offset, end: offset + match[0].length,
+            syntax: "yaml", quote: node.type === Scalar.QUOTE_SINGLE ? "'" : '"' });
+          candidates.set(id, entries);
+        }
+      },
+    });
+    for (const reference of references) {
+      const id = JSON.stringify([reference.frontmatterKey, reference.original]);
+      reference.edit = candidates.get(id)?.shift();
     }
   }
 
@@ -242,6 +278,7 @@ export function extractMarkdownLinkReferences(content: string): MarkdownLinkRefe
         if (isOpaque(start, start + 1)) continue;
         const reference = makeReference(node.type === "image" ? "embed" : "link",
           node.url, body.slice(start, end), displayLabel(node), true);
+        if (reference && editable) reference.edit = { start: start + bodyOffset, end: end + bodyOffset, syntax: "markdown" };
         if (reference) located.push({ start, end, reference });
         blocked.push({ start, end });
         continue;
@@ -265,6 +302,8 @@ export function extractMarkdownLinkReferences(content: string): MarkdownLinkRefe
     if (!definition) continue;
     const reference = makeReference(node.type === "imageReference" ? "embed" : "link",
       definition.url, body.slice(start, end), displayLabel(node), true);
+    if (reference && editable) reference.edit = { start: definition.position!.start.offset! + bodyOffset,
+      end: definition.position!.end.offset! + bodyOffset, syntax: "definition" };
     if (reference) located.push({ start, end, reference });
   }
 
@@ -274,10 +313,10 @@ export function extractMarkdownLinkReferences(content: string): MarkdownLinkRefe
     const end = start + match[0].length;
     if (isBlocked(start, end)) continue;
     const reference = makeReference(match[1] ? "embed" : "link", match[2], body.slice(start, end), match[3]);
+    if (reference && editable) reference.edit = { start: start + bodyOffset, end: end + bodyOffset, syntax: "wiki" };
     if (reference) located.push({ start, end, reference });
   }
 
-  const bodyOffset = content.length - body.length;
   const lineBreaks = content.matchAll(/\r\n?|\n/gu);
   let nextBreak = lineBreaks.next();
   let line = 0;

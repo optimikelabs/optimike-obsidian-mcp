@@ -18,7 +18,7 @@ This profile is for a dedicated server or copied Sync vault. It keeps the stable
 - The filesystem backend reads the shared cache, which may contain Markdown refreshed through Local REST. After a REST update it reindexes changed rows by content hash without reopening vault notes. A change to the vault root or exclusion scope requires a new filesystem inventory.
 - Keep MCP cache outside the synchronized vault.
 - Use vault exclusions for operational noise, but do not rely on them to stop Obsidian Sync downloads.
-- Do not claim Desktop parity. Move/delete, frontmatter or inline tags, batch frontmatter, minimal Bases writes, format validation, and minimal Canvas helpers exist as bounded filesystem/local features, not as Obsidian Desktop behavior.
+- Do not claim Desktop parity. Frontmatter or inline tags, batch frontmatter, minimal Bases writes, format validation, and minimal Canvas helpers exist as bounded filesystem/local features, not as Obsidian Desktop behavior.
 
 ## Environment
 
@@ -89,7 +89,7 @@ The snapshot is not a full backup strategy, but it gives a fast local rollback p
 
 Only after the `headless-guarded` step, switch a copied or dedicated vault to `OBSIDIAN_RUNTIME_MODE=headless-filesystem`.
 
-1. For move/delete, require `expectedHash` or `expectedMtime`.
+1. Use the governed move and trash tools below. The compatibility tools require `expectedHash` or `expectedMtime`.
 2. For tags, limit the contract to Markdown text: YAML frontmatter `tags`, inline `#tags`, and cache-backed local index.
 3. For batch frontmatter, keep dry-run as the default and allow only `set`.
 4. For Bases, limit the contract to `.base` YAML files and Markdown frontmatter properties.
@@ -97,6 +97,34 @@ Only after the `headless-guarded` step, switch a copied or dedicated vault to `O
 6. Validate with `npm run smoke:headless-filesystem`.
 
 Never use this phase to edit existing production notes until the server profile has its own rollback and monitoring story.
+
+### Governed move and trash
+
+In `headless-filesystem` with the filesystem cache and `MCP_WRITE_MODE=full`, call
+`obsidian_note_move_plan` with exact source and destination paths and an idempotency key.
+The plan uses the indexed Markdown links, including supported quoted YAML links and
+attachment embeds. Its preview includes the rewrite count, affected notes and bounded
+examples. The link preferences in `.obsidian/app.json` control whether links are updated
+and how paths are rendered. Apply with the original key. The source and all rewritten
+notes are checked before the first write. A stale plan returns `outcome: conflict`.
+
+Call `obsidian_note_delete_plan` to see the total incoming link count and capped
+source list. If backlinks exist, inspect them and submit a new plan with
+`acknowledgeBacklinks: true`. Apply moves the original bytes to a collision-safe
+path under `.trash` or the vault-relative `trashFolder` / `trashFolderPath` in
+`app.json`. Existing links are retained. The destination is always a vault folder
+regardless of the Desktop system-trash or permanent-delete preference.
+
+Both operations refresh the shared cache and link index before returning a successful
+cache receipt. After an interruption, call the matching `*_status` and use
+`*_recover` with the same reference and key when `recoveryAllowed` is true. Other
+processes outside the governed tools do not share their locks. Each replacement
+is atomic, while a multi-file change is recoverable and can be visible partway
+through. Moves preserve the date properties. Coverage follows the filesystem link
+inventory, including its Markdown-source exclusions.
+
+`operational` prefers these tools. The `full` profile also retains the older
+direct move and delete tools, whose hash/mtime checks apply to a single file.
 
 ## Server Go/No-Go
 

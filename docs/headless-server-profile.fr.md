@@ -20,7 +20,7 @@ Ce profil sert à valider un serveur dédié ou une copie Sync. Il garde une pos
 - Le backend filesystem lit le cache partagé, qui peut contenir du Markdown actualisé via Local REST. Après une mise à jour REST, seules les lignes dont l’empreinte a changé sont réindexées, sans rouvrir les notes du coffre. Un changement de racine ou de périmètre d’exclusions impose un nouvel inventaire sur disque.
 - Garder le cache MCP hors du vault synchronisé.
 - Utiliser les exclusions pour le bruit opérationnel, sans prétendre qu’elles bloquent les téléchargements Obsidian Sync.
-- Ne pas promettre la parité Desktop. Move/delete, tags frontmatter ou inline, batch frontmatter, écritures Bases minimales, validation de format et helpers Canvas minimaux existent comme fonctions filesystem/locales bornées, pas comme comportement Obsidian Desktop.
+- Ne pas promettre la parité Desktop. Tags frontmatter ou inline, batch frontmatter, écritures Bases minimales, validation de format et helpers Canvas minimaux existent comme fonctions filesystem/locales bornées, pas comme comportement Obsidian Desktop.
 
 ## Environnement
 
@@ -91,7 +91,7 @@ Le snapshot ne remplace pas une vraie sauvegarde, mais donne un rollback local r
 
 Seulement après le palier `headless-guarded`, passer une copie ou un vault dédié en `OBSIDIAN_RUNTIME_MODE=headless-filesystem`.
 
-1. Pour move/delete, exiger `expectedHash` ou `expectedMtime`.
+1. Utiliser les opérations gouvernées ci-dessous. Les outils de compatibilité exigent `expectedHash` ou `expectedMtime`.
 2. Pour tags, limiter le contrat au texte Markdown : `tags` dans le frontmatter YAML, `#tags` inline et index local depuis le cache.
 3. Pour batch frontmatter, garder le dry-run par défaut et n’autoriser que `set`.
 4. Pour Bases, limiter le contrat aux fichiers `.base` YAML et aux propriétés frontmatter des notes.
@@ -99,6 +99,38 @@ Seulement après le palier `headless-guarded`, passer une copie ou un vault déd
 6. Valider avec `npm run smoke:headless-filesystem`.
 
 Ne jamais utiliser cette phase pour modifier des notes de production existantes tant que le profil serveur n’a pas son propre rollback et monitoring.
+
+### Déplacement et corbeille gouvernés
+
+En `headless-filesystem`, avec le cache filesystem et `MCP_WRITE_MODE=full`,
+appeler `obsidian_note_move_plan` avec les chemins exacts de départ et d’arrivée
+et une clé d’idempotence. Le plan s’appuie sur les liens Markdown indexés, y
+compris les liens YAML entre guillemets pris en charge et les embeds de pièces
+jointes. Son aperçu indique le nombre de réécritures et de notes concernées avec
+des exemples bornés. Les préférences de `.obsidian/app.json` déterminent si les
+liens sont actualisés et sous quelle forme. Appliquer avec la clé d’origine. Le
+fichier source et chaque note réécrite sont contrôlés avant la première écriture.
+Un plan périmé renvoie `outcome: conflict`.
+
+Appeler `obsidian_note_delete_plan` pour obtenir le nombre de liens entrants
+et la liste plafonnée des notes sources. En présence de backlinks, les examiner
+puis soumettre un nouveau plan avec `acknowledgeBacklinks: true`. L’application
+déplace les octets d’origine dans un emplacement libre sous `.trash` ou sous
+le dossier du coffre indiqué par `trashFolder` / `trashFolderPath` dans
+`app.json`. Les liens existants sont conservés. La destination reste un dossier
+du coffre, quelle que soit la préférence Desktop de suppression.
+
+Les deux opérations actualisent le cache partagé et l’index avant de confirmer
+leur actualisation. Après une interruption, appeler le `*_status` correspondant,
+puis `*_recover` si `recoveryAllowed` est vrai, avec la même référence et la
+même clé. Les autres processus ne partagent pas ces verrous. Chaque remplacement
+est atomique. Une opération sur plusieurs fichiers peut être visible en cours
+d’exécution et reprendre après une interruption. Les propriétés de date sont
+préservées. La couverture suit l’inventaire filesystem, avec ses exclusions de
+sources Markdown.
+
+`operational` privilégie ces outils. Le profil `full` conserve également les
+anciens outils directs dont le contrôle hash/mtime porte sur un seul fichier.
 
 ## Décision go/no-go serveur
 

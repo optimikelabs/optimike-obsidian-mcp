@@ -653,6 +653,14 @@ function atomicCapability(
     | "governed-frontmatter-write"
     | "governed-canvas-write",
 ): CapabilityManifestEntry {
+  if ((id === "governed-native-move" || id === "governed-note-delete") &&
+      input.registrationMode === "headless-filesystem") {
+    const available = visible(new Set(input.visibleToolNames), id);
+    const authorized = available && input.writeMode === "full";
+    return entry(input, id, available, authorized,
+      !available ? "vault_backend_unavailable" : authorized ? "ready" : "write_policy_blocked",
+      !available ? "refresh_vault_cache" : authorized ? "none" : "enable_write_policy");
+  }
   if (input.atomicWrite.state === "timed_out") {
     return entry(input, id, false, false,
       "bridge_probe_timed_out", "retry_capability_probe");
@@ -1509,11 +1517,12 @@ export async function collectCapabilityManifest(options: {
     }
   }
   const unavailableGovernedNames = new Set<string>([
+    ...(!options.governedRuntimes.note && options.registrationMode !== "headless-filesystem"
+      ? [...TOOL_FAMILIES["governed-native-move"], ...TOOL_FAMILIES["governed-note-delete"]]
+      : []),
     ...(!options.governedRuntimes.note
       ? [
           ...TOOL_FAMILIES["governed-note-write"],
-          ...TOOL_FAMILIES["governed-native-move"],
-          ...TOOL_FAMILIES["governed-note-delete"],
           ...TOOL_FAMILIES["governed-note-create"],
           ...TOOL_FAMILIES["governed-base-create"],
           ...TOOL_FAMILIES["governed-canvas-create"],

@@ -30,6 +30,7 @@ import { NoteJson, ObsidianRestApiService } from "../index.js";
 import type { FilesystemNoteLinksResponse } from "../types.js";
 import { CacheEventSupervisor } from "./eventSupervisor.js";
 import { MarkdownLinkIndex } from "./markdownLinkIndex.js";
+import { foldedPath, readVaultAppSettings } from "../../operations/headlessVaultFiles.js";
 import {
   applyWalSizeLimit,
   checkpointWal,
@@ -553,6 +554,33 @@ export class VaultCacheService {
         ...links.read(matched, limit),
       };
     });
+  }
+
+  /** Refresh from disk before using the index to admit a filesystem mutation. */
+  public async readFilesystemMoveInventory(filePath: string) {
+    await this.refreshCache(true);
+    await this.linkIndexRun;
+    if (!this.markdownLinks || !this.verifyFilesystemIndex(false)) {
+      throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "The filesystem link inventory is incomplete.");
+    }
+    this.db.exec("BEGIN");
+    try {
+      if (!this.verifyFilesystemIndex(false)) {
+        throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "The filesystem link inventory is changing.");
+      }
+      const inventory = this.markdownLinks.moveInventory("/" + filePath);
+      this.db.exec("COMMIT");
+      return inventory;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  public allowsHeadlessOperationSource(relativePath: string): boolean {
+    return this.allowsHiddenLinkPath(relativePath) &&
+      !this.technicalExclusions.ignores(relativePath) &&
+      !isVaultPathExcluded(relativePath, this.vaultExclusionMatcher);
   }
 
   private verifyFilesystemIndex(remember = true): boolean {
@@ -1332,6 +1360,11 @@ export class VaultCacheService {
     }
 
     const markdownFiles: string[] = [];
+    let trashFolder: string | undefined;
+    if (config.obsidianRuntimeMode === "headless-filesystem") {
+      try { trashFolder = foldedPath(readVaultAppSettings(vaultRoot).trashFolder); }
+      catch { /* Mutation planning checks app.json separately and fails closed. */ }
+    }
     const walk = async (directory: string): Promise<void> => {
       let entries: Dirent[];
       try {
@@ -1352,6 +1385,7 @@ export class VaultCacheService {
         const relativePath = normalizeVaultRelativePath(
           path.relative(vaultRoot, path.join(directory, entry.name)),
         );
+        if (trashFolder && foldedPath(relativePath) === trashFolder) continue;
         if (pathTargets && !this.allowsHiddenLinkPath(relativePath, entry.isDirectory())) continue;
         const excluded = isVaultPathExcluded(relativePath, this.vaultExclusionMatcher);
         const fullPath = path.join(directory, entry.name);

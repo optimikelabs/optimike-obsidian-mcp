@@ -8,7 +8,9 @@ export function proxyMutationFailure(name: string, args: unknown) {
     bases_create_apply: "obsidian-base-create:v1:",
     obsidian_canvas_create_apply: "obsidian-canvas-create:v1:",
     obsidian_note_move_apply: "obsidian-note-move:v1:",
+    obsidian_note_move_recover: "obsidian-note-move:v1:",
     obsidian_note_delete_apply: "obsidian-note-delete:v1:",
+    obsidian_note_delete_recover: "obsidian-note-delete:v1:",
     obsidian_canvas_patch_apply: "obsidian-canvas-patch:v1:",
     bases_formula_patch_apply: "obsidian-base-formula-patch:v1:",
     bases_config_patch_apply: "obsidian-base-config-patch:v1:",
@@ -25,7 +27,7 @@ export function proxyMutationFailure(name: string, args: unknown) {
     content: [{ type: "text" as const, text: JSON.stringify({
       ok: false,
       error: { code: "OUTCOME_UNKNOWN", message: "The mutation may have applied. Call the matching status tool before any further action.",
-        details: { mutationMayHaveApplied: true, planRef, nextAction: name.replace(/_apply$/u, "_status") } },
+        details: { mutationMayHaveApplied: true, planRef, nextAction: name.replace(/_(?:apply|recover)$/u, "_status") } },
     }) }],
   };
 }

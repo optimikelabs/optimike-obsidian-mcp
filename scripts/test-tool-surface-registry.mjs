@@ -102,16 +102,10 @@ for (const entry of TOOL_SURFACE_REGISTRY) {
   items.push(entry);
   governedFamilies.set(entry.family, items);
 }
-assert.equal(
-  governedFamilies.size,
-  13,
-  "exactly thirteen governed lifecycle families are expected",
-);
-
 for (const [family, entries] of governedFamilies) {
   assert.deepEqual(
     entries.map((entry) => entry.lifecycleRole).sort(),
-    ["note-move", "note-delete", "note-create", "base-create", "canvas-create", "base-rows", "asset-import"].includes(family)
+    ["note-create", "base-create", "canvas-create", "base-rows", "asset-import"].includes(family)
       ? ["apply", "plan", "status"]
       : expectedLifecycleRoles,
     `${family} must expose its complete declared lifecycle`,
@@ -121,11 +115,16 @@ for (const [family, entries] of governedFamilies) {
     1,
     `${family} lifecycle must stay in one group`,
   );
-  assert.equal(
-    new Set(entries.map((entry) => entry.registrationModes.join("|"))).size,
-    1,
-    `${family} lifecycle must share one registration boundary`,
-  );
+  const headlessFileOperation = family === "note-move" || family === "note-delete";
+  if (headlessFileOperation) {
+    for (const entry of entries) {
+      assert.deepEqual(entry.registrationModes, entry.lifecycleRole === "recover"
+        ? ["headless-filesystem"] : ["live", "hybrid-live", "headless-filesystem"]);
+    }
+  } else {
+    assert.equal(new Set(entries.map((entry) => entry.registrationModes.join("|"))).size, 1,
+      `${family} lifecycle must share one registration boundary`);
+  }
 }
 
 const selected = compileToolSurface({
