@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { appendFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, symlink, unlink, utimes, watch, writeFile } from "node:fs/promises";
@@ -337,12 +337,16 @@ test("corrupt retirement state is quarantined and reported while the service kee
   await f.put("Edit.md", note("Before"));
   const first = await f.run();
   const filename = path.join(f.index, "RETIREMENTS.json");
+  const backups = [1, 2, 3].map(at => `RETIREMENTS.json.corrupt-${at}-${randomUUID()}`);
+  for (const [i, backup] of backups.entries()) await writeFile(path.join(f.index, backup), String(i));
   await writeFile(filename, "null");
   await f.withService(async () => {
     await f.until(status => status.maintenanceWarning === "retirements_rebuilt");
     const entries = await readdir(f.index);
-    const quarantine = entries.find(name => name.startsWith("RETIREMENTS.json.corrupt-"));
+    const quarantines = entries.filter(name => name.startsWith("RETIREMENTS.json.corrupt-"));
+    const quarantine = quarantines.find(name => !backups.includes(name));
     assert.ok(quarantine);
+    assert.deepEqual(new Set(quarantines), new Set([quarantine, ...backups.slice(1)]));
     assert.equal(await readFile(path.join(f.index, quarantine), "utf8"), "null");
     assert.deepEqual(JSON.parse(await readFile(filename, "utf8")), {});
     await f.put("Edit.md", note("After"));
@@ -350,25 +354,102 @@ test("corrupt retirement state is quarantined and reported while the service kee
   });
 });
 
+async function holdWindowsReader(filename) {
+  const program = [
+    "$stream = [IO.File]::Open($env:OPTIMIKE_TEST_READ_FILE, 'Open', 'Read', 'Read')",
+    "try { [Console]::WriteLine('ready'); [void][Console]::ReadLine() } finally { $stream.Dispose() }",
+  ].join("; ");
+  const reader = execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", program], {
+    windowsHide: true,
+    timeout: producerTimeout,
+    env: { ...process.env, OPTIMIKE_TEST_READ_FILE: filename },
+  });
+  const exited = once(reader, "close");
+  const release = async () => {
+    if (!reader.stdin.writableEnded) reader.stdin.end("\n");
+    await exited;
+  };
+  try {
+    const [output] = await Promise.race([once(reader.stdout, "data"), exited.then(() => assert.fail("Reader exited early"))]);
+    assert.match(String(output), /ready/u);
+    return release;
+  } catch (error) {
+    await release();
+    throw error;
+  }
+}
+
+async function withWindowsReader(filename, callback) {
+  const release = await holdWindowsReader(filename);
+  try {
+    await callback();
+  } finally {
+    await release();
+  }
+}
+
 if (process.platform === "win32") {
+  test("a locked retired generation stays recorded at capacity until the Windows reader releases it", async t => {
+    const f = await fixture(t);
+    await f.put("Edit.md", note("Before"));
+    const first = await f.run();
+    const sources = path.join(f.generation(first.generation), "smart_sources");
+    const [file] = await readdir(sources);
+    await f.withService(async service => {
+      await f.until(status => status.generation === first.generation && status.pendingChanges === 0);
+      let retired;
+      await withWindowsReader(path.join(sources, file), async () => {
+        await f.put("Edit.md", note("After"));
+        const next = await f.until(status => status.generation !== first.generation && status.pendingChanges === 0);
+        retired = next.generation;
+        await f.put("Edit.md", note("Pending at capacity"));
+        const blocked = await Promise.race([
+          f.until(status => status.maintenanceWarning === "generation_prune_blocked" && status.pendingChanges === 1),
+          service.result.then(result => assert.fail(result.stderr || "Service exited early")),
+        ]);
+        assert.equal(blocked.generation, retired);
+        const remaining = JSON.parse(await readFile(path.join(f.index, "RETIREMENTS.json"), "utf8"));
+        assert.ok(Number.isSafeInteger(remaining[first.generation]));
+        assert.deepEqual(new Set(await readdir(path.join(f.index, "generations"))), new Set([first.generation, retired]));
+      });
+      await f.until(status => status.generation !== retired && status.pendingChanges === 0 &&
+        status.maintenanceWarning !== "generation_prune_blocked");
+      assert.ok(!(await readdir(path.join(f.index, "generations"))).includes(first.generation));
+    }, "--keep-generations", "0", "--max-generations", "2", "--reader-grace-seconds", "1");
+  });
+
+  test("a corrupt retirement receipt held open on Windows is recovered after the reader releases it", async t => {
+    const f = await fixture(t);
+    await f.put("Edit.md", note("Before"));
+    const first = await f.run();
+    const filename = path.join(f.index, "RETIREMENTS.json");
+    await writeFile(filename, "null");
+    const release = await holdWindowsReader(filename);
+    try {
+      await f.withService(async service => {
+        await f.put("Edit.md", note("After"));
+        await Promise.race([
+          f.until(status => status.maintenanceWarning === "retirements_recovery_blocked" && status.pendingChanges === 1),
+          service.result.then(result => assert.fail(result.stderr || "Service exited early")),
+        ]);
+        assert.equal(await f.current(), first.generation);
+        assert.equal(await readFile(filename, "utf8"), "null");
+        await release();
+        await f.until(status => status.maintenanceWarning === "retirements_rebuilt" &&
+          status.generation !== first.generation && status.pendingChanges === 0);
+      });
+    } finally {
+      await release();
+    }
+  });
+
   test("a Windows reader can deny status replacement without stopping publication", async t => {
     const f = await fixture(t);
     await f.put("Edit.md", note("Before"));
     const first = await f.run();
-    const program = [
-      "$stream = [IO.File]::Open($env:OPTIMIKE_TEST_STATUS, 'Open', 'Read', 'Read')",
-      "try { [Console]::WriteLine('ready'); [void][Console]::ReadLine() } finally { $stream.Dispose() }",
-    ].join("; ");
     await f.withService(async () => {
       await f.until(status => status.generation === first.generation && status.pendingChanges === 0);
-      const reader = execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", program], {
-        windowsHide: true,
-        env: { ...process.env, OPTIMIKE_TEST_STATUS: path.join(f.index, "SERVICE.json") },
-      });
-      const exited = once(reader, "close");
-      try {
-        const [output] = await Promise.race([once(reader.stdout, "data"), exited.then(() => assert.fail("Reader exited early"))]);
-        assert.match(String(output), /ready/u);
+      await withWindowsReader(path.join(f.index, "SERVICE.json"), async () => {
         // CURRENT must change while the reader still denies deletion of SERVICE.json.
         await f.put("Edit.md", note("After"));
         const events = watch(f.index, { signal: AbortSignal.timeout(12_000) });
@@ -382,10 +463,7 @@ if (process.platform === "win32") {
           await events.return();
         }
         assert.notEqual(await f.current(), first.generation);
-      } finally {
-        reader.stdin.end("\n");
-        await exited;
-      }
+      });
       await f.until(status => status.generation !== first.generation && status.pendingChanges === 0);
     });
   });

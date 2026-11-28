@@ -26,6 +26,31 @@ async function atomicJson(index, name, value) {
 }
 
 const generationName = /^g-[a-f0-9-]{36}$/u;
+const retirementBackupName = /^RETIREMENTS\.json\.corrupt-(?:(\d+)-)?[a-f0-9-]{36}$/u;
+const retirementBackupLimit = 3;
+const removalBlocked = error => ["EBUSY", "EPERM", "ENOTEMPTY", "EACCES"].includes(error.code);
+
+async function trimRetirementBackups(index, keep) {
+  const backups = [];
+  for (const entry of await readdir(index, { withFileTypes: true })) {
+    const name = retirementBackupName.exec(entry.name);
+    if (!entry.isFile() || !name) continue;
+    const filename = path.join(index, entry.name);
+    const at = name[1] ? Number(name[1]) : (await lstat(filename)).mtimeMs;
+    backups.push({ filename, at });
+  }
+  backups.sort((a, b) => b.at - a.at || a.filename.localeCompare(b.filename));
+  let blocked = false;
+  for (const { filename } of backups.slice(keep)) {
+    try {
+      await rm(filename, { force: true });
+    } catch (error) {
+      if (!removalBlocked(error)) throw error;
+      blocked = true;
+    }
+  }
+  return blocked;
+}
 
 export function createVectorCache(limit = 64 * 1024 * 1024) {
   const entries = new Map();
@@ -62,10 +87,16 @@ export async function pruneGenerations(index, current, keep, graceMs, maxGenerat
   const directory = path.join(index, "generations");
   const filename = "RETIREMENTS.json";
   const statePath = path.join(index, filename);
-  const raw = await readFile(statePath, "utf8")
-    .catch(error => { if (error.code === "ENOENT") return undefined; throw error; });
+  const recoveryBlocked = { room: false, rebuilt: false, warning: "retirements_recovery_blocked" };
+  let raw;
+  try {
+    raw = await readFile(statePath, "utf8");
+  } catch (error) {
+    if (removalBlocked(error)) return recoveryBlocked;
+    if (error.code !== "ENOENT") throw error;
+  }
   let previous = {};
-  let rebuilt = false;
+  let corrupt = false;
   if (raw !== undefined) {
     try {
       const parsed = JSON.parse(raw);
@@ -75,9 +106,18 @@ export async function pruneGenerations(index, current, keep, graceMs, maxGenerat
       }
       previous = parsed;
     } catch {
-      await rename(statePath, statePath + ".corrupt-" + randomUUID());
-      rebuilt = true;
+      corrupt = true;
     }
+  }
+  let backupBlocked;
+  try {
+    backupBlocked = await trimRetirementBackups(index, retirementBackupLimit - Number(corrupt));
+    if (corrupt) {
+      if (backupBlocked) return recoveryBlocked;
+      await rename(statePath, statePath + ".corrupt-" + now + "-" + randomUUID());
+    }
+  } catch {
+    return recoveryBlocked;
   }
   const retired = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -90,15 +130,30 @@ export async function pruneGenerations(index, current, keep, graceMs, maxGenerat
   retired.sort((a, b) => b.at - a.at || b.built - a.built || a.id.localeCompare(b.id));
   const remaining = {};
   const retiredLimit = maxGenerations - Number(Boolean(current));
+  let generationBlocked = false;
   for (const [position, entry] of retired.entries()) {
     if (position >= retiredLimit || (position >= keep && now - entry.at >= graceMs)) {
-      await rm(path.join(directory, entry.id), { recursive: true, force: true });
-    } else {
-      remaining[entry.id] = entry.at;
+      try {
+        await rm(path.join(directory, entry.id), { recursive: true, force: true });
+        continue;
+      } catch (error) {
+        if (!removalBlocked(error)) throw error;
+        generationBlocked = true;
+      }
+    }
+    remaining[entry.id] = entry.at;
+  }
+  if (corrupt || !isDeepStrictEqual(previous, remaining)) {
+    try {
+      await atomicJson(index, filename, remaining);
+    } catch (error) {
+      if (!removalBlocked(error)) throw error;
+      return recoveryBlocked;
     }
   }
-  if (rebuilt || !isDeepStrictEqual(previous, remaining)) await atomicJson(index, filename, remaining);
-  return { room: Object.keys(remaining).length < retiredLimit, rebuilt };
+  const warning = generationBlocked ? "generation_prune_blocked" :
+    backupBlocked ? recoveryBlocked.warning : null;
+  return { room: Object.keys(remaining).length < retiredLimit, rebuilt: corrupt, warning };
 }
 
 async function changedNotes(vault, manifest, snapshot, observations, signal) {
@@ -156,7 +211,8 @@ export async function runIndexService({
   let outcome;
   let lastPrune = -Infinity;
   let room = !active;
-  let maintenanceWarning = null;
+  let retirementsRebuilt = false;
+  let pruneWarning = null;
   let reportedFailure = false;
   const observations = new Map();
   const fail = (code) => {
@@ -179,7 +235,7 @@ export async function runIndexService({
         validUntil: observedAt + (stopped ? 0 : Math.max(1000, 3 * pollMs)),
         pendingChanges,
         lastError,
-        maintenanceWarning,
+        maintenanceWarning: pruneWarning ?? (retirementsRebuilt ? "retirements_rebuilt" : null),
         retryAt: retryAt > performance.now() ? Date.now() + Math.ceil(retryAt - performance.now()) : null,
       });
       reportedFailure = false;
@@ -209,11 +265,12 @@ export async function runIndexService({
         outcome = undefined;
         running = undefined;
       }
-      const pruneInterval = room ? Math.max(1000, Math.min(60_000, graceMs)) : Math.min(pollMs, graceMs);
+      const pruneInterval = room && !pruneWarning ? Math.max(1000, Math.min(60_000, graceMs)) : Math.min(pollMs, graceMs);
       if (!running && performance.now() - lastPrune >= pruneInterval) {
         const result = await pruneGenerations(index, active?.manifest.generation ?? null, keep, graceMs, maxGenerations);
         room = result.room;
-        if (result.rebuilt) maintenanceWarning = "retirements_rebuilt";
+        retirementsRebuilt ||= result.rebuilt;
+        pruneWarning = result.warning;
         lastPrune = performance.now();
       }
       let snapshot;

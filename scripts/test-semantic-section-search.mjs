@@ -305,8 +305,12 @@ try {
     generation: "a", builtAt, pendingChanges: 2, lastError: null,
     coverage: { indexedNotes: 2, indexedSections: 2, candidateNotes: null },
   });
-  await reportService("a", 2, { maintenanceWarning: "retirements_rebuilt" });
-  assert.equal((await runtimeStatus()).index.maintenanceWarning, "retirements_rebuilt");
+  for (const maintenanceWarning of ["retirements_rebuilt", "retirements_recovery_blocked", "generation_prune_blocked"]) {
+    await reportService("a", 2, { maintenanceWarning });
+    const index = (await runtimeStatus()).index;
+    assert.equal(index.maintenanceWarning, maintenanceWarning);
+    assert.equal(index.pendingChanges, 2);
+  }
   await reportService("a", 2, {
     observedAt: Date.now() - 900_000, lastError: "deletion_guard", maintenanceWarning: "retirements_rebuilt",
   });

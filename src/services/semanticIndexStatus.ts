@@ -7,7 +7,7 @@ import { resolveExternalSemanticGeneration, type ExternalSemanticGeneration } fr
 const count = z.number().int().nonnegative().safe();
 const generationId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u);
 const errorCode = z.enum(["scan_failed", "embedding_busy", "embedding_failed", "build_failed", "source_drift", "deletion_guard"]);
-const maintenanceWarning = z.literal("retirements_rebuilt");
+const maintenanceWarning = z.enum(["retirements_rebuilt", "retirements_recovery_blocked", "generation_prune_blocked"]);
 const serviceStatus = z.object({
   version: z.literal(1),
   generation: generationId.nullable(),

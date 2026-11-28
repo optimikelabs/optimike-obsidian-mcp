@@ -1,6 +1,6 @@
 # Producteur d’index sémantique autonome
 
-Utiliser Node 22.12 ou ultérieur et un bridge BitNet qui expose son identité
+Utiliser Node 22.13.0 ou ultérieur et un bridge BitNet qui expose son identité
 d’encodage sur `GET /health`. Lancer la commande installée
 `optimike-semantic-index`. Depuis le dépôt, lancer `npm run build` puis
 `node scripts/semantic-index-producer.mjs`.
@@ -167,15 +167,24 @@ authentifié exposent `semanticIndex.generation`, `builtAt`, `pendingChanges`,
 ajouts, modifications de contenu et suppressions au dernier relevé valide.
 Le nombre et la dernière erreur valent `null` quand le relevé expire ou manque.
 Un conflit de partage du fichier de statut déclenche quelques réessais. Le
-producteur continue même si le statut reste bloqué. Il isole le registre des
-retraits s’il est corrompu, le reconstruit et expose
-`semanticIndex.maintenanceWarning: "retirements_rebuilt"` pour le reste de l’exécution.
+producteur continue même si le statut reste bloqué. Il isole et reconstruit le
+registre des retraits s’il est corrompu, et garde les trois fichiers isolés les
+plus récents. Si un verrou empêche la récupération, le service suspend les
+nouveaux calculs et signale `semanticIndex.maintenanceWarning: "retirements_recovery_blocked"`
+jusqu’à ce qu’un nouvel essai aboutisse. La réparation est ensuite signalée par
+`retirements_rebuilt` pour le reste de l’exécution, sauf si une autre alerte de
+maintenance est prioritaire.
 
 Le service conserve `CURRENT` et deux générations retirées récentes par défaut
 (`--keep-generations`), avec un plafond global de quatre (`--max-generations`).
-Le plafond s’applique aussi lors de la reprise d’un index existant. Une fois
-le plafond atteint, le producteur attend la fin d’un délai de grâce avant le
-calcul suivant. Ce délai vaut 60 secondes par défaut (`--reader-grace-seconds`).
+Au plafond, le producteur attend de pouvoir supprimer une génération retirée
+avant le calcul suivant. Si un fichier ouvert empêche la suppression après le
+délai de grâce, le service garde la génération dans le registre, signale
+`generation_prune_blocked` et réessaie lors des relevés suivants. Il ne lance
+aucune génération supplémentaire tant que le plafond est atteint ou dépassé.
+Un index qui dépasse déjà ce plafond peut y rester tant que des fichiers
+sont verrouillés. Le délai de grâce vaut 60 secondes par défaut
+(`--reader-grace-seconds`).
 Chaque nouvelle requête lit `CURRENT`. Seules les requêtes déjà en cours
 peuvent encore avoir besoin de l’ancienne génération. Réglez le délai au-dessus
 de la durée de votre lecture la plus longue. Chaque génération contient les

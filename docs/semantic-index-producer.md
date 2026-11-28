@@ -1,6 +1,6 @@
 # Standalone semantic index producer
 
-Use Node 22.12 or later and a BitNet bridge that exposes its encoding identity at
+Use Node 22.13.0 or later and a BitNet bridge that exposes its encoding identity at
 `GET /health`. Run the installed `optimike-semantic-index` command. From a
 checkout, run `npm run build` and use `node scripts/semantic-index-producer.mjs`.
 
@@ -162,15 +162,21 @@ reflects additions, content changes and removals in the latest valid poll.
 It can lag recent disk writes. Missing or expired observations yield `null`
 for the count and last error.
 Status writes retry transient file sharing errors and leave the producer running
-if publication remains blocked. Corrupt retirement metadata is quarantined
-and rebuilt. Status reports `semanticIndex.maintenanceWarning: "retirements_rebuilt"`
-for the rest of that service run.
+if publication remains blocked. The service quarantines and rebuilds corrupt
+retirement metadata and keeps the three newest quarantine files. If a file
+lock prevents recovery, it pauses new builds and reports
+`semanticIndex.maintenanceWarning: "retirements_recovery_blocked"` until it can
+retry successfully. A successful repair reports `retirements_rebuilt` for the
+rest of that service run, unless another maintenance issue takes precedence.
 
 The service keeps `CURRENT` plus two recent retired generations by default
 (`--keep-generations`) and caps total generations at four (`--max-generations`).
-That cap also applies when bringing an existing index under the service.
-At capacity the producer waits for a retirement grace period to expire before
-building again. Grace defaults to 60 seconds (`--reader-grace-seconds`), since
+At capacity the producer waits until it can remove a retired generation before
+building again. If an open handle blocks removal after grace, the service
+records that generation, reports `generation_prune_blocked` and retries on
+later polls. It starts no extra generation while at or above the cap. An
+existing index already above the cap may remain there while files are locked.
+Grace defaults to 60 seconds (`--reader-grace-seconds`), since
 each new query opens `CURRENT` and only requests already in flight can need the
 retired generation. Set grace above the longest reader request for your
 deployment. Each generation contains full vector files, even for unchanged
