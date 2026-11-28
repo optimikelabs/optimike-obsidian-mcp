@@ -252,6 +252,8 @@ try {
     const refs = pending.recoveries.filter(row => row.mutationKind === "operon_transition_task");
     assert.equal(refs.length, 1);
     const recoveryInput = { recoveryRef: refs[0].recoveryRef, idempotencyKey: "recover-crash", recovery: { kind: "developer-api" } };
+    await rejects(guarded, "operon_recover_mutation", recoveryInput, "FORBIDDEN");
+    await bytes(interruptedPath, beforeSources.get(interruptedPath));
     assert.equal((await call(resumed, "operon_recover_mutation", recoveryInput)).status, "applied");
     assert.equal((await call(resumed, "operon_recover_mutation", recoveryInput)).status, "already-applied");
     const reusedRecoveryKey = await rejects(resumed, "operon_transition_task",

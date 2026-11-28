@@ -360,12 +360,13 @@ const DIRECT_TOOLS = new Set([
   "operon_update_periodic_scheduling",
   "operon_convert_task",
   "operon_relocate_task",
-  "operon_recover_mutation",
 ]);
 
-export function vaultInstructionsToolRole(name: string): ToolRole | undefined {
+export function vaultInstructionsToolRole(name: string, canResolveOperonRecovery = false): ToolRole | undefined {
   if (name === "obsidian_read_note") return { kind: "read-proof" };
-  if (DIRECT_TOOLS.has(name)) return { kind: "direct" };
+  if (DIRECT_TOOLS.has(name) || (name === "operon_recover_mutation" && canResolveOperonRecovery)) {
+    return { kind: "direct" };
+  }
   const lifecycle = /^(.*)_(plan|apply|recover)$/u.exec(name);
   if (lifecycle && GOVERNED_FAMILIES.has(lifecycle[1])) {
     return lifecycle[2] === "plan"
@@ -1176,7 +1177,7 @@ export function installVaultInstructionsGate(
   if (!runtime || installed.has(server)) return;
   const register = server.registerTool.bind(server) as Registrar;
   server.registerTool = ((name: string, configuration: unknown, callback: Callback) => {
-    const role = vaultInstructionsToolRole(name);
+    const role = vaultInstructionsToolRole(name, Boolean(runtime.resolveOperonRecoveryPath));
     if (!role || typeof callback !== "function") {
       return register(name, configuration, callback);
     }

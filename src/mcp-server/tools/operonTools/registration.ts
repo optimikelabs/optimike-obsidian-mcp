@@ -35,6 +35,7 @@ import { unsupportedFilesystemMutation } from "../../../services/operon/filesyst
 import type { GovernedNoteReplaceRuntime } from "../governedNoteReplaceTools/runtime.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { OperonService } from "../../../services/operon/service.js";
+import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
 import { mcpSchema } from "../../mcpSchema.js";
 
@@ -121,14 +122,20 @@ export async function registerOperonTools(
   const runRead: typeof runTool = (name, params, operation) => runTool(name, params, operation, filesystem);
   const service = new OperonService();
   const reader = filesystem ?? service;
-  const writer = filesystem && cache && notes?.isFilesystem && config.obsidianRuntimeMode === "headless-filesystem"
+  const filesystemWriteMode = headless && config.obsidianRuntimeMode === "headless-filesystem";
+  const runMutation = filesystemWriteMode ? runRead : runTool;
+  const writer = filesystem && cache && notes?.isFilesystem && filesystemWriteMode
     ? new FilesystemOperonMutations(filesystem, notes) : undefined;
   const mutations = writer ?? service;
-  const filesystemWriteRequired = "This operation requires the governed headless-filesystem mode with a shared vault cache, or the live Desktop Bridge.";
-  const availableMutation = (operation: () => Promise<unknown>) => filesystem && !writer
-    ? async () => unsupportedFilesystemMutation(filesystemWriteRequired) : operation;
-  const liveOnly = (reason: string, action: () => Promise<unknown>) => filesystem
-    ? async () => unsupportedFilesystemMutation(reason) : action;
+  const liveOnly = (reason: string, action: () => Promise<unknown>) => async () => {
+    if (!headless) return action();
+    if (filesystemWriteMode) return unsupportedFilesystemMutation(reason);
+    throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "The Operon mutation requires the live Desktop Bridge.");
+  };
+  const availableMutation = (operation: () => Promise<unknown>) => writer ? operation : liveOnly(
+    "This operation requires the governed headless-filesystem mode with a shared vault cache, or the live Desktop Bridge.",
+    operation,
+  );
   const recoveryNotice =
     config.operonMutationAllowedPathPrefixes.length > 0
       ? RECOVERY_BLOCKED_NOTICE
@@ -323,7 +330,7 @@ export async function registerOperonTools(
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonAdoptTaskSchema>) =>
-      runRead("operon_adopt_task", params, liveOnly("Adoption needs the native Tasks metadata conversion and sealed workflow.", () => service.adoptTask(params))),
+      runMutation("operon_adopt_task", params, liveOnly("Adoption needs the native Tasks metadata conversion and sealed workflow.", () => service.adoptTask(params))),
   );
   server.registerTool(
     "operon_create_periodic_task",
@@ -334,7 +341,7 @@ export async function registerOperonTools(
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonCreatePeriodicTaskSchema>) =>
-      runRead("operon_create_periodic_task", params, liveOnly("Periodic creation needs native Daily/Weekly routing and container verification.", () =>
+      runMutation("operon_create_periodic_task", params, liveOnly("Periodic creation needs native Daily/Weekly routing and container verification.", () =>
         service.createPeriodicTask(params),
       )),
   );
@@ -347,7 +354,7 @@ export async function registerOperonTools(
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonUpdatePeriodicSchedulingSchema>) =>
-      runRead("operon_update_periodic_scheduling", params, liveOnly("Scheduled-date changes can realign Daily/Weekly parent notes and need the native workflow.", () =>
+      runMutation("operon_update_periodic_scheduling", params, liveOnly("Scheduled-date changes can realign Daily/Weekly parent notes and need the native workflow.", () =>
         service.updatePeriodicScheduling(params),
       )),
   );
@@ -364,7 +371,7 @@ export async function registerOperonTools(
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonCreateTaskSchema>) =>
-      runRead("operon_create_task", params, availableMutation(() => mutations.createTask(params))),
+      runMutation("operon_create_task", params, availableMutation(() => mutations.createTask(params))),
   );
   server.registerTool(
     "operon_set_pinned",
@@ -375,7 +382,7 @@ export async function registerOperonTools(
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonSetPinnedSchema>) =>
-      runRead("operon_set_pinned", params, liveOnly("Pins require Operon's sealed plugin-data transaction.", () => service.setPinned(params))),
+      runMutation("operon_set_pinned", params, liveOnly("Pins require Operon's sealed plugin-data transaction.", () => service.setPinned(params))),
   );
   server.registerTool(
     "operon_update_tasks",
@@ -386,7 +393,7 @@ export async function registerOperonTools(
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonUpdateTasksSchema>) =>
-      runRead("operon_update_tasks", params, liveOnly("Batch updates require a native batch proof across all sources.", () => service.updateTasks(params))),
+      runMutation("operon_update_tasks", params, liveOnly("Batch updates require a native batch proof across all sources.", () => service.updateTasks(params))),
   );
   server.registerTool(
     "operon_update_task",
@@ -399,7 +406,7 @@ export async function registerOperonTools(
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonUpdateTaskSchema>) =>
-      runRead("operon_update_task", params, availableMutation(() => mutations.updateTask(params))),
+      runMutation("operon_update_task", params, availableMutation(() => mutations.updateTask(params))),
   );
   server.registerTool(
     "operon_transition_task",
@@ -412,7 +419,7 @@ export async function registerOperonTools(
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonTransitionTaskSchema>) =>
-      runRead("operon_transition_task", params, availableMutation(() => mutations.transitionTask(params))),
+      runMutation("operon_transition_task", params, availableMutation(() => mutations.transitionTask(params))),
   );
   server.registerTool(
     "operon_convert_task",
@@ -423,7 +430,7 @@ export async function registerOperonTools(
       annotations: DESTRUCTIVE_MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonConvertTaskSchema>) =>
-      runRead("operon_convert_task", params, liveOnly("Conversion requires native source removal, target publication and postflight.", () => service.convertTask(params))),
+      runMutation("operon_convert_task", params, liveOnly("Conversion requires native source removal, target publication and postflight.", () => service.convertTask(params))),
   );
   server.registerTool(
     "operon_relocate_task",
@@ -434,7 +441,7 @@ export async function registerOperonTools(
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonRelocateTaskSchema>) =>
-      runRead("operon_relocate_task", params, liveOnly("Relocation requires a native transaction over source and destination notes.", () =>
+      runMutation("operon_relocate_task", params, liveOnly("Relocation requires a native transaction over source and destination notes.", () =>
         service.relocateTask(params),
       )),
   );
@@ -447,7 +454,7 @@ export async function registerOperonTools(
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonSetRelationshipsSchema>) =>
-      runRead("operon_set_relationships", params, liveOnly("Relationships require reciprocal edge and aggregate updates across affected tasks.", () =>
+      runMutation("operon_set_relationships", params, liveOnly("Relationships require reciprocal edge and aggregate updates across affected tasks.", () =>
         service.setRelationships(params),
       )),
   );
@@ -460,7 +467,7 @@ export async function registerOperonTools(
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonUpdateRecurrenceSchema>) =>
-      runRead("operon_update_recurrence", params, liveOnly("Recurrence requires native series state and next-occurrence planning.", () =>
+      runMutation("operon_update_recurrence", params, liveOnly("Recurrence requires native series state and next-occurrence planning.", () =>
         service.updateRecurrence(params),
       )),
   );
@@ -475,7 +482,7 @@ export async function registerOperonTools(
       annotations: READ_ONLY_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonPendingRecoveriesInputSchema>) =>
-      runRead("operon_list_pending_recoveries", params, availableMutation(() => mutations.pendingRecoveries(params))),
+      runMutation("operon_list_pending_recoveries", params, availableMutation(() => mutations.pendingRecoveries(params))),
   );
   server.registerTool(
     "operon_recover_mutation",
@@ -488,6 +495,6 @@ export async function registerOperonTools(
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonRecoverMutationSchema>) =>
-      runRead("operon_recover_mutation", params, availableMutation(() => mutations.recoverMutation(params))),
+      runMutation("operon_recover_mutation", params, availableMutation(() => mutations.recoverMutation(params))),
   );
 }
