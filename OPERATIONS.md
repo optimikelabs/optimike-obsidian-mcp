@@ -6,6 +6,25 @@ French version: [OPERATIONS.fr.md](OPERATIONS.fr.md)
 
 This guide explains how the server actually runs, what it depends on, how Tasks and semantic search work, and what keeps the runtime memory footprint low.
 
+## Ranked and hybrid search
+
+`obsidian_global_search` defaults to substring or regex search, newest first.
+Set `mode: "ranked"` for BM25 relevance over cached Markdown. Ranked search
+folds case and accents, handles common French and English plurals, and boosts
+titles, YAML aliases and headings. Folder and date filters still apply.
+
+Set `hybrid: true` on `smart_semantic_search` to combine BM25, note vectors
+and the best section vector per note by reciprocal rank fusion. Each path
+appears once with contributing `signals`, their ranks and scores, and
+`best_section` when a passage is available. A heading-free note can return its
+whole Markdown body as a lexical section. The semantic signals are verified
+against the vault cache. If the index or embedder is unavailable, or no
+eligible vector is current, results use BM25 and `provenance` explains why.
+Hybrid uses both granularities and overrides `granularity`. Tune `rrf_k`
+(default 20) or set `short_note_floor` (default 240 body characters, 0 to
+disable) to adjust the semantic downweight for short notes. This does not
+change the result shape or ranking of a default semantic request.
+
 ## Runtime Model
 
 The final runtime uses two layers:

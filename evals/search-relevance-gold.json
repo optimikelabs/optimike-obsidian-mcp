@@ -1,0 +1,14 @@
+{
+  "queries": [
+    {
+      "type": "section",
+      "query": "Which section contains the answer paragraph?",
+      "relevant": [{ "path": "Notes/Alpha.md", "section": "Target" }]
+    },
+    {
+      "type": "code",
+      "query": "Bôbines relay pulse",
+      "relevant": ["Notes/Coil.md"]
+    }
+  ]
+}

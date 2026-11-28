@@ -11,6 +11,7 @@ export type SmartVec = {
   title?: string;
   tags?: string[];
   model?: string;
+  readHash?: string;
   vec: number[];
 };
 

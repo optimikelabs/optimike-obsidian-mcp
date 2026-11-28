@@ -31,6 +31,14 @@ import {
   validQueryVector,
 } from "../../../services/semanticSearchHealth.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
+import {
+  bestLexicalSection,
+  comparePaths,
+  getLexicalDocuments,
+  queryTerms,
+  rankLexical,
+  type LexicalDocument,
+} from "../../../services/rankedVaultSearch.js";
 
 async function semanticStage<T>(
   reasonCode: string,
@@ -59,6 +67,13 @@ const In = z.object({
   folders: z.array(z.string()).optional(),
   tags: z.array(z.string()).optional(),
   with_snippets: z.boolean().default(true),
+  hybrid: z.boolean().default(false).describe(
+    "Fuse BM25, note vectors and best section per note. Returns one result per path, with lexical fallback when semantic signals are unavailable.",
+  ),
+  rrf_k: z.number().min(1).max(1000).default(20).describe("Hybrid only: reciprocal rank fusion constant. Lower values favor the first ranks."),
+  short_note_floor: z.number().min(0).max(10000).default(240).describe(
+    "Hybrid only: downweight semantic matches below this many Markdown body characters. Set to zero to disable.",
+  ),
   granularity: z
     .enum(["notes", "sections", "both"])
     .default("notes")
@@ -68,8 +83,25 @@ const In = z.object({
 });
 
 const SECTION_SNIPPET_MAX_CHARS = 1200;
+const SectionEvidence = z.object({
+  source: z.enum(["semantic", "lexical"]),
+  block_key: z.string().optional(),
+  headings: z.array(z.string()),
+  lines: z.tuple([z.number(), z.number()]),
+  lines_verified: z.boolean(),
+  snippet: z.string().optional(),
+});
+const Signal = z.object({ rank: z.number(), score: z.number() });
 
 const Out = z.object({
+  provenance: z.object({
+    mode: z.enum(["hybrid", "lexical"]),
+    semantic_status: z.enum(["ready", "partial", "stale", "unavailable", "empty"]),
+    reason_code: z.string().optional(),
+    stale_notes: z.number().optional(),
+    stale_sections: z.number().optional(),
+    rrf_k: z.number(),
+  }).optional(),
   generation_id: z.string().optional(),
   model: z.string().optional(),
   dim: z.number().optional(),
@@ -106,12 +138,26 @@ const Out = z.object({
       lines: z.tuple([z.number(), z.number()]).optional(),
       lines_verified: z.boolean().optional(),
       snippet: z.string().optional(),
+      signals: z.object({
+        lexical: Signal.optional(),
+        note: Signal.optional(),
+        section: Signal.optional(),
+      }).optional(),
+      best_section: SectionEvidence.optional(),
     }),
   ),
 });
 
 type InType = z.infer<typeof In>;
 type OutType = z.infer<typeof Out>;
+type Result = OutType["results"][number];
+type HybridContext = {
+  cache: VaultCacheService;
+  documents: Map<string, LexicalDocument>;
+  terms: Set<string>;
+  lexical: ReturnType<typeof rankLexical>;
+  depth: number;
+};
 
 const vectorNormCache = new WeakMap<number[], number>();
 
@@ -305,6 +351,11 @@ function rankSections(
   input: InType,
   queryVector: number[],
   queryNorm: number,
+  hybrid?: {
+    penaltyByPath: Map<string, number>;
+    verifiedLines: Map<number, [number, number]>;
+    depth: number;
+  },
 ): { ranked: Array<{ item: number; score: number }>; filteredCount: number } {
   const { refs, vectors, norms, dimensions, tagsByNote } = sections;
   const query = Float64Array.from(queryVector);
@@ -312,22 +363,105 @@ function rankSections(
   let filteredCount = 0;
   let lastPath: string | undefined;
   let lastMatch = false;
+  const bestByPath = new Map<string, { item: number; score: number }>();
   for (let row = 0; row < refs.length; row++) {
     const notePath = refs[row]!.notePath;
     if (notePath !== lastPath) {
       lastPath = notePath;
-      lastMatch = matchesFilters(input, notePath, tagsByNote.get(notePath));
+      lastMatch = hybrid ? hybrid.penaltyByPath.has(notePath) : matchesFilters(input, notePath, tagsByNote.get(notePath));
     }
-    if (!lastMatch) continue;
+    if (!lastMatch || (hybrid && !hybrid.verifiedLines.has(row))) continue;
     filteredCount += 1;
     const norm = norms[row]!;
     let dot = 0;
     const offset = row * dimensions;
     for (let i = 0; i < dimensions; i++) dot += query[i]! * vectors[offset + i]!;
     const score = queryNorm && norm ? dot / (queryNorm * norm) : 0;
-    insertRankedTopK(ranked, { item: row, score }, input.top_k);
+    if (hybrid) {
+      const adjusted = score - hybrid.penaltyByPath.get(notePath)!;
+      const previous = bestByPath.get(notePath);
+      if (!previous || adjusted > previous.score) bestByPath.set(notePath, { item: row, score: adjusted });
+    } else {
+      insertRankedTopK(ranked, { item: row, score }, input.top_k);
+    }
   }
-  return { ranked, filteredCount };
+  return {
+    ranked: hybrid
+      ? [...bestByPath.values()].sort((a, b) => b.score - a.score ||
+          comparePaths(refs[a.item]!.notePath, refs[b.item]!.notePath)).slice(0, hybrid.depth)
+      : ranked,
+    filteredCount,
+  };
+}
+
+async function fuseHybrid(
+  input: InType,
+  hybrid: HybridContext,
+  semantic: {
+    notes: Array<{ item: SmartVec; score: number }>;
+    sections: Array<{ item: number; score: number }>;
+    snapshot?: SemanticSectionSnapshot;
+    verifiedLines: Map<number, [number, number]>;
+    linesByPath: Map<string, string[]>;
+  } | undefined,
+  freshness: Omit<NonNullable<OutType["provenance"]>, "mode" | "rrf_k">,
+): Promise<Pick<OutType, "results" | "provenance">> {
+  const results = new Map<string, Result>();
+  function add(notePath: string, signal: keyof NonNullable<Result["signals"]>, rank: number, score: number) {
+    const result = results.get(notePath) ?? {
+      path: notePath, score: 0, signals: {}, title: hybrid.documents.get(notePath)!.note.title,
+    };
+    result.score += 1 / (input.rrf_k + rank);
+    result.signals![signal] = { rank, score };
+    results.set(notePath, result);
+    return result;
+  }
+  for (const [rank, hit] of hybrid.lexical.slice(0, hybrid.depth).entries()) {
+    add(hit.path, "lexical", rank + 1, hit.score);
+  }
+  const sectionsByPath = new Map<string, number>();
+  if (semantic) {
+    for (const [rank, hit] of semantic.notes.entries()) {
+      add(hit.item.notePath, "note", rank + 1, hit.score);
+    }
+    for (const [rank, hit] of semantic.sections.entries()) {
+      const ref = semantic.snapshot!.refs[hit.item]!;
+      add(ref.notePath, "section", rank + 1, hit.score);
+      sectionsByPath.set(ref.notePath, hit.item);
+    }
+  }
+  const ranked = [...results.values()]
+    .sort((a, b) => b.score - a.score || comparePaths(a.path, b.path))
+    .slice(0, input.top_k);
+  for (const hit of ranked) {
+    const sectionRow = sectionsByPath.get(hit.path);
+    if (semantic && sectionRow !== undefined) {
+      const ref = semantic.snapshot!.refs[sectionRow]!;
+      const lines = semantic.verifiedLines.get(sectionRow)!;
+      hit.best_section = {
+        source: "semantic", block_key: ref.blockKey, headings: headingPath(ref.blockKey),
+        lines, lines_verified: true,
+        snippet: input.with_snippets
+          ? semantic.linesByPath.get(hit.path)!.slice(lines[0] - 1, lines[1]).join("\n")
+              .replace(/\r(?=\n|$)/gu, "").slice(0, SECTION_SNIPPET_MAX_CHARS)
+          : undefined,
+      };
+    } else {
+      const entry = hybrid.documents.get(hit.path)!.entry;
+      const current = await hybrid.cache.getEntry(entry.path);
+      if (current?.hash !== entry.hash) continue;
+      const section = bestLexicalSection(current.content, hybrid.terms, input.with_snippets);
+      if (section) hit.best_section = { ...section, source: "lexical", lines_verified: true };
+    }
+  }
+  return {
+    results: ranked,
+    provenance: {
+      mode: semantic && (semantic.notes.length || semantic.sections.length) ? "hybrid" : "lexical",
+      rrf_k: input.rrf_k,
+      ...freshness,
+    },
+  };
 }
 
 function makeSuccessResult(payload: OutType) {
@@ -362,7 +496,7 @@ function makeErrorResult(error: unknown, params: unknown) {
   };
 }
 
-async function performSearch(input: InType): Promise<OutType> {
+async function performSearch(input: InType, hybrid?: HybridContext): Promise<OutType> {
   const startedAt = nowMs();
   const timings: NonNullable<OutType["timings_ms"]> = {
     total: 0,
@@ -416,7 +550,7 @@ async function performSearch(input: InType): Promise<OutType> {
   );
   const wantNotes = input.granularity !== "sections";
   let sections: SemanticSectionSnapshot | undefined;
-  if (input.granularity !== "notes") {
+  if (hybrid || input.granularity !== "notes") {
     // Before the note snapshot: one cold source read can then serve both.
     const sectionCacheStartedAt = nowMs();
     sections = await semanticStage("semantic_index_unavailable", () =>
@@ -450,11 +584,39 @@ async function performSearch(input: InType): Promise<OutType> {
       sections.dimensions !== dimension ||
       sections.model !== model)
   ) {
-    throw new McpError(
-      BaseErrorCode.SERVICE_UNAVAILABLE,
-      "No section vectors of the active Smart Connections model are available; search with granularity notes.",
-      { reasonCode: "semantic_sections_unavailable" },
-    );
+    if (hybrid) {
+      sections = undefined;
+    } else {
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        "No section vectors of the active Smart Connections model are available; search with granularity notes.",
+        { reasonCode: "semantic_sections_unavailable" },
+      );
+    }
+  }
+
+  const filterStartedAt = nowMs();
+  let staleNotes = 0;
+  const penaltyByPath = new Map<string, number>();
+  const filtered = itemsWithDim.filter((item) => {
+    if (!hybrid) return matchesFilters(input, item.notePath, item.tags);
+    const doc = hybrid.documents.get(item.notePath);
+    if (!doc) return false;
+    if (!item.readHash || doc.note.smartHash !== item.readHash) {
+      staleNotes++;
+      return false;
+    }
+    const floor = input.short_note_floor;
+    penaltyByPath.set(item.notePath, floor ? 0.2 * Math.max(0, 1 - doc.note.bodyLength / floor) : 0);
+    return true;
+  });
+  timings.filter = elapsedSince(filterStartedAt);
+  if (hybrid && !filtered.length) {
+    return fuseHybrid(input, hybrid, undefined, {
+      semantic_status: staleNotes ? "stale" : "empty",
+      reason_code: staleNotes ? "semantic_note_hash_mismatch_or_missing" : "no_semantic_candidates",
+      stale_notes: staleNotes,
+    });
   }
 
   const openaiDimensions = Number.isFinite(Number(OPENAI_EMBEDDING_DIMENSIONS))
@@ -505,36 +667,66 @@ async function performSearch(input: InType): Promise<OutType> {
     );
   }
 
-  const filterStartedAt = nowMs();
-  const filtered = itemsWithDim.filter((item) =>
-    matchesFilters(input, item.notePath, item.tags),
-  );
-  timings.filter = elapsedSince(filterStartedAt);
-
   const rankingStartedAt = nowMs();
   const queryNorm = vectorNorm(queryVector);
   const ranked: Array<{ item: SmartVec; score: number }> = [];
 
-  for (const item of wantNotes ? filtered : []) {
+  for (const item of (hybrid || wantNotes) ? filtered : []) {
     insertRankedTopK(
       ranked,
       {
         item,
-        score: cosineWithCachedNorm(queryVector, queryNorm, item.vec),
+        score: cosineWithCachedNorm(queryVector, queryNorm, item.vec) - (penaltyByPath.get(item.notePath) ?? 0),
       },
-      input.top_k,
+      hybrid?.depth ?? input.top_k,
     );
   }
   timings.ranking = elapsedSince(rankingStartedAt);
 
   let rankedSections: Array<{ item: number; score: number }> = [];
   let sectionFilteredCount: number | undefined;
+  const verifiedLines = new Map<number, [number, number]>();
+  const linesByPath = new Map<string, string[]>();
+  let staleSections = 0;
   if (sections) {
     const sectionRankingStartedAt = nowMs();
-    const sectionRanking = rankSections(sections, input, queryVector, queryNorm);
+    if (hybrid) {
+      const checkedPaths = new Set<string>();
+      const budget = { lines: SECTION_RELOCATION_MAX_LINES_HASHED };
+      for (const [row, ref] of sections.refs.entries()) {
+        if (!penaltyByPath.has(ref.notePath)) continue;
+        if (!checkedPaths.has(ref.notePath)) {
+          checkedPaths.add(ref.notePath);
+          const entry = hybrid.documents.get(ref.notePath)!.entry;
+          const cached = await hybrid.cache.getEntry(entry.path);
+          if (cached?.hash === entry.hash)
+            linesByPath.set(ref.notePath, cached.content.split("\n"));
+        }
+        const lines = linesByPath.get(ref.notePath);
+        const verified = lines && locateSection(lines, ref, budget);
+        if (verified) verifiedLines.set(row, verified);
+        else staleSections++;
+      }
+    }
+    const sectionRanking = rankSections(sections, input, queryVector, queryNorm,
+      hybrid && { penaltyByPath, verifiedLines, depth: hybrid.depth });
     rankedSections = sectionRanking.ranked;
     sectionFilteredCount = sectionRanking.filteredCount;
     timings.section_ranking = elapsedSince(sectionRankingStartedAt);
+  }
+
+  if (hybrid) {
+    const result = await fuseHybrid(input, hybrid, {
+      notes: ranked, sections: rankedSections, snapshot: sections, verifiedLines, linesByPath,
+    }, {
+      semantic_status: staleNotes || staleSections || !sections ? "partial" : "ready",
+      ...(!sections ? { reason_code: "semantic_sections_unavailable" } : {}),
+      stale_notes: staleNotes,
+      stale_sections: staleSections,
+    });
+    timings.total = elapsedSince(startedAt);
+    recordSemanticSearch(selection.embed, dimension, true, undefined, generation?.cacheKey);
+    return { ...result, generation_id: generation?.id, model, dim: dimension, timings_ms: timings };
   }
 
   // One list, best score first: notes and sections share the query model.
@@ -754,15 +946,41 @@ export async function prewarmSemanticSearch(): Promise<SemanticSearchPrewarmResu
   };
 }
 
-async function handleSearchRequest(params: unknown): Promise<OutType> {
+async function handleSearchRequest(params: unknown, cache?: VaultCacheService): Promise<OutType> {
   const parsed = In.parse(params);
-  return performSearch(parsed);
+  if (!parsed.hybrid) return performSearch(parsed);
+  if (!parsed.query.trim()) {
+    throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Hybrid query must contain text.");
+  }
+  if (!cache) {
+    throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Hybrid search requires a ready vault cache.");
+  }
+  const indexed = await getLexicalDocuments(cache);
+  const tags = parsed.tags?.map((tag) => tag.replace(/^#/u, ""));
+  const documents = new Map([...indexed].filter(([notePath, doc]) =>
+    matchesFilters({ ...parsed, tags }, notePath, [...doc.note.tags]),
+  ));
+  const terms = queryTerms(parsed.query);
+  const hybrid = {
+    cache, documents, terms,
+    lexical: rankLexical([...documents.values()], terms),
+    depth: Math.min(100, Math.max(30, Math.ceil(parsed.top_k) * 3)),
+  };
+  try {
+    return await performSearch(parsed, hybrid);
+  } catch (error) {
+    const reason = error instanceof McpError ? error.details?.reasonCode : undefined;
+    return fuseHybrid(parsed, hybrid, undefined, {
+      semantic_status: "unavailable",
+      reason_code: typeof reason === "string" ? reason : "semantic_index_unavailable",
+    });
+  }
 }
 
 export const registerSemanticSearchTool = async (
   server: McpServer,
   _obsidianService: ObsidianRestApiService | undefined,
-  _vaultCacheService: VaultCacheService | undefined,
+  vaultCacheService: VaultCacheService | undefined,
 ): Promise<void> => {
   const register = (name: string, description: string) => {
     server.registerTool(
@@ -774,7 +992,7 @@ export const registerSemanticSearchTool = async (
       },
       async (params: InType, _extra: unknown) => {
         try {
-          const payload = await handleSearchRequest(params);
+          const payload = await handleSearchRequest(params, vaultCacheService);
           Out.parse(payload);
           return makeSuccessResult(payload);
         } catch (error) {
@@ -786,7 +1004,7 @@ export const registerSemanticSearchTool = async (
 
   register(
     "smart_semantic_search",
-    "Semantic search powered by Smart Connections embeddings (query embedder auto-matches the vault model). Set granularity to sections to get the heading sections and paragraphs that answer, with their line range in the note, instead of whole notes.",
+    'Semantic search powered by Smart Connections embeddings (query embedder auto-matches the vault model). Set granularity to "sections" to retrieve matching sections and line ranges. Set hybrid to true to rank notes by meaning and keywords together, with contributing signals, best sections and lexical fallback.',
   );
 };
 

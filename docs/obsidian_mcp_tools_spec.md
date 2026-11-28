@@ -87,7 +87,10 @@ The family is live/hybrid-live only and has no recover or undo operation. Missin
 - `obsidian_read_note`: read a vault note by path, with cache fallback.
 - `obsidian_note_links`: live/hybrid-live only. Observe a bounded semantic neighborhood from Obsidian Desktop public `MetadataCache` APIs: outgoing links, embeds and frontmatter links with effective resolution; requested subpaths with heading/block validity when demonstrable; unresolved aggregates; and backlinks reconstructed from resolved relations. It reports provenance, truncation, explicit collection availability, a best-effort non-atomic snapshot and cache freshness as `unknown` when the public API cannot prove it. An unavailable source cache reports `coverage.outgoing.total: null` rather than fabricating zero links. It performs no write and makes no graph-preservation claim.
 - `obsidian_list_notes`: list notes and folders, using REST or cache/filesystem.
-- `obsidian_global_search`: text/regex search across cached vault content.
+- `obsidian_global_search`: substring/regex search with a vault-cache
+  fallback. Opt into `mode: "ranked"` for cached BM25 scores on Markdown,
+  including boosts for note titles, aliases and headings. Ranked mode folds
+  accents and case, and rejects `useRegex: true` and `caseSensitive: true`.
 - `obsidian_update_note`: live REST note update for an explicit `filePath` or
   the live `activeFile`, or guarded headless append/prepend for an explicit
   `filePath` in filesystem modes.
@@ -314,6 +317,9 @@ fail-closed; no private or Markdown fallback is introduced.
   [README](../README.md#semantic-search).
   With the optional [external index](semantic-vector-cache-encoding.md#external-smart-env-v3-generations),
   each successful response includes the pinned `generation_id`.
+  `hybrid: true` returns one hit per note with a fused score, the
+  contributing ranks and the best section. Fallback and partial freshness
+  are identified in `provenance`. See [ranked and hybrid search](../OPERATIONS.md#ranked-and-hybrid-search).
 
 The former `smart_search` and `smart-search` aliases were physically removed in
 3.0. Existing clients must migrate to `smart_semantic_search`.

@@ -6,6 +6,28 @@ Version anglaise : [OPERATIONS.md](OPERATIONS.md)
 
 Ce guide explique comment le serveur tourne réellement, de quoi il dépend, comment Tasks et la recherche sémantique fonctionnent, et ce qui permet de garder une faible empreinte mémoire.
 
+## Recherche classée et hybride
+
+`obsidian_global_search` cherche par défaut une chaîne ou une expression
+régulière et trie les résultats du plus récent au plus ancien. Avec
+`mode: "ranked"`, BM25 classe le Markdown en cache par pertinence. Ce mode
+ignore la casse et les accents, prend en compte les pluriels courants en
+français et en anglais, et donne plus de poids aux titres, aux alias YAML et
+aux intertitres. Les filtres de dossier et de date s'appliquent.
+
+`hybrid: true` dans `smart_semantic_search` fusionne les rangs BM25, les
+vecteurs de note et le meilleur vecteur de section par note. Chaque chemin
+apparaît une fois avec les rangs et scores des `signals` et la
+`best_section` disponible. Une note sans intertitre peut renvoyer tout son
+corps Markdown comme section lexicale. Le serveur vérifie les signaux
+sémantiques contre le cache du coffre. Si l'index ou l'encodeur est
+indisponible, ou si aucun vecteur éligible n'est à jour, BM25 prend le relais
+et `provenance` en donne la raison. Le mode hybride utilise les deux
+granularités et prime sur `granularity`. `rrf_k` vaut 20 par défaut.
+`short_note_floor` réduit le poids sémantique des notes dont le corps fait
+moins de 240 caractères par défaut. Régler ce seuil à 0 désactive la
+réduction. La recherche sémantique par défaut garde sa forme et son classement.
+
 ## Modèle runtime
 
 Le runtime final repose sur deux couches :

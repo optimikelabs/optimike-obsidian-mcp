@@ -5,11 +5,12 @@ import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
-import { appendFile, cp, mkdir, mkdtemp, rename, rm, truncate, writeFile } from "node:fs/promises";
+import { appendFile, cp, mkdir, mkdtemp, readFile, rename, rm, truncate, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { McpServer, InMemoryTransport } from "@modelcontextprotocol/server";
 import { Client } from "@modelcontextprotocol/client";
+import { callSearch, evaluateSearch, readGold } from "./score-search-relevance.mjs";
 
 // Synthetic vault and Smart Connections v3 index with block (section) vectors.
 const root = await mkdtemp(path.join(os.tmpdir(), "semantic-sections-"));
@@ -30,6 +31,8 @@ Object.assign(process.env, {
   NODE_ENV: "test",
   OBSIDIAN_RUNTIME_MODE: "headless-readonly",
   OBSIDIAN_VAULT: root,
+  OBSIDIAN_CACHE_SOURCE: "filesystem",
+  OBSIDIAN_ENABLE_CACHE: "true",
   SMART_ENV_DIR: source,
   SMART_ENV_GENERATION_POINTER: path.join(root, "CURRENT"),
   OBSIDIAN_SHARED_CACHE_DB_PATH: dbPath,
@@ -53,6 +56,10 @@ const { registerSemanticSearchTool } = await import(
 );
 const { registerRuntimeTools } = await import(
   "../dist/mcp-server/tools/runtimeTools/registration.js"
+);
+const { VaultCacheService } = await import("../dist/services/obsidianRestAPI/vaultCache/index.js");
+const { registerObsidianGlobalSearchTool } = await import(
+  "../dist/mcp-server/tools/obsidianGlobalSearchTool/registration.js"
 );
 
 const model = { provider_key: "ollama", model_key: "fixture-embed", dims: 4 };
@@ -132,6 +139,7 @@ await mkdir(path.join(source, "smart_sources"));
 await mkdir(path.join(source, "smart_blocks"));
 await writeFile(path.join(root, "Notes", "Alpha.md"), alpha, "utf8");
 await writeFile(path.join(root, "Other", "Beta.md"), beta, "utf8");
+await writeFile(path.join(root, "Notes", "Coil.md"), "---\naliases: [Bobine, Coils]\n---\n\`\`\`js\nrelay.pulse();\n\`\`\`\n", "utf8");
 await writeFile(
   path.join(source, "smart_env.json"),
   JSON.stringify({ embedding_models: { default_model_key: "ollama#fixture" } }),
@@ -168,6 +176,7 @@ await writeFile(
 const server = new McpServer({ name: "sections", version: "1" });
 const client = new Client({ name: "sections-test", version: "1" });
 const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+const vaultCache = new VaultCacheService();
 const search = async (args) => {
   const response = await client.callTool({
     name: "smart_semantic_search",
@@ -206,7 +215,8 @@ try {
   fresh.db.close();
   reopened.db.close();
 
-  await registerSemanticSearchTool(server);
+  await registerSemanticSearchTool(server, undefined, vaultCache);
+  await registerObsidianGlobalSearchTool(server, undefined, vaultCache);
   await registerRuntimeTools(server, undefined, undefined, undefined, undefined, undefined, {
     operon: async () => { throw new Error("No Operon in the semantic fixture"); },
   });
@@ -311,6 +321,31 @@ try {
     "B replaces A's note scores and section references, including the deleted note",
   );
   assert.equal((await runtimeStatus()).capability.reasonCode, "ready");
+
+  const lexical = await callSearch(client, "ranked", "Comment commander les BÔBINES ?");
+  assert.equal(lexical[0].path, "Notes/Coil.md", "accent folding and plural stemming reach a YAML alias");
+  assert.deepEqual(await callSearch(client, "exact", "Comment commander les BÔBINES ?"), [],
+    "the exact mode still requires a substring match");
+  const gold = readGold(JSON.parse(await readFile(new URL("../evals/search-relevance-gold.json", import.meta.url), "utf8")));
+  const report = await evaluateSearch(gold, (query) => callSearch(client, "hybrid", query));
+  console.log(JSON.stringify(report));
+  assert.equal(report.all.recall5, 1, "hybrid retrieves both the section and the code-only note");
+  assert.equal(report.section.ndcg10, 1, "the matching section's note ranks first");
+  assert.equal(report.section.sectionRecall5, 1, "best_section locates the expected answer section");
+  const fused = await search({ query: "where is the answer", hybrid: true, tags: ["#keep"], with_snippets: false });
+  assert.equal(fused.isError, false);
+  assert.deepEqual(fused.value.results.map(({ path }) => path), ["Notes/Alpha.md"]);
+  const match = fused.value.results[0];
+  assert.deepEqual(Object.keys(match.signals).sort(), ["lexical", "note", "section"]);
+  assert.equal(match.score, 3 / 21);
+  assert.deepEqual(match.best_section.lines, [7, 9]);
+  assert.equal(match.best_section.snippet, undefined);
+  const noFloor = await search({ hybrid: true, short_note_floor: 0 });
+  assert.ok(match.signals.note.score < noFloor.value.results[0].signals.note.score,
+    "the opt-in floor lowers both semantic signals for a short note");
+  const code = await search({ hybrid: true, query: "bobine relay", folders: ["Notes/Coil"] });
+  assert.deepEqual(code.value.results[0].best_section.lines, [4, 6],
+    "a code-only note without published vectors gets a whole-body lexical section");
   queryVector = [1, 0];
   const wrongDimension = await search({});
   assert.equal(wrongDimension.isError, true);
@@ -344,6 +379,10 @@ try {
   assert.equal(unavailableStatus.capability.reasonCode, "semantic_index_unavailable");
   await rm(pointer);
   assert.equal((await search({})).isError, true, "a configured but missing pointer fails closed");
+  const fallback = await search({ hybrid: true, query: "bobine relay" });
+  assert.equal(fallback.value.provenance.semantic_status, "unavailable");
+  assert.equal(fallback.value.provenance.mode, "lexical");
+  assert.deepEqual(Object.keys(fallback.value.results[0].signals), ["lexical"]);
   assert.equal(embedRequests, requestsBeforeRefusals, "invalid generations are refused before query encoding");
   delete process.env.SMART_ENV_GENERATION_POINTER;
   delete process.env.SMART_ENV_QUERY_FINGERPRINT;
@@ -357,6 +396,11 @@ try {
     "utf8",
   );
   const edited = await search({ granularity: "sections", folders: ["Notes/"] });
+  await vaultCache.rebuildFromSource();
+  const stale = await search({ hybrid: true, folders: ["Notes/Alpha"] });
+  assert.equal(stale.value.provenance.semantic_status, "stale");
+  assert.equal(stale.value.provenance.mode, "lexical");
+  assert.deepEqual(stale.value.results[0].best_section.lines, [9, 11]);
   const moved = edited.value.results.find((result) => result.block_key === "#Alpha##Target");
   assert.deepEqual([moved.lines, moved.lines_verified], [[9, 11], true]);
   assert.equal(moved.snippet, span(alpha, 7, 9));
@@ -482,6 +526,7 @@ try {
   );
 } finally {
   await client.close().catch(() => undefined);
+  await vaultCache.close();
   http.close();
   await rm(root, { recursive: true, force: true }).catch(() => undefined);
 }
