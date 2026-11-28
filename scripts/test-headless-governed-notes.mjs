@@ -423,7 +423,8 @@ async function checkAtomicExchange() {
       const restore = () => reverts.plan({ path: raced, operationRef: source.planRef, idempotencyKey: `revert-${key}` });
       if (recoverable) {
         assert.equal(status.replacesConcurrentEdit.sha256, sha256(interference), key);
-        assert.equal(status.replacesConcurrentEdit.modifiedAt, (await stat(filename)).mtime.toISOString(), key);
+        const onDisk = await stat(filename, { bigint: true });
+        assert.equal(status.replacesConcurrentEdit.modifiedAt, new Date(Number(onDisk.mtimeMs)).toISOString(), key);
         assert.ok(Number.isFinite(Date.parse(status.replacesConcurrentEdit.observedAt)), key);
         const plan = await restore();
         assert.equal(plan.replacesConcurrentEdit.sha256, sha256(interference), key);
