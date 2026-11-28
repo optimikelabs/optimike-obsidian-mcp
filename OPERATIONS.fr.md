@@ -23,10 +23,30 @@ corps Markdown comme section lexicale. Le serveur vérifie les signaux
 sémantiques contre le cache du coffre. Si l'index ou l'encodeur est
 indisponible, ou si aucun vecteur éligible n'est à jour, BM25 prend le relais
 et `provenance` en donne la raison. Le mode hybride utilise les deux
-granularités et prime sur `granularity`. `rrf_k` vaut 20 par défaut.
-`short_note_floor` réduit le poids sémantique des notes dont le corps fait
-moins de 240 caractères par défaut. Régler ce seuil à 0 désactive la
-réduction. La recherche sémantique par défaut garde sa forme et son classement.
+granularités et prime sur `granularity`. Une section vérifiée peut contribuer
+quand le vecteur de la note entière manque ou est périmé. Le serveur réutilise
+les plages vérifiées tant que l'index sémantique et l'empreinte de la note en
+cache correspondent. Il lit les extraits des seuls résultats renvoyés, dans le
+texte qui porte cette empreinte.
+
+`rrf_k` vaut 20 par défaut. `short_note_floor` réduit le poids du vecteur
+de note sous le nombre de caractères de prose choisi. Le seuil vaut 0 par
+défaut (désactivé), car les seuils positifs ont dégradé le classement sur
+la réplique. Une section vérifiée garde son propre score. BM25 indexe aussi
+le code et les liens.
+Le seuil compte les libellés visibles des liens et exclut les blocs de code
+délimités, le code en ligne et les destinations des liens.
+
+Le serveur prépare l'index BM25 en mémoire une fois le cache du coffre prêt.
+Un appel précoce rejoint la construction déjà lancée. Le serveur laisse les
+autres outils fonctionner entre les lots. Les recherches suivantes
+reconstruisent les partitions dont les métadonnées des notes en cache ont
+changé. Sur une réplique locale en lecture seule de 8 818 notes, la
+construction à froid a pris 15,8 s sous charge, contre 21,7 s auparavant.
+Après le passage du ramasse-miettes, le heap retenu a augmenté de 56 Mo,
+contre 217 Mo. Les tableaux typés représentaient 25 Mo supplémentaires.
+La mémoire résidente du processus a augmenté de 177 Mo pendant la mesure,
+contre 260 Mo auparavant. Ces chiffres proviennent d'une seule réplique.
 
 ## Modèle runtime
 

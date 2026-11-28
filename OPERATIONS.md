@@ -20,10 +20,27 @@ appears once with contributing `signals`, their ranks and scores, and
 whole Markdown body as a lexical section. The semantic signals are verified
 against the vault cache. If the index or embedder is unavailable, or no
 eligible vector is current, results use BM25 and `provenance` explains why.
+An independently verified section can contribute when its whole-note vector
+is missing or stale. Verified ranges are reused for the same semantic
+snapshot and cached note hash. Semantic snippets are read only for returned
+hits and only from the text with that hash.
 Hybrid uses both granularities and overrides `granularity`. Tune `rrf_k`
-(default 20) or set `short_note_floor` (default 240 body characters, 0 to
-disable) to adjust the semantic downweight for short notes. This does not
-change the result shape or ranking of a default semantic request.
+(default 20) or set `short_note_floor` to apply a whole-note vector penalty
+below the chosen number of prose characters. It defaults to 0 (off) after
+positive floors lowered ranking quality in the replica evaluation. A
+verified section keeps its own score. BM25 indexes code and links. The
+prose floor counts visible link labels and excludes fenced code, inline
+code and link destinations.
+
+The server prepares the in-memory BM25 index after the vault cache is ready.
+An early caller joins the same build as startup. The build yields between
+batches so other tools can continue. Subsequent searches rebuild only
+the partitions whose cached note metadata changed. On a local read-only
+replica of 8,818 notes, a cold build took 15.8 s under load, compared with
+21.7 s in the previous implementation. The retained heap increase after GC
+was 56 MB, compared with 217 MB. Typed arrays accounted for another 25 MB.
+Process RSS rose by 177 MB in the build and GC measurement, compared
+with 260 MB before. These are measurements from one replica.
 
 ## Runtime Model
 

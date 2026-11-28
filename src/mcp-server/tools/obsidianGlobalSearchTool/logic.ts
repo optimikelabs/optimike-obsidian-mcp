@@ -7,7 +7,7 @@ import {
 } from "../../../services/obsidianRestAPI/index.js";
 import { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
-import { getLexicalDocuments, lexicalSnippets, queryTerms, rankLexical } from "../../../services/rankedVaultSearch.js";
+import { getLexicalIndex, lexicalSnippets, queryTerms, rankLexical } from "../../../services/rankedVaultSearch.js";
 // Import formatTimestamp utility
 import { config } from "../../../config/index.js";
 import {
@@ -273,13 +273,12 @@ export const processObsidianGlobalSearch = async (
 
   const terms = ranked ? queryTerms(params.query) : undefined;
   if (terms) {
-    const documents = await getLexicalDocuments(vaultCacheService);
-    const eligible = [...documents.values()].filter(({ entry, path }) =>
+    const index = await getLexicalIndex(vaultCacheService);
+    allFilteredResults = rankLexical(index, terms, ({ entry, path }) =>
       (!searchPathPrefix || path.startsWith(searchPathPrefix)) &&
       (!sinceDate || entry.mtime >= sinceDate.getTime()) &&
       (!untilDate || entry.mtime <= untilDate.getTime()),
-    );
-    allFilteredResults = rankLexical(eligible, terms).map(({ entry, path: notePath, score, matchCount }) => ({
+    ).map(({ entry, path: notePath, score, matchCount }) => ({
       path: notePath,
       filename: path.basename(entry.path),
       modifiedTime: formatTimestamp(entry.mtime, opContext),

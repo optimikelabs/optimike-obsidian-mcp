@@ -1,4 +1,5 @@
 import path from "node:path/posix";
+import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import { CORE_SCHEMA, load } from "js-yaml";
 import type { CacheIndexEntry, VaultCacheService } from "./obsidianRestAPI/vaultCache/index.js";
 import { smartTextHash } from "./smartEnvV3.js";
@@ -30,13 +31,6 @@ function tokenize(text: string): string[] {
     .map(termOf).filter((term): term is string => term !== undefined);
 }
 
-function field(text: string) {
-  const terms = new Map<string, number>();
-  const words = tokenize(text);
-  for (const term of words) terms.set(term, (terms.get(term) ?? 0) + 1);
-  return { terms, length: words.length };
-}
-
 function strings(value: unknown): string[] {
   return (Array.isArray(value) ? value : [value]).filter((item): item is string => typeof item === "string");
 }
@@ -59,16 +53,18 @@ function markdownParts(text: string) {
   };
 }
 
-function headings(lines: string[]): Array<{ line: number; level: number; title: string }> {
+function headings(lines: string[], codeLines?: Set<number>): Array<{ line: number; level: number; title: string }> {
   const result: Array<{ line: number; level: number; title: string }> = [];
   let fence: string | undefined;
   for (const [line, content] of lines.entries()) {
     const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(content);
     if (marker && !fence) {
+      codeLines?.add(line);
       fence = marker[1];
       continue;
     }
     if (fence) {
+      codeLines?.add(line);
       if (marker && marker[1]!.startsWith(fence) && !marker[2]!.trim()) fence = undefined;
       continue;
     }
@@ -80,58 +76,155 @@ function headings(lines: string[]): Array<{ line: number; level: number; title: 
   return result;
 }
 
+function proseLength(lines: string[], codeLines: Set<number>): number {
+  return lines.filter((_, i) => !codeLines.has(i))
+    .join("\n")
+    .replace(/\x60+[^\x60\n]*\x60+/gu, "")
+    .replace(/!?\[\[([^\]\n]+)\]\]/gu, (_markup, label: string) => label.split("|").at(-1)!)
+    .replace(/!?\[([^\]\n]*)\]\([^\n)]*\)/gu, "$1")
+    .replace(/<https?:[^>\n]+>|https?:\/\/[^\s<>]+/gu, "")
+    .trim().length;
+}
+
 function indexNote(text: string, notePath: string) {
   const { body, aliases, tags } = markdownParts(text);
   const lines = body.split(/\r?\n/u);
-  const outline = headings(lines);
+  const codeLines = new Set<number>();
+  const outline = headings(lines, codeLines);
   const headingLines = new Set(outline.map(({ line }) => line));
+  const title = path.basename(notePath, path.extname(notePath));
   return {
-    title: path.basename(notePath, path.extname(notePath)),
-    smartHash: smartTextHash(text),
-    bodyLength: body.trim().length,
-    tags: new Set([
-      ...tags.map((tag) => tag.replace(/^#/u, "")),
-      ...(body.match(/(?<![\p{L}\p{N}/])#[\p{L}_][\p{L}\p{N}_/-]*/gu) ?? [])
-        .map((tag) => tag.slice(1)),
-    ]),
+    metadata: {
+      title,
+      smartHash: smartTextHash(text),
+      bodyLength: proseLength(lines, codeLines),
+      tags: new Set([
+        ...tags.map((tag) => tag.replace(/^#/u, "")),
+        ...(body.match(/(?<![\p{L}\p{N}/])#[\p{L}_][\p{L}\p{N}_/-]*/gu) ?? [])
+          .map((tag) => tag.slice(1)),
+      ]),
+    },
     fields: [
-      field(lines.filter((_, line) => !headingLines.has(line)).join("\n")),
-      field(path.basename(notePath, path.extname(notePath))),
-      field(aliases.join("\n")),
-      field(outline.map(({ title }) => title).join("\n")),
+      lines.filter((_, line) => !headingLines.has(line)).join("\n"),
+      title,
+      aliases.join("\n"),
+      outline.map(({ title: heading }) => heading).join("\n"),
     ],
   };
 }
 
-type IndexedNote = ReturnType<typeof indexNote>;
+type IndexedNote = ReturnType<typeof indexNote>["metadata"];
 export type LexicalDocument = { path: string; entry: CacheIndexEntry; note: IndexedNote };
 type LexicalHit = LexicalDocument & { score: number; matchCount: number };
-const indexes = new WeakMap<VaultCacheService, Map<string, LexicalDocument>>();
 
-export async function getLexicalDocuments(cache: VaultCacheService | undefined) {
-  if (cache && !cache.isReady()) {
+// Each term's postings are consecutive (document ID, term frequency) pairs.
+// The offsets and all pairs for a field share two typed arrays.
+type PostingField = { terms: Map<string, number>; offsets: Uint32Array; pairs: Uint32Array };
+type Shard = { documents: LexicalDocument[]; lengths: Uint32Array; fields: PostingField[] };
+export type LexicalIndex = { documents: Map<string, LexicalDocument>; shards: Shard[] };
+type IndexState = { current?: LexicalIndex; pending?: Promise<LexicalIndex> };
+const indexes = new WeakMap<VaultCacheService, IndexState>();
+const shardCount = 32;
+const fieldCount = 4;
+
+function packPostings(postings: Map<string, number[]>): PostingField {
+  const terms = new Map<string, number>();
+  const offsets = new Uint32Array(postings.size + 1);
+  let length = 0;
+  for (const [term, pairs] of postings) {
+    offsets[terms.size] = length;
+    terms.set(term, terms.size);
+    length += pairs.length;
+  }
+  offsets[terms.size] = length;
+  const pairs = new Uint32Array(length);
+  for (const [term, rows] of postings) pairs.set(rows, offsets[terms.get(term)!]!);
+  return { terms, offsets, pairs };
+}
+
+async function buildShard(
+  cache: VaultCacheService,
+  entries: CacheIndexEntry[],
+  previous: Shard | undefined,
+  normalizedTerms: Map<string, string | undefined>,
+): Promise<Shard> {
+  if (previous?.documents.length === entries.length && entries.every((entry, i) => {
+    const prev = previous.documents[i]!.entry;
+    return entry.path === prev.path && entry.hash === prev.hash && entry.mtime === prev.mtime && entry.ctime === prev.ctime;
+  })) return previous;
+
+  const documents: LexicalDocument[] = [];
+  const lengths = new Uint32Array(entries.length * fieldCount);
+  const postings = Array.from({ length: fieldCount }, () => new Map<string, number[]>());
+  for (const [i, entry] of entries.entries()) {
+    if (i % 32 === 0) await yieldToEventLoop();
+    const cached = await cache.getEntry(entry.path);
+    if (cached?.hash !== entry.hash) continue;
+    const notePath = entry.path.replace(/^\//u, "");
+    const { metadata, fields } = indexNote(cached.content, notePath);
+    const id = documents.length;
+    documents.push({ path: notePath, entry, note: metadata });
+    fields.forEach((content, field) => {
+      const terms = new Map<string, number>();
+      for (const raw of content.match(/[\p{L}\p{N}][\p{L}\p{M}\p{N}]*/gu) ?? []) {
+        let term = normalizedTerms.get(raw);
+        if (term === undefined && !normalizedTerms.has(raw)) {
+          term = termOf(raw);
+          if (normalizedTerms.size < 32768) normalizedTerms.set(raw, term);
+        }
+        if (term === undefined) continue;
+        lengths[id * fieldCount + field]!++;
+        terms.set(term, (terms.get(term) ?? 0) + 1);
+      }
+      for (const [term, count] of terms) {
+        const rows = postings[field]!.get(term);
+        if (rows) rows.push(id, count);
+        else postings[field]!.set(term, [id, count]);
+      }
+    });
+  }
+  return { documents, lengths, fields: postings.map(packPostings) };
+}
+
+async function refreshIndex(cache: VaultCacheService, previous?: LexicalIndex): Promise<LexicalIndex> {
+  if (!cache.isReady()) {
     await cache.buildVaultCache();
     await cache.waitUntilReady();
   }
-  if (!cache?.isReady()) {
+  if (!cache.isReady()) {
     throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Ranked search requires a ready vault cache.");
   }
-  const previous = indexes.get(cache);
-  const next = new Map<string, LexicalDocument>();
+  const groups: CacheIndexEntry[][] = Array.from({ length: shardCount }, () => []);
   for (const entry of cache.getEntriesByPrefix()) {
-    if (!entry.path.toLowerCase().endsWith(".md")) continue;
-    const notePath = entry.path.replace(/^\//u, "");
-    const existing = previous?.get(notePath);
-    if (existing?.entry.hash === entry.hash) {
-      next.set(notePath, { path: notePath, entry, note: existing.note });
-      continue;
+    if (entry.path.toLowerCase().endsWith(".md")) {
+      const shard = Number.parseInt(smartTextHash(entry.path), 36) % shardCount;
+      groups[shard]!.push(entry);
     }
-    const cached = await cache.getEntry(entry.path);
-    if (cached?.hash === entry.hash)
-      next.set(notePath, { path: notePath, entry, note: indexNote(cached.content, notePath) });
   }
-  indexes.set(cache, next);
-  return next;
+  const normalizedTerms = new Map<string, string | undefined>();
+  const shards: Shard[] = [];
+  for (const [i, entries] of groups.entries()) {
+    shards.push(await buildShard(cache, entries, previous?.shards[i], normalizedTerms));
+  }
+  if (previous && shards.every((shard, i) => shard === previous.shards[i])) return previous;
+  const documents = new Map<string, LexicalDocument>();
+  for (const shard of shards) for (const doc of shard.documents) documents.set(doc.path, doc);
+  return { documents, shards };
+}
+
+export function getLexicalIndex(cache: VaultCacheService | undefined): Promise<LexicalIndex> {
+  if (!cache) {
+    return Promise.reject(new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Ranked search requires a ready vault cache."));
+  }
+  let state = indexes.get(cache);
+  if (!state) {
+    state = {};
+    indexes.set(cache, state);
+  }
+  const indexState = state;
+  return indexState.pending ??= refreshIndex(cache, indexState.current)
+    .then((index) => indexState.current = index)
+    .finally(() => { indexState.pending = undefined; });
 }
 
 export function queryTerms(query: string): Set<string> {
@@ -144,38 +237,63 @@ const weights = [1, 3, 3, 2];
 const lengthNormalization = [0.75, 0.3, 0.3, 0.5];
 const saturation = 1.2;
 
-export function rankLexical(documents: LexicalDocument[], query: Set<string>): LexicalHit[] {
-  if (!query.size || !documents.length) return [];
+export function rankLexical(
+  index: LexicalIndex,
+  query: Set<string>,
+  eligible?: (doc: LexicalDocument) => boolean,
+): LexicalHit[] {
+  if (!query.size || !index.documents.size) return [];
+  const documents: LexicalDocument[] = [];
+  const allowed = new Uint8Array(index.documents.size);
   const totals = weights.map(() => 0);
-  const counts = new Map([...query].map((term) => [term, 0]));
-  const hits: Array<LexicalDocument & { frequencies: number[][] }> = [];
-
-  for (const doc of documents) {
-    doc.note.fields.forEach((field, i) => { totals[i]! += field.length; });
-    const frequencies = [...query].map((term) => {
-      const byField = doc.note.fields.map((field) => field.terms.get(term) ?? 0);
-      if (byField.some(Boolean)) counts.set(term, counts.get(term)! + 1);
-      return byField;
-    });
-    if (frequencies.some((byField) => byField.some(Boolean))) hits.push({ ...doc, frequencies });
-  }
-
-  const averages = totals.map((total) => total / documents.length || 1);
-  const idf = [...counts.values()].map((count) => Math.log1p((documents.length - count + 0.5) / (count + 0.5)));
-  return hits.map(({ frequencies, ...doc }) => {
-    let matchCount = 0;
-    let score = 0;
-    for (const [termIndex, byField] of frequencies.entries()) {
-      let frequency = 0;
-      for (const [i, raw] of byField.entries()) {
-        matchCount += raw;
-        const b = lengthNormalization[i]!;
-        frequency += raw * weights[i]! / (1 - b + b * doc.note.fields[i]!.length / averages[i]!);
-      }
-      score += idf[termIndex]! * (saturation + 1) * frequency / (saturation + frequency);
+  let count = 0;
+  const shards = index.shards.map((shard) => {
+    const offset = documents.length;
+    for (const [id, doc] of shard.documents.entries()) {
+      documents.push(doc);
+      if (eligible && !eligible(doc)) continue;
+      allowed[offset + id] = 1;
+      count++;
+      for (let field = 0; field < fieldCount; field++) totals[field]! += shard.lengths[id * fieldCount + field]!;
     }
-    return { ...doc, matchCount, score };
-  }).sort((a, b) => b.score - a.score || comparePaths(a.path, b.path));
+    return { ...shard, offset };
+  });
+  if (!count) return [];
+
+  const averages = totals.map((total) => total / count || 1);
+  const scores = new Float64Array(documents.length);
+  const matchCounts = new Uint32Array(documents.length);
+  const frequencies = new Float64Array(documents.length);
+  for (const term of query) {
+    const touched: number[] = [];
+    for (const { fields, lengths, offset } of shards) {
+      for (const [field, { terms, offsets, pairs }] of fields.entries()) {
+        const termId = terms.get(term);
+        if (termId === undefined) continue;
+        const b = lengthNormalization[field]!;
+        for (let row = offsets[termId]!; row < offsets[termId + 1]!; row += 2) {
+          const id = pairs[row]!;
+          const docId = offset + id;
+          if (!allowed[docId]) continue;
+          if (!frequencies[docId]) touched.push(docId);
+          const raw = pairs[row + 1]!;
+          matchCounts[docId]! += raw;
+          frequencies[docId]! += raw * weights[field]! / (1 - b + b * lengths[id * fieldCount + field]! / averages[field]!);
+        }
+      }
+    }
+    const idf = Math.log1p((count - touched.length + 0.5) / (touched.length + 0.5));
+    for (const id of touched) {
+      const frequency = frequencies[id]!;
+      scores[id]! += idf * (saturation + 1) * frequency / (saturation + frequency);
+      frequencies[id] = 0;
+    }
+  }
+  const hits: LexicalHit[] = [];
+  for (const [id, doc] of documents.entries()) {
+    if (matchCounts[id]) hits.push({ ...doc, matchCount: matchCounts[id]!, score: scores[id]! });
+  }
+  return hits.sort((a, b) => b.score - a.score || comparePaths(a.path, b.path));
 }
 
 export function comparePaths(a: string, b: string): number {

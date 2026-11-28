@@ -11,6 +11,7 @@ import { logger, McpLogLevel } from "./utils/internal/logger.js"; // Import logg
 // Import Services
 import { ObsidianRestApiService } from "./services/obsidianRestAPI/index.js";
 import { VaultCacheService } from "./services/obsidianRestAPI/vaultCache/index.js"; // Import VaultCacheService
+import { getLexicalIndex } from "./services/rankedVaultSearch.js";
 import { prewarmSemanticSearch } from "./mcp-server/tools/semanticSearchTool/registration.js";
 import {
   createGovernedNoteReplaceRuntime,
@@ -417,6 +418,14 @@ const start = async () => {
         .then(() => {
           // Once the initial build is done, start the periodic refresh
           vaultCacheService?.startPeriodicRefresh();
+          if (vaultCacheService?.isReady()) {
+            void getLexicalIndex(vaultCacheService).catch(() => {
+              logger.warning("Background ranked-search index preparation failed.", {
+                ...startupContext,
+                operation: "RankedSearchPrebuild",
+              });
+            });
+          }
         })
         .catch((cacheBuildError) => {
           // Log errors during the background build process
