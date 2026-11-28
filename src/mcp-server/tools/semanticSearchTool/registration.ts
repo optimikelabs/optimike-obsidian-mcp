@@ -1029,7 +1029,7 @@ async function handleSearchRequest(params: unknown, cache?: VaultCacheService): 
   const hybrid = {
     cache, documents, terms,
     lexical: rankLexical(index, terms, (doc) => documents.has(doc.path)),
-    depth: Math.min(100, Math.max(30, Math.ceil(parsed.top_k) * 3)),
+    depth: Math.min(100, Math.max(60, Math.ceil(parsed.top_k) * 3)),
   };
   try {
     return await performSearch(parsed, hybrid);

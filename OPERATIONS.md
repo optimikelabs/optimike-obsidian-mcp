@@ -32,6 +32,10 @@ verified section keeps its own score. BM25 indexes code and links. The
 prose floor counts visible link labels and excludes fenced code, inline
 code and link destinations.
 
+Each ranking supplies at least 60 candidates to fusion when available.
+Above 20 requested hits, the budget grows with `top_k` up to 100
+candidates per ranking.
+
 The server prepares the in-memory BM25 index after the vault cache is ready.
 An early caller joins the same build as startup. The build yields between
 batches so other tools can continue. Subsequent searches rebuild only

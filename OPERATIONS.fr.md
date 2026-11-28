@@ -37,6 +37,10 @@ le code et les liens.
 Le seuil compte les libellés visibles des liens et exclut les blocs de code
 délimités, le code en ligne et les destinations des liens.
 
+Chaque classement fournit au moins 60 candidats à la fusion quand ils
+sont disponibles. Au-delà de 20 résultats demandés, le budget croît avec
+`top_k` jusqu'à 100 candidats par classement.
+
 Le serveur prépare l'index BM25 en mémoire une fois le cache du coffre prêt.
 Un appel précoce rejoint la construction déjà lancée. Le serveur laisse les
 autres outils fonctionner entre les lots. Les recherches suivantes
