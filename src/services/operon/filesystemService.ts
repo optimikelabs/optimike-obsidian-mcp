@@ -182,6 +182,7 @@ export class FilesystemOperonService {
     let usesBirthtime = false;
     let missingEntry = false;
     const start = this.provenance();
+    const metadataGeneration = this.cache.getMetadataGeneration();
     for (const entry of this.cache.getEntriesByPrefix()) {
       const path = entry.path.replace(/^\//u, "");
       if (path.split("/").some(segment => segment.startsWith(".")) || paths.some(excluded => excluded && matchesPath(path, excluded))) continue;
@@ -226,7 +227,9 @@ export class FilesystemOperonService {
     this.configurationSignature = settingsSignature;
     if (changed) this.sequence++;
     const provenance = this.provenance();
-    if (missingEntry || start.partial || start.lastRefreshAt !== provenance.lastRefreshAt) {
+    const cacheChangedDuringRead = missingEntry || metadataGeneration !== this.cache.getMetadataGeneration() ||
+      start.lastRefreshAt !== provenance.lastRefreshAt;
+    if (cacheChangedDuringRead || start.partial) {
       provenance.partial = true;
       provenance.freshness = "uncertain";
     }
@@ -256,7 +259,7 @@ export class FilesystemOperonService {
     const locations = taskCreation.fileTaskPipelineLocations ?? settings.fileTaskPipelineLocations;
     const recent = settings.taskFinderRecentModifiedDays ?? object(object(data?.ui).taskUiPreferences).taskFinderRecentModifiedDays;
     const recentDays = typeof recent === "number" && Number.isFinite(recent) ? Math.max(1, Math.min(7, Math.round(recent))) : 3;
-    return { snapshot, configuration, provenance, invalidFrontmatter, sourceDigests, recentDays, legacyWithoutPipelines,
+    return { snapshot, configuration, provenance, invalidFrontmatter, sourceDigests, recentDays, legacyWithoutPipelines, cacheChangedDuringRead,
       filePipelineRouting: Array.isArray(locations) && locations.length > 0,
       extraCreationRules: (taskCreation.assigneesRequired ?? settings.assigneesRequired) === true ||
         Boolean(taskCreation.defaultInlineTaskTemplateId ?? settings.defaultInlineTaskTemplateId) ||
@@ -275,7 +278,11 @@ export class FilesystemOperonService {
   }
 
   async mutationSnapshot() {
-    const view = await this.view(true);
+    let view = await this.view(true);
+    // A peer can publish cache rows after our metadata scan but before getEntry.
+    // Rebuild once before checking the task revision. A persistently incomplete
+    // snapshot still cannot authorize a mutation.
+    if (view.cacheChangedDuringRead) view = await this.view(true);
     if (view.provenance.partial || !view.snapshot.capabilities.configuration || view.legacyWithoutPipelines ||
         view.invalidFrontmatter.length || customCacheExclusions) {
       return unavailable("operon_filesystem_mutation_snapshot_incomplete", "A complete Operon filesystem snapshot and workflow configuration are required for writes.");

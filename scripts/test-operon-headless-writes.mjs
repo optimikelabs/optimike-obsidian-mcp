@@ -70,6 +70,7 @@ const clients = [];
 const entry = fileURLToPath(new URL("../dist/index.js", import.meta.url));
 const runtimeModule = new URL("../dist/mcp-server/tools/governedNoteReplaceTools/runtime.js", import.meta.url).href;
 const journalModule = new URL("../dist/services/operations/obsidianNoteReplaceJournal.js", import.meta.url).href;
+const cacheModule = new URL("../dist/services/obsidianRestAPI/vaultCache/index.js", import.meta.url).href;
 const logsParent = fileURLToPath(new URL("../logs/", import.meta.url));
 await mkdir(logsParent, { recursive: true });
 const logs = await mkdtemp(path.join(logsParent, "operon-write-fixture-"));
@@ -77,6 +78,16 @@ const logs = await mkdtemp(path.join(logsParent, "operon-write-fixture-"));
 async function start(mode = "headless-filesystem", profile = "tasks", options = {}) {
   const client = new Client({ name: "operon-filesystem-write-fixture", version: "1" });
   let bootstrap = `Date.now = () => ${options.instant ?? instant};\n`;
+  if (options.cacheSkew) bootstrap += `
+    import { VaultCacheService } from ${JSON.stringify(cacheModule)};
+    const originalGetEntry = VaultCacheService.prototype.getEntry;
+    let skewNext = true;
+    VaultCacheService.prototype.getEntry = async function (relative) {
+      const entry = await originalGetEntry.call(this, relative);
+      if (!entry || relative !== ${JSON.stringify("/" + racePath)} || !skewNext) return entry;
+      skewNext = false;
+      return { ...entry, mtime: entry.mtime + 1 };
+    };`;
   if (options.phone) bootstrap += `
     import { GovernedNoteReplaceRuntime } from ${JSON.stringify(runtimeModule)};
     import { appendFile } from 'node:fs/promises';
@@ -180,7 +191,7 @@ try {
     assert.equal(error.reason, "headless_atomic_exchange_unavailable");
     await bytes(textPath, before);
   } else {
-    const full = await start("headless-filesystem", "full");
+    const full = await start("headless-filesystem", "full", { cacheSkew: true });
     const paths = await profile(full, "full", "headless-filesystem");
     assert.ok(paths.includes("operon_update_recurrence"));
     const readonly = await start("headless-filesystem", "tasks", { writeMode: "readonly" });

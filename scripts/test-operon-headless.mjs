@@ -382,6 +382,7 @@ try {
   const building = new FilesystemOperonService({
     getStats: () => ({ status: "building", freshness: "uncertain" }),
     isReady: () => false,
+    getMetadataGeneration: () => 0,
     getEntriesByPrefix: () => [],
   });
   const partial = await building.query({});
@@ -396,6 +397,7 @@ try {
   const sample = { path: "Synced.md", content: "---\noperonId: time003\nstatus: CN.Open\n---", mtime: recentMtime, hash: "sample" };
   const synchronized = new FilesystemOperonService({
     getStats: () => ({ status: "ready" }),
+    getMetadataGeneration: () => 0,
     isReady: () => true, getEntriesByPrefix: () => [sample], getEntry: () => sample,
   });
   const readBirthtime = VaultFileService.prototype.readBirthtime;
