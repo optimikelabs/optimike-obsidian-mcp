@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Headless note listings, searches, and reads by path omit dot-prefixed Markdown files and files under dot-prefixed directories by default. Explicit re-inclusions still apply, and the shared cache removes previously indexed excluded rows on startup (#227).
 
+- Live JSON note reads and frontmatter key reads use the YAML from the same Local REST response when cached properties disagree. They signal affected keys with `metadataCacheStale` and require no additional REST request (#230).
+
 ### Added
 
 - Headless note reads, listings, and global search report cache provenance and flag requests that overlap a refresh. Runtime status reports the newest indexed Markdown modification time and explicitly marks upstream synchronization as unknown.
