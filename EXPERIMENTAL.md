@@ -54,6 +54,7 @@ With #205 and #218 combined, direct exact reads include
 in the provenance. The full inventory may still be refreshing. Cached reads
 keep the successful scan's start and refresh timestamps. The regression test
 exercises both responses on the same note.
+Carry commit `1d52fc50fb1b5a1d96e08a7ac4851ba25fb83b86` into `main` when integrating #218 and #242. It updates the exact cache freshness test to require the three null Sync evidence fields when upstream Sync is unknown.
 
 The headless Bases scan validates request filters with #234's shared compiler
 before enforcing #204's explicit opt-in. It reads note properties with #228's
