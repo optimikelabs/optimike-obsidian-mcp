@@ -187,16 +187,16 @@ Le serveur final peut exposer des capacités différentes selon les plugins Obsi
 - Fallback local Bases
 
   - disponible en modes headless pour `bases_list`, `bases_get_schema` et `bases_query`
-  - sans l’API REST d’Obsidian, `bases_query` renvoie `SERVICE_UNAVAILABLE`
-    si la requête nécessite les filtres de la Base, les règles d’une vue,
-    des formules ou demande explicitement `evaluate: true`
-  - utiliser Obsidian avec le Bases Bridge pour ces requêtes, ou passer
-    `property_only: true` pour parcourir les propriétés Markdown en cache.
-    Une requête simple sans ces exigences fonctionne sans option supplémentaire
+  - les lignes d’une Base nécessitent Obsidian et le Bases Bridge, même pour
+    une Base sans filtre et quelle que soit la valeur de `evaluate`. Sans l’API
+    REST d’Obsidian, `bases_query` renvoie `SERVICE_UNAVAILABLE` sauf avec
+    `property_only: true`
+  - `property_only: true` parcourt les propriétés Markdown en cache
+    indépendamment de la Base et de ses vues. Le fichier Base doit exister
   - le parcours renvoie `source: "local-fallback"`, `mode: "property-scan"`,
     `evaluate: false` et `limitations`. Ses lignes et son total décrivent le
     parcours Markdown, avec le filtre de propriétés, le tri et la pagination de la requête.
-    Les fichiers non Markdown sont exclus même pour les requêtes simples
+    Les fichiers non Markdown sont exclus
   - les filtres du parcours prennent en charge l’égalité directe, les tableaux,
     `eq`, `ne`, `contains`, `in`, `gt`, `gte`, `lt` et `lte`. Filtres
     et tris acceptent les clés de frontmatter sans préfixe et `file.path`,

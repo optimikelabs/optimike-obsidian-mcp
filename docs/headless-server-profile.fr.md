@@ -104,9 +104,8 @@ Le smoke serveur vérifie que :
 - `obsidian_runtime_maintenance refresh_all` fonctionne ;
 - le status runtime confirme la politique `readonly` ;
 - list/read/tasks passent sur le vault ;
-- la liste et le schéma des Bases sont disponibles localement. Les requêtes qui
-  nécessitent les filtres de la Base, les règles d’une vue ou le calcul des
-  formules passent par Obsidian avec le Bases Bridge. Utiliser
+- la liste et le schéma des Bases sont disponibles localement. Les lignes d’une
+  Base nécessitent Obsidian et le Bases Bridge. En headless, `bases_query` exige
   `property_only: true` pour [parcourir les propriétés des notes Markdown en cache](../OPERATIONS.fr.md#dépendances-requises).
 
 ## Écritures guarded

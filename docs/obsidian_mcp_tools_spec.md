@@ -353,19 +353,17 @@ semantic manifest/vector metadata are cached locally for faster warm refreshes.
 - `bases_upsert_rows`: live REST row upsert, or guarded Markdown frontmatter
   `set` operations in `headless-filesystem`.
 
-Without Obsidian REST, `bases_query` returns `SERVICE_UNAVAILABLE` for a named
-view, Base-level filters, filters or a limit on the default view, grouping or ordering on
-the default view without a request sort, configured formulas, filters or sorts on
-`formula.*`, or explicit `evaluate: true`. Use Obsidian with the Bases Bridge
-to apply those rules. A plain request with none of these requirements can omit
-`evaluate`.
+Base rows require Obsidian and the Bases Bridge, including for filterless
+Bases. Without REST, `bases_query` returns `SERVICE_UNAVAILABLE` with reason
+`base_query_requires_obsidian` unless `property_only: true` is set. The value
+of `evaluate` does not change this requirement.
 
 Set `property_only: true` to explicitly scan cached Markdown notes in the
 local fallback. The Base must exist. The scan applies ad-hoc filters and sorts
 to raw properties and paginates their matches. Results report
 `source: "local-fallback"`, `mode: "property-scan"`, `evaluate: false`, and
-`limitations`. The rows and total exclude non-Markdown files, even for plain
-queries. Local filters support `and`, `or`, and `not` trees with simple
+`limitations`. The rows and total describe cached Markdown notes independently
+of any Base or view rules. Local filters support `and`, `or`, and `not` trees with simple
 comparison expressions, bare truthy references, and local property maps.
 Unsupported filters and sorts return `VALIDATION_ERROR`. This includes
 `formula.*` references in an explicit property scan.

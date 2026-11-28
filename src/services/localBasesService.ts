@@ -55,11 +55,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function hasFilters(value: unknown): boolean {
-  if (isRecord(value)) return Object.keys(value).length > 0;
-  return Boolean(value);
-}
-
 function extractFrontmatter(content: string): Record<string, unknown> {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/u);
   if (!match) return {};
@@ -235,14 +230,21 @@ export class LocalBasesService {
       limitations: string[];
     }
   > {
-    const base = await this.getParsedBase(baseId, context);
+    if (request.property_only !== true) {
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        "Base query requires Obsidian.",
+        { ...context, reasonCode: "base_query_requires_obsidian", retryable: false },
+      );
+    }
+
+    await this.getParsedBase(baseId, context);
     const filter = compileLocalBaseFilter(request.filter);
     const sort = request.sort ?? [];
-    const referencesFormula = filter?.usesFormula || sort.some(({ prop }) => prop.startsWith("formula."));
     if (
       !filter ||
-      sort.some(({ prop }) => !isLocalBaseProperty(prop)) ||
-      (request.property_only && referencesFormula)
+      filter.usesFormula ||
+      sort.some(({ prop }) => !isLocalBaseProperty(prop) || prop.startsWith("formula."))
     ) {
       throw new McpError(
         BaseErrorCode.VALIDATION_ERROR,
@@ -251,32 +253,6 @@ export class LocalBasesService {
       );
     }
 
-    const { filters, formulas, views } = base.config;
-    // The REST Bridge uses the first view when the caller omits `view`.
-    const defaultView = Array.isArray(views) ? views.find(isRecord) : undefined;
-    const usesDefaultViewOrder =
-      !sort.length &&
-      ((Array.isArray(defaultView?.order) && defaultView.order.length > 0) ||
-        (Array.isArray(defaultView?.sort) && defaultView.sort.length > 0) ||
-        isRecord(defaultView?.groupBy));
-    const usesFormulas =
-      (isRecord(formulas) && Object.keys(formulas).length > 0) ||
-      referencesFormula;
-    const requiresObsidian =
-      request.view !== undefined ||
-      request.evaluate === true ||
-      hasFilters(filters) ||
-      hasFilters(defaultView?.filters) ||
-      typeof defaultView?.limit === "number" ||
-      usesDefaultViewOrder ||
-      usesFormulas;
-    if (requiresObsidian && !request.property_only) {
-      throw new McpError(
-        BaseErrorCode.SERVICE_UNAVAILABLE,
-        "Base query requires Obsidian.",
-        { ...context, reasonCode: "base_query_requires_obsidian", retryable: false },
-      );
-    }
     const rows: LocalBaseRow[] = [];
 
     for (const entry of this.vaultCacheService.getEntriesByPrefix()) {

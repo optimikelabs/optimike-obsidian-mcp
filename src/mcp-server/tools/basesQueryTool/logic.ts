@@ -35,7 +35,7 @@ export const BasesQueryInputSchema = z
       .string()
       .min(1)
       .optional()
-      .describe("Vue de la Base à interroger. Nécessite Obsidian, sauf pour un parcours property_only qui ignore la vue."),
+      .describe("Vue de la Base à interroger via Obsidian et le Bases Bridge. Le parcours property_only ignore la vue."),
     filter: z
       .record(z.any())
       .optional()
@@ -58,11 +58,11 @@ export const BasesQueryInputSchema = z
     evaluate: z
       .boolean()
       .optional()
-      .describe("Demande les valeurs évaluées. Par défaut true via REST. En local, true exige property_only pour obtenir un parcours sans calcul."),
+      .describe("Demande les valeurs évaluées via REST, avec true par défaut. Le parcours property_only est toujours sans calcul."),
     property_only: z
       .boolean()
       .optional()
-      .describe("Sans REST, accepte explicitement un parcours des propriétés des notes Markdown en cache. Ignore les filtres de la Base, les règles de vue et les formules. Sans effet via REST."),
+      .describe("Sans REST, true est requis pour obtenir un parcours des propriétés des notes Markdown en cache. Ignore les filtres de la Base, les règles de vue et les formules. Sans effet via REST."),
   })
   .describe(
     "Interroge une Base via Obsidian ou renvoie un parcours local de propriétés Markdown.",

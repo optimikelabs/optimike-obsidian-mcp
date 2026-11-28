@@ -714,7 +714,7 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
     code === BaseErrorCode.SERVICE_UNAVAILABLE &&
     reasonCode === "base_query_requires_obsidian"
   )
-    return "Without Obsidian, this query cannot apply Base filters, view rules (filters, grouping, ordering and limits), or formula evaluation. Run with Obsidian and the Bases Bridge, or set property_only: true to scan cached Markdown properties.";
+    return "Base rows require Obsidian and the Bases Bridge, including for Bases without filters. Set property_only: true to scan cached Markdown properties independently of the Base and its views.";
   if (
     code === BaseErrorCode.VALIDATION_ERROR &&
     reasonCode === "base_query_unsupported_local_input"
