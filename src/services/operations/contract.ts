@@ -1,7 +1,15 @@
 import { createHash } from "node:crypto";
 import type { FrontmatterAssessment } from "../obsidianFrontmatterFormat.js";
+import { McpError } from "../../types-global/errors.js";
 
 export const OPERATION_RUNTIME_CONTRACT_VERSION = 1 as const;
+export const HEADLESS_VAULT_LOCK_BUSY = "headless_vault_lock_busy";
+
+export function isHeadlessVaultLockBusy(error: unknown) {
+  return error instanceof McpError && error.details?.reasonCode === HEADLESS_VAULT_LOCK_BUSY;
+}
+
+export type ConcurrentEditReplacement = { sha256: string; observedAt: string; modifiedAt?: string };
 
 export type OperationPhase = "planned" | "applying" | "terminal";
 
@@ -41,9 +49,11 @@ export type OperationReceipt = {
   };
   beforeProof: OperationProof;
   afterProof?: OperationProof;
+  replacesConcurrentEdit?: ConcurrentEditReplacement;
   postflight: {
     source?: "filesystem-reread";
-    reason?: "modified_time_settlement" | "headless_atomic_exchange_unavailable" | "headless_displaced_edit";
+    reason?: "modified_time_settlement" | "headless_atomic_exchange_unavailable" | "headless_displaced_edit" | typeof HEADLESS_VAULT_LOCK_BUSY;
+    retryable?: true;
     checkAfter?: string;
     status:
       | "not_started"

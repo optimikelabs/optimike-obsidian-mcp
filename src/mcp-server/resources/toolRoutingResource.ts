@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import "../../config/toolProfileCli.js";
 import { installToolProfileRegistrationGate } from "../toolProfileRuntime.js";
+import type { ToolRegistrationMode } from "../toolSurfaceRegistry.js";
 
 export const TOOL_ROUTING_RESOURCE_URI =
   "optimike://guides/tool-routing" as const;
@@ -74,10 +75,10 @@ closed next action. It never applies or recovers an operation.
 There is intentionally no generic public \`operation_*\` surface.
 `;
 
-export function registerToolRoutingResource(server: McpServer): void {
+export function registerToolRoutingResource(server: McpServer, registrationMode?: ToolRegistrationMode): void {
   // server.ts calls this bootstrap point before registering any MCP tools.
   // Install the selected profile first so hidden tools never reach tools/list.
-  installToolProfileRegistrationGate(server);
+  installToolProfileRegistrationGate(server, undefined, registrationMode);
 
   server.registerResource(
     "optimike-tool-routing",

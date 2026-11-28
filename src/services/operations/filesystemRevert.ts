@@ -1,9 +1,9 @@
 import { z } from "zod/v3";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { assertWriteAllowed } from "../writePolicy.js";
-import { operationDigest, type OperationReceipt, type OperationOutcome } from "./contract.js";
+import { HEADLESS_VAULT_LOCK_BUSY, isHeadlessVaultLockBusy, operationDigest, type OperationReceipt, type OperationOutcome } from "./contract.js";
 import { FILESYSTEM_AUTHORITY, type FilesystemNoteBackend } from "./filesystemNoteBackend.js";
-import { ObsidianNoteReplaceConcurrencyError, displacedFilesystemEdit, type ObsidianNoteReplacePlan, type ObsidianNoteReplaceJournal } from "./obsidianNoteReplaceJournal.js";
+import { ObsidianNoteReplaceConcurrencyError, displacedFilesystemEdit, replacedConcurrentEdit, type ObsidianNoteReplacePlan, type ObsidianNoteReplaceJournal } from "./obsidianNoteReplaceJournal.js";
 
 const KIND = "obsidian.operation.revert";
 const PREFIX = "obsidian-operation-revert:v1:";
@@ -48,12 +48,14 @@ export class FilesystemRevert {
         source.projection?.kind !== SOURCES.get(prefix)) refuse("The headless operation does not match the target.");
     const divergent = source.status === "outcome_unknown" ? source.filesystem.divergentObservation : undefined;
     const displaced = displacedFilesystemEdit(source);
-    const restoreDisplaced = displaced !== undefined;
+    const undoConcurrentRestore = prefix === PREFIX && source.status === "committed" &&
+      source.projection?.proof.restoreDisplaced === true && source.projection.proof.displacedEditVerified === true;
+    const restoreDisplaced = displaced !== undefined || undoConcurrentRestore;
     if (divergent !== undefined && source.filesystem.localStageMode === "exchange" && !restoreDisplaced) {
       refuse("The exchange has no verified displaced edit eligible for restoration.");
     }
-    if (prefix === PREFIX && !restoreDisplaced) refuse("This revert has no displaced edit to restore.");
-    const before = restoreDisplaced
+    if (prefix === PREFIX && !restoreDisplaced) refuse("This revert has no retained concurrent edit to restore.");
+    const before = displaced
       ? new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Buffer.from(displaced.bytesBase64, "base64"))
       : source.filesystem.beforeContent;
     const afterSha256 = source.status === "committed" ? source.filesystem.stagedSha256 : divergent?.sha256;
@@ -67,19 +69,22 @@ export class FilesystemRevert {
       if (replay.idempotencyIdentity !== identity) refuse("The idempotency key belongs to another revert.");
       return this.status(PREFIX + replay.operationId);
     }
-    this.authorize("plan", source.path, restoreAbsence || divergent !== undefined, before?.length);
+    const restoresAfterDivergence = divergent !== undefined || undoConcurrentRestore;
+    this.authorize("plan", source.path, restoreAbsence || restoresAfterDivergence, before?.length);
     const sealed = await this.backend.sealRevert(source.path, restoreAbsence ? undefined : before, afterSha256, restoreDisplaced);
     if (sealed.bindingFingerprint !== source.bindingFingerprint) refuse("The vault differs from the original operation.");
     if (sealed.policyDigest !== source.filesystem.policyDigest) refuse("The protected date policy differs from the original operation.");
+    const replacesConcurrentEdit = undoConcurrentRestore || (displaced && replacedConcurrentEdit(source))
+      ? { sha256: afterSha256, modifiedAt: sealed.beforeModifiedAt, observedAt: sealed.beforeObservedAt } : undefined;
     const row = this.journal.create({
       path: source.path, idempotencyKey: key, idempotencyIdentity: identity,
       beforeSha256: afterSha256, afterSha256: sealed.afterSha256, nextContent: sealed.content,
       bindingFingerprint: sealed.bindingFingerprint,
-      filesystem: { policyDigest: sealed.policyDigest, beforeContent: sealed.before },
+      filesystem: { policyDigest: sealed.policyDigest, beforeContent: sealed.before, replacesConcurrentEdit },
       requestDigest: operationDigest({ identity, before: afterSha256, after: sealed.afterSha256,
         policy: sealed.policyDigest, binding: sealed.bindingFingerprint }),
       projection: { contractVersion: 1, kind: KIND, publicIdempotencyKey: input.idempotencyKey, intentDigest: identity,
-        proof: { restoreAbsence, restoresAfterDivergence: divergent !== undefined, restoreDisplaced,
+        proof: { restoreAbsence, restoresAfterDivergence, restoreDisplaced,
           displacedEditVerified: restoreDisplaced } },
     });
     return this.receipt(row);
@@ -120,8 +125,10 @@ export class FilesystemRevert {
     }
     const attempt = row.executionOwner!.attemptId;
     try {
+      row = this.journal.recordEffectAttempt(row.operationId, attempt, undefined);
       await this.backend.applyRevert(row);
     } catch (error) {
+      if (isHeadlessVaultLockBusy(error)) throw error;
       try {
         this.journal.transition(row.operationId, ["applying"],
           error instanceof McpError && error.code === BaseErrorCode.CONFLICT ? "conflict"
@@ -135,6 +142,7 @@ export class FilesystemRevert {
   private receipt(row: ObsidianNoteReplacePlan): OperationReceipt {
     const committed = row.status === "committed";
     const phase = row.status === "planned" || row.status === "applying" ? row.status : "terminal";
+    const concurrentEdit = replacedConcurrentEdit(row);
     return {
       contractVersion: 1, operationKind: KIND, operationId: row.operationId,
       idempotencyKey: row.projection!.publicIdempotencyKey, planRef: PREFIX + row.operationId, planDigest: row.requestDigest,
@@ -143,6 +151,7 @@ export class FilesystemRevert {
       beforeProof: { kind: "note-sha256", digest: row.beforeSha256 },
       ...(committed ? { afterProof: { kind: row.projection!.proof.restoreAbsence ? "observed-path-absence" : "note-sha256",
         digest: row.filesystem?.stagedSha256 ?? row.afterSha256 } } : {}),
+      ...(concurrentEdit ? { replacesConcurrentEdit: concurrentEdit } : {}),
       phase, outcome: phase === "terminal" ? row.status as OperationOutcome : null,
       admittedAt: row.createdAt, updatedAt: row.updatedAt,
       ...(phase === "terminal" ? { terminalAt: row.updatedAt } : {}),
@@ -150,6 +159,7 @@ export class FilesystemRevert {
       recoveryAllowed: row.status === "applying" || (row.status === "outcome_unknown" && !row.filesystem?.stagedIdentity),
       postflight: { status: committed ? "verified" : phase === "planned" ? "not_started" : "unverified",
         ...(row.failure === "headless_atomic_exchange_unavailable" ? { reason: row.failure } : {}),
+        ...(row.failure === HEADLESS_VAULT_LOCK_BUSY ? { reason: HEADLESS_VAULT_LOCK_BUSY, retryable: true as const } : {}),
         ...(displacedFilesystemEdit(row) ? { reason: "headless_displaced_edit" as const } : {}),
         ...(committed ? { source: "filesystem-reread" as const } : {}) },
     };
