@@ -204,6 +204,7 @@ export class ObsidianRestApiService {
               const payload = axiosError.response.data as { error?: { reasonCode?: unknown } } | undefined;
               const reason = payload && typeof payload === "object" && payload.error && typeof payload.error === "object" ? payload.error.reasonCode : undefined;
               bridgeReasons.add("base_query_selection_unavailable");
+              bridgeReasons.add("base_query_row_disappeared");
               bridgeReasons.add("base_view_not_found");
               bridgeReasonCode = typeof reason === "string" && bridgeReasons.has(reason) ? reason : undefined;
               const publicReason = bridgeReasonCode ? { reasonCode: bridgeReasonCode } : {};

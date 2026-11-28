@@ -254,7 +254,7 @@ type BasePublicErrorDescriptor = {
   code: string;
   reasonCode: string;
   status: "blocked" | "conflict" | "not_found" | "rejected";
-  retryable: false;
+  retryable: boolean;
   message: string;
 };
 
@@ -324,6 +324,13 @@ const BASE_PUBLIC_ERRORS: Record<string, BasePublicErrorDescriptor> = {
     status: "rejected",
     retryable: false,
     message: "Obsidian's Bases engine could not select the requested rows.",
+  },
+  base_query_row_disappeared: {
+    code: "base_query_row_disappeared",
+    reasonCode: "base_query_row_disappeared",
+    status: "rejected",
+    retryable: true,
+    message: "A selected Base row is no longer available. Run the query again.",
   },
   base_view_not_found: {
     code: "base_view_not_found",
@@ -1688,7 +1695,7 @@ export default class BasesBridgePlugin extends Plugin {
       for (const rowPath of engine.paths) {
         const file = this.app.vault.getAbstractFileByPath(rowPath);
         if (!(file instanceof TFile)) {
-          sendJson(res, 503, atomicError("base_query_selection_unavailable"));
+          sendJson(res, 503, atomicError("base_query_row_disappeared"));
           return;
         }
         candidates.push({ file });

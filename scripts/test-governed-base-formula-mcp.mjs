@@ -190,12 +190,11 @@ const server = http.createServer((req, res) => {
     }
     if (req.method === "POST" && url.pathname === `/bases/${encodeURIComponent(fixturePath)}/query`) {
       const request = await body(req);
-      assert.equal(request.evaluate, false);
       if (request.view === "Engine unavailable") {
         return json(res, 503, { error: { reasonCode: "base_query_selection_unavailable" } });
       }
       return json(res, 200, {
-        source: "fallback", evaluate: false, total: 1, page: 1,
+        source: "fallback", evaluate: request.evaluate, total: 1, page: 1,
         rows: [{ file: { path: "Canary/Approximate.md" }, props: {} }],
       });
     }
@@ -260,10 +259,14 @@ function parsed(result) {
 
 try {
   await client.connect(transport);
-  for (const view of ["Older Bridge", "Engine unavailable"]) {
+  for (const query of [
+    { view: "Older Bridge", evaluate: false },
+    { view: "Older Bridge", evaluate: true },
+    { view: "Engine unavailable", evaluate: false },
+  ]) {
     const result = await client.callTool({
       name: "bases_query",
-      arguments: { base_id: fixturePath, view, evaluate: false },
+      arguments: { base_id: fixturePath, ...query },
     });
     assert.equal(result.isError, true);
     const payload = parsed(result);

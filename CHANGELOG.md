@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Bases Bridge 1.3.1 uses Obsidian's engine to select the same live `bases_query` rows in both `evaluate` modes. `evaluate: false` omits formula result columns, and an unavailable selection returns an explicit error. Governed Base row selection explicitly requests its supported-filter snapshot. Update the MCP and Bridge together.
+- Bases Bridge 1.3.2 uses Obsidian's engine to select the same live `bases_query` rows in both `evaluate` modes. `evaluate: false` omits formula result columns, and an unavailable selection returns an explicit error. An unknown view now returns HTTP 404 (`base_view_not_found`). Governed Base row selection explicitly requests its supported-filter snapshot. Update the MCP and Bridge together.
 
 ## [3.23.1] - 2026-11-26
 

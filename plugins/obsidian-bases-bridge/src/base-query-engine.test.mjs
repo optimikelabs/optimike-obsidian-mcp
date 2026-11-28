@@ -57,7 +57,13 @@ const TABLE = {
   'file.name + "!"': (row) => `${row.name}!`,
 };
 
-async function queryRoute({ baseText = JSON.stringify(BASE), engine = true, notes = NOTES, table = TABLE } = {}) {
+async function queryRoute({
+  baseText = JSON.stringify(BASE),
+  engine = true,
+  notes = NOTES,
+  table = TABLE,
+  removedAfterSelection,
+} = {}) {
   const { Bridge, TFile } = await loadBridge();
   const files = new Map();
   const add = (path) => {
@@ -81,7 +87,12 @@ async function queryRoute({ baseText = JSON.stringify(BASE), engine = true, note
   });
   const calls = [];
   const rows = notes.map((path) => ({ path, name: path.split("/").pop() }));
-  const handler = fakeBaseQueryHandler(vault, { rows, table, calls });
+  const nativeQuery = fakeBaseQueryHandler(vault, { rows, table, calls });
+  const handler = async (params) => {
+    const result = await nativeQuery(params);
+    if (removedAfterSelection) files.delete(removedAfterSelection);
+    return result;
+  };
   const routes = new Map();
   const api = {
     addRoute(path) {
@@ -165,6 +176,17 @@ test("public queries refuse when the engine cannot select rows", async () => {
     assert.equal(payload.error.reasonCode, "base_query_selection_unavailable");
     assert.equal(payload.rows, undefined);
   }
+});
+
+test("a selected file that disappears makes the query retryable", async () => {
+  const removedPath = "Notes/b.md";
+  const query = await queryRoute({ removedAfterSelection: removedPath });
+  const { status, payload } = await query({ view: "Top", evaluate: false });
+  assert.equal(status, 503);
+  assert.equal(payload.retryable, true);
+  assert.equal(payload.error.reasonCode, "base_query_row_disappeared");
+  assert.equal(payload.rows, undefined);
+  assert.ok(!JSON.stringify(payload).includes(removedPath));
 });
 
 test("a missing view refuses without echoing the caller value", async () => {

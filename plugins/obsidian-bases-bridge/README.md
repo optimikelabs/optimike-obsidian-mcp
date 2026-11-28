@@ -157,7 +157,7 @@ est `bases_formula_patch_*`, pas l’envoi de YAML arbitraire.
 ## Requêtes (`/query`)
 
 `POST /bases/:id/query` accepte `view`, `filter`, `sort`, `limit`, `page` et
-`evaluate`. Avec le Bridge 1.3.1, les deux modes utilisent le moteur d’Obsidian
+`evaluate`. Avec le Bridge 1.3.2, les deux modes utilisent le moteur d’Obsidian
 pour appliquer les filtres globaux, les filtres de vue, le tri et la limite de
 la vue (`source: "engine"`). Le moteur évalue les formules nécessaires aux
 filtres ou au tri de la vue. Le Bridge applique ensuite `filter` et `sort` de
@@ -175,7 +175,15 @@ lignes. Au-delà, le Bridge ignore les conditions et tris sur formule et émet
 `formula_filter_not_evaluated:too_many_rows:<lignes>:1000`. Les autres critères
 s’appliquent toujours.
 
+Sur 8 000 notes liées avec `evaluate: true`, une page de 50 lignes prenait
+0,45 s, avec une réponse d’Obsidian en 0,2 s au plus. Un filtre et un tri sur
+formule sur 820 lignes prenaient 2,5 s, avec un blocage d’Obsidian de 1,2 s au
+plus par lot. Le calcul de toutes les lignes en une fois bloquait Obsidian
+pendant 15,9 s.
+
 Une sélection impossible renvoie HTTP 503 (`base_query_selection_unavailable`).
+Si un fichier sélectionné disparaît pendant la requête, le Bridge renvoie
+HTTP 503 avec `base_query_row_disappeared` et `retryable: true`.
 Une vue inconnue renvoie HTTP 404 (`base_view_not_found`). Si seules les
 colonnes de résultat ne peuvent pas être calculées après la sélection, les
 lignes sont renvoyées avec `formula_not_evaluated:<nom>:<raison>`.

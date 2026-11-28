@@ -324,7 +324,7 @@ semantic manifest/vector metadata are cached locally for faster warm refreshes.
 - `bases_list`: list `.base` definitions via Bases Bridge REST or local fallback.
 - `bases_get_schema`: inspect a `.base` schema via REST or local fallback.
 - `bases_query`: query Bases via REST, or simple local fallback filters in
-  headless modes. In live queries with Bases Bridge 1.3.1, Obsidian's engine
+  headless modes. In live queries with Bases Bridge 1.3.2, Obsidian's engine
   applies Base and view filters, view sort and view limit in both `evaluate`
   modes (`source: "engine"`). `evaluate: false` omits formula columns and
   `computed`. Obsidian still evaluates formulas needed by the view. Request
@@ -333,8 +333,9 @@ semantic manifest/vector metadata are cached locally for faster warm refreshes.
   criteria and emits `formula_filter_not_evaluated:too_many_rows:<rows>:1000`.
   `evaluate: true` (default) returns the engine's rendered formula values for
   the requested page. If the engine cannot select rows, the query returns
-  `SERVICE_UNAVAILABLE` with reason `base_query_selection_unavailable`. An
-  unknown view returns `NOT_FOUND` with reason `base_view_not_found`.
+  `SERVICE_UNAVAILABLE` with reason `base_query_selection_unavailable`. If a
+  selected file disappears during the query, retry on `base_query_row_disappeared`.
+  An unknown view returns `NOT_FOUND` with reason `base_view_not_found`.
 - `bases_functions`: live only; the Bases formula functions of the installed
   Obsidian, grouped by receiver type, or the signatures of one type (`on`).
 - `bases_check`: live only; formula health of one Base or of every Base as

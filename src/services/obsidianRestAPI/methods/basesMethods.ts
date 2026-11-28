@@ -78,7 +78,7 @@ export async function queryBase(
     context,
     "queryBase",
   );
-  if (payload.evaluate === false && result?.source !== "engine") {
+  if (result?.source !== "engine") {
     throw new McpError(
       BaseErrorCode.SERVICE_UNAVAILABLE,
       "Obsidian's Bases engine could not select the requested rows.",
