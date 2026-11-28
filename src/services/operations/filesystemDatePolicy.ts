@@ -1,5 +1,4 @@
 import { posix } from "node:path";
-import { isDeepStrictEqual } from "node:util";
 import { JSON_SCHEMA, load } from "js-yaml";
 import picomatch from "picomatch/posix.js";
 import { z } from "zod/v3";
@@ -23,7 +22,8 @@ const settings = z.object({
   timezone: z.string().max(128).optional(),
   enableContentHashCheck: z.boolean().default(true),
   hashTrackingMode: z.enum(["body", "frontmatter", "both"]).default("body"),
-  frontmatterHashExcludeKeys: z.array(z.string()).max(0).optional(),
+  frontmatterHashExcludeKeys: z.array(z.string().max(128).refine(key => !key.includes(">"))).max(64).optional(),
+  headerUpdateCount: z.string().max(128).refine(key => !key.includes(">")).optional(),
   trackExcalidraw: z.boolean().default(true),
   minSecondsBetweenSaves: z.number().int().min(5).max(300).default(30),
   enableNumberProperties: z.literal(false).optional(),
@@ -111,9 +111,21 @@ function changesModification(policy: FilesystemDatePolicy, before: string | unde
   const mode = policy.fdm.hashTrackingMode;
   if (mode !== "frontmatter" && body(before) !== body(after)) return true;
   if (mode === "body") return false;
-  const owned = new Set(policy.keys.map(normalizeDateKey));
-  const tracked = (content: string) => Object.fromEntries(Object.entries(properties(content)).filter(([key]) => !owned.has(normalizeDateKey(key))));
-  return !isDeepStrictEqual(tracked(before), tracked(after));
+  const excluded = new Set([policy.fdm.headerCreated, policy.fdm.headerUpdated,
+    policy.fdm.headerLastViewed ?? "viewed", policy.fdm.headerUpdateCount ?? "",
+    ...(policy.fdm.frontmatterHashExcludeKeys ?? []),
+  ].map(key => key.trim()));
+  const tracked = (content: string) => {
+    const lines = (frontmatterEnvelope(content)?.yaml ?? "").replace(/\r?\n$/u, "").split(/\r?\n/u);
+    let omit = false;
+    return lines.filter(line => {
+      const key = /^([^\s:][^:]*?)\s*:/u.exec(line)?.[1];
+      if (key !== undefined) omit = excluded.has(key);
+      else if (/^\S/u.test(line) && line.trim()) omit = false;
+      return !omit;
+    }).join("\n");
+  };
+  return tracked(before) !== tracked(after);
 }
 
 export function renderFilesystemDates(content: string, updates: FrontmatterPatchOperation[]) {

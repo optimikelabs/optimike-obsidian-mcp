@@ -162,6 +162,8 @@ async function checkDates() {
   const withLabelEdit = edited.replace("label: first", "label: second");
   assert.equal(sealFilesystemDates(bodyOnly, "Note.md", withLabelEdit, time + 1000, source(edited)), withLabelEdit);
   assert.equal(materializeFilesystemDates(bodyOnly, "Note.md", withLabelEdit, time + 2000, edited), withLabelEdit);
+  const excludedLabel = await loadPolicy({ frontmatterHashExcludeKeys: ["label"] });
+  assert.equal(sealFilesystemDates(excludedLabel, "Note.md", withLabelEdit, time + 1000, source(edited)), withLabelEdit);
   assert.throws(() => sealFilesystemDates(policy, "Note.md", withLabelEdit, time + 1000, source(edited)), /minimum save interval/u);
   assert.equal(sealFilesystemDates(policy, "Note.md", "\n", time), "\n");
   const drawing = "---\nexcalidraw-plugin: parsed\n---\nDrawing.\n";
