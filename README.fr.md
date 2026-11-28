@@ -75,7 +75,7 @@ Le chemin `/mcp` sans qualificatif utilise désormais `standard` ; `/mcp/full` r
 
 Pré-requis :
 
-- Node.js `>=22.12.0` ;
+- Node.js `>=22.13.0` ;
 - Obsidian Desktop uniquement pour les fonctions live ;
 - plugins correspondant aux capacités activées.
 

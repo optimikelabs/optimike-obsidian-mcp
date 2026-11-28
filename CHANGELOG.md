@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Headless note reads, listings, search and status distinguish local cache freshness from upstream Sync evidence. An optional heartbeat records the last successful pull, exposes stalled or failed sync, and can guard filesystem writes. Authenticated status lists indexed Sync conflict files.
 - The standalone semantic index producer has a polling service mode with incremental embeddings, an exclusive producer lock, retry backoff and atomic publication. External semantic search and runtime status expose the generation, build time and observed pending changes.
 - Headless Sync receipts are bound to the vault path. Status caps the conflict list and reports the full count. The semantic service recovers abandoned producer leases, keeps a reader grace period before pruning, and requires one-use authorization for deletions beyond its configured limit.
+- The semantic service now caps generations, carries forward a changing note's last published vectors, and keeps indexing through Windows status-file contention or a damaged retirement ledger. Node.js 22.13.0 or later is required.
 
 ## [3.23.1] - 2026-11-26
 

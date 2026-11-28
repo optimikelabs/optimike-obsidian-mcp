@@ -140,12 +140,15 @@ arrivées continues ne repoussent pas indéfiniment une construction. Si seul
 l’horodatage d’un fichier change, le service vérifie son empreinte avant de
 le compter. Un relevé sans changement ne contacte pas l’encodeur.
 
-Le producteur vérifie l’identité du coffre et le contenu des notes incluses
-avant de publier. Les nouvelles notes arrivées pendant le calcul restent en
-attente. Si une note incluse change, `source_drift` déclenche une nouvelle
-tentative après le délai d’agrégation. Une panne de l’encodeur espace les
-tentatives jusqu’à cinq minutes. Un changement de profil d’encodage exige
-`--rebuild` hors service avant de redémarrer.
+Le producteur vérifie l’identité du coffre et le contenu des nouvelles versions
+avant de publier. Si une note change pendant le calcul, le service reprend ses
+derniers vecteurs et empreintes publiés, ou l’écarte si elle n’a jamais été
+publiée. Ses modifications restent en attente. Sans changement stable à
+publier, `source_drift` déclenche une nouvelle tentative après le délai
+d’agrégation. Un cache mémoire de 64 Mio réutilise les encodages récents à
+entrée et profil identiques, jusqu’à éviction ou redémarrage. Une panne de
+l’encodeur espace les tentatives jusqu’à cinq minutes. Un changement de profil
+d’encodage exige `--rebuild` hors service.
 
 Le seuil de suppression traite un même contenu réapparu sous un nouveau chemin
 comme un renommage, avec une correspondance un pour un. Le chemin peut
@@ -163,13 +166,22 @@ authentifié exposent `semanticIndex.generation`, `builtAt`, `pendingChanges`,
 `indexGeneration`, `indexBuiltAt` et `staleNotes`. Ce dernier champ compte les
 ajouts, modifications de contenu et suppressions au dernier relevé valide.
 Le nombre et la dernière erreur valent `null` quand le relevé expire ou manque.
+Un conflit de partage du fichier de statut déclenche quelques réessais. Le
+producteur continue même si le statut reste bloqué. Il isole le registre des
+retraits s’il est corrompu, le reconstruit et expose
+`semanticIndex.maintenanceWarning: "retirements_rebuilt"` pour le reste de l’exécution.
 
 Le service conserve `CURRENT` et deux générations retirées récentes par défaut
-(`--keep-generations`). Il conserve aussi toute génération retirée dans le
-délai de grâce (`--reader-grace-seconds`, 3 600 secondes par défaut). Le délai
-court depuis le retrait ou, à défaut, son premier constat. Réglez-le au-dessus
-de la durée maximale d’une lecture. Utilisez le pointeur avec le service.
-Gardez une copie à part pour les lecteurs qui ouvrent un dossier fixe.
+(`--keep-generations`), avec un plafond global de quatre (`--max-generations`).
+Le plafond s’applique aussi lors de la reprise d’un index existant. Une fois
+le plafond atteint, le producteur attend la fin d’un délai de grâce avant le
+calcul suivant. Ce délai vaut 60 secondes par défaut (`--reader-grace-seconds`).
+Chaque nouvelle requête lit `CURRENT`. Seules les requêtes déjà en cours
+peuvent encore avoir besoin de l’ancienne génération. Réglez le délai au-dessus
+de la durée de votre lecture la plus longue. Chaque génération contient les
+fichiers de vecteurs complets, y compris les vecteurs inchangés. Prévoyez
+l’espace pour autant d’index complets et une copie distincte pour les lecteurs
+qui ouvrent un dossier fixe.
 
 Voir le [déploiement des services](../OPERATIONS.fr.md#services-sync-et-index-sémantique-headless).
 

@@ -135,11 +135,14 @@ the start of a build. Metadata-only changes to a known file are checked by
 content hash before counting pending work. Unchanged polls do not contact
 the embedder.
 
-The producer verifies the vault identity and the content of every included note
-before publication. Unrelated arrivals remain pending for the next calculation.
-If included sources change, `source_drift` waits for the debounce and retries.
-Embedding errors use exponential backoff capped at five minutes. An encoding
-profile change requires an offline `--rebuild` before restarting the service.
+The producer verifies the vault identity and the content of newly included notes
+before publication. If a note changes during the build, the service carries
+forward its last published vectors and hashes, or leaves it out if it has no
+published version. Its changes remain pending. If a build has no stable changes
+to publish, `source_drift` waits for the debounce and retries. A 64 MiB in-memory
+cache reuses encodings from recent attempts by exact input hash and encoding
+profile until eviction or restart. Embedding errors use exponential backoff capped
+at five minutes. An encoding profile change requires an offline `--rebuild`.
 
 Content-identical renames are matched one-to-one against new paths when applying
 the deletion limit. A changed breadcrumb can still require new embeddings.
@@ -158,13 +161,21 @@ authenticated `/statusz` expose `semanticIndex.generation`, `builtAt`,
 reflects additions, content changes and removals in the latest valid poll.
 It can lag recent disk writes. Missing or expired observations yield `null`
 for the count and last error.
+Status writes retry transient file sharing errors and leave the producer running
+if publication remains blocked. Corrupt retirement metadata is quarantined
+and rebuilt. Status reports `semanticIndex.maintenanceWarning: "retirements_rebuilt"`
+for the rest of that service run.
 
 The service keeps `CURRENT` plus two recent retired generations by default
-(`--keep-generations`). It also retains all generations within the reader grace
-period (`--reader-grace-seconds`, default 3,600 seconds), measured from retirement,
-with the first observation as a conservative fallback. Set grace above the
-maximum time a reader can hold a generation. Use the pointer for service readers.
-A reader pinned to a concrete directory must have a separately retained copy.
+(`--keep-generations`) and caps total generations at four (`--max-generations`).
+That cap also applies when bringing an existing index under the service.
+At capacity the producer waits for a retirement grace period to expire before
+building again. Grace defaults to 60 seconds (`--reader-grace-seconds`), since
+each new query opens `CURRENT` and only requests already in flight can need the
+retired generation. Set grace above the longest reader request for your
+deployment. Each generation contains full vector files, even for unchanged
+vectors. Allow disk space for that many complete indexes. Use the pointer for
+service readers and a separately retained copy for readers fixed to a directory.
 
 See [service deployment](../OPERATIONS.md#headless-sync-and-semantic-services).
 

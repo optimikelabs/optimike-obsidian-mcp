@@ -270,21 +270,126 @@ test("included content drift is retried with the debounce instead of embedding b
   }, "--debounce-ms", "200");
 });
 
+test("a changing note retains its published vectors while stable changes publish without duplicate encoding", async t => {
+  const f = await fixture(t);
+  await f.put("A-Hot.md", note("Original hot note"));
+  await f.put("B-Stable.md", note("Original stable note"));
+  const first = await f.run();
+  const from = f.requests.length;
+  const holdHot = Promise.withResolvers();
+  await f.withService(async () => {
+    try {
+      await f.until(status => status.generation === first.generation && status.pendingChanges === 0);
+      f.beforeEncode(async () => {
+        await f.put("A-Hot.md", note("Second draft"));
+        f.beforeEncode(() => holdHot.promise, items => items.some(item => item.input.includes("Second draft")));
+      });
+      await Promise.all([
+        f.put("A-Hot.md", note("First draft")),
+        f.put("B-Stable.md", note("Published change")),
+      ]);
+      const partial = await f.until(status => status.generation !== first.generation && status.pendingChanges === 1);
+      const manifest = await f.manifest(partial.generation);
+      assert.equal(manifest.sources["A-Hot.md"].sha256, hash(note("Original hot note")));
+      assert.equal(manifest.sources["B-Stable.md"].sha256, hash(note("Published change")));
+      assert.deepEqual((await f.load(partial.generation)).notes.map(row => row.notePath), ["A-Hot.md", "B-Stable.md"]);
+      const encoded = f.requests.slice(from).filter(row => row.source_path.startsWith("B-Stable.md")).map(row => row.input);
+      assert.ok(encoded.length > 0);
+      assert.equal(encoded.length, new Set(encoded).size, "the rebuilt staging directory reuses encoded stable vectors");
+    } finally {
+      holdHot.resolve();
+    }
+  });
+});
+
 test("retirement keeps CURRENT, the newest retired generation, and generations within reader grace", async t => {
   const f = await fixture(t);
   await f.put("Edit.md", note("One"));
   const one = await f.run();
   await f.put("Edit.md", note("Two"));
   const two = await f.run();
-  await pruneGenerations(f.index, two.generation, 1, 5000, 1000);
+  await pruneGenerations(f.index, two.generation, 1, 5000, 3, 1000);
   await f.put("Edit.md", note("Three"));
   const three = await f.run();
-  await pruneGenerations(f.index, three.generation, 1, 5000, 5999);
+  assert.equal((await pruneGenerations(f.index, three.generation, 1, 5000, 3, 5999)).room, false);
   assert.equal((await f.load(one.generation)).notes[0].notePath, "Edit.md", "a pinned reader keeps access during grace");
-  await pruneGenerations(f.index, three.generation, 1, 5000, 6000);
+  assert.equal((await pruneGenerations(f.index, three.generation, 1, 5000, 3, 6000)).room, true);
   assert.deepEqual(new Set(await readdir(path.join(f.index, "generations"))), new Set([two.generation, three.generation]));
   assert.equal(await f.current(), three.generation);
 });
+
+test("pruning enforces the configured hard cap even when older generations are in grace", async t => {
+  const f = await fixture(t);
+  for (const text of ["One", "Two", "Three", "Four"]) {
+    await f.put("Edit.md", note(text));
+    await f.run();
+  }
+  const current = await f.current();
+  const result = await pruneGenerations(f.index, current, 1, 60_000, 3, 1000);
+  const retained = await readdir(path.join(f.index, "generations"));
+  assert.equal(result.room, false);
+  assert.equal(retained.length, 3);
+  assert.ok(retained.includes(current));
+});
+
+test("corrupt retirement state is quarantined and reported while the service keeps publishing", async t => {
+  const f = await fixture(t);
+  await f.put("Edit.md", note("Before"));
+  const first = await f.run();
+  const filename = path.join(f.index, "RETIREMENTS.json");
+  await writeFile(filename, "null");
+  await f.withService(async () => {
+    await f.until(status => status.maintenanceWarning === "retirements_rebuilt");
+    const entries = await readdir(f.index);
+    const quarantine = entries.find(name => name.startsWith("RETIREMENTS.json.corrupt-"));
+    assert.ok(quarantine);
+    assert.equal(await readFile(path.join(f.index, quarantine), "utf8"), "null");
+    assert.deepEqual(JSON.parse(await readFile(filename, "utf8")), {});
+    await f.put("Edit.md", note("After"));
+    await f.until(status => status.generation !== first.generation && status.pendingChanges === 0);
+  });
+});
+
+if (process.platform === "win32") {
+  test("a Windows reader can deny status replacement without stopping publication", async t => {
+    const f = await fixture(t);
+    await f.put("Edit.md", note("Before"));
+    const first = await f.run();
+    const program = [
+      "$stream = [IO.File]::Open($env:OPTIMIKE_TEST_STATUS, 'Open', 'Read', 'Read')",
+      "try { [Console]::WriteLine('ready'); [void][Console]::ReadLine() } finally { $stream.Dispose() }",
+    ].join("; ");
+    await f.withService(async () => {
+      await f.until(status => status.generation === first.generation && status.pendingChanges === 0);
+      const reader = execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", program], {
+        windowsHide: true,
+        env: { ...process.env, OPTIMIKE_TEST_STATUS: path.join(f.index, "SERVICE.json") },
+      });
+      const exited = once(reader, "close");
+      try {
+        const [output] = await Promise.race([once(reader.stdout, "data"), exited.then(() => assert.fail("Reader exited early"))]);
+        assert.match(String(output), /ready/u);
+        // CURRENT must change while the reader still denies deletion of SERVICE.json.
+        await f.put("Edit.md", note("After"));
+        const events = watch(f.index, { signal: AbortSignal.timeout(12_000) });
+        try {
+          if (await f.current() === first.generation) {
+            for await (const { filename } of events) {
+              if (filename === "CURRENT" && await f.current() !== first.generation) break;
+            }
+          }
+        } finally {
+          await events.return();
+        }
+        assert.notEqual(await f.current(), first.generation);
+      } finally {
+        reader.stdin.end("\n");
+        await exited;
+      }
+      await f.until(status => status.generation !== first.generation && status.pendingChanges === 0);
+    });
+  });
+}
 
 test("service recognizes a rename and requires a fresh single-use authorization for deletion", async t => {
   const f = await fixture(t);

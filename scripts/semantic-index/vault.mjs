@@ -133,19 +133,33 @@ export async function verifyIncludedSources(vault, binding, included, signal) {
     return stamp(stat);
   }
   const verified = new Map();
-  for (const [relative, digest] of included) {
-    const expected = await includedStamp(relative);
-    if (sha256(await readSource(vault, relative, expected)) !== digest) {
-      throw sourceDrift("Included Markdown changed during build");
+  const drifted = new Set();
+  async function observe(relative, check) {
+    try {
+      await check();
+    } catch (error) {
+      if (!["SOURCE_DRIFT", "ENOENT"].includes(error.code)) throw error;
+      drifted.add(relative);
     }
-    verified.set(relative, expected);
+  }
+  for (const [relative, digest] of included) {
+    await observe(relative, async () => {
+      const expected = await includedStamp(relative);
+      if (sha256(await readSource(vault, relative, expected)) !== digest) {
+        throw sourceDrift("Included Markdown changed during build");
+      }
+      verified.set(relative, expected);
+    });
   }
   for (const [relative, expected] of verified) {
-    if (await includedStamp(relative) !== expected) {
-      throw sourceDrift("Included Markdown changed during verification");
-    }
+    await observe(relative, async () => {
+      if (await includedStamp(relative) !== expected) {
+        throw sourceDrift("Included Markdown changed during verification");
+      }
+    });
   }
   await checkRoot();
+  return drifted;
 }
 
 function sameEntries(left, right) {

@@ -11,37 +11,94 @@ async function atomicJson(index, name, value) {
   const pending = path.join(index, "." + name + "-" + randomUUID());
   try {
     await writeSynced(pending, jsonLine(value));
-    await rename(pending, path.join(index, name));
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await rename(pending, path.join(index, name));
+        break;
+      } catch (error) {
+        if (attempt >= 3 || !["EPERM", "EBUSY", "EACCES"].includes(error.code)) throw error;
+        await delay(10 * 2 ** attempt);
+      }
+    }
   } finally {
     await rm(pending, { force: true });
   }
 }
 
-export async function pruneGenerations(index, current, keep, graceMs, now = Date.now()) {
-  if (await readFile(path.join(index, "CURRENT"), "utf8") !== current + "\n") {
+const generationName = /^g-[a-f0-9-]{36}$/u;
+
+export function createVectorCache(limit = 64 * 1024 * 1024) {
+  const entries = new Map();
+  let bytes = 0;
+  const size = vector => 128 + (vector?.length ?? 0);
+  return {
+    get(key) {
+      if (!entries.has(key)) return undefined;
+      const vector = entries.get(key);
+      entries.delete(key);
+      entries.set(key, vector);
+      return vector;
+    },
+    set(key, vector) {
+      if (entries.has(key)) bytes -= size(entries.get(key));
+      entries.delete(key);
+      entries.set(key, vector);
+      bytes += size(vector);
+      while (bytes > limit) {
+        const oldest = entries.keys().next().value;
+        bytes -= size(entries.get(oldest));
+        entries.delete(oldest);
+      }
+    },
+  };
+}
+
+export async function pruneGenerations(index, current, keep, graceMs, maxGenerations, now = Date.now()) {
+  const pointer = await readFile(path.join(index, "CURRENT"), "utf8")
+    .catch(error => { if (error.code === "ENOENT") return null; throw error; });
+  if (pointer !== (current ? current + "\n" : null)) {
     throw Error("CURRENT changed outside the producer lease");
   }
   const directory = path.join(index, "generations");
   const filename = "RETIREMENTS.json";
-  const previous = await readFile(path.join(index, filename), "utf8")
-    .then(JSON.parse).catch(error => { if (error.code === "ENOENT") return {}; throw error; });
+  const statePath = path.join(index, filename);
+  const raw = await readFile(statePath, "utf8")
+    .catch(error => { if (error.code === "ENOENT") return undefined; throw error; });
+  let previous = {};
+  let rebuilt = false;
+  if (raw !== undefined) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) ||
+          Object.entries(parsed).some(([id, at]) => !generationName.test(id) || !Number.isSafeInteger(at) || at < 0)) {
+        throw new Error("Invalid retirement metadata");
+      }
+      previous = parsed;
+    } catch {
+      await rename(statePath, statePath + ".corrupt-" + randomUUID());
+      rebuilt = true;
+    }
+  }
   const retired = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
-    if (!entry.isDirectory() || !/^g-[a-f0-9-]{36}$/u.test(entry.name) || entry.name === current) continue;
+    if (!entry.isDirectory() || !generationName.test(entry.name) || entry.name === current) continue;
     const stat = await lstat(path.join(directory, entry.name));
     const recorded = previous[entry.name];
     retired.push({ id: entry.name, at: Number.isSafeInteger(recorded) && recorded <= now && recorded >= 0
       ? recorded : now, built: stat.mtimeMs });
   }
   retired.sort((a, b) => b.at - a.at || b.built - a.built || a.id.localeCompare(b.id));
+  const remaining = {};
+  const retiredLimit = maxGenerations - Number(Boolean(current));
   for (const [position, entry] of retired.entries()) {
-    if (position >= keep && now - entry.at >= graceMs) {
+    if (position >= retiredLimit || (position >= keep && now - entry.at >= graceMs)) {
       await rm(path.join(directory, entry.id), { recursive: true, force: true });
+    } else {
+      remaining[entry.id] = entry.at;
     }
   }
-  const remaining = Object.fromEntries(retired.filter((entry, position) =>
-    position < keep || now - entry.at < graceMs).map(entry => [entry.id, entry.at]));
-  if (!isDeepStrictEqual(previous, remaining)) await atomicJson(index, filename, remaining);
+  if (rebuilt || !isDeepStrictEqual(previous, remaining)) await atomicJson(index, filename, remaining);
+  return { room: Object.keys(remaining).length < retiredLimit, rebuilt };
 }
 
 async function changedNotes(vault, manifest, snapshot, observations, signal) {
@@ -58,7 +115,13 @@ async function changedNotes(vault, manifest, snapshot, observations, signal) {
     }
     let observation = observations.get(name);
     if (observation?.stamp !== stamp) {
-      observation = { stamp, hash: sha256(await readSource(vault, name, stamp)) };
+      try {
+        observation = { stamp, hash: sha256(await readSource(vault, name, stamp)) };
+      } catch (error) {
+        if (!["SOURCE_DRIFT", "ENOENT"].includes(error.code)) throw error;
+        count++;
+        continue;
+      }
       observations.set(name, observation);
     }
     if (observation.hash !== previousHash) count++;
@@ -78,7 +141,7 @@ const errorCodes = {
 };
 
 export async function runIndexService({
-  index, vault, active, scan, build, allowDeletions, pollMs, debounceMs, keep, graceMs, controller,
+  index, vault, active, scan, build, allowDeletions, pollMs, debounceMs, keep, graceMs, maxGenerations, controller,
 }) {
   const { signal } = controller;
   let lastInventory;
@@ -92,6 +155,9 @@ export async function runIndexService({
   let running;
   let outcome;
   let lastPrune = -Infinity;
+  let room = !active;
+  let maintenanceWarning = null;
+  let reportedFailure = false;
   const observations = new Map();
   const fail = (code) => {
     lastError = code;
@@ -104,15 +170,24 @@ export async function runIndexService({
     failures++;
     retryAt = performance.now() + Math.min(Math.max(pollMs, 1000) * 2 ** Math.min(failures - 1, 10), 300_000);
   };
-  const report = (pendingChanges, observedAt, stopped = false) => atomicJson(index, "SERVICE.json", {
-    version: 1,
-    generation: active?.manifest.generation ?? null,
-    observedAt,
-    validUntil: observedAt + (stopped ? 0 : Math.max(1000, 3 * pollMs)),
-    pendingChanges,
-    lastError,
-    retryAt: retryAt > performance.now() ? Date.now() + Math.ceil(retryAt - performance.now()) : null,
-  });
+  async function report(pendingChanges, observedAt, stopped = false) {
+    try {
+      await atomicJson(index, "SERVICE.json", {
+        version: 1,
+        generation: active?.manifest.generation ?? null,
+        observedAt,
+        validUntil: observedAt + (stopped ? 0 : Math.max(1000, 3 * pollMs)),
+        pendingChanges,
+        lastError,
+        maintenanceWarning,
+        retryAt: retryAt > performance.now() ? Date.now() + Math.ceil(retryAt - performance.now()) : null,
+      });
+      reportedFailure = false;
+    } catch {
+      if (!reportedFailure) console.error("Semantic index service: status publication failed; will retry");
+      reportedFailure = true;
+    }
+  }
 
   try {
     while (!signal.aborted) {
@@ -134,8 +209,11 @@ export async function runIndexService({
         outcome = undefined;
         running = undefined;
       }
-      if (!running && active && performance.now() - lastPrune >= Math.max(1000, Math.min(60_000, graceMs))) {
-        await pruneGenerations(index, active.manifest.generation, keep, graceMs);
+      const pruneInterval = room ? Math.max(1000, Math.min(60_000, graceMs)) : Math.min(pollMs, graceMs);
+      if (!running && performance.now() - lastPrune >= pruneInterval) {
+        const result = await pruneGenerations(index, active?.manifest.generation ?? null, keep, graceMs, maxGenerations);
+        room = result.room;
+        if (result.rebuilt) maintenanceWarning = "retirements_rebuilt";
         lastPrune = performance.now();
       }
       let snapshot;
@@ -170,7 +248,7 @@ export async function runIndexService({
         lastError = null;
       }
       await report(pendingChanges, observedAt);
-      if (!running && needsBuild && !signal.aborted) {
+      if (!running && room && needsBuild && !signal.aborted) {
         const authorized = blockedInventory && await allowDeletions(active);
         const debouncedAt = Math.min(changeAt + debounceMs, firstPendingAt + Math.max(pollMs, 2 * debounceMs));
         if ((!blockedInventory || authorized) &&
