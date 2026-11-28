@@ -316,9 +316,11 @@ function collectMarkdownLinks(body: string, editable: boolean, bodyOffset: numbe
 
 export function extractMarkdownLinkReferences(
   content: string,
-  { forceMarkdownTree = false, editable = false } = {},
+  { forceMarkdownTree = false, readFrontmatter = true, editable = false } = {},
 ): MarkdownLinkReference[] {
-  const { body: rawBody, frontmatter } = readMarkdownFrontmatter(content);
+  const { body: rawBody, frontmatter } = readFrontmatter
+    ? readMarkdownFrontmatter(content)
+    : { body: content, frontmatter: {} };
   const body = rawBody.replace(/^\uFEFF/u, "");
   const bodyOffset = content.length - body.length;
   const references: MarkdownLinkReference[] = [];

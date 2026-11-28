@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {test, after} from 'node:test';
+import {serve} from '@hono/node-server';
+import {Hono} from 'hono';
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'optimike-cache-consumers-'));
 process.env.OBSIDIAN_RUNTIME_MODE='headless-readonly';process.env.OBSIDIAN_VAULT=root;
 process.env.MCP_LOG_DIR=path.join(root,'logs');
@@ -13,6 +15,7 @@ const {LocalBasesService}=await import('../dist/services/localBasesService.js');
 const {warmSharedTaskCache,processListAllTasks}=await import('../dist/mcp-server/tools/tasksShared/logic.js');
 const {processObsidianNoteLinks}=await import('../dist/mcp-server/tools/obsidianNoteLinksTool/logic.js');
 const {publicMcpToolErrorPayload}=await import('../dist/utils/internal/errorHandler.js');
+const {createHttpObservability}=await import('../dist/mcp-server/transports/httpObservability.js');
 const {extractMarkdownLinkReferences}=await import('../dist/services/obsidianRestAPI/vaultCache/markdownLinkReferences.js');
 const context={requestId:'cache-consumer-fixture',timestamp:new Date().toISOString(),operation:'test'};
 config.obsidianVaultPath=root;config.obsidianCacheSource='rest';
@@ -310,9 +313,9 @@ function pauseAfterFirstLinkBatch(cache) {
  const index=cache.markdownLinks;
  const reconcile=index.reconcileBatch.bind(index);
  return new Promise(resolve=>{
-  index.reconcileBatch=(afterPath,accept)=>{
+  index.reconcileBatch=async(afterPath,accept,indexPaths)=>{
    index.reconcileBatch=reconcile;
-   const result=reconcile(afterPath,file=>file==='/A.md' && accept(file));
+   const result=await reconcile(afterPath,file=>file==='/A.md' && accept(file),indexPaths);
    resolve();
    return result;
   };
@@ -351,12 +354,12 @@ test('restart resumes a committed partial link index without exposing it',()=>li
  assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Z.md',count:1}]);
 }));
 
-test('restart rebuilds a stale v7 link projection from unchanged note content',()=>linkFixture(async f=>{
+test('restart rebuilds a stale v8 link projection from unchanged note content',()=>linkFixture(async f=>{
  await f.cache.buildVaultCache();
  await f.cache.linkIndexRun;
  f.cache.db.exec(`
   UPDATE markdown_link_files
-  SET hash = 'v7:' || (SELECT hash FROM file_cache WHERE path = '/A.md')
+  SET hash = 'v8:' || (SELECT hash FROM file_cache WHERE path = '/A.md')
   WHERE path = '/A.md';
   DELETE FROM markdown_link_refs WHERE source = '/A.md';
  `);
@@ -366,21 +369,57 @@ test('restart rebuilds a stale v7 link projection from unchanged note content',(
  assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1}]);
 }));
 
-test('an indexing error rolls back the batch and a later link request retries it',()=>linkFixture(async f=>{
- const index=f.cache.markdownLinks;
- const reconcile=index.reconcileBatch.bind(index);
- index.reconcileBatch=(...args)=>{
-  index.reconcileBatch=reconcile;
-  reconcile(...args);
-  throw new Error('Synthetic index failure');
- };
+test('an indexing error rolls back the source and a later link request retries it',()=>linkFixture(async f=>{
+ f.cache.db.exec(`
+  CREATE TRIGGER fixture_reject_link BEFORE INSERT ON markdown_link_refs
+  BEGIN SELECT RAISE(ABORT,'synthetic index failure'); END
+ `);
  await f.cache.buildVaultCache();
  await f.cache.linkIndexRun;
  assert.equal(f.cache.db.prepare('SELECT count(*) AS count FROM markdown_link_files').get().count,0);
+ f.cache.db.exec('DROP TRIGGER fixture_reject_link');
  assert.equal(await f.cache.readFilesystemNoteContent('A.md',context),'[[Target]]');
  await assert.rejects(f.read(),isIndexPending);
  await f.cache.linkIndexRun;
  assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1}]);
+}));
+
+test('healthz responds while the worker handles a five MiB note',()=>linkFixture(async f=>{
+ const oversizedCode='hidden [[Target]]\n'.repeat(307_000);
+ f.write('Large.md','```text\n'+oversizedCode+'```\n\n[[Target]]');
+ const app=new Hono();
+ app.get('/healthz',createHttpObservability().livenessHandler);
+ let server;
+ const {port}=await new Promise(resolve=>{
+  server=serve({fetch:app.fetch,port:0,hostname:'127.0.0.1'},resolve);
+ });
+ try {
+  const index=f.cache.markdownLinks;
+  const reconcile=index.reconcileBatch.bind(index);
+  let checkedHealth=false;
+  index.reconcileBatch=(afterPath,accept,indexPaths)=>reconcile(afterPath,accept,async paths=>{
+   if(!paths.includes('/Large.md')) return indexPaths(paths);
+   const probe=fetch('http://127.0.0.1:'+port+'/healthz',{signal:AbortSignal.timeout(2000)})
+    .then(async response=>{
+     assert.equal(response.status,200);
+     assert.equal((await response.json()).state,'live');
+     assert.ok(f.cache.linkIndexRun);
+     checkedHealth=true;
+    });
+   await Promise.all([probe,indexPaths(paths)]);
+  });
+  await f.cache.buildVaultCache();
+  assert.equal(f.cache.isReady(),true);
+  await f.cache.linkIndexRun;
+  assert.equal(checkedHealth,true);
+  const result=await f.read();
+  assert.deepEqual(result.backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Large.md',count:1}]);
+  assert.deepEqual(result.indexCoverage,{
+   reason:'bounded_large_note_extraction',sourceComplete:true,backlinksComplete:false,limitedSourceCount:1,
+  });
+ } finally {
+  await new Promise(resolve=>server.close(resolve));
+ }
 }));
 async function readTaskModes(cache){
  const compact=JSON.parse(await processListAllTasks({responseFormat:'json'},context,cache));

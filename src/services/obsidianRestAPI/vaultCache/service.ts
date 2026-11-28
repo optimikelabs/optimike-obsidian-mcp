@@ -31,6 +31,7 @@ import type { FilesystemNoteLinksResponse } from "../types.js";
 import { CacheEventSupervisor } from "./eventSupervisor.js";
 import { MarkdownLinkIndex } from "./markdownLinkIndex.js";
 import { foldedPath, readVaultAppSettings } from "../../operations/headlessVaultFiles.js";
+import { MarkdownLinkWorker } from "./markdownLinkWorker.js";
 import {
   applyWalSizeLimit,
   checkpointWal,
@@ -176,6 +177,7 @@ export class VaultCacheService {
   private checkedFilesystemVersion?: number;
   private hotCacheDataVersion?: number;
   private linkIndexRun?: Promise<void>;
+  private linkIndexWorker?: MarkdownLinkWorker;
   private readonly vaultExclusionMatcher = createVaultExclusionMatcher(
     config.obsidianVaultExcludePatterns,
   );
@@ -567,6 +569,7 @@ export class VaultCacheService {
           backlinks: "filesystem", unresolved: "filesystem",
         },
         ...links.read(matched, limit),
+        indexCoverage: links.readIndexCoverage(matched),
       };
     }, () => this.assertFilesystemLinkCacheReady(context));
   }
@@ -600,6 +603,10 @@ export class VaultCacheService {
       if (!this.verifyFilesystemIndex(false)) {
         throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "The filesystem link inventory is changing.");
       }
+      if (limit > 0 && this.markdownLinks.readIndexCoverage("/" + filePath)) {
+        throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The operation requires complete backlink coverage.",
+          { reasonCode: "headless_link_coverage_incomplete" });
+      }
       const inventory = this.markdownLinks.moveInventory("/" + filePath, destination ? "/" + destination : undefined, limit);
       this.db.exec("COMMIT");
       return inventory;
@@ -629,10 +636,7 @@ export class VaultCacheService {
         if (markdown && !trash) {
           try {
             const row = await this.readCacheRow(filePath, "filesystem", context);
-            this.writeLinkIndexBatch(() => {
-              this.upsertRow(row);
-              links.update(filePath, row.hash, row.content);
-            });
+            this.upsertRow(row);
             continue;
           } catch (error) {
             if ((error as NodeJS.ErrnoException)?.code !== "ENOENT" &&
@@ -644,13 +648,17 @@ export class VaultCacheService {
             if (error.code === "ENOENT") return false;
             throw error;
           });
-        this.writeLinkIndexBatch(() => {
-          if (markdown) this.deleteRow(filePath);
-          links.updatePathTarget(filePath, present);
-        });
+        if (markdown) this.deleteRow(filePath);
+        links.updatePathTarget(filePath, present);
       }
       this.checkedFilesystemVersion = undefined;
     });
+    await this.linkIndexRun;
+    if (!links.coversCache(this.acceptFilesystemSource)) {
+      this.scheduleFilesystemLinkIndex();
+      await this.linkIndexRun;
+      if (!links.coversCache(this.acceptFilesystemSource)) throw new Error("filesystem_index_unavailable");
+    }
   }
 
   public allowsHeadlessOperationSource(relativePath: string): boolean {
@@ -701,8 +709,10 @@ export class VaultCacheService {
     this.linkIndexRun = this.buildFilesystemLinkIndex(this.markdownLinks)
       .catch(() => {
         this.checkedFilesystemVersion = undefined;
-        logger.warning("Headless link indexing was interrupted. The link tool can retry.",
-          requestContextService.createRequestContext({ operation: "buildFilesystemLinkIndex" }));
+        if (!this.closing) {
+          logger.warning("Headless link indexing was interrupted. The link tool can retry.",
+            requestContextService.createRequestContext({ operation: "buildFilesystemLinkIndex" }));
+        }
       })
       .finally(() => { this.linkIndexRun = undefined; });
   }
@@ -711,27 +721,22 @@ export class VaultCacheService {
     await yieldToEventLoop();
     if (this.closing || !this.isReady()) return;
     if (this.verifyFilesystemIndex()) return;
-    let afterPath = "";
-    while (!this.closing) {
-      if (this.refreshRun) await this.refreshRun;
-      if (this.closing || !this.isReady() || !this.hasFilesystemIndexScope() ||
-          this.readMetadataValue("refresh_state") !== "complete") return;
-      const last = this.writeLinkIndexBatch(() => links.reconcileBatch(afterPath, this.acceptFilesystemSource));
-      if (last === undefined && this.verifyFilesystemIndex()) return;
-      afterPath = last ?? "";
-      await yieldToEventLoop();
-    }
-  }
-
-  private writeLinkIndexBatch<T>(work: () => T): T {
-    this.db.exec("BEGIN IMMEDIATE");
+    const worker = new MarkdownLinkWorker(config.obsidianSharedCacheDbPath);
+    this.linkIndexWorker = worker;
     try {
-      const result = work();
-      this.db.exec("COMMIT");
-      return result;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
+      let afterPath = "";
+      while (!this.closing) {
+        if (this.refreshRun) await this.refreshRun;
+        if (this.closing || !this.isReady() || !this.hasFilesystemIndexScope() ||
+            this.readMetadataValue("refresh_state") !== "complete") return;
+        const last = await links.reconcileBatch(afterPath, this.acceptFilesystemSource, worker.indexPaths);
+        if (last === undefined && this.verifyFilesystemIndex()) return;
+        afterPath = last ?? "";
+        await yieldToEventLoop();
+      }
+    } finally {
+      await worker.close();
+      this.linkIndexWorker = undefined;
     }
   }
 
@@ -954,6 +959,7 @@ export class VaultCacheService {
     this.closing = true;
     await this.eventStop;
     await this.refreshRun?.catch(() => undefined);
+    await this.linkIndexWorker?.close();
     await this.linkIndexRun;
     await this.cacheWriteTail;
     if (!this.closed) {

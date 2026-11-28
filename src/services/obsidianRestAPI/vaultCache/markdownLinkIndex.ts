@@ -1,7 +1,7 @@
-import { performance } from "node:perf_hooks";
 import { basenameKey, MarkdownLinkResolver } from "./markdownLinkResolver.js";
 import type { DatabaseSync } from "node:sqlite";
-import type { NoteLinkObservation, NoteLinksProjection } from "../types.js";
+import type { FilesystemNoteLinksResponse, NoteLinkObservation, NoteLinksProjection } from "../types.js";
+import { extractLargeLinkSource, LARGE_LINK_SOURCE_BYTES } from "./boundedLinkReferences.js";
 import { extractMarkdownLinkReferences, type MarkdownLinkReference } from "./markdownLinkReferences.js";
 
 function coverage(total: number, returned: number) {
@@ -9,7 +9,8 @@ function coverage(total: number, returned: number) {
 }
 
 type LinkCount = { link_path: string; count: number };
-const INDEX_REVISION = "v8:";
+const INDEX_REVISION = "v9:";
+const BATCH_BYTES = 256 * 1024;
 
 /** Store unresolved spellings on disk; resolve against the current file set at read time.
  * Adding/removing an ambiguous destination can then affect unchanged sources. */
@@ -18,6 +19,9 @@ export class MarkdownLinkIndex {
   private readonly refsDelete;
   private readonly refInsert;
   private readonly staleRowsAfterPath;
+  private readonly staleSource;
+  private readonly currentSource;
+  private readonly boundedSources;
   private readonly targetsByFoldedPath;
   private readonly filesByBasename;
   private readonly resolver: MarkdownLinkResolver;
@@ -63,10 +67,21 @@ export class MarkdownLinkIndex {
       VALUES (?, ?, ?, ?, ?, ?)
     `);
     this.staleRowsAfterPath = this.db.prepare(`
-      SELECT file.path, file.hash, file.content FROM file_cache AS file
+      SELECT file.path, file.size FROM file_cache AS file
       LEFT JOIN markdown_link_files AS indexed USING(path)
       WHERE file.path > ? AND (indexed.hash IS NULL OR indexed.hash <> ? || file.hash)
       ORDER BY file.path LIMIT 16
+    `);
+    this.staleSource = db.prepare(`
+      SELECT file.hash, file.content, file.size FROM file_cache AS file
+      LEFT JOIN markdown_link_files AS indexed USING(path)
+      WHERE file.path = ? AND (indexed.hash IS NULL OR indexed.hash <> ? || file.hash)
+    `);
+    this.currentSource = db.prepare("SELECT 1 FROM file_cache WHERE path = ? AND hash = ?");
+    this.boundedSources = db.prepare(`
+      SELECT count(*) AS n, max(file.path = ?) AS sourceLimited
+      FROM file_cache AS file JOIN markdown_link_files USING(path)
+      WHERE file.size > ?
     `);
     this.targetsByFoldedPath = db.prepare(`
       SELECT path FROM markdown_link_files WHERE folded_path = ?
@@ -94,14 +109,25 @@ export class MarkdownLinkIndex {
     return true;
   }
 
-  reconcileBatch(afterPath: string, acceptPath: (path: string) => boolean): string | undefined {
-    const deadline = performance.now() + 8;
+  async reconcileBatch(
+    afterPath: string,
+    acceptPath: (path: string) => boolean,
+    indexPaths: (paths: string[]) => Promise<void>,
+  ): Promise<string | undefined> {
+    const paths: string[] = [];
+    let bytes = 0;
     let last: string | undefined;
     for (const row of this.staleRowsAfterPath.iterate(afterPath, INDEX_REVISION)) {
-      last = row.path as string;
-      if (acceptPath(last)) this.update(last, row.hash as string, row.content as string);
-      if (performance.now() >= deadline) break;
+      const filePath = row.path as string;
+      if (acceptPath(filePath)) {
+        const size = row.size as number;
+        if (paths.length && bytes + size > BATCH_BYTES) break;
+        paths.push(filePath);
+        bytes += size;
+      }
+      last = filePath;
     }
+    if (paths.length) await indexPaths(paths);
     return last;
   }
 
@@ -120,11 +146,41 @@ export class MarkdownLinkIndex {
     for (const filePath of paths) insert.run(filePath, filePath.toLowerCase(), basenameKey(filePath));
   }
 
-  update(filePath: string, hash: string, content: string): void {
+  readIndexCoverage(filePath: string): FilesystemNoteLinksResponse["indexCoverage"] {
+    const row = this.boundedSources.get(filePath, LARGE_LINK_SOURCE_BYTES)!;
+    if (!row.n) return undefined;
+    return {
+      reason: "bounded_large_note_extraction",
+      sourceComplete: row.sourceLimited !== 1,
+      backlinksComplete: false,
+      limitedSourceCount: row.n as number,
+    };
+  }
+
+  indexSource(filePath: string): void {
+    const row = this.staleSource.get(filePath, INDEX_REVISION) as
+      { hash: string; content: string; size: number } | undefined;
+    if (!row) return;
+    // Parse outside the write transaction. Recheck the hash before publishing
+    // so a concurrent write wins and the next pass picks up the new text.
+    const references = row.size > LARGE_LINK_SOURCE_BYTES
+      ? extractLargeLinkSource(row.content)
+      : extractMarkdownLinkReferences(row.content);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      if (this.currentSource.get(filePath, row.hash)) this.replaceSource(filePath, row.hash, references);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  private replaceSource(filePath: string, hash: string, references: MarkdownLinkReference[]): void {
     const basename = basenameKey(filePath);
     if (!this.fileUpsert.run(filePath, filePath.toLowerCase(), basename, INDEX_REVISION + hash).changes) return;
     this.refsDelete.run(filePath);
-    for (const [ordinal, reference] of extractMarkdownLinkReferences(content).entries()) {
+    for (const [ordinal, reference] of references.entries()) {
       this.refInsert.run(filePath, ordinal, reference.linkPath ? basenameKey(reference.linkPath) : basename,
         reference.linkPath, reference.linkText, JSON.stringify(reference));
     }
@@ -134,7 +190,7 @@ export class MarkdownLinkIndex {
     const paths = this.db.prepare(`
       SELECT path FROM markdown_link_files UNION SELECT path FROM markdown_link_excluded_targets ORDER BY path
     `).all().map(row => row.path as string);
-    const sources = this.db.prepare(`
+    const sources = limit === 0 ? [] : this.db.prepare(`
       SELECT DISTINCT source FROM markdown_link_refs WHERE basename IN (?, ?) ORDER BY source LIMIT ?
     `).all(basenameKey(target), basenameKey(destination ?? target), limit + 1).map(row => row.source as string);
     return { paths, sources };

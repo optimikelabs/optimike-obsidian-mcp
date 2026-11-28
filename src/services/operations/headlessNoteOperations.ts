@@ -7,6 +7,7 @@ import { NOTE_DELETE_PREFIX } from "../noteDeleteContract.js";
 import { assertNewNotePath } from "../noteNameMcp.js";
 import { assertWriteAllowed } from "../writePolicy.js";
 import type { VaultCacheService } from "../obsidianRestAPI/vaultCache/service.js";
+import { LARGE_LINK_SOURCE_BYTES } from "../obsidianRestAPI/vaultCache/boundedLinkReferences.js";
 import { extractMarkdownLinkReferences } from "../obsidianRestAPI/vaultCache/markdownLinkReferences.js";
 import { MarkdownLinkResolver } from "../obsidianRestAPI/vaultCache/markdownLinkResolver.js";
 import { HeadlessOperationJournal, type HeadlessRow } from "./headlessOperationJournal.js";
@@ -110,6 +111,10 @@ export class HeadlessNoteOperations {
       const note = indexedPath.slice(1);
       const state = note === intent.source ? original : files.state(note, { readBytes: true });
       if (!state?.bytes) filesystemConflict("An indexed backlink source disappeared.");
+      if (state.size > LARGE_LINK_SOURCE_BYTES) {
+        throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The operation requires complete backlink coverage.",
+          { reasonCode: "headless_link_coverage_incomplete" });
+      }
       const content = state.bytes.toString("utf8");
       if (intent.kind === "delete") {
         const count = extractMarkdownLinkReferences(content).filter(ref => before.resolve(indexedPath, ref.linkPath)?.path === source).length;
@@ -390,7 +395,8 @@ export class HeadlessNoteOperations {
         for (const proof of plan.graphProofs) {
           await yieldToEventLoop();
           const state = files.state(proof.path, { readBytes: true });
-          if (!state?.bytes || graphProof(state.bytes.toString("utf8"), "/" + proof.path, resolver) !== proof.digest) {
+          if (!state?.bytes || state.size > LARGE_LINK_SOURCE_BYTES ||
+              graphProof(state.bytes.toString("utf8"), "/" + proof.path, resolver) !== proof.digest) {
             graphMatches = false;
             break;
           }

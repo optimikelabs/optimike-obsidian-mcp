@@ -257,6 +257,7 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "hard_links_unsupported",
   "headless_backlink_limit",
   "headless_backlink_inspection_limit",
+  "headless_link_coverage_incomplete",
   "headless_parent_missing",
   "headless_plan_ref_invalid",
   "headless_link_target_changed",
@@ -730,6 +731,8 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
     return "Invalid tool arguments. See validationIssues for the field and reason.";
   if (reasonCode === "headless_parent_missing")
     return "The destination parent folder must already exist.";
+  if (reasonCode === "headless_link_coverage_incomplete")
+    return "The filesystem link index uses bounded extraction for at least one large note. This operation requires complete backlink coverage.";
   if (reasonCode === "headless_plan_ref_invalid")
     return "Use the planRef returned by the matching plan tool.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === BASE_FORMULA_ENGINE_REFUSAL)

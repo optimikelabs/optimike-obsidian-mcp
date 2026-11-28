@@ -14,7 +14,9 @@ const settings = options => put(".obsidian/app.json", JSON.stringify(options));
 const probeFiles = dir => readdir(at(dir)).then(files => files.filter(name => name.startsWith(".optimike-probe-")));
 await Promise.all([".obsidian", "New", "Reader", "Twin", "Trash/Reader"].map(dir => mkdir(at(dir), { recursive: true })));
 let client;
+let step = "fixture setup";
 const start = async (entry, fault = false, overrides = {}) => {
+  step = `server startup (fault: ${fault})`;
   await client?.close();
   client = new Client({ name: "headless-note-operation-test", version: "1" });
   const injected = `
@@ -69,6 +71,7 @@ const start = async (entry, fault = false, overrides = {}) => {
 };
 
 const rawCall = async (name, args) => {
+  step = `${name}${args.idempotencyKey ? "/" + args.idempotencyKey : ""}`;
   const timeout = process.argv[2]?.startsWith("--benchmark") ? { timeout: 240_000 } : undefined;
   const result = await client.callTool({ name, arguments: args }, timeout);
   return { result, body: JSON.parse(result.content[0].text) };
@@ -405,6 +408,31 @@ try {
     assert.equal((await lifecycle("move", "apply", manyUnchanged, "many-unchanged")).graph_postflight, "verified");
     assert.equal((await linkQuery("Reader/Readme 0.md")).outgoing[0].resolution.targetPath, "A/Readme.md");
 
+    await put("Bounded target.md", "target with a backlink outside bounded extraction");
+    const beforeLarge = await movePlan("Bounded target.md", "New/Bounded moved.md", "before-large-source");
+    const oversized = "x".repeat(300 * 1024) + " [[Bounded target]]";
+    await put("Reader/Large backlink source.md", oversized);
+    assert.equal((await lifecycle("move", "apply", beforeLarge, "before-large-source")).reasonCode, "headless_plan_stale");
+    const boundedLinks = await linkQuery("Bounded target.md");
+    assert.equal(boundedLinks.indexCoverage.backlinksComplete, false);
+    assert.equal(boundedLinks.backlinks.length, 0);
+    const boundedMove = await rawCall("obsidian_note_move_plan", {
+      sourcePath: "Bounded target.md", destinationPath: "New/Bounded moved.md", idempotencyKey: "bounded-move",
+    });
+    const boundedDelete = await rawCall("obsidian_note_delete_plan", {
+      path: "Bounded target.md", acknowledgeBacklinks: true, idempotencyKey: "bounded-delete",
+    });
+    for (const refusal of [boundedMove, boundedDelete]) {
+      assert.equal(refusal.body.error.details.reasonCode, "headless_link_coverage_incomplete");
+    }
+    await missing("New/Bounded moved.md");
+    await missing(".trash/Bounded target.md");
+    await settings({ alwaysUpdateLinks: false });
+    const noRelink = await movePlan("Bounded target.md", "New/Bounded moved.md", "bounded-without-link-updates");
+    assert.equal((await lifecycle("move", "apply", noRelink, "bounded-without-link-updates")).outcome, "committed");
+    assert.equal(await read("Reader/Large backlink source.md"), oversized);
+    await settings({});
+
     await start("dist/index.js", false, { MCP_WRITE_MODE: "guarded" });
     const { result, body: refused } = await rawCall("obsidian_note_move_plan", {
       sourcePath: "Reader/Edit.md", destinationPath: "Reader/Forbidden.md", idempotencyKey: "guarded",
@@ -414,6 +442,8 @@ try {
     await missing("Reader/Forbidden.md");
     console.log("PASS headless move/relink, hash conflict, crash recovery, trash, link index and profiles");
   }
+} catch (error) {
+  throw new Error(`Headless note operations fixture failed at ${step}`, { cause: error });
 } finally {
   await client?.close();
 }
