@@ -8,6 +8,7 @@
  */
 
 import { RequestContext } from "../../../utils/index.js";
+import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
   BaseConfigResponse,
   BaseConfigUpsertRequest,
@@ -67,7 +68,7 @@ export async function queryBase(
   payload: BaseQueryRequest,
   context: RequestContext,
 ): Promise<BaseQueryResponse> {
-  return _request<BaseQueryResponse>(
+  const result = await _request<BaseQueryResponse>(
     {
       method: "POST",
       url: `/bases/${encodeURIComponent(baseId)}/query`,
@@ -77,6 +78,14 @@ export async function queryBase(
     context,
     "queryBase",
   );
+  if (payload.evaluate === false && result?.source !== "engine") {
+    throw new McpError(
+      BaseErrorCode.SERVICE_UNAVAILABLE,
+      "Obsidian's Bases engine could not select the requested rows.",
+      { reasonCode: "base_query_selection_unavailable" },
+    );
+  }
+  return result;
 }
 
 /**
@@ -95,7 +104,7 @@ export async function queryBaseQualified(
       method: "POST",
       url: `/extensions/obsidian-bases-bridge/bases/${encodeURIComponent(baseId)}/query`,
       headers: { "Content-Type": "application/json" },
-      data: payload,
+      data: { ...payload, selection: "supported-filter-snapshot" },
     },
     context,
     "queryBaseQualified",

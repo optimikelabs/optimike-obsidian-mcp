@@ -324,14 +324,17 @@ semantic manifest/vector metadata are cached locally for faster warm refreshes.
 - `bases_list`: list `.base` definitions via Bases Bridge REST or local fallback.
 - `bases_get_schema`: inspect a `.base` schema via REST or local fallback.
 - `bases_query`: query Bases via REST, or simple local fallback filters in
-  headless modes. Through the Bases Bridge, `evaluate` (default) lets
-  Obsidian's engine select the view's rows (filters, sort, limit) and compute
-  formulas for the rows of the requested page only (`source: "engine"`, values
-  as the engine's text); request filters and sorts on `formula.*` use these
-  values and compute every row, in chunks of 100, up to 1,000 rows (past it, formula predicates and sorts are skipped:
-  `formula_filter_not_evaluated:too_many_rows:<rows>:1000`). Without it, or when the engine is
-  unavailable, `source: "fallback"` returns no formula value; when `evaluate`
-  was requested and the engine is unavailable, one warning per formula says so.
+  headless modes. In live queries with Bases Bridge 1.3.1, Obsidian's engine
+  applies Base and view filters, view sort and view limit in both `evaluate`
+  modes (`source: "engine"`). `evaluate: false` omits formula columns and
+  `computed`. Obsidian still evaluates formulas needed by the view. Request
+  filters and sorts on `formula.*` also use computed values in both modes,
+  in chunks of 100 up to 1,000 rows. Above that cap the Bridge skips the formula
+  criteria and emits `formula_filter_not_evaluated:too_many_rows:<rows>:1000`.
+  `evaluate: true` (default) returns the engine's rendered formula values for
+  the requested page. If the engine cannot select rows, the query returns
+  `SERVICE_UNAVAILABLE` with reason `base_query_selection_unavailable`. An
+  unknown view returns `NOT_FOUND` with reason `base_view_not_found`.
 - `bases_functions`: live only; the Bases formula functions of the installed
   Obsidian, grouped by receiver type, or the signatures of one type (`on`).
 - `bases_check`: live only; formula health of one Base or of every Base as

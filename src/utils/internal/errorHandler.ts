@@ -290,6 +290,8 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "frontmatter_envelope_invalid",
   "invalid_frontmatter",
   "ambiguous_base_view",
+  "base_query_selection_unavailable",
+  "base_view_not_found",
   "ambiguous_delete_comment",
   "ambiguous_trailing_comment",
   "asset_bytes_invalid",
@@ -704,6 +706,10 @@ function safeDiagnosticFields(
 }
 
 function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
+  if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "base_query_selection_unavailable")
+    return "Obsidian's Bases engine could not select the requested rows.";
+  if (code === BaseErrorCode.NOT_FOUND && reasonCode === "base_view_not_found")
+    return "The requested Base view was not found.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_tool_arguments")
     return "Invalid tool arguments. See validationIssues for the field and reason.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === BASE_FORMULA_ENGINE_REFUSAL)

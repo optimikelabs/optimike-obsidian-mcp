@@ -188,6 +188,17 @@ const server = http.createServer((req, res) => {
         bases: [fixturePath, "Canary/Missing.base"].map((path) => ({ id: path, name: path, path })),
       });
     }
+    if (req.method === "POST" && url.pathname === `/bases/${encodeURIComponent(fixturePath)}/query`) {
+      const request = await body(req);
+      assert.equal(request.evaluate, false);
+      if (request.view === "Engine unavailable") {
+        return json(res, 503, { error: { reasonCode: "base_query_selection_unavailable" } });
+      }
+      return json(res, 200, {
+        source: "fallback", evaluate: false, total: 1, page: 1,
+        rows: [{ file: { path: "Canary/Approximate.md" }, props: {} }],
+      });
+    }
     json(res, 404, { error: "fixture route not found" });
   })().catch((error) => json(res, 500, { error: String(error) }));
 });
@@ -249,6 +260,17 @@ function parsed(result) {
 
 try {
   await client.connect(transport);
+  for (const view of ["Older Bridge", "Engine unavailable"]) {
+    const result = await client.callTool({
+      name: "bases_query",
+      arguments: { base_id: fixturePath, view, evaluate: false },
+    });
+    assert.equal(result.isError, true);
+    const payload = parsed(result);
+    assert.equal(payload.error.code, "SERVICE_UNAVAILABLE");
+    assert.equal(payload.error.details.reasonCode, "base_query_selection_unavailable");
+    assert.equal(payload.rows, undefined);
+  }
   const tools = await client.listTools();
   assert.deepEqual(
     tools.tools

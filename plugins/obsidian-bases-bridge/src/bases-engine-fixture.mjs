@@ -3,8 +3,8 @@
 // Like the native handler it reads the Base through `vault.cachedRead`, keeps
 // the rows matching the global and view filters, applies the view limit and
 // returns rows keyed by column display name, with null for empty cells.
-// Filters support `file.inFolder("X")` and `{ and: [...] }` only. Formula
-// results come from a per-expression table instead of a real parser.
+// Filters support a small set of path/folder expressions and `{ and: [...] }`.
+// Formula results come from a per-expression table instead of a real parser.
 export const PARSE_ERRORS = new Set(['if(file.name == "x", 1', '"unterminated + file.name']);
 
 function evaluateExpression(expression, row, table) {
@@ -28,6 +28,8 @@ function matches(filter, row) {
   if (typeof filter === "string") {
     const list = /^\[(.*)\]\.contains\(file\.path\)$/s.exec(filter);
     if (list) return JSON.parse(`[${list[1]}]`).includes(row.path);
+    const suffix = /^file\.path\.endsWith\("([^"]*)"\)$/.exec(filter);
+    if (suffix) return row.path.endsWith(suffix[1]);
     const folder = /^file\.inFolder\("(.*)"\)$/.exec(filter);
     if (!folder) throw new Error(`fixture does not support filter ${filter}`);
     return row.path.startsWith(`${folder[1]}/`);

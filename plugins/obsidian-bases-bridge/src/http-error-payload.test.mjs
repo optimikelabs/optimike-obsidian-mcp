@@ -693,16 +693,11 @@ test("Base runtime console diagnostics never pass raw errors or engine state", (
   );
 });
 
-test("Base query missing-view warning does not echo the caller value", () => {
+test("unsupported Base query filter diagnostics do not echo the caller value", () => {
   const source = readFileSync(
     fileURLToPath(new URL("./main.ts", import.meta.url)),
     "utf8",
   );
-  assert.doesNotMatch(
-    source,
-    /Vue introuvable:\s*\$\{JSON\.stringify\(viewName\)\}/u,
-  );
-  assert.match(source, /["']Vue introuvable\.["']/u);
   assert.doesNotMatch(source, /Filter non reconnu:\s*\$\{raw\}/u);
   assert.match(source, /["']Filter non reconnu\.["']/u);
 });
