@@ -28,6 +28,25 @@ typographic apostrophes, `·`, `€`, `&`, parentheses, emoji and non-Latin scri
 valid. ZWJ/ZWNJ are accepted only between letters or emoji (emoji sequences,
 Persian, Indic scripts).
 
+## Reading existing names
+
+`obsidian_read_note` accepts the exact spelling and can retry with the Obsidian
+path spelling. This uses forward slashes, a regular space for U+00A0 and U+202F,
+and Unicode NFC. `obsidian_list_notes` also accepts either spelling of an
+unambiguous folder path. See [Obsidian's `normalizePath` API](https://github.com/obsidianmd/obsidian-api/blob/master/obsidian.d.ts#L6471-L6487).
+
+If Local REST returns different content for the exact Markdown path and the
+normalized JSON path, the read returns `CONFLICT` without either note's content.
+
+When served from a filesystem-backed cache, JSON reads and compact listings report the
+vault-relative Obsidian path when it identifies a single entry. If two disk
+paths have the same Obsidian spelling, the results preserve their exact disk
+spellings. A read returns a top-level `diskPath` in either content format, and a
+compact list entry has its own `diskPath`, when the physical spelling differs
+from the vault path. Use `diskPath` for filesystem access. Tree listings display
+the cache's recorded names. Local REST supplies the Obsidian spelling and does
+not expose the physical one. Write targets still follow the rules above.
+
 ## Where each constraint comes from
 
 | Constraint | Source of the constraint | What happens if ignored |

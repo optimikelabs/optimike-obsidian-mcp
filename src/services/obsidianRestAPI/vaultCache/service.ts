@@ -24,6 +24,7 @@ import {
   retryWithDelay,
 } from "../../../utils/index.js";
 import { NoteJson, ObsidianRestApiService } from "../index.js";
+import { normalizeVaultSlashes, toVaultPath } from "../../../utils/obsidian/obsidianApiUtils.js";
 import { CacheEventSupervisor } from "./eventSupervisor.js";
 import {
   applyWalSizeLimit,
@@ -416,19 +417,31 @@ export class VaultCacheService {
     await this.refreshCache(true);
   }
 
-  public findMatchingPath(filePath: string): string | undefined {
-    const normalizedInput = normalizeDirPath(filePath);
-    if (this.metadataCache.has(normalizedInput)) {
-      return normalizedInput;
-    }
+  public isFilesystemBacked(): boolean {
+    return this.readMetadataValue("last_refresh_source") === "filesystem";
+  }
 
-    const normalized = normalizedInput.toLowerCase();
+  public findMatchingPath(filePath: string): string | undefined {
+    const exact = normalizedCacheFilePath(normalizeVaultSlashes(filePath));
+    if (!exact) return undefined;
+    if (this.metadataCache.has(exact)) return exact;
+
+    const normalized = toVaultPath(exact);
+    const folded = normalized.toLowerCase();
+    let normalizedMatch: string | undefined;
+    let foldedMatch: string | undefined;
+    let ambiguousFold = false;
     for (const candidate of this.metadataCache.keys()) {
-      if (candidate.toLowerCase() === normalized) {
-        return candidate;
+      const alias = toVaultPath(candidate);
+      if (alias === normalized) {
+        if (normalizedMatch) return undefined;
+        normalizedMatch = candidate;
+      } else if (alias.toLowerCase() === folded) {
+        if (foldedMatch) ambiguousFold = true;
+        foldedMatch = candidate;
       }
     }
-    return undefined;
+    return normalizedMatch ?? (ambiguousFold ? undefined : foldedMatch);
   }
 
   public getEntriesByPrefix(prefix?: string): CacheIndexEntry[] {
