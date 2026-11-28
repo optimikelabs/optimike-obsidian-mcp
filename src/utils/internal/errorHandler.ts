@@ -483,6 +483,7 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "headless_date_policy_unavailable",
   "headless_date_save_interval",
   "headless_note_path_spelling",
+  "headless_revert_target_missing",
   "date_preparation_bridge_upgrade_required",
   "date_preparation_fdm_pending",
   "date_preparation_not_started",
@@ -711,6 +712,7 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
     return "Headless governed writes require supported Frontmatter Date Manager settings and an explicit timezone matching the process.";
   if (reasonCode === "headless_date_save_interval")
     return "The date manager's minimum save interval has not elapsed. Plan the write again after the interval.";
+  if (reasonCode === "headless_revert_target_missing") return "The note no longer exists.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_tool_arguments")
     return "Invalid tool arguments. See validationIssues for the field and reason.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === BASE_FORMULA_ENGINE_REFUSAL)

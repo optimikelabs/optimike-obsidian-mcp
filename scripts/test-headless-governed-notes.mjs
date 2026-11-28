@@ -402,8 +402,10 @@ async function integration() {
     expectVerified(await call(first, "operation_revert_apply", { planRef: undo.planRef, idempotencyKey: "undo-current-postflight" }));
     assert.equal(await read(postflightRace), initial);
     await rm(path.join(vault, postflightRace));
-    assert.equal((await call(first, "operation_revert_plan", { path: postflightRace,
-      operationRef: changed.planRef, idempotencyKey: "deleted-note-revert" }, true)).error.code, "CONFLICT");
+    const missingRevert = await call(first, "operation_revert_plan", { path: postflightRace,
+      operationRef: changed.planRef, idempotencyKey: "deleted-note-revert" }, true);
+    assert.equal(missingRevert.error.code, "CONFLICT");
+    assert.equal(missingRevert.error.message, "The note no longer exists.");
     await checkDivergenceRetention(privateDirectory);
 
     const settingsPath = path.join(vault, ".obsidian/plugins/frontmatter-date-manager/data.json");

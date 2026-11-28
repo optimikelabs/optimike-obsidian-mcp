@@ -374,7 +374,9 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
 
   async sealRevert(relative: string, source: string | undefined, expectedHash: string) {
     const current = await this.snapshot(relative).catch(error => {
-      if (absent(error)) throw conflict("The note no longer exists.");
+      if (absent(error)) throw new McpError(BaseErrorCode.CONFLICT, "The note no longer exists.", {
+        reasonCode: "headless_revert_target_missing",
+      });
       throw error;
     });
     if (current.sha256 !== expectedHash) throw conflict("The note no longer matches the original operation's after proof.");
