@@ -43,7 +43,10 @@ function opaqueSpans(root: Nodes, source: string): Span[] {
     if (node.type === "code" || node.type === "inlineCode") {
       spans.push({ start, end });
     } else if (node.type === "link") {
-      destinations.push({ start: node.children.at(-1)?.position?.end.offset ?? start, end });
+      // For explicit Markdown links protect the destination. For both kinds
+      // of autolinks the URL is the link text itself.
+      const destinationStart = source[start] === "[" ? node.children.at(-1)?.position?.end.offset ?? start : start;
+      destinations.push({ start: destinationStart, end });
     } else if (node.type === "image" || node.type === "definition") {
       destinations.push({ start, end });
     } else if (node.type === "html") {
@@ -65,6 +68,9 @@ function opaqueSpans(root: Nodes, source: string): Span[] {
   }
   const codeOrHtml = spanFilter(spans.sort((a, b) => a.start - b.start));
   if (!source.includes("$")) return spans;
+  for (const match of source.matchAll(wikiLink)) {
+    destinations.push({ start: match.index, end: match.index + match[0].length });
+  }
   const inDestination = spanFilter(destinations.sort((a, b) => a.start - b.start));
   const formulas: Span[] = [];
   let opener: { start: number; width: number } | undefined;

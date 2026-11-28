@@ -26,6 +26,15 @@ test('math and HTML hide links while adjacent Markdown remains visible',()=>{
 test('currency and dollars in link destinations do not open or close math',()=>{
  assert.deepEqual(['Costs $5 and [[Money]] then $10','$5 [[V]] $6','[a](A$1.md) [[V]] [b](B$2.md)'].map(linkTexts),[['Money'],['V'],['A$1.md','V','B$2.md']]);
 });
+test('dollars in autolinks and wikilinks are literal, and formulas still hide links',()=>{
+ const samples = [
+  ['https://e.com/$a [[V]] https://e.com/$b',['V']],
+  ['<https://e.com/$a> [[V]] <https://e.com/$b>',['V']],
+  ['[[Budget $5k]] then [[V]] and [[Tax$]]',['Budget $5k','V','Tax$']],
+  ['$x$ $[[H]]$ [[V]]\n\n$$\n[[Hide me]]\n$$',['V']],
+ ];
+ for (const [source, expected] of samples) assert.deepEqual(linkTexts(source),expected);
+});
 test('unpaired inline HTML is scoped to its paragraph',()=>{
  assert.deepEqual(linkTexts('a <span>x\n\n[[P2]]\n\n</span> [[V]]'),['P2','V']);
 });
@@ -39,7 +48,7 @@ test('filesystem links preserve observations and reconcile edits, destination am
   obsidianSharedCacheDbPath:config.obsidianSharedCacheDbPath,obsidianRuntimeMode:config.obsidianRuntimeMode,
   obsidianVaultExcludePatterns:config.obsidianVaultExcludePatterns};
  Object.assign(config,{obsidianVaultPath:vault,obsidianCacheSource:'filesystem',obsidianSharedCacheDbPath:path.join(vault,'cache.sqlite'),
-  obsidianVaultExcludePatterns:[...config.obsidianVaultExcludePatterns,'Private/**']});
+  obsidianVaultExcludePatterns:[...config.obsidianVaultExcludePatterns,'Private/**','!.included/allowed.pdf']});
  const file=(name)=>path.join(vault,name);
  function write(name,content='Synthetic note.') {
   fs.mkdirSync(path.dirname(file(name)),{recursive:true});
@@ -63,6 +72,10 @@ test('filesystem links preserve observations and reconcile edits, destination am
  write('Private/Target.md','[[Notes/People/Ada]]');
  write('node_modules/pkg/README.md');
  write('img.png');
+ write('.hidden/doc.pdf');
+ write('.included/allowed.pdf');
+ write('.included/other.pdf');
+ write('Hidden targets.md','![[doc.pdf]] ![[allowed.pdf]] ![[other.pdf]]');
  // Populate a cache from before the filesystem link index existed.
  config.obsidianRuntimeMode='hybrid';
  let cache=new VaultCacheService();
@@ -76,6 +89,9 @@ test('filesystem links preserve observations and reconcile edits, destination am
   assert.equal(cache.isReady(),false);
   cache.waitUntilReady=()=>{ throw new Error('headless reads must await reconciliation, never a readiness deadline'); };
   const result=await read('Notes/Source.md');
+  assert.deepEqual((await read('Hidden targets.md')).outgoing.map(({linkText,resolution})=>[linkText,resolution.targetPath ?? null]),[
+   ['doc.pdf',null],['allowed.pdf','.included/allowed.pdf'],['other.pdf',null],
+  ]);
   assert.equal(result.path,'Notes/Source.md');
   assert.equal(result.provenance.sourceMetadata,'filesystem');
   assert.deepEqual(result.outgoing.map(({kind,linkText,resolution,displayText,frontmatterKey})=>
@@ -130,7 +146,7 @@ test('filesystem links preserve observations and reconcile edits, destination am
 
   let restContent='[[Notes/Shared]]';
   const rest=new VaultCacheService({
-   listFiles:async()=>['A/Shared.md','Notes/Source.md','Notes/People/Ada.md','Notes/Shared.md','Space Name.md','Another.md'],
+   listFiles:async()=>['A/Shared.md','Notes/Source.md','Notes/People/Ada.md','Notes/Shared.md','Space Name.md','Another.md','Hidden targets.md'],
    getFileMetadata:async()=>({ctime:1,mtime:2,size:1}),
    getFileContent:async(p)=>({path:p,content:p==='/Another.md'?restContent:fs.readFileSync(file(p.slice(1)),'utf8'),stat:{ctime:1,mtime:2,size:1}}),
   });

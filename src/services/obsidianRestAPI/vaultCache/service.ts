@@ -10,6 +10,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import ignore from "ignore";
 import { config } from "../../../config/index.js";
 import {
   createVaultExclusionMatcher,
@@ -158,7 +159,10 @@ export class VaultCacheService {
   private readonly db: DatabaseSync;
   private readonly markdownLinks?: MarkdownLinkIndex;
   private readonly filesystemIndexScope?: string;
-  private readonly technicalExclusions = createVaultExclusionMatcher(DEFAULT_VAULT_EXCLUDE_PATTERNS);
+  private readonly technicalExclusions = ignore().add(DEFAULT_VAULT_EXCLUDE_PATTERNS);
+  private readonly linkReinclusions = config.obsidianVaultExcludePatterns.some((rule) => rule.startsWith("!"))
+    ? ignore().add(config.obsidianVaultExcludePatterns)
+    : undefined;
   private checkedFilesystemVersion?: number;
   private readonly vaultExclusionMatcher = createVaultExclusionMatcher(
     config.obsidianVaultExcludePatterns,
@@ -191,7 +195,7 @@ export class VaultCacheService {
     if (!obsidianService && config.obsidianRuntimeMode.startsWith("headless-")) {
       this.markdownLinks = new MarkdownLinkIndex(this.db);
       this.filesystemIndexScope = createHash("sha256").update(JSON.stringify([
-        "path-targets-v2", getVaultRoot(), config.obsidianVaultExcludePatterns,
+        "path-targets-v3", getVaultRoot(), config.obsidianVaultExcludePatterns,
       ])).digest("hex");
     }
     this.ensureMetadata();
@@ -541,8 +545,20 @@ export class VaultCacheService {
 
   private readonly acceptFilesystemSource = (filePath: string): boolean =>
     !!normalizedCacheFilePath(filePath) &&
-    !isVaultPathExcluded(filePath, this.technicalExclusions) &&
+    this.allowsHiddenLinkPath(normalizeVaultRelativePath(filePath)) &&
+    !this.technicalExclusions.ignores(normalizeVaultRelativePath(filePath)) &&
     !isVaultPathExcluded(filePath, this.vaultExclusionMatcher);
+
+  private allowsHiddenLinkPath(relativePath: string, isDirectory = false): boolean {
+    const parts = relativePath.split("/");
+    if (!parts.some((part) => part.startsWith("."))) return true;
+    const reinclusions = this.linkReinclusions;
+    if (!reinclusions) return false;
+    // A negation can name a descendant without naming the directory itself.
+    if (isDirectory || reinclusions.test(relativePath).unignored) return true;
+    return parts.every((part, index) => !part.startsWith(".") ||
+      (index < parts.length - 1 && reinclusions.test(parts.slice(0, index + 1).join("/") + "/").unignored));
+  }
 
   private async reconcileFilesystemIndex(): Promise<void> {
     await this.serializeCacheWrite(async () => {
@@ -1135,7 +1151,7 @@ export class VaultCacheService {
         now,
       );
       if (this.markdownLinks) {
-        this.markdownLinks.update(row.path, row.hash, row.content);
+        if (this.acceptFilesystemSource(row.path)) this.markdownLinks.update(row.path, row.hash, row.content);
         this.db.exec("COMMIT");
       }
     } catch (error) {
@@ -1322,14 +1338,15 @@ export class VaultCacheService {
         const relativePath = normalizeVaultRelativePath(
           path.relative(vaultRoot, path.join(directory, entry.name)),
         );
+        if (pathTargets && !this.allowsHiddenLinkPath(relativePath, entry.isDirectory())) continue;
         const excluded = isVaultPathExcluded(relativePath, this.vaultExclusionMatcher);
         const fullPath = path.join(directory, entry.name);
         if (entry.isDirectory()) {
-          const technical = isVaultPathExcluded(relativePath + "/__cache_probe__.md", this.technicalExclusions);
+          const technical = this.technicalExclusions.ignores(relativePath + "/__cache_probe__.md");
           if (pathTargets ? !technical : !excluded) await walk(fullPath);
         } else if (entry.isFile()) {
           const filePath = vaultRelativePathFromAbsolute(fullPath, vaultRoot);
-          if (pathTargets && isVaultPathExcluded(relativePath, this.technicalExclusions)) continue;
+          if (pathTargets && this.technicalExclusions.ignores(relativePath)) continue;
           if (!excluded && entry.name.toLowerCase().endsWith(".md")) markdownFiles.push(filePath);
           else pathTargets?.push(filePath);
         }
