@@ -1631,10 +1631,20 @@ async function start() {
       const callBackend = (params: typeof request.params) =>
         withBackendRetry(
           "callTool",
-          (client) =>
-            relaying
+          async (client) => {
+            const result = await (relaying
               ? client.callTool(params, { allowInputRequired: true })
-              : client.callTool(params),
+              : client.callTool(params));
+            const registrationMode = profileModeFromCapability(
+              client.getServerCapabilities()?.experimental?.[TOOL_PROFILE_MODE_CAPABILITY],
+            );
+            if (!isInputRequiredResult(result) && toolProfile === "tasks" &&
+                registrationMode === undefined &&
+                ["operon_status", "obsidian_runtime_status"].includes(request.params.name)) {
+              return { ...result, content: [...(result.content ?? []), { type: "text" as const, text: backendProfileWarning }] };
+            }
+            return result;
+          },
           { replayNetworkFailure: { toolName: request.params.name } },
         );
       try {
@@ -1664,10 +1674,6 @@ async function start() {
           if (isInputRequiredResult(result)) {
             return refuse("apply_confirmation_unavailable");
           }
-        }
-        if (toolProfile === "tasks" && backend?.registrationMode === undefined &&
-            ["operon_status", "obsidian_runtime_status"].includes(request.params.name)) {
-          result = { ...result, content: [...result.content, { type: "text", text: backendProfileWarning }] };
         }
         return chatgptCompatibleResult(result);
       } catch (error) {

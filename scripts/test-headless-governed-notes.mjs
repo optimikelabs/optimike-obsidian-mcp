@@ -59,7 +59,7 @@ async function holdVaultLock(filename) {
 async function injectAfterFilesystemEffect() {
   const [mode, vault, state, ref, key] = process.argv.slice(2);
   const { FilesystemNoteBackend } = await import("../dist/services/operations/filesystemNoteBackend.js");
-  const { ObsidianNoteReplaceJournal } = await import("../dist/services/operations/obsidianNoteReplaceJournal.js");
+  const { ObsidianNoteReplaceConcurrencyError, ObsidianNoteReplaceJournal } = await import("../dist/services/operations/obsidianNoteReplaceJournal.js");
   const { ObsidianNoteReplaceOperationAdapter } = await import("../dist/services/operations/obsidianNoteReplaceOperationAdapter.js");
   const { NoteCreateOperationAdapter } = await import("../dist/services/operations/noteCreateOperationAdapter.js");
   const { FilesystemRevert } = await import("../dist/services/operations/filesystemRevert.js");
@@ -142,13 +142,31 @@ async function injectAfterFilesystemEffect() {
     };
   };
   const backend = new FilesystemNoteBackend(vault, state, journal, () => time, () => {
-    if (mode === "crash-after-effect") process.exit(87);
+    if (mode === "crash-after-effect" || mode === "crash-after-restore") process.exit(87);
     if (mode !== "external-after-effect") return;
     const external = path.join(vault, "Archive", ".external-replacement.tmp");
     writeFileSync(external, interference);
     renameSync(external, path.join(vault, postflightRace));
   }, injectExchange); // Other rename injections target the explicit legacy path.
   try {
+    if (mode === "crash-after-restore") {
+      await new FilesystemRevert(backend, journal).apply(ref, key);
+      assert.fail("The restore publication crash was not reached");
+    }
+    if (mode === "restore-status-race") {
+      const commit = journal.commitAfterVerifiedProof.bind(journal);
+      let attempted = false;
+      journal.commitAfterVerifiedProof = (...args) => {
+        if (attempted) return commit(...args);
+        attempted = true;
+        assert.equal(journal.get(args[0]).status, "outcome_unknown");
+        throw new ObsidianNoteReplaceConcurrencyError();
+      };
+      const restored = await new FilesystemRevert(backend, journal).status(ref);
+      assert.equal(attempted, true);
+      assert.equal(restored.outcome, "committed");
+      return;
+    }
     if (mode === "revert-plan-other-volume") {
       const before = await readFile(path.join(vault, "Created.md"));
       await assert.rejects(new FilesystemRevert(backend, journal).plan({ path: "Created.md", operationRef: ref, idempotencyKey: key }), {
@@ -768,7 +786,9 @@ async function integration() {
     assert.equal(missingRevert.error.message, "The note no longer exists.");
     await writeFile(path.join(vault, postflightRace), interference);
     const undo = await call(first, "operation_revert_plan", { path: postflightRace, operationRef: changed.planRef, idempotencyKey: "undo-current-postflight" });
-    expectVerified(await call(first, "operation_revert_apply", { planRef: undo.planRef, idempotencyKey: "undo-current-postflight" }));
+    await inject("crash-after-restore", undo.planRef, "undo-current-postflight", 87);
+    await inject("restore-status-race", undo.planRef, "undo-current-postflight");
+    expectVerified(await call(first, "operation_revert_status", { planRef: undo.planRef }));
     assert.equal(await read(postflightRace), initial);
     const settled = await call(second, "note_replace_status", { planRef: changed.planRef });
     assert.equal(settled.outcome, "conflict");

@@ -298,7 +298,12 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
   private async verifyPublicationAndSettleRestore(plan: ObsidianNoteReplacePlan) {
     if (!await this.verifyPublication(plan)) return false;
     if (plan.filesystem?.displacedSourceOperationId && this.journal.get(plan.operationId)?.status !== "committed") {
-      this.journal.commitAfterVerifiedProof(plan.operationId, ["applying", "outcome_unknown"]);
+      try {
+        this.journal.commitAfterVerifiedProof(plan.operationId, ["applying", "outcome_unknown"]);
+      } catch (error) {
+        // The lease sweep can advance the journal independently of the path lock.
+        if (!(error instanceof ObsidianNoteReplaceConcurrencyError)) throw error;
+      }
     }
     return true;
   }
