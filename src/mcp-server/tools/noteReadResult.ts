@@ -38,6 +38,7 @@ export async function noteReadResult(
         source: "filesystem",
         upstreamSync: "unknown",
         lastRefreshAt: after.lastRefreshAt,
+        lastSuccessfulRefreshStartedAt: after.lastSuccessfulRefreshStartedAt,
         refreshOrigin: after.refreshOrigin,
         ...(refreshing ? { refreshing: true } : {}),
         ...(!before.ready || !after.ready || refreshing ? { partial: true } : {}),

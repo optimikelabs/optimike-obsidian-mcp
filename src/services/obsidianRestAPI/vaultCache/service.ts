@@ -162,6 +162,7 @@ export class VaultCacheService {
   private refreshGeneration = 0;
   private refreshCheckpoint?: {
     at: number;
+    startedAt: number | null;
     source: string | undefined;
     origin: "startup-snapshot" | "process-refresh";
   };
@@ -308,6 +309,7 @@ export class VaultCacheService {
   public getRefreshEvidence() {
     return {
       lastRefreshAt: this.refreshCheckpoint?.at ?? null,
+      lastSuccessfulRefreshStartedAt: this.refreshCheckpoint?.startedAt ?? null,
       refreshOrigin: this.refreshCheckpoint?.origin,
       refreshing: Boolean(this.isBuilding || this.refreshRun || this.refreshRequested),
       ready: this.isPubliclyReady(),
@@ -751,7 +753,8 @@ export class VaultCacheService {
     this.isBuilding = true;
     this.refreshGeneration++;
     const uncertaintyAtStart = this.uncertaintyGeneration;
-    this.lastRefreshStartedAt = Date.now();
+    const startedAt = Date.now();
+    this.lastRefreshStartedAt = startedAt;
     this.lastRefreshCompletedAt = null;
     this.lastRefreshDurationMs = null;
     this.lastRefreshError = null;
@@ -909,6 +912,7 @@ export class VaultCacheService {
         if (successfulAt !== null) {
           this.upsertMetadataValue("last_refresh_at", String(successfulAt));
           this.upsertMetadataValue("last_refresh_source", refreshSource);
+          this.upsertMetadataValue("last_refresh_window", `${successfulAt}:${startedAt}`);
         }
         this.db.exec("COMMIT");
       } catch (error) {
@@ -918,6 +922,7 @@ export class VaultCacheService {
       if (successfulAt !== null) {
         this.refreshCheckpoint = {
           at: successfulAt,
+          startedAt,
           source: refreshSource,
           origin: "process-refresh",
         };
@@ -976,8 +981,17 @@ export class VaultCacheService {
       state = this.readMetadataValue("refresh_state");
       const lastRefreshAt = this.readMetadataNumber("last_refresh_at");
       if (lastRefreshAt !== undefined) {
+        // An older writer can advance last_refresh_at without recording a
+        // window. Only a window paired with the loaded completion is usable.
+        const [completed, started] = (
+          this.readMetadataValue("last_refresh_window") ?? ""
+        ).split(":");
+        const startedAt = completed === String(lastRefreshAt) && started
+          ? Number(started)
+          : NaN;
         this.refreshCheckpoint = {
           at: lastRefreshAt,
+          startedAt: Number.isFinite(startedAt) ? startedAt : null,
           source: this.readMetadataValue("last_refresh_source"),
           origin: "startup-snapshot",
         };
