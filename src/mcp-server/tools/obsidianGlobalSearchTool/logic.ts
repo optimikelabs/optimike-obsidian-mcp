@@ -7,6 +7,7 @@ import {
 } from "../../../services/obsidianRestAPI/index.js";
 import { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
+import { getLexicalIndex, lexicalSnippets, queryTerms, rankLexical } from "../../../services/rankedVaultSearch.js";
 import { addLiveDiskPaths } from "../../../utils/obsidian/liveDiskPaths.js";
 // Import formatTimestamp utility
 import { config } from "../../../config/index.js";
@@ -28,6 +29,9 @@ const ObsidianGlobalSearchInputSchema = z
       .string()
       .min(1)
       .describe("The search query (text or regex pattern)."),
+    mode: z.enum(["exact", "ranked"]).default("exact").optional().describe(
+      "exact: existing substring or regex search, newest first. ranked: BM25 relevance over cached note text, titles, aliases and headings. Uses case and accent folding; incompatible with useRegex or caseSensitive.",
+    ),
     searchInPath: z
       .string()
       .optional()
@@ -124,6 +128,7 @@ export interface GlobalSearchResult {
   modifiedTime: string; // Formatted string
   createdTime: string; // Formatted string
   numericMtime: number; // Numeric mtime for robust sorting
+  score?: number;
 }
 
 export interface CompactGlobalSearchResult {
@@ -133,6 +138,7 @@ export interface CompactGlobalSearchResult {
   matchCount: number;
   modifiedTime: string;
   createdTime: string;
+  score?: number;
 }
 
 // Added alsoFoundInFiles
@@ -150,6 +156,7 @@ export interface ObsidianGlobalSearchResponse {
   hasMore: boolean;
   nextPage?: number;
   responseMode?: "detailed" | "compact";
+  mode?: "ranked";
 }
 
 // ====================================================================================
@@ -220,13 +227,19 @@ export const processObsidianGlobalSearch = async (
 ): Promise<ObsidianGlobalSearchResponse> => {
   const operation = "processObsidianGlobalSearch";
   const opContext = { ...context, operation };
-  logger.info("Processing obsidian_global_search request (API-first).", {
-    ...opContext,
-    params: sanitizeInputForLogging(params),
-  });
+  const ranked = params.mode === "ranked";
+  if (ranked && (params.useRegex || params.caseSensitive)) {
+    throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Ranked search does not use regex or case-sensitive matching.");
+  }
+  if (!ranked) {
+    logger.info("Processing obsidian_global_search request (API-first).", {
+      ...opContext,
+      params: sanitizeInputForLogging(params),
+    });
 
-  // Validate before touching either backend: invalid regex must not become an empty success.
-  findMatchesInContent("", params.query, params.useRegex, params.caseSensitive, params.contextLength, opContext);
+    // Validate before touching either backend: invalid regex must not become an empty success.
+    findMatchesInContent("", params.query, params.useRegex, params.caseSensitive, params.contextLength, opContext);
+  }
   let sinceDate: Date | null = null;
   let untilDate: Date | null = null;
   let strategyMessage = "";
@@ -262,6 +275,27 @@ export const processObsidianGlobalSearch = async (
     );
   }
 
+  const terms = ranked ? queryTerms(params.query) : undefined;
+  if (terms) {
+    const index = await getLexicalIndex(vaultCacheService);
+    allFilteredResults = rankLexical(index, terms, ({ entry, path }) =>
+      (!searchPathPrefix || path.startsWith(searchPathPrefix)) &&
+      (!sinceDate || entry.mtime >= sinceDate.getTime()) &&
+      (!untilDate || entry.mtime <= untilDate.getTime()),
+    ).map(({ entry, path: notePath, score, matchCount }) => ({
+      path: notePath,
+      filename: path.basename(entry.path),
+      modifiedTime: formatTimestamp(entry.mtime, opContext),
+      createdTime: formatTimestamp(entry.ctime ?? entry.mtime, opContext),
+      numericMtime: entry.mtime,
+      matches: [],
+      matchCount,
+      returnedMatchCount: 0,
+      score,
+    }));
+    totalMatchesCount = allFilteredResults.reduce((sum, result) => sum + result.matchCount, 0);
+    strategyMessage = "Searched cached Markdown with BM25. ";
+  } else {
   // 2. Attempt API Search with Retries and Timeout
   let apiFailedOrTimedOut = false;
   try {
@@ -518,6 +552,7 @@ export const processObsidianGlobalSearch = async (
       );
     }
   }
+  }
 
   // 4. Apply Pagination and Sorting
   const totalFilesFound = allFilteredResults.length;
@@ -528,13 +563,21 @@ export const processObsidianGlobalSearch = async (
   const endIndex = startIndex + pageSize;
 
   // Sort results by numeric modified time (descending) *before* pagination
-  allFilteredResults.sort((a, b) => {
+  if (!ranked) allFilteredResults.sort((a, b) => {
     return b.numericMtime - a.numericMtime || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0); // Descending
   });
 
   const paginatedResults = allFilteredResults.slice(startIndex, endIndex);
   if (!apiFailedOrTimedOut) {
     await addLiveDiskPaths(config.obsidianVaultPath, paginatedResults);
+  }
+  if (terms && params.responseMode === "detailed") {
+    for (const result of paginatedResults) {
+      const entry = await vaultCacheService!.getEntry("/" + result.path);
+      if (!entry) continue;
+      result.matches = lexicalSnippets(entry.content, terms, params.maxMatchesPerFile, params.contextLength);
+      result.returnedMatchCount = result.matches.length;
+    }
   }
   const responseResults =
     params.responseMode === "compact"
@@ -545,6 +588,7 @@ export const processObsidianGlobalSearch = async (
           matchCount: result.matchCount,
           modifiedTime: result.modifiedTime,
           createdTime: result.createdTime,
+          ...(ranked ? { score: result.score } : {}),
         }))
       : paginatedResults;
 
@@ -559,7 +603,8 @@ export const processObsidianGlobalSearch = async (
   }
 
   // 6. Construct Final Response
-  const finalMessage = `${strategyMessage}Found ${totalMatchesCount} matches across ${totalFilesFound} files matching all criteria. Returning page ${currentPage} of ${totalPages} (${paginatedResults.length} files on this page, page size ${pageSize}, max matches per file ${params.maxMatchesPerFile}). Results sorted by modification date (newest first).`;
+  const sortDescription = ranked ? "relevance (highest first)" : "modification date (newest first)";
+  const finalMessage = `${strategyMessage}Found ${totalMatchesCount} matches across ${totalFilesFound} files matching all criteria. Returning page ${currentPage} of ${totalPages} (${paginatedResults.length} files on this page, page size ${pageSize}, max matches per file ${params.maxMatchesPerFile}). Results sorted by ${sortDescription}.`;
 
   const response: ObsidianGlobalSearchResponse = {
     success: true, // Indicate overall tool success, even if fallback was used or results are empty
@@ -575,6 +620,7 @@ export const processObsidianGlobalSearch = async (
     hasMore: currentPage < totalPages,
     nextPage: currentPage < totalPages ? currentPage + 1 : undefined,
     responseMode: params.responseMode,
+    ...(ranked ? { mode: "ranked" } : {}),
   };
 
   logger.info(`Global search processing completed. ${finalMessage}`, opContext);

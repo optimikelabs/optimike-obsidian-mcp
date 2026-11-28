@@ -1,5 +1,21 @@
 # Tool-routing evaluations
 
+## Search relevance
+
+`node scripts/score-search-relevance.mjs GOLD.json MCP_URL hybrid` reports
+recall@5, recall@10, MRR@10 and graded nDCG@10 overall and by query type.
+Pass `ranked`, `exact`, `notes` or `sections` to score another mode. For
+authenticated endpoints, provide `SEARCH_EVAL_TOKEN` in the environment.
+The scorer prints only aggregates. It stops on a failed tool call. For a
+large run, use a dedicated local pilot with a suitable per-token rate limit.
+
+The [synthetic gold set](search-relevance-gold.json) is run in CI against the
+fixture vault created by `scripts/test-semantic-section-search.mjs`. Each
+case has a `query`, a `type` and a `relevant` array of paths or objects
+with `path`, optional integer `grade` (default 1) and optional `section`
+heading. Note metrics deduplicate paths. When headings are supplied, the
+report also gives section recall at 5 and 10.
+
 `tool-routing-corpus.json` is a versioned, harness-neutral corpus for measuring
 whether a reduced MCP tool surface improves routing without reducing successful
 coverage. Corpus v1 preserves the original 31 discriminating cases and adds:

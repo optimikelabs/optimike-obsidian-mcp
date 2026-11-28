@@ -91,6 +91,9 @@ The family is live/hybrid-live only and has no recover or undo operation. Missin
 - `obsidian_global_search` searches live or cached vault content and returns
   up to 500 result files per page (`pageSize`). With `useRegex: true`, `^` and
   `$` match the start and end of each line.
+  Opt into `mode: "ranked"` for cached BM25 scores on Markdown,
+  including boosts for note titles, aliases and headings. Ranked mode folds
+  accents and case, and rejects `useRegex: true` and `caseSensitive: true`.
 - `obsidian_update_note`: live REST note update for an explicit `filePath` or
   the live `activeFile`, or guarded headless append/prepend for an explicit
   `filePath` in filesystem modes.
@@ -324,6 +327,9 @@ fail-closed; no private or Markdown fallback is introduced.
   [README](../README.md#semantic-search).
   With the optional [external index](semantic-vector-cache-encoding.md#external-smart-env-v3-generations),
   each successful response includes the pinned `generation_id`.
+  `hybrid: true` returns one hit per note with a fused score, the
+  contributing ranks and the best section. Fallback and partial freshness
+  are identified in `provenance`. See [ranked and hybrid search](../OPERATIONS.md#ranked-and-hybrid-search).
 
 The former `smart_search` and `smart-search` aliases were physically removed in
 3.0. Existing clients must migrate to `smart_semantic_search`.

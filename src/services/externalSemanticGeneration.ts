@@ -112,7 +112,7 @@ export async function resolveExternalSemanticGeneration(): Promise<ExternalSeman
     throw new Error("Semantic generation vector file size does not match its manifest");
   const cacheKey = createHash("sha256")
     .update(JSON.stringify([
-      "external-smart-env-v3-v1",
+      "external-smart-env-v3-v2",
       directory,
       id,
       manifestText,

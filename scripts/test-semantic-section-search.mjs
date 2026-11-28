@@ -5,11 +5,12 @@ import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
-import { appendFile, cp, mkdir, mkdtemp, rename, rm, truncate, writeFile } from "node:fs/promises";
+import { appendFile, cp, mkdir, mkdtemp, readFile, rename, rm, truncate, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { McpServer, InMemoryTransport } from "@modelcontextprotocol/server";
 import { Client } from "@modelcontextprotocol/client";
+import { callSearch, evaluateSearch, readGold } from "./score-search-relevance.mjs";
 
 // Synthetic vault and Smart Connections v3 index with block (section) vectors.
 const root = await mkdtemp(path.join(os.tmpdir(), "semantic-sections-"));
@@ -30,6 +31,8 @@ Object.assign(process.env, {
   NODE_ENV: "test",
   OBSIDIAN_RUNTIME_MODE: "headless-readonly",
   OBSIDIAN_VAULT: root,
+  OBSIDIAN_CACHE_SOURCE: "filesystem",
+  OBSIDIAN_ENABLE_CACHE: "true",
   SMART_ENV_DIR: source,
   SMART_ENV_GENERATION_POINTER: path.join(root, "CURRENT"),
   OBSIDIAN_SHARED_CACHE_DB_PATH: dbPath,
@@ -53,6 +56,11 @@ const { registerSemanticSearchTool } = await import(
 );
 const { registerRuntimeTools } = await import(
   "../dist/mcp-server/tools/runtimeTools/registration.js"
+);
+const { VaultCacheService } = await import("../dist/services/obsidianRestAPI/vaultCache/index.js");
+const { getLexicalIndex } = await import("../dist/services/rankedVaultSearch.js");
+const { registerObsidianGlobalSearchTool } = await import(
+  "../dist/mcp-server/tools/obsidianGlobalSearchTool/registration.js"
 );
 
 const model = { provider_key: "ollama", model_key: "fixture-embed", dims: 4 };
@@ -140,6 +148,15 @@ await mkdir(path.join(source, "smart_sources"));
 await mkdir(path.join(source, "smart_blocks"));
 await writeFile(path.join(root, "Notes", "Alpha.md"), alpha, "utf8");
 await writeFile(path.join(root, "Other", "Beta.md"), beta, "utf8");
+await writeFile(path.join(root, "Other", "Incoherent.md"), "Obsolete chronometer.", "utf8");
+await writeFile(path.join(root, "Notes", "Coil.md"), "---\naliases: [Bobine, Coils]\n---\n\`\`\`js\nrelay.pulse();\n\`\`\`\n", "utf8");
+await mkdir(path.join(root, ".obsidian"));
+await writeFile(path.join(root, ".obsidian", "Private.md"), "# Spectrometer", "utf8");
+await writeFile(path.join(root, "Other", "Spectrometer.md"), "# Firmware\nDiagnostics", "utf8");
+await writeFile(path.join(root, "Notes", "Diagnostics.md"), "Spectrometer calibration instructions.", "utf8");
+await writeFile(path.join(root, "Notes", "Reference.md"), "[Guide](https://example.invalid/doc) [[Reference|Manual]]", "utf8");
+await utimes(path.join(root, "Other", "Spectrometer.md"), new Date("2024-06-01T12:00Z"), new Date("2024-06-01T12:00Z"));
+await utimes(path.join(root, "Notes", "Diagnostics.md"), new Date("2025-06-01T12:00Z"), new Date("2025-06-01T12:00Z"));
 await writeFile(
   path.join(source, "smart_env.json"),
   JSON.stringify({ embedding_models: { default_model_key: "ollama#fixture" } }),
@@ -176,6 +193,7 @@ await writeFile(
 const server = new McpServer({ name: "sections", version: "1" });
 const client = new Client({ name: "sections-test", version: "1" });
 const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+const vaultCache = new VaultCacheService();
 const search = async (args) => {
   const response = await client.callTool({
     name: "smart_semantic_search",
@@ -215,7 +233,8 @@ try {
   fresh.db.close();
   reopened.db.close();
 
-  await registerSemanticSearchTool(server);
+  await registerSemanticSearchTool(server, undefined, vaultCache);
+  await registerObsidianGlobalSearchTool(server, undefined, vaultCache);
   await registerRuntimeTools(server, undefined, undefined, undefined, undefined, undefined, {
     operon: async () => { throw new Error("No Operon in the semantic fixture"); },
   });
@@ -344,6 +363,114 @@ try {
     "B replaces A's note scores and section references, including the deleted note",
   );
   assert.equal((await runtimeStatus()).capability.reasonCode, "ready");
+
+  const readEntry = vaultCache.getEntry.bind(vaultCache);
+  const listEntries = vaultCache.getEntriesByPrefix.bind(vaultCache);
+  let metadataReads = 0;
+  let incoherentReads = 0;
+  vaultCache.getEntriesByPrefix = (...args) => {
+    metadataReads++;
+    return listEntries(...args);
+  };
+  vaultCache.getEntry = async (file) => {
+    const entry = await readEntry(file);
+    if (entry && file === "/Other/Incoherent.md") {
+      incoherentReads++;
+      return { ...entry, hash: "mismatched-version" };
+    }
+    return entry;
+  };
+  const appIndex = getLexicalIndex(vaultCache);
+  assert.equal(getLexicalIndex(vaultCache), appIndex, "concurrent cold readers wait for the same build");
+  const rankedCall = async (args) => {
+    const response = await client.callTool({
+      name: "obsidian_global_search", arguments: { query: "spectrometer", mode: "ranked", ...args },
+    });
+    assert.equal(response.isError, false);
+    return JSON.parse(response.content[0].text);
+  };
+  const [p1, p2] = await Promise.all([rankedCall({ pageSize: 1 }), rankedCall({ pageSize: 1, page: 2 }), appIndex]);
+  assert.equal((await appIndex).documents.get("Notes/Coil.md").note.bodyLength, 0,
+    "a fenced code block contributes no prose to the short-note floor");
+  assert.equal((await appIndex).documents.get("Notes/Reference.md").note.bodyLength, "Guide Manual".length,
+    "link labels count as readable text without their destinations");
+  assert.equal(p1.totalFilesFound, 2, "the excluded configuration note never enters ranked search");
+  assert.equal(p1.nextPage, 2);
+  assert.deepEqual([p1.results[0].path, p2.results[0].path], ["Other/Spectrometer.md", "Notes/Diagnostics.md"]);
+  const folder = await rankedCall({ searchInPath: "/Notes/" });
+  assert.deepEqual(folder.results.map(({ path }) => path), ["Notes/Diagnostics.md"]);
+  const date = await rankedCall({ modified_since: "2024-01-01", modified_until: "2024-12-31" });
+  assert.deepEqual(date.results.map(({ path }) => path), ["Other/Spectrometer.md"]);
+  assert.equal(metadataReads, 1, "warm ranked calls skip metadata enumeration");
+  assert.equal((await appIndex).documents.has("Other/Incoherent.md"), false);
+  const shardOf = (p) => Number.parseInt(smartTextHash(p), 36) % 32;
+  let neighbor = 0;
+  while (shardOf(`/Other/Neighbor-${neighbor}.md`) !== shardOf("/Other/Incoherent.md")) neighbor++;
+  await writeFile(path.join(root, "Other", `Neighbor-${neighbor}.md`), "A neighboring cache entry.", "utf8");
+  await vaultCache.rebuildFromSource();
+  await getLexicalIndex(vaultCache);
+  assert.equal(incoherentReads, 1, "editing the same shard does not retry an unchanged incoherent entry");
+  vaultCache.getEntry = readEntry;
+  vaultCache.getEntriesByPrefix = listEntries;
+  await writeFile(path.join(root, "Other", "Incoherent.md"), "Updated chronometer.", "utf8");
+  await vaultCache.rebuildFromSource();
+  assert.equal((await getLexicalIndex(vaultCache)).documents.has("Other/Incoherent.md"), true,
+    "a revised entry is eligible for indexing again");
+
+  const lexical = await callSearch(client, "ranked", "Comment commander les BÔBINES ?");
+  assert.equal(lexical[0].path, "Notes/Coil.md", "accent folding and plural stemming reach a YAML alias");
+  assert.deepEqual(await callSearch(client, "exact", "Comment commander les BÔBINES ?"), [],
+    "the exact mode still requires a substring match");
+  const gold = readGold(JSON.parse(await readFile(new URL("../evals/search-relevance-gold.json", import.meta.url), "utf8")));
+  const report = await evaluateSearch(gold, (query) => callSearch(client, "hybrid", query));
+  console.log(JSON.stringify(report));
+  assert.equal(report.all.recall5, 1, "hybrid retrieves both the section and the code-only note");
+  assert.equal(report.section.ndcg10, 1, "the matching section's note ranks first");
+  assert.equal(report.section.sectionRecall5, 1, "best_section locates the expected answer section");
+  const fused = await search({ query: "where is the answer", hybrid: true, tags: ["#keep"], with_snippets: false, short_note_floor: 240 });
+  assert.equal(fused.isError, false);
+  assert.deepEqual(fused.value.results.map(({ path }) => path), ["Notes/Alpha.md"]);
+  const match = fused.value.results[0];
+  assert.deepEqual(Object.keys(match.signals).sort(), ["lexical", "note", "section"]);
+  assert.equal(match.score, 3 / 21);
+  assert.deepEqual(match.best_section.lines, [7, 9]);
+  assert.equal(match.best_section.snippet, undefined);
+  const originalRead = vaultCache.getEntry.bind(vaultCache);
+  let warmSectionReads = 0;
+  vaultCache.getEntry = (file) => {
+    if (file === "/Notes/Alpha.md") warmSectionReads++;
+    return originalRead(file);
+  };
+  try {
+    const warm = await search({ query: "where is the answer", hybrid: true, tags: ["#keep"], with_snippets: false, short_note_floor: 240 });
+    assert.deepEqual(warm.value.results, fused.value.results);
+    assert.equal(warmSectionReads, 0, "a warm query reuses verified section ranges without rereading the note");
+  } finally {
+    vaultCache.getEntry = originalRead;
+  }
+  let failOnce = true;
+  vaultCache.getEntry = async (file) => {
+    if (file === "/Notes/Alpha.md" && failOnce) {
+      failOnce = false;
+      throw new Error("Injected cache read failure");
+    }
+    return originalRead(file);
+  };
+  try {
+    const fallbackOnFault = await search({ hybrid: true, tags: ["#keep"] });
+    assert.equal(fallbackOnFault.value.provenance.reason_code, "semantic_internal_error");
+    assert.equal(fallbackOnFault.value.provenance.mode, "lexical");
+  } finally {
+    vaultCache.getEntry = originalRead;
+  }
+  const noFloor = await search({ hybrid: true });
+  assert.ok(match.signals.note.score < noFloor.value.results[0].signals.note.score,
+    "the prose floor lowers the whole-note score for a short note");
+  assert.equal(match.signals.section.score, noFloor.value.results[0].signals.section.score,
+    "an independently verified passage keeps its own score");
+  const code = await search({ hybrid: true, query: "bobine relay", folders: ["Notes/Coil"] });
+  assert.deepEqual(code.value.results[0].best_section.lines, [4, 6],
+    "a code-only note without published vectors gets a whole-body lexical section");
   queryVector = [1, 0];
   const wrongDimension = await search({});
   assert.equal(wrongDimension.isError, true);
@@ -377,6 +504,10 @@ try {
   assert.equal(unavailableStatus.capability.reasonCode, "semantic_index_unavailable");
   await rm(pointer);
   assert.equal((await search({})).isError, true, "a configured but missing pointer fails closed");
+  const fallback = await search({ hybrid: true, query: "bobine relay" });
+  assert.equal(fallback.value.provenance.semantic_status, "unavailable");
+  assert.equal(fallback.value.provenance.mode, "lexical");
+  assert.deepEqual(Object.keys(fallback.value.results[0].signals), ["lexical"]);
   assert.equal(embedRequests, requestsBeforeRefusals, "invalid generations are refused before query encoding");
   delete process.env.SMART_ENV_GENERATION_POINTER;
   delete process.env.SMART_ENV_QUERY_FINGERPRINT;
@@ -390,6 +521,12 @@ try {
     "utf8",
   );
   const edited = await search({ granularity: "sections", folders: ["Notes/"] });
+  await vaultCache.rebuildFromSource();
+  const shifted = await search({ hybrid: true, folders: ["Notes/Alpha"] });
+  assert.equal(shifted.value.provenance.semantic_status, "partial");
+  assert.equal(shifted.value.results[0].signals.note, undefined, "an edit invalidates the note vector");
+  assert.ok(shifted.value.results[0].signals.section, "the unchanged section still contributes");
+  assert.deepEqual(shifted.value.results[0].best_section.lines, [9, 11], "the edit invalidates the previous range");
   const moved = edited.value.results.find((result) => result.block_key === "#Alpha##Target");
   assert.deepEqual([moved.lines, moved.lines_verified], [[9, 11], true]);
   assert.equal(moved.snippet, span(alpha, 7, 9));
@@ -404,6 +541,14 @@ try {
     [[9, 11], undefined],
     "lines are verified even without snippets",
   );
+
+  await writeFile(path.join(root, "Notes", "Alpha.md"),
+    "# Replacement\nThe answer now lives in newly written material.", "utf8");
+  await vaultCache.rebuildFromSource();
+  const stale = await search({ hybrid: true, folders: ["Notes/Alpha"] });
+  assert.equal(stale.value.provenance.semantic_status, "stale");
+  assert.equal(stale.value.provenance.mode, "lexical");
+  assert.equal(stale.value.results[0].best_section.source, "lexical");
 
   // Once the TTL has elapsed, a block vector file rewritten without any source
   // record change (other size) is not served from the in-memory snapshot.
@@ -515,6 +660,7 @@ try {
   );
 } finally {
   await client.close().catch(() => undefined);
+  await vaultCache.close();
   http.close();
   await rm(root, { recursive: true, force: true }).catch(() => undefined);
 }
