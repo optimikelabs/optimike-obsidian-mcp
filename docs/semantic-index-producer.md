@@ -62,6 +62,41 @@ Renames and newly excluded paths count as missing. Use `--allow-deletions` for
 one run after verifying that the removals are intentional. Content refusals
 are reported separately from missing paths.
 
+## Bootstrap from Smart Connections v3
+
+```text
+optimike-semantic-index bootstrap --from-smart-env <smart-env-dir> --vault <vault-dir> --index <index-dir> --endpoint <bitnet-origin> --model <model-id> --revision <model-revision> --model-sha256 <expected-weights-sha256>
+```
+
+Use an index directory without `CURRENT`, disjoint from both the vault and the
+Smart Environment. The source directories are read-only. Use a stable Smart
+Environment snapshot if Desktop is still indexing. The importer matches the
+active provider, model ID, dimensions, token budget and v3 fingerprint. It
+checks the current note hash, the vector reference and, for a section, its
+block key, inclusive lines and block hash. For notes it requires an identical
+unfiltered input. When Smart Connections has excluded headings configured,
+note vectors are encoded again. A conservative UTF-8 size bound leaves room
+for tokenizer overhead. Unmatched, oversized or invalid rows enter the
+normal encoding path.
+
+Before encoding any remaining rows, the producer re-encodes a deterministic
+sample balanced across notes and sections where possible. The sample is 1%,
+bounded to 20–40 rows when at least 20 qualify. Smaller sets are checked in
+full. Use an encoder with a fresh document cache. If the bridge reports a
+cache hit, the check stops. The minimum cosine must reach 0.995 and the median
+0.999. The v3 fingerprint does not identify the original weights or preserve
+every historical input. The sample checks agreement with the configured
+encoder. The manifest records the sample result and imported and encoded
+counts by kind.
+
+Add `--verify-only` to report import coverage, rows that require encoding and
+sample agreement as JSON. The report also compares section keys with eligible
+Smart Environment references, including references outside the scanned corpus.
+Use `--max-samples` with a value from 20 to 40 to limit a verification-only
+run. This mode uses the producer lock and can create the index directory.
+It does not encode the remaining rows or publish a generation.
+The queued counts are measured before the encoder can refuse an item for length.
+
 ## Publication and recovery
 
 - `<index>/CURRENT` contains the active generation ID and a newline.

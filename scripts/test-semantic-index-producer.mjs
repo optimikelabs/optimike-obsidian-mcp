@@ -414,3 +414,138 @@ if (process.getuid?.() > 0 && process.platform !== "win32") {
     }
   });
 }
+
+async function smartEnvFixture(f, { maxTokens = 256 } = {}) {
+  const directory = path.join(f.root, "desktop");
+  for (const sub of ["smart_sources", "smart_blocks", "embedding_models"]) {
+    await mkdir(path.join(directory, sub), { recursive: true });
+  }
+  const profile = { provider_key: "ollama", model_key: model, dimensions: 2, max_tokens: maxTokens };
+  const fingerprint = "mf_" + smartTextHash(JSON.stringify(profile));
+  await writeFile(path.join(directory, "smart_env.json"), JSON.stringify({
+    embedding_models: { default_model_key: "fixture" },
+  }));
+  await writeFile(path.join(directory, "embedding_models", "embedding_models.ajson"),
+    '"embedding_models:fixture": ' + JSON.stringify(profile) + ',\n');
+  const records = [];
+  const notes = [];
+  const sections = [];
+  function addRow(rows, input, text) {
+    const vector = Buffer.alloc(8);
+    vector.writeFloatLE(1, parseInt(hash(input)[0], 16) % 2 * 4);
+    const readHash = smartTextHash(text);
+    const ref = { file: fingerprint, file_i: rows.length, read_hash: readHash };
+    rows.push(vector);
+    return { last_read: { hash: readHash }, embedding: { default: { [fingerprint]: ref } } };
+  }
+  for (const name of ["fresh", "changed", "excluded", "deleted", "outside"]) {
+    const text = name === "excluded" ? "# Heading\n\nexcluded\n# Private\n\nRemoved from the input\n" : note(name);
+    const relative = name + ".md";
+    if (name !== "outside") await f.put(relative, text);
+    const block = name === "excluded" ? "# Heading\n\nexcluded" : text;
+    const source = {
+      path: relative,
+      ...addRow(notes, name + ":\n" + text, text),
+      blocks_data: { "#Heading": {
+        lines: [1, name === "excluded" ? 3 : 4],
+        ...addRow(sections, name + "\n" + block, block),
+      } },
+    };
+    if (name === "fresh") {
+      source.blocks_data["#Retired"] = { lines: [1, 4], ...addRow(sections, "retired", block) };
+    }
+    records.push(JSON.stringify("smart_sources:" + relative) + ": " + JSON.stringify(source) + ",\n");
+  }
+  await writeFile(path.join(directory, "smart_sources", "smart_sources.ajson"), records.join(""));
+  await writeFile(path.join(directory, "smart_sources", "smart_sources_1.ajson"), '"smart_sources:deleted.md": null,\n');
+  await writeFile(path.join(directory, "smart_sources", fingerprint), Buffer.concat(notes));
+  await writeFile(path.join(directory, "smart_blocks", fingerprint), Buffer.concat(sections));
+  return directory;
+}
+
+test("bootstrap imports fresh rows and encodes stale, transformed and tombstoned inputs", async t => {
+  const f = await fixture(t);
+  const desktop = await smartEnvFixture(f);
+  await f.put("changed.md", note("edited"));
+  const receipt = await f.run("bootstrap", "--from-smart-env", desktop, "--exclude-heading", "Private");
+  const manifest = await f.manifest(receipt.generation);
+  assert.deepEqual(manifest.bootstrap.imported, { notes: 1, sections: 2 });
+  assert.equal(manifest.bootstrap.verification.status, "passed");
+  assert.equal(manifest.bootstrap.verification.sampleCount, 3);
+  assert.equal(manifest.bootstrap.verification.medianCosine, 1);
+  assert.equal(manifest.bootstrap.encoded.notes, 3);
+  assert.equal(manifest.stats.encoded, f.requests.length - 3);
+  assert.equal(await f.current(), receipt.generation);
+  const loaded = await f.load(receipt.generation);
+  assert.equal(loaded.notes.length, 4);
+  assert.ok(f.requests.every(row => !row.input.includes("Removed from the input")));
+  f.requests.length = 0;
+  const incremental = await f.run("--exclude-heading", "Private");
+  assert.equal(incremental.encoded, 0);
+  assert.equal(f.requests.length, 0);
+  await f.fail(/requires an index without CURRENT/u, "bootstrap", "--from-smart-env", desktop);
+  assert.equal(await f.current(), incremental.generation);
+  assert.equal(f.requests.length, 0);
+});
+
+test("bootstrap records published rows when the encoder skips a note with an importable section", async t => {
+  const f = await fixture(t);
+  const desktop = await smartEnvFixture(f);
+  f.transformRow((row, item) => item.source_path === "excluded.md"
+    ? { ...row, truncated: true, tokens: f.health.max_tokens } : row);
+  const receipt = await f.run("bootstrap", "--from-smart-env", desktop, "--exclude-heading", "Private");
+  const { bootstrap, stats, skipped } = await f.manifest(receipt.generation);
+  assert.deepEqual(skipped, [{ path: "excluded.md", reason: "document_too_long" }]);
+  assert.equal(bootstrap.imported.sections, 2);
+  assert.equal(stats.notes + stats.sections, stats.imported + stats.encoded);
+  const loaded = await f.load(receipt.generation);
+  assert.ok(!loaded.blocks.refs.some(row => row.notePath === "excluded.md"));
+});
+
+test("bootstrap queues all rows when the Smart Env fingerprint differs", async t => {
+  const f = await fixture(t);
+  const desktop = await smartEnvFixture(f, { maxTokens: 512 });
+  const receipt = await f.run("bootstrap", "--from-smart-env", desktop);
+  const { bootstrap, stats } = await f.manifest(receipt.generation);
+  assert.deepEqual(bootstrap.imported, { notes: 0, sections: 0 });
+  assert.equal(bootstrap.verification.status, "no-imports");
+  assert.equal(stats.encoded, stats.notes + stats.sections);
+});
+
+test("bootstrap refuses publication on one bad sampled vector before encoding any misses", async t => {
+  const f = await fixture(t);
+  const desktop = await smartEnvFixture(f);
+  f.transformRow((row, item) => item.source_path === "fresh.md" ? { ...row, vector: row.vector.reverse() } : row);
+  await f.fail(/Bootstrap verification failed/u, "bootstrap", "--from-smart-env", desktop);
+  await assert.rejects(f.current(), { code: "ENOENT" });
+  assert.deepEqual(await readdir(path.join(f.index, "generations")), []);
+  assert.ok(f.requests.every(row => !row.source_path.startsWith("deleted.md")));
+});
+
+test("bootstrap verification-only measures coverage without encoding misses or publishing", async t => {
+  const f = await fixture(t);
+  const desktop = await smartEnvFixture(f);
+  await f.put("invalid.md", Buffer.from([0xff]));
+  const receipt = await f.run("bootstrap", "--from-smart-env", desktop, "--verify-only", "--max-samples", "38");
+  assert.deepEqual(receipt.imported, { notes: 3, sections: 3 });
+  assert.deepEqual(receipt.toEncode, { notes: 1, sections: 7 });
+  assert.deepEqual(receipt.sectionSelection, {
+    shared: 3, smartEnvOnly: 1, producerOnly: 7, smartEnvOutsideCorpus: 1,
+  });
+  assert.deepEqual(receipt.excludedNotes, { invalidPath: 0, invalidUtf8: 1 });
+  assert.equal(f.requests.length, 6);
+  await assert.rejects(f.current(), { code: "ENOENT" });
+  assert.deepEqual(await readdir(path.join(f.index, "generations")), []);
+});
+
+test("bootstrap stops when the bridge serves the sample from its cache", async t => {
+  const f = await fixture(t);
+  const desktop = await smartEnvFixture(f);
+  f.transformRow(row => ({ ...row, cache_hit: true }));
+  const result = await f.start("bootstrap", "--from-smart-env", desktop, "--verify-only").result;
+  assert.equal(result.error?.code, 1);
+  assert.match(result.stderr, /requires uncached/u);
+  assert.equal(JSON.parse(result.stdout).verification.status, "incomplete");
+  assert.equal(f.requests.length, 1);
+  await assert.rejects(f.current(), { code: "ENOENT" });
+});
