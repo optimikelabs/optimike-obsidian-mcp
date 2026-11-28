@@ -243,7 +243,7 @@ const tasksSnapshot = compileToolProfileNames({
   registrationMode: "headless-readonly",
   availableStaticRequirements: WITH_CACHE,
 });
-assert.equal(tasksSnapshot.length, 14);
+assert.equal(tasksSnapshot.length, 17);
 for (const required of [
   "operon_status",
   "operon_get_configuration",
@@ -251,6 +251,9 @@ for (const required of [
   "operon_get_task",
   "operon_query_tasks",
   "operon_validate",
+  "operon_get_relationships",
+  "operon_find_tasks",
+  "operon_query_saved_filter",
   "list_all_tasks",
   "query_tasks",
 ]) {
@@ -260,11 +263,8 @@ for (const required of [
   );
 }
 for (const liveOnly of [
-  "operon_query_saved_filter",
   "operon_get_diagnostics",
-  "operon_find_tasks",
   "operon_resolve_task",
-  "operon_get_relationships",
   "operon_build_context",
   "operon_get_timer_state",
   "operon_create_task",
@@ -283,6 +283,7 @@ for (const liveOnly of [
 
 const selectedSnapshotTasks = selectAvailableToolProfileNames({
   profile: "tasks",
+  operonFilesystem: true,
   availableNames: compileToolProfileNames({
     profile: "full",
     registrationMode: "headless-readonly",
@@ -348,7 +349,7 @@ for (const absent of [
 assert.equal(readonlyWithoutCache.length, 5);
 
 console.log(
-  "PASS: profiles are deterministic, removed semantic aliases stay absent, whole-Base config stays full-only, governed families are atomic, and headless tasks expose only snapshot-safe Operon reads",
+  "PASS: profiles are deterministic, removed semantic aliases stay absent, whole-Base config stays full-only, governed families are atomic, and headless tasks expose filesystem Operon reads and no live-only tools",
 );
 
 // M5 intentionally belongs to authoring/full, not standard/tasks; partial families stay hidden.

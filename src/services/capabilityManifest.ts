@@ -976,6 +976,14 @@ function operonCapabilities(input: CapabilityManifestProjectionInput): {
   read: CapabilityManifestEntry;
   write: CapabilityManifestEntry;
 } {
+  if (input.registrationMode.startsWith("headless-")) {
+    return {
+      read: entry(input, "operon-read", input.cacheReady, input.cacheReady,
+        input.cacheReady ? "ready" : "operon_index_not_ready",
+        input.cacheReady ? "none" : "refresh_vault_cache"),
+      write: unavailableOperonWrite(input, "operon_live_required", "use_live_runtime"),
+    };
+  }
   if (input.operon.state === "timed_out") {
     return {
       read: entry(input, "operon-read", false, false,
@@ -1467,7 +1475,7 @@ export async function collectCapabilityManifest(options: {
       semanticIndexProbe ? probe(semanticIndexProbe) : unavailable,
       atomicWriteProbe ? probe(atomicWriteProbe) : unavailable,
       baseAtomicWriteProbe ? probe(baseAtomicWriteProbe) : unavailable,
-      probe(operonProbe),
+      options.registrationMode.startsWith("headless-") ? unavailable : probe(operonProbe),
     ]);
   // A probe that lost the race against a cold cache load is not a failure:
   // report the load while it is recent, and a timeout once it is stale.

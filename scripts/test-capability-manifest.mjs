@@ -685,9 +685,16 @@ assert.deepEqual(
   },
 );
 
+const headlessOperon = projectCapabilityManifest(input({
+  profile: "tasks", registrationMode: "headless-readonly", cacheReady: true,
+  operon: { state: "unavailable" },
+}));
+assert.equal(capability(headlessOperon, "operon-read").state, "ready");
+assert.equal(capability(headlessOperon, "operon-write").available, false);
+
 const snapshotFallbackInput = input({
   profile: "tasks",
-  registrationMode: "headless-readonly",
+  registrationMode: "hybrid-degraded",
   operon: {
     state: "ready",
     value: {

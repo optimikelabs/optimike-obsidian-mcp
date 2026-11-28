@@ -58,14 +58,17 @@ const TASK_GROUPS = [
 ] as const satisfies readonly ToolGroupId[];
 
 const OPERON_LIVE_ONLY_READ_TOOLS = new Set([
-  "operon_query_saved_filter",
   "operon_get_diagnostics",
-  "operon_find_tasks",
   "operon_resolve_task",
-  "operon_get_relationships",
   "operon_build_context",
   "operon_get_timer_state",
   "operon_list_pending_recoveries",
+]);
+
+const OPERON_FILESYSTEM_READ_TOOLS = new Set([
+  "operon_query_saved_filter",
+  "operon_find_tasks",
+  "operon_get_relationships",
 ]);
 
 export const TOOL_PROFILES: Readonly<
@@ -88,7 +91,7 @@ export const TOOL_PROFILES: Readonly<
   tasks: {
     id: "tasks",
     description:
-      "Task-focused work: note context, Markdown Tasks compatibility, the complete Operon MCP contract when the Desktop Bridge is configured, and only the snapshot-safe Operon read subset in non-live runtimes.",
+      "Task-focused work: note context, Markdown Tasks compatibility, the complete Operon MCP contract when the Desktop Bridge is configured, and read-only Operon tools over the synchronized vault in headless modes.",
     groups: TASK_GROUPS,
     preferCanonicalAlternatives: true,
   },
@@ -192,8 +195,10 @@ function operonLiveForRegistrationMode(
 function modernRuntimeAvailable(
   entry: ToolSurfaceEntry,
   operonLive: boolean,
+  operonFilesystem: boolean,
 ): boolean {
   if (entry.group === "tasks.operon.write") return operonLive;
+  if (OPERON_FILESYSTEM_READ_TOOLS.has(entry.name)) return operonLive || operonFilesystem;
   if (
     entry.group === "tasks.operon.read" &&
     OPERON_LIVE_ONLY_READ_TOOLS.has(entry.name)
@@ -205,6 +210,7 @@ function modernRuntimeAvailable(
 
 interface FinalizeProfileEntriesOptions {
   tolerateIncompleteRegistration?: boolean;
+  operonFilesystem?: boolean;
 }
 
 function finalizeProfileEntries(
@@ -216,7 +222,7 @@ function finalizeProfileEntries(
   let selected =
     definition.id === "full" || definition.id === "operational"
       ? entries
-      : entries.filter((entry) => modernRuntimeAvailable(entry, operonLive));
+      : entries.filter((entry) => modernRuntimeAvailable(entry, operonLive, options.operonFilesystem ?? false));
 
   // A concrete McpServer registers tools one at a time. During that transient
   // construction phase a governed family is necessarily incomplete. Keep the
@@ -254,6 +260,7 @@ export function compileToolProfile({
     definition,
     entries,
     operonLiveForRegistrationMode(registrationMode),
+    { operonFilesystem: registrationMode.startsWith("headless-") },
   );
 }
 
@@ -266,6 +273,7 @@ export function compileToolProfileNames(
 export interface SelectAvailableToolProfileInput {
   profile: ToolProfileId;
   availableNames: readonly string[];
+  operonFilesystem?: boolean;
 }
 
 /**
@@ -286,6 +294,7 @@ export interface SelectAvailableToolProfileInput {
 export function selectAvailableToolProfileNames({
   profile,
   availableNames,
+  operonFilesystem = false,
 }: SelectAvailableToolProfileInput): readonly string[] {
   const uniqueNames = [...new Set(availableNames)];
   if (profile === "full") {
@@ -302,5 +311,6 @@ export function selectAvailableToolProfileNames({
 
   return finalizeProfileEntries(definition, entries, operonLive, {
     tolerateIncompleteRegistration: true,
+    operonFilesystem,
   }).map((entry) => entry.name);
 }
