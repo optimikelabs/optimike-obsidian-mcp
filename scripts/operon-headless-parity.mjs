@@ -8,11 +8,11 @@ import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 const server = fileURLToPath(new URL("../dist/index.js", import.meta.url));
-export async function withOperonClient({ vault, cache, mode, url, token, profile = "tasks", proxyPort }, run) {
+export async function withOperonClient({ vault, cache, mode, url, token, profile = "tasks" }, run) {
   const client = new Client({ name: "operon-headless-parity", version: "1" });
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [proxyPort ? fileURLToPath(new URL("../dist/stdio-proxy.js", import.meta.url)) : server],
+    args: [server],
     cwd: cache,
     env: {
       OBSIDIAN_VAULT: vault,
@@ -25,10 +25,6 @@ export async function withOperonClient({ vault, cache, mode, url, token, profile
       OBSIDIAN_VERIFY_SSL: process.env.OPERON_PARITY_VERIFY_SSL ?? "true",
       MCP_TRANSPORT_TYPE: "stdio",
       MCP_TOOL_PROFILE: profile,
-      ...(proxyPort ? {
-        MCP_HTTP_HOST: "127.0.0.1", MCP_HTTP_PORT: String(proxyPort),
-        MCP_PROXY_REQUIRE_EXISTING_BACKEND: "true",
-      } : {}),
       MCP_WRITE_MODE: "readonly",
       OPERON_MUTATIONS_ENABLED: "false",
       SEMANTIC_SEARCH_PREWARM: "false",

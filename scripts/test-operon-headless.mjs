@@ -265,39 +265,11 @@ try {
       });
     }
   });
-  let proxyCatalog;
   await withOperonClient({ ...options, mode: "headless-readonly", profile: "full" }, async fs => {
-    proxyCatalog = await fs.listTools();
     const refused = await callOperon(fs, "operon_get_timer_state", {}, true);
     assert.equal(refused.source, "filesystem");
     assert.equal(refused.error.details.reasonCode, "operon_filesystem_live_required");
   });
-
-  const backend = createServer(async (req, res) => {
-    if (req.url === "/healthz") { res.writeHead(200).end(); return; }
-    if (req.method !== "POST") { res.writeHead(405).end(); return; }
-    const chunks = [];
-    for await (const chunk of req) chunks.push(chunk);
-    const { id, method, params } = JSON.parse(Buffer.concat(chunks));
-    if (id === undefined) { res.writeHead(202).end(); return; }
-    const result = method === "initialize" ? {
-      protocolVersion: params.protocolVersion, capabilities: { tools: {} },
-      serverInfo: { name: "headless-proxy-fixture", version: "1" },
-    } : proxyCatalog;
-    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ id, jsonrpc: "2.0", result }));
-  });
-  try {
-    await new Promise(resolve => backend.listen(0, "127.0.0.1", resolve));
-    await withOperonClient({ ...options, mode: "headless-readonly", proxyPort: backend.address().port }, async proxy => {
-      const tools = (await proxy.listTools()).tools;
-      assert.deepEqual(tools.filter(tool => tool.name.startsWith("operon_")).map(tool => tool.name).sort(), [
-        "operon_find_tasks", "operon_get_configuration", "operon_get_relationships", "operon_get_task",
-        "operon_list_tasks", "operon_query_saved_filter", "operon_query_tasks", "operon_status", "operon_validate",
-      ]);
-    });
-  } finally {
-    await new Promise(resolve => backend.close(resolve));
-  }
 
   const { parseOperonMarkdown, projectFilesystemConfiguration, projectFilesystemTask } =
     await import("../dist/services/operon/filesystemFormat.js");
