@@ -482,7 +482,18 @@ Exemples :
 
 Au démarrage, le backend préchauffe la recherche sémantique en chargeant le snapshot et en envoyant une petite requête d’embedding au provider configuré. Avec le modèle intégré, c’est ce préchauffage en arrière-plan qui télécharge et charge le modèle la première fois : la première requête d’un agent ne l’attend pas. Désactivation possible avec `SEMANTIC_SEARCH_PREWARM=false` ; texte de warmup surchargeable avec `SEMANTIC_SEARCH_PREWARM_TEXT`.
 
+Les [générations externes](docs/semantic-vector-cache-encoding.md#external-smart-env-v3-generations)
+utilisent le pointeur et l’identifiant de génération pour actualiser le cache.
+Un chargement à froid vérifie les deux fichiers de vecteurs, y compris lors
+d’une recherche de notes seules ou du préchauffage.
+Utiliser un seul mode sémantique par cache SQLite partagé. Attribuer des
+valeurs `OBSIDIAN_SHARED_CACHE_DB_PATH` distinctes aux backends qui utilisent
+le pointeur externe et `SMART_ENV_DIR`. Leurs snapshots se remplacent dans une
+base commune, ce qui provoque des lectures à froid répétées.
+
 ### Recherche par sections
+
+Le chargement décrit ici s’applique à `SMART_ENV_DIR`.
 
 `granularity: sections` ou `both` charge les vecteurs de sections à la première requête de ce type, jamais au préchauffage : un runtime qui ne cherche que des notes garde son empreinte mémoire précédente. Les vecteurs de sections restent en mémoire dans un seul tableau float32 pendant toute la vie du processus. Le premier chargement à froid lit une seule fois les enregistrements sources de Smart Connections pour les notes et les sections ; ensuite, les références des sections viennent du store partagé et seuls les vecteurs sont relus dans `smart_blocks/<empreinte du modèle>`. Le cache des sections se rafraîchit quand les enregistrements sources, le modèle actif ou ce fichier de vecteurs de blocs (date de modification ou taille) changent, avec le même TTL que les notes. Chaque résultat de section lit sa note pour vérifier ses lignes, même sans `with_snippets`. La recherche d’une section déplacée est bornée par requête (200 000 lignes hachées) ; au-delà, les sections déplacées restantes indiquent `lines_verified: false` (une section encore à ses lignes indexées reste vérifiée). La recherche ne va jamais au-delà de la fin de la note.
 
@@ -697,6 +708,7 @@ Variables importantes :
 - `MCP_PROXY_START_TIMEOUT_MS`
 - `OBSIDIAN_VAULT`
 - `SMART_ENV_DIR`
+- `SMART_ENV_GENERATION_POINTER` et `SMART_ENV_QUERY_FINGERPRINT` pour un [index sémantique externe](docs/semantic-vector-cache-encoding.md#external-smart-env-v3-generations) optionnel, à configurer sur le backend
 - `OBSIDIAN_BASE_URL`
 - `OBSIDIAN_API_KEY`
 - `MCP_EXTERNAL_ROOTS_FILE`
@@ -741,9 +753,17 @@ ne modifie aucun document source.
 
 Vérifie :
 
-- `SMART_ENV_DIR`
+- `SMART_ENV_DIR` ou le [pointeur et l’empreinte de la génération externe](docs/semantic-vector-cache-encoding.md#external-smart-env-v3-generations)
 - la disponibilité du provider d’embedding
 - l’état runtime via `obsidian_runtime_status`
+
+En mode externe, le fichier UTF-8 `CURRENT` contient un identifiant comme
+`g42` suivi d’un unique retour à la ligne LF ou CRLF. Un BOM UTF-8 est accepté.
+Le serveur lit `generations/g42` à côté du pointeur. Préparer la
+génération complète sur le même volume, puis remplacer le pointeur par
+renommage atomique. Garder la génération précédente immuable et lisible
+jusqu’à la fin des requêtes qui ont pu la sélectionner. Si le pointeur,
+l’index ou l’empreinte est invalide, la recherche est indisponible.
 
 ### Les résultats Tasks semblent stale
 

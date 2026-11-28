@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `smart_semantic_search` can read a published external Smart Env v3 generation selected by `SMART_ENV_GENERATION_POINTER`. Searches switch on the next request, keep notes and sections in the same generation, and report the generation ID. See the [publication contract](docs/semantic-vector-cache-encoding.md#external-smart-env-v3-generations).
+
 ## [3.23.1] - 2026-11-26
 
 No Bridge change: Atomic Write Bridge 0.10.0, Operon Bridge 0.9.9 and Bases Bridge 1.3.0 ship unchanged in the bundle of this release. See the [English](docs/releases/3.23.1.md) and [French](docs/releases/3.23.1.fr.md) release notes.
