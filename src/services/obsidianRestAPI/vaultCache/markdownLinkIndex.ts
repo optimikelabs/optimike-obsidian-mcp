@@ -1,4 +1,5 @@
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import type { DatabaseSync } from "node:sqlite";
 import type { NoteLinkObservation, NoteLinksProjection } from "../types.js";
 import { extractMarkdownLinkReferences, type MarkdownLinkReference } from "./markdownLinkReferences.js";
@@ -17,7 +18,7 @@ function coverage(total: number, returned: number) {
 
 type LinkCount = { link_path: string; count: number };
 type Target = { path: string; ambiguous?: true };
-const INDEX_REVISION = "v4:";
+const INDEX_REVISION = "v5:";
 
 /** Store unresolved spellings on disk; resolve against the current file set at read time.
  * Adding/removing an ambiguous destination can then affect unchanged sources. */
@@ -25,7 +26,6 @@ export class MarkdownLinkIndex {
   private readonly fileUpsert;
   private readonly refsDelete;
   private readonly refInsert;
-  private readonly fileByFoldedPath;
   private readonly targetsByFoldedPath;
   private readonly filesByBasename;
 
@@ -69,7 +69,6 @@ export class MarkdownLinkIndex {
       INSERT INTO markdown_link_refs (source, ordinal, basename, link_path, link_text, reference)
       VALUES (?, ?, ?, ?, ?, ?)
     `);
-    this.fileByFoldedPath = db.prepare("SELECT path FROM markdown_link_files WHERE folded_path = ?");
     this.targetsByFoldedPath = db.prepare(`
       SELECT path FROM markdown_link_files WHERE folded_path = ?
       UNION SELECT path FROM markdown_link_excluded_targets WHERE folded_path = ?
@@ -92,15 +91,21 @@ export class MarkdownLinkIndex {
     return true;
   }
 
-  reconcileCachedRows(acceptPath: (path: string) => boolean): void {
+  reconcileBatch(afterPath: string, acceptPath: (path: string) => boolean): string | undefined {
     const rows = this.db.prepare(`
       SELECT file.path, file.hash, file.content FROM file_cache AS file
       LEFT JOIN markdown_link_files AS indexed USING(path)
-      WHERE indexed.hash IS NULL OR indexed.hash <> ? || file.hash
+      WHERE file.path > ? AND (indexed.hash IS NULL OR indexed.hash <> ? || file.hash)
+      ORDER BY file.path LIMIT 16
     `);
-    for (const row of rows.iterate(INDEX_REVISION)) {
-      if (acceptPath(row.path as string)) this.update(row.path as string, row.hash as string, row.content as string);
+    const deadline = performance.now() + 8;
+    let last: string | undefined;
+    for (const row of rows.iterate(afterPath, INDEX_REVISION)) {
+      last = row.path as string;
+      if (acceptPath(last)) this.update(last, row.hash as string, row.content as string);
+      if (performance.now() >= deadline) break;
     }
+    return last;
   }
 
   replacePathTargets(paths: readonly string[]): void {
@@ -117,11 +122,6 @@ export class MarkdownLinkIndex {
       this.refInsert.run(filePath, ordinal, reference.linkPath ? basenameKey(reference.linkPath) : basename,
         reference.linkPath, reference.linkText, JSON.stringify(reference));
     }
-  }
-
-  findNotePath(wanted: string): string | undefined {
-    const matches = this.fileByFoldedPath.all(wanted.toLowerCase()) as { path: string }[];
-    return (matches.find((row) => row.path === wanted) ?? (matches.length === 1 ? matches[0] : undefined))?.path;
   }
 
   private explicitTarget(wanted: string): Target | undefined {

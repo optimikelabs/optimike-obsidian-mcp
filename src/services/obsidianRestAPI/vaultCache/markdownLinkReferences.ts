@@ -10,14 +10,34 @@ export type MarkdownLinkReference = Pick<
   "kind" | "linkText" | "linkPath" | "subpath" | "original" | "displayText" | "frontmatterKey" | "position"
 >;
 
-const wikiLink = /(?<!\\)(!)?\[\[([^\]\r\n|]+)(?:\|([^\]\r\n]*))?\]\]/gu;
+const wikiLink = /(?<!\\)(!)?\[\[([^\[\]\r\n|]+)(?:\|([^\[\]\r\n]*))?\]\]/gu;
 const scheme = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/iu;
 const htmlTag = /^<(\/?)([a-z][\w:-]*)(?=[\s/>])(?:"[^"]*"|'[^']*'|[^<>"'])*>$/iu;
+const markdownSyntax = gfm();
+// Remove the disabled construct from dispatch as well: GFM normally
+// registers it on every alphanumeric character.
+const inlineConstructs = markdownSyntax.text ?? {};
+for (const [character, constructs] of Object.entries(inlineConstructs)) {
+  if (!constructs) continue;
+  const remaining = (Array.isArray(constructs) ? constructs : [constructs])
+    .filter((construct) => construct.name !== "emailAutolink");
+  if (remaining.length) inlineConstructs[character] = remaining;
+  else delete inlineConstructs[character];
+}
+const [literalAutolinks, ...otherGfmNodes] = gfmFromMarkdown();
+const markdownOptions = {
+  extensions: [markdownSyntax, { disable: { null: ["emailAutolink"] } }],
+  // The fallback literal-autolink transform scans the AST again and emits
+  // links without source positions. This index only uses positioned tokens.
+  mdastExtensions: [{ ...literalAutolinks, transforms: [] }, ...otherGfmNodes],
+};
 
 type Span = { start: number; end: number };
 
 function parseMarkdown(source: string) {
-  return fromMarkdown(source, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] });
+  // Bare emails are external to the vault graph. Keep GFM URL tokenization,
+  // which protects dollar signs inside bare URLs.
+  return fromMarkdown(source, markdownOptions);
 }
 
 function* walk(root: Nodes): IterableIterator<{ node: Nodes; parent: Nodes }> {
@@ -195,11 +215,21 @@ export function extractMarkdownLinkReferences(content: string): MarkdownLinkRefe
   }
 
   if (!body.includes("[")) return references;
-  const initial = parseMarkdown(body);
-  const initialOpaque = opaqueSpans(initial, body);
-  const source = body.includes("%%") ? maskComments(body, initialOpaque) : body;
-  const root = source === body ? initial : parseMarkdown(source);
-  const blocked = source === body ? initialOpaque : opaqueSpans(root, source);
+  // Only inspect the unmasked tree if a comment delimiter might be inside
+  // code, an HTML element or math. In plain Markdown we can mask before parsing.
+  const needsOpaqueSpans = /[`<$\t]| {4}|~~~/u;
+  const hasComments = body.includes("%%");
+  const inspectBeforeMask = hasComments && needsOpaqueSpans.test(body);
+  let source = hasComments && !inspectBeforeMask ? maskComments(body, []) : body;
+  let root = parseMarkdown(source);
+  let blocked = needsOpaqueSpans.test(source) ? opaqueSpans(root, source) : [];
+  if (inspectBeforeMask) {
+    source = maskComments(body, blocked);
+    if (source !== body) {
+      root = parseMarkdown(source);
+      blocked = opaqueSpans(root, source);
+    }
+  }
   const isOpaque = spanFilter(blocked.slice());
   const located: Array<{ start: number; end: number; reference: MarkdownLinkReference }> = [];
   const definitions = new Map<string, Definition>();

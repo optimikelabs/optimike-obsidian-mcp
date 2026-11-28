@@ -12,6 +12,7 @@ const {VaultCacheService}=await import('../dist/services/obsidianRestAPI/vaultCa
 const {LocalBasesService}=await import('../dist/services/localBasesService.js');
 const {warmSharedTaskCache,processListAllTasks}=await import('../dist/mcp-server/tools/tasksShared/logic.js');
 const {processObsidianNoteLinks}=await import('../dist/mcp-server/tools/obsidianNoteLinksTool/logic.js');
+const {publicMcpToolErrorPayload}=await import('../dist/utils/internal/errorHandler.js');
 const {extractMarkdownLinkReferences}=await import('../dist/services/obsidianRestAPI/vaultCache/markdownLinkReferences.js');
 const context={requestId:'cache-consumer-fixture',timestamp:new Date().toISOString(),operation:'test'};
 config.obsidianVaultPath=root;config.obsidianCacheSource='rest';
@@ -34,6 +35,9 @@ test('dollars in autolinks and wikilinks are literal, and formulas still hide li
   ['$x$ $[[H]]$ [[V]]\n\n$$\n[[Hide me]]\n$$',['V']],
  ];
  for (const [source, expected] of samples) assert.deepEqual(linkTexts(source),expected);
+});
+test('external email autolinks leave adjacent vault references visible',()=>{
+ assert.deepEqual(linkTexts('name+alias@example.com [[V]] <other@example.com> [mail](mailto:name@example.com) [[After]]'),['V','After']);
 });
 test('unpaired inline HTML is scoped to its paragraph',()=>{
  assert.deepEqual(linkTexts('a <span>x\n\n[[P2]]\n\n</span> [[V]]'),['P2','V']);
@@ -79,7 +83,18 @@ test('filesystem links preserve observations and reconcile edits, destination am
  // Populate a cache from before the filesystem link index existed.
  config.obsidianRuntimeMode='hybrid';
  let cache=new VaultCacheService();
- const read=(filePath,limit=200)=>processObsidianNoteLinks({filePath,limit},context,undefined,cache);
+ const readLinks=(filePath,limit=200)=>processObsidianNoteLinks({filePath,limit},context,undefined,cache);
+ const indexPending=(error)=>error.code==='SERVICE_UNAVAILABLE' &&
+  error.details?.reasonCode==='headless_link_index_building' && error.details?.retryable===true;
+ const read=async(filePath,limit)=>{
+  try {
+   return await readLinks(filePath,limit);
+  } catch(error) {
+   if (!indexPending(error)) throw error;
+   await cache.linkIndexRun;
+   return readLinks(filePath,limit);
+  }
+ };
  try {
   await cache.refreshCache();
   assert.equal(cache.isReady(),true);
@@ -88,6 +103,20 @@ test('filesystem links preserve observations and reconcile edits, destination am
   cache=new VaultCacheService();
   assert.equal(cache.isReady(),false);
   cache.waitUntilReady=()=>{ throw new Error('headless reads must await reconciliation, never a readiness deadline'); };
+  await cache.buildVaultCache();
+  assert.equal(cache.isReady(),true);
+  assert.equal(await cache.readFilesystemNoteContent('Notes/Source.md',context),source);
+  await assert.rejects(readLinks('Notes/People/Ada.md'),(error)=>{
+   assert.ok(indexPending(error));
+   const response=publicMcpToolErrorPayload(error,{
+    operation:'test',toolName:'obsidian_note_links',params:{filePath:'Notes/People/Ada.md'},
+   });
+   assert.equal(response.error.code,'SERVICE_UNAVAILABLE');
+   assert.equal(response.error.details.reasonCode,'headless_link_index_building');
+   assert.equal(response.error.details.retryable,true);
+   return true;
+  });
+  await cache.linkIndexRun;
   const result=await read('Notes/Source.md');
   assert.deepEqual((await read('Hidden targets.md')).outgoing.map(({linkText,resolution})=>[linkText,resolution.targetPath ?? null]),[
    ['doc.pdf',null],['allowed.pdf','.included/allowed.pdf'],['other.pdf',null],
@@ -163,6 +192,7 @@ test('filesystem links preserve observations and reconcile edits, destination am
    assert.equal(cache.getStats().refreshSource,'rest');
    config.obsidianCacheSource='filesystem';
    assert.equal(await cache.readFilesystemNoteContent('Another.md',context),restContent);
+   await assert.rejects(readLinks('Notes/Shared.md'),indexPending);
    assert.deepEqual((await read('Notes/Shared.md')).backlinks,[{sourcePath:'Notes/Source.md',count:2}]);
   } finally {
    await rest.close();
