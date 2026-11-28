@@ -51,6 +51,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: node scripts/test-headless-governed-notes.mjs
+      - run: node scripts/test-headless-journal-sweep.mjs
 
   runtime:
     needs: changes

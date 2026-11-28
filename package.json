@@ -194,7 +194,7 @@
     "test:headless-long-run": "node scripts/long-run-headless-server.mjs",
     "snapshot:vault": "node scripts/snapshot-vault.mjs",
     "check:vault-exclusions": "node scripts/check-vault-exclusion-policy.mjs",
-    "test:runtime": "npm run build && npm run test:operon-startup-order-offline && npm run smoke:headless-readonly && npm run smoke:hybrid-unavailable && npm run smoke:hybrid-api-available && npm run smoke:headless-guarded && npm run smoke:headless-filesystem && npm run smoke:headless-status && node scripts/test-headless-governed-notes.mjs && npm run test:local-rest-api-compat",
+    "test:runtime": "npm run build && npm run test:operon-startup-order-offline && npm run smoke:headless-readonly && npm run smoke:hybrid-unavailable && npm run smoke:hybrid-api-available && npm run smoke:headless-guarded && npm run smoke:headless-filesystem && npm run smoke:headless-status && node scripts/test-headless-governed-notes.mjs && node scripts/test-headless-journal-sweep.mjs && npm run test:local-rest-api-compat",
     "audit:production": "npm audit --omit=dev --audit-level=high",
     "verify:code": "npm run audit:production && npm run build",
     "rebuild": "npx ts-node --esm scripts/clean.ts && npm run build",

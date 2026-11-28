@@ -25,7 +25,8 @@ export const FILESYSTEM_AUTHORITY = "headless-filesystem" as const;
 const absent = (error: unknown) => (error as NodeJS.ErrnoException)?.code === "ENOENT";
 const occupied = (error: unknown) => (error as NodeJS.ErrnoException)?.code === "EEXIST";
 const isExchangeUnavailable = (error: unknown) => error instanceof McpError && error.details?.reasonCode === ATOMIC_EXCHANGE_UNAVAILABLE;
-const exchangeProbeName = /^\.mcp-exchange-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-[ab]\.tmp$/u;
+export const filesystemOperationId = "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
+export const exchangeProbeName = new RegExp(`^\\.mcp-exchange-${filesystemOperationId}-[ab]\\.tmp$`, "u");
 const hash = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
 // NTFS may preserve a replaced entry's creation time (file name tunneling).
 const identity = (s: BigIntStats) => process.platform === "win32" ?
@@ -64,10 +65,22 @@ function within(root: string, target: string) {
   return relative === "" || (!path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(".." + path.sep));
 }
 
-function vaultIdentity(root: string) {
+export function vaultIdentity(root: string) {
   return operationDigest({ backend: FILESYSTEM_AUTHORITY,
     root: process.platform === "win32" ? root.toLowerCase() : root,
     identity: identity(statSync(root, { bigint: true })) });
+}
+
+export function filesystemPathLock(relative: string) {
+  return relative.normalize("NFC").toLowerCase();
+}
+
+export function filesystemProbeLock(root: string, directory: string) {
+  return "\0exchange-probe:" + filesystemPathLock(path.relative(root, directory));
+}
+
+export function filesystemLockDirectory(root: string, bindingFingerprint: string) {
+  return filesystemJournalPath(root, path.join(config.headlessGovernedStateDirectory, bindingFingerprint + ".locks"));
 }
 
 export function defaultFilesystemJournal(vaultRoot: string) {
@@ -101,15 +114,21 @@ export function filesystemJournalPath(vaultRoot: string, candidate: string, fall
 /** Advisory locks for cooperating local processes. Kernel SQLite locks are
  * released on process death, without deleting a lock file or expiring a live
  * owner. Shards bound the on-disk footprint; collisions only serialize writes. */
-class PathLocks {
+export class PathLocks {
   constructor(private readonly directory: string) {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
   }
 
-  async run<T>(key: string, write: () => Promise<T>): Promise<T> {
-    const db = new DatabaseSync(path.join(this.directory, hash(key).slice(0, 2) + ".sqlite"));
+  async run<T>(key: string, write: () => Promise<T>, waitMs = 15_000): Promise<T> {
+    const lockPath = path.join(this.directory, hash(key).slice(0, 2) + ".sqlite");
+    if (path.relative(this.directory, realpathSync.native(this.directory))) throw new Error("The headless lock directory changed.");
     try {
-      const deadline = Date.now() + 15_000;
+      const entry = lstatSync(lockPath);
+      if (!entry.isFile() || entry.nlink !== 1) throw new Error("The headless lock is not an ordinary file.");
+    } catch (error) { if (!absent(error)) throw error; }
+    const db = new DatabaseSync(lockPath);
+    try {
+      const deadline = Date.now() + waitMs;
       for (;;) {
         try { db.exec("BEGIN IMMEDIATE"); break; } catch (error) {
           if (((error as { errcode?: number }).errcode ?? 0) % 256 !== 5) throw error;
@@ -142,8 +161,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
     this.root = realpathSync.native(vaultRoot);
     this.bindingFingerprint = vaultIdentity(this.root);
     this.writer = new VaultFileService(this.root);
-    this.locks = new PathLocks(filesystemJournalPath(this.root,
-      path.join(config.headlessGovernedStateDirectory, this.bindingFingerprint + ".locks")));
+    this.locks = new PathLocks(filesystemLockDirectory(this.root, this.bindingFingerprint));
     this.removedDirectory = filesystemJournalPath(this.root, journalPath + ".removed");
   }
 
@@ -277,7 +295,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
   }
 
   private pathLock(relative: string) {
-    return relative.normalize("NFC").toLowerCase();
+    return filesystemPathLock(relative);
   }
 
   private async withWriteLock<T>(plan: ObsidianNoteReplacePlan, write: () => Promise<T>): Promise<T> {
@@ -309,7 +327,6 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
   }
 
   async restoreInterruptedReplacements() {
-    await this.cleanupExchangeProbes();
     for (const operationId of this.journal.interruptedFilesystemReplacements()) {
       const plan = this.journal.get(operationId);
       if (!plan || plan.bindingFingerprint !== this.bindingFingerprint) continue;
@@ -351,31 +368,6 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
     return { temp: prefix + ".tmp", backup: prefix + ".bak" };
   }
 
-  private probeLock(directory: string) {
-    return "\0exchange-probe:" + this.pathLock(path.relative(this.root, directory));
-  }
-
-  private async cleanupExchangeProbes() {
-    const directories = [this.root];
-    for (const dir of directories) {
-      if (!(await lstat(dir).catch(() => undefined))?.isDirectory()) continue;
-      const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
-      for (const entry of entries) {
-        if (entry.isDirectory() && !entry.name.startsWith(".")) directories.push(path.join(dir, entry.name));
-      }
-      const probes = entries.filter(entry => entry.isFile() && exchangeProbeName.test(entry.name));
-      if (!probes.length) continue;
-      await this.locks.run(this.probeLock(dir), async () => {
-        if (path.relative(dir, realpathSync.native(dir))) return;
-        for (const entry of probes) {
-          const filename = path.join(dir, entry.name);
-          const file = await lstat(filename).catch(() => undefined);
-          if (file?.isFile() && file.size === 0 && file.nlink === 1) await rm(filename, { force: true }).catch(() => {});
-        }
-      }).catch(() => {});
-    }
-  }
-
   private async probeReplacement(relative: string) {
     const exchange = this.getExchange() && this.getProbeExchange();
     if (!exchange) {
@@ -383,7 +375,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
       return;
     }
     const dir = path.dirname(await this.target(relative));
-    await this.locks.run(this.probeLock(dir), async () => {
+    await this.locks.run(filesystemProbeLock(this.root, dir), async () => {
       const prefix = path.join(dir, `.mcp-exchange-${randomUUID()}`);
       const probes: string[] = [];
       let probeFailed = false;

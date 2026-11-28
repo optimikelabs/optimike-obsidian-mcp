@@ -161,8 +161,8 @@ par défaut, d’après l’identité du coffre quel que soit le mode headless, 
 dans le répertoire d’état local si le cache est dans le coffre. Le verrou par
 coffre est dans l’état local indépendamment du chemin du journal. Les processus
 qui coopèrent partagent cet état. `MCP_HEADLESS_GOVERNED_JOURNAL_PATH` accepte
-un chemin absolu hors du coffre. Le journal conserve les versions antérieures
-et les divergences traitées pendant 30 jours. Protégez-le comme les données du coffre.
+un chemin absolu hors du coffre. Protégez le journal comme les données du coffre.
+Les entrées headless clôturées deviennent éligibles au nettoyage manuel après 30 jours.
 Si le verrou du chemin reste occupé pendant 15 secondes, apply renvoie le motif
 réessayable `headless_vault_lock_busy`. Le statut indique `failed` et la tentative
 n’a effectué aucune écriture. Une fois le verrou libéré, utilisez un nouveau
@@ -191,8 +191,7 @@ Après une interruption, appelez status avec la référence d’origine. Il peut
 clore une écriture jamais publiée ou nettoyer le lien temporaire après une
 création. Une interruption pendant l’échange natif laisse un fichier complet
 à la cible. Le démarrage réconcilie aussi son fichier temporaire journalisé avant
-de servir les outils et retire les fichiers de sonde vides dont le nom correspond
-exactement au motif, à la racine et dans les dossiers visibles. Avec l’ancienne séquence activée, le démarrage et le premier statut
+de servir les outils. Avec l’ancienne séquence activée, le démarrage et le premier statut
 rétablissent un original absent depuis sa sauvegarde par un lien exclusif et
 signalent un conflit. Une écriture déjà
 préparée ne se rejoue pas. Pour annuler une écriture terminée, planifiez un
@@ -202,6 +201,31 @@ Le hash doit toujours correspondre au résultat de l’écriture d’origine.
 Une note existante retrouve son contenu antérieur avec la politique de dates
 en vigueur. Annuler une création rétablit l’absence du chemin et exige
 `MCP_WRITE_MODE=full` ainsi qu’un journal sur le même système de fichiers.
+
+### Maintenance locale du journal
+
+Lancez ces commandes depuis le dossier d’installation avec la même configuration
+du coffre, du mode headless, du journal et de l’état local que le serveur.
+
+```sh
+node dist/headless-journal-maintenance.js --dry-run
+node dist/headless-journal-maintenance.js --apply <planDigest>
+```
+
+Relisez la liste avant de transmettre son empreinte. Le nettoyage s’exécute
+sur demande. Il supprime les entrées clôturées de plus de 30 jours et leurs
+fichiers temporaires aux noms exacts quand le journal conserve les mêmes octets.
+Dans le coffre, seuls sont concernés `.mcp-write-<UUID d’opération>.tmp`,
+`.mcp-write-<UUID d’opération>.bak` et les sondes vides
+`.mcp-exchange-<UUID de sonde>-a.tmp` ou `-b.tmp` de plus de 24 heures.
+En dehors du coffre, la commande utilise le journal configuré et son dossier
+`.removed`. Elle préserve les liens symboliques, les sondes récentes, les
+fichiers sans preuve d’appartenance, les opérations planifiées, en cours ou
+incertaines et les entrées dont le verrou est occupé.
+
+Après une interruption ou si la liste a changé, relancez le dry-run. Le
+journal conserve son entrée jusqu’à la suppression de tous ses fichiers
+temporaires dont il détient une copie vérifiée.
 
 ## Décision go/no-go serveur
 

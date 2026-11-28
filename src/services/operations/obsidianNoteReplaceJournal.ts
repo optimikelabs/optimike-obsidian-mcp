@@ -221,6 +221,7 @@ const SQLITE_BUSY_TIMEOUT_MS = 5_000;
 const SQLITE_STARTUP_RETRY_WINDOW_MS = 15_000;
 const SQLITE_STARTUP_RETRY_DELAY_MS = 50;
 const MAX_PENDING_OPERATION_ROWS_LIMIT = 100;
+export const NOTE_REPLACE_TERMINAL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 function isTransientSqliteContention(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const sqliteError = error as Error & {
@@ -290,7 +291,7 @@ export class ObsidianNoteReplaceJournal {
   ) {
     this.now = options.now ?? Date.now;
     this.terminalRetentionMs =
-      options.terminalRetentionMs ?? 30 * 24 * 60 * 60 * 1000;
+      options.terminalRetentionMs ?? NOTE_REPLACE_TERMINAL_RETENTION_MS;
     this.plannedRetentionMs = options.plannedRetentionMs ?? 30 * 24 * 60 * 60 * 1000;
     this.purgeIntervalMs = options.purgeIntervalMs ?? 60 * 60 * 1000;
     this.executionLeaseMs = options.executionLeaseMs ?? 30_000;
@@ -1165,15 +1166,13 @@ export class ObsidianNoteReplaceJournal {
       .prepare(
         `DELETE FROM obsidian_note_replace_plans
          WHERE status IN ('committed', 'conflict', 'rejected', 'failed', 'expired')
+           AND json_type(payload_json, '$.filesystem') IS NULL
            AND updated_at < ?`,
       )
       .run(cutoff);
-    const expiredDivergences = this.db.prepare(`DELETE FROM obsidian_note_replace_plans
-      WHERE status = 'outcome_unknown' AND updated_at < ?
-        AND json_type(payload_json, '$.filesystem.divergentObservation') IS NOT NULL
-        AND (json_extract(payload_json, '$.filesystem.witnessesCleaned') = 1
-          OR json_type(payload_json, '$.filesystem.localStage') IS NULL)`).run(cutoff);
-    if (Number(result.changes) > 0 || Number(expired.changes) > 0 || Number(expiredDivergences.changes) > 0) {
+    // Filesystem rows own staged witnesses and before images. Their retention
+    // is enforced by the opt-in sweep under the same lock as note writes.
+    if (Number(result.changes) > 0 || Number(expired.changes) > 0) {
       this.walCheckpointRequired = true;
       this.checkpointSensitiveFrames();
     }
