@@ -54,7 +54,7 @@ const filters = [dueFilter, runtimeFilter, dynamicFilter, groupedFilter];
 const priority = { id: "pr_a", label: "A", color: null, description: null };
 const mapping = { canonicalKey: "status", visiblePropertyName: "État", type: "text", sync: "yes", enabled: true, isSystem: true, isInternal: false };
 const pluginData = {
-  schemaVersion: 3, settings: { language: "fr", excludedFolders: ["Excluded"] },
+  schemaVersion: 3, settings: { language: "fr", excludedFolders: ["Unindexed", "Excluded"] },
   taxonomy: {
     pipelines: { pipelines: [pipeline], defaultPipelineName: "CN" },
     priorities: { priorities: [priority], defaultPriority: "A" },
@@ -148,7 +148,7 @@ const live = createServer(async (req, res) => {
       automation: { autoCompleteParentWhenAllChildrenTerminal: false, cascadeCancelToDescendants: false,
         fileTaskAutoArchiveEnabled: false, fileTaskArchiveFolder: "", fileTaskArchiveDelaySeconds: 0,
         fileTaskArchiveOnlyFromFileTasksFolder: false, fileRepeatDestination: "", fileRepeatCustomFolder: "" },
-      indexing: { excludedFolders: ["Excluded"], fullReindexOnStartup: false, indexEventDebounceMs: 0 },
+      indexing: { excludedFolders: ["Excluded", "Unindexed"], fullReindexOnStartup: false, indexEventDebounceMs: 0 },
       docs: { folder: "", autoUpdateEnabled: false }, views: { filters: filters.map(({ id, name, icon, ...definition }) => ({ id, name, icon, definition })) },
     },
   } : req.url.endsWith("/status") ? {
@@ -291,9 +291,18 @@ try {
   assert.equal(projection.tier, "warm");
   assert.equal(projection.plainCheckboxProgress, undefined);
   const [rawFile] = parseOperonMarkdown("---\noperonId: time001\ndatetimeModified: 2020-01-02T08:00:00\n---\n- [x] Sidebar", "Clock.md", cfg).tasks;
-  const clock = projectFilesystemTask(rawFile, "Clock.md", { mtime: Date.UTC(2026, 1, 1), birthtime: Date.UTC(2020, 0, 1) }, cfg, "Europe/Paris");
+  const oldMtime = Date.UTC(2020, 0, 1);
+  const recentMtime = Date.UTC(2020, 0, 3);
+  const clock = projectFilesystemTask(rawFile, "Clock.md", { mtime: recentMtime, birthtime: oldMtime }, cfg, "Europe/Paris");
   assert.equal(clock.dates.created, "2020-01-01T01:00:00");
-  assert.equal(clock.dates.modified, "2020-01-02T08:00:00");
+  assert.equal(clock.dates.modified, "2020-01-03T01:00:00");
+  assert.equal(clock.fields.datetimeModified, clock.dates.modified);
+  assert.equal(projectFilesystemTask(rawFile, "Clock.md", { mtime: oldMtime }, cfg, "Europe/Paris").dates.modified,
+    "2020-01-02T08:00:00");
+  const [noStoredTime] = parseOperonMarkdown("---\noperonId: time002\n---", "Clock.md", cfg).tasks;
+  assert.equal(projectFilesystemTask(noStoredTime, "Clock.md", { mtime: recentMtime }, cfg, "Europe/Paris").dates.modified,
+    "2020-01-03T01:00:00");
+  assert.equal(projectFilesystemTask(decoded[0], "Retained.md", { mtime: recentMtime }, cfg, "Europe/Paris").dates.modified, null);
   assert.equal(projectFilesystemTask(rawFile, "Clock.md", { mtime: 1 }, cfg).dates.created, null);
   assert.equal(clock.plainCheckboxProgress, undefined);
 

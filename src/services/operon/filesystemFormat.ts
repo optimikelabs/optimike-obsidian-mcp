@@ -95,7 +95,7 @@ export function projectFilesystemConfiguration(data: RecordValue): FilesystemCon
       fileRepeatDestination: s("fileRepeatDestination"), fileRepeatCustomFolder: s("fileRepeatCustomFolder"),
     },
     indexing: {
-      excludedFolders: strings(settings.excludedFolders),
+      excludedFolders: strings(settings.excludedFolders).sort(),
       fullReindexOnStartup: b("fullReindexOnStartup"), indexEventDebounceMs: n("indexEventDebounceMs"),
     },
     docs: { folder: s("operonDocsFolder"), autoUpdateEnabled: b("operonDocsAutoUpdateEnabled") },
@@ -291,7 +291,14 @@ export function projectFilesystemTask(
       return [parts.year, parts.month, parts.day].join("-") + "T" + [parts.hour, parts.minute, parts.second].join(":");
     };
     if (!fields.datetimeCreated && stat.birthtime && stat.birthtime > 0) fields.datetimeCreated = format(stat.birthtime);
-    if (!fields.datetimeModified && stat.mtime > 0) fields.datetimeModified = format(stat.mtime);
+    // Operon resolves the effective modification timestamp before the Bridge reads it.
+    if (Number.isFinite(stat.mtime) && stat.mtime > 0) {
+      const fileModified = format(stat.mtime);
+      const storedModified = scalar(fields.datetimeModified);
+      if (!storedModified || storedModified.localeCompare(fileModified) < 0) {
+        fields.datetimeModified = fileModified;
+      }
+    }
   }
   for (const name of ["datetimeStart", "datetimeEnd"]) {
     const value = scalar(fields[name]);

@@ -66,7 +66,10 @@ async function waitForHealth(port, child) {
 async function openProxy(vault, port, profile) {
   const args = ["dist/stdio-proxy.js"];
   if (profile) args.push("--tool-profile", profile);
-  const env = sharedEnv(vault, port, { MCP_TRANSPORT_TYPE: "stdio" });
+  const env = sharedEnv(vault, port, {
+    MCP_TRANSPORT_TYPE: "stdio",
+    MCP_PROXY_REQUIRE_EXISTING_BACKEND: "true",
+  });
   if (profile) {
     // Deliberately conflicting env proves CLI precedence inside each proxy.
     env.MCP_TOOL_PROFILE = profile === "standard" ? "full" : "standard";
