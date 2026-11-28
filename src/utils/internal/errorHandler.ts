@@ -481,6 +481,7 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "atomic_write_creation_property_missing",
   "date_preparation_unverified",
   "headless_date_policy_unavailable",
+  "headless_note_path_spelling",
   "date_preparation_bridge_upgrade_required",
   "date_preparation_fdm_pending",
   "date_preparation_not_started",

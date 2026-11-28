@@ -80,6 +80,10 @@ export type ObsidianNoteReplacePlan = {
     projectedSha256?: string;
     stagedIdentity?: string;
     stagedSha256?: string;
+    stagedContent?: string;
+    publicationConfirmed?: true;
+    // Private evidence. null means publication was followed by absence.
+    divergentObservation?: { sha256: string; bytesBase64: string } | null;
   };
   bindingFingerprint: string;
   status: ObsidianNoteReplaceStatus;
@@ -711,11 +715,24 @@ export class ObsidianNoteReplaceJournal {
     return updated;
   }
 
-  recordFilesystemStage(operationId: string, attemptId: string, stagedIdentity: string, stagedSha256: string): void {
+  recordFilesystemStage(operationId: string, attemptId: string, stagedIdentity: string, stagedSha256: string, stagedContent?: string): void {
+    this.updateFilesystemAttempt(operationId, attemptId, { stagedIdentity, stagedSha256, stagedContent });
+  }
+
+  confirmFilesystemPublication(operationId: string, attemptId: string): void {
+    this.updateFilesystemAttempt(operationId, attemptId, { publicationConfirmed: true });
+  }
+
+  recordFilesystemDivergence(operationId: string, observation: { sha256: string; bytesBase64: string } | null): void {
+    this.transitionInternal(operationId, ["applying", "outcome_unknown"], "outcome_unknown",
+      "headless_postflight_diverged", undefined, true, undefined, undefined, { divergentObservation: observation });
+  }
+
+  private updateFilesystemAttempt(operationId: string, attemptId: string, evidence: Partial<NonNullable<ObsidianNoteReplacePlan["filesystem"]>>): void {
     const current = this.get(operationId);
     if (!current?.filesystem || current.status !== "applying" ||
         current.executionOwner?.attemptId !== attemptId) throw new ObsidianNoteReplaceConcurrencyError();
-    const updated = { ...current, filesystem: { ...current.filesystem, stagedIdentity, stagedSha256 } };
+    const updated = { ...current, filesystem: { ...current.filesystem, ...evidence } };
     const result = this.db.prepare(
       "UPDATE obsidian_note_replace_plans SET payload_json = ? WHERE operation_id = ? AND status = 'applying' AND payload_json = ?",
     ).run(JSON.stringify(updated), operationId, JSON.stringify(current));
@@ -919,10 +936,14 @@ export class ObsidianNoteReplaceJournal {
     verifiedCommitWithoutOwner: boolean,
     settlementEvidence: ModifiedTimeSettlementEvidence | undefined,
     effectProof?: OperationProof,
+    filesystemUpdate?: Partial<NonNullable<ObsidianNoteReplacePlan["filesystem"]>>,
   ): ObsidianNoteReplacePlan {
     this.maybePurgeTerminalPlans();
     const current = this.get(operationId);
     if (!current || !expected.includes(current.status)) {
+      throw new ObsidianNoteReplaceConcurrencyError();
+    }
+    if (next === "committed" && current.filesystem?.divergentObservation !== undefined) {
       throw new ObsidianNoteReplaceConcurrencyError();
     }
     if (
@@ -972,6 +993,8 @@ export class ObsidianNoteReplaceJournal {
         ? { modifiedTimeSettlementEvidence: settlementEvidence }
         : {}),
       ...(effectProof ? { effectProof } : {}),
+      ...(current.filesystem ? { filesystem: { ...current.filesystem, ...filesystemUpdate,
+        ...(STABLE_TERMINAL.has(next) && current.filesystem.divergentObservation === undefined ? { stagedContent: undefined } : {}) } } : {}),
       ...(STABLE_TERMINAL.has(next) ? { nextContent: "" } : {}),
       ...(failure ? { failure } : { failure: undefined }),
     };

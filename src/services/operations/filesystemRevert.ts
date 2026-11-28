@@ -34,20 +34,21 @@ export class FilesystemRevert {
     return row;
   }
 
-  private authorize(phase: "plan" | "apply" | "recover", path: string, restoreAbsence: boolean, length?: number) {
+  private authorize(phase: "plan" | "apply" | "recover", path: string, destructive: boolean, length?: number) {
     assertWriteAllowed({ operation: phase === "plan" ? "obsidian_operation_revert_plan" : "obsidian_operation_revert_apply",
-      action: phase, target: path, targetType: "filePath", destructive: restoreAbsence, contentLength: length });
+      action: phase, target: path, targetType: "filePath", destructive, contentLength: length });
   }
 
   async plan(input: { path: string; operationRef: string; idempotencyKey: string }) {
     const prefix = [...SOURCES.keys()].find(prefix => input.operationRef.startsWith(prefix));
-    if (!prefix) refuse("A committed headless note operation reference is required.");
+    if (!prefix) refuse("A headless note operation reference is required.");
     const source = this.journal.get(operationId(input.operationRef, prefix));
-    if (!source?.filesystem || source.status !== "committed" || source.path !== input.path ||
-        source.projection?.kind !== SOURCES.get(prefix)) refuse("The committed operation does not match the target.");
+    if (!source?.filesystem || source.path !== input.path ||
+        source.projection?.kind !== SOURCES.get(prefix)) refuse("The headless operation does not match the target.");
+    const divergent = source.status === "outcome_unknown" ? source.filesystem.divergentObservation : undefined;
     const before = source.filesystem.beforeContent;
-    const afterSha256 = source.filesystem.stagedSha256;
-    if (!afterSha256) refuse("The original operation has no verified filesystem after proof.");
+    const afterSha256 = source.status === "committed" ? source.filesystem.stagedSha256 : divergent?.sha256;
+    if (!afterSha256) refuse("The filesystem has no after proof against which to seal the revert.");
     const restoreAbsence = source.projection?.kind === "obsidian.note.create";
     if (!restoreAbsence && before === undefined) refuse("The operation has no retained before image.");
     const key = "optimike:projection:v1:revert:" + operationDigest(input.idempotencyKey);
@@ -57,7 +58,7 @@ export class FilesystemRevert {
       if (replay.idempotencyIdentity !== identity) refuse("The idempotency key belongs to another revert.");
       return this.status(PREFIX + replay.operationId);
     }
-    this.authorize("plan", source.path, restoreAbsence, before?.length);
+    this.authorize("plan", source.path, restoreAbsence || Boolean(divergent), before?.length);
     const sealed = await this.backend.sealRevert(source.path, restoreAbsence ? undefined : before, afterSha256);
     if (sealed.bindingFingerprint !== source.bindingFingerprint) refuse("The vault differs from the original operation.");
     if (sealed.policyDigest !== source.filesystem.policyDigest) refuse("The protected date policy differs from the original operation.");
@@ -69,7 +70,7 @@ export class FilesystemRevert {
       requestDigest: operationDigest({ identity, before: afterSha256, after: sealed.afterSha256,
         policy: sealed.policyDigest, binding: sealed.bindingFingerprint }),
       projection: { contractVersion: 1, kind: KIND, publicIdempotencyKey: input.idempotencyKey, intentDigest: identity,
-        proof: { restoreAbsence } },
+        proof: { restoreAbsence, restoresAfterDivergence: Boolean(divergent) } },
     });
     return this.receipt(row);
   }
@@ -95,7 +96,9 @@ export class FilesystemRevert {
       if (row.filesystem?.stagedIdentity) return this.receipt(row);
     }
     if (row.status !== (recovery ? "outcome_unknown" : "planned")) return this.status(ref);
-    this.authorize(recovery ? "recover" : "apply", row.path, row.projection!.proof.restoreAbsence === true, row.nextContent.length);
+    const proof = row.projection!.proof;
+    this.authorize(recovery ? "recover" : "apply", row.path,
+      proof.restoreAbsence === true || proof.restoresAfterDivergence === true, row.nextContent.length);
     await this.backend.status();
     try { row = this.journal.transition(row.operationId, [row.status], "applying"); }
     catch (error) {

@@ -180,6 +180,18 @@ export class NoteCreateOperationAdapter {
     if (!["applying", "outcome_unknown", "committed"].includes(row.status)) return this.receipt(row);
     let postflight: "pending" | "verified" | "unverified" = "unverified";
     try {
+      if (row.status !== "committed" && row.filesystem && this.backend.matchesEffect) {
+        const matches = await this.backend.matchesEffect(row);
+        row = this.require(ref);
+        if (!matches) return this.receipt(row, row.status === "applying" ? "pending" : "unverified");
+        if (row.status !== "committed") {
+          row = this.journal.commitAfterVerifiedProof(row.operationId, ["applying", "outcome_unknown"], {
+            kind: "note-create-observed-state", digest: row.filesystem!.stagedSha256!,
+            details: { match: "exact", authorAttribution: "not_proven", observedAt: new Date(this.now()).toISOString() },
+          });
+        }
+        return this.receipt(row, "verified");
+      }
       const plan = this.sealed(row), observation = Inspection.parse(await this.backend.inspect(row.path));
       // The current automatic-date policy is an apply-time fence, not a
       // reconciliation identity. A lost response can be observed after the
@@ -198,10 +210,7 @@ export class NoteCreateOperationAdapter {
         }
         const observationDelay = Math.max(0, ...plan.policy.fields.map(field => field.delayMs));
         const settled = this.now() - row.settlementObservationStartedAtEpochMs! >= observationDelay;
-        const match = this.backend.matchesEffect
-          ? await this.backend.matchesEffect(row) && observation.sha256 === this.journal.get(row.operationId)?.filesystem?.stagedSha256
-            ? { kind: "exact", sha256: observation.sha256! } : undefined
-          : settled ? observeCreateContent(row.nextContent, observation.content!, plan.policy, start, this.now()) : undefined;
+        const match = settled ? observeCreateContent(row.nextContent, observation.content!, plan.policy, start, this.now()) : undefined;
         if (match) {
           row = this.journal.commitAfterVerifiedProof(row.operationId, ["applying", "outcome_unknown"], {
             kind: "note-create-observed-state", digest: match.sha256,

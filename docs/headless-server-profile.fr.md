@@ -111,11 +111,22 @@ apply et status.
 Le plan lie le coffre et le SHA-256 des octets lus sur disque, ou l’absence du
 chemin pour une création. Apply réutilise la référence scellée et la clé
 d’idempotence. L’autorité filesystem sérialise les processus qui partagent le
-verrou local. Elle synchronise le fichier temporaire, revérifie la cible et
-publie atomiquement. Une modification Sync visible au dernier contrôle
-provoque un conflit. Un programme externe qui ignore le verrou peut encore
-intervenir entre cette vérification et le renommage. Le reçu identifie
-`headless-filesystem` et exige une relecture vérifiée sur disque.
+verrou local. Elle synchronise le fichier temporaire, revérifie la cible juste
+avant publication et publie atomiquement. Une modification Sync visible à ce
+contrôle provoque un conflit. Sous Windows, l’autorité réessaie jusqu’à quatre
+fois si le renommage renvoie `EPERM` ou `EBUSY` et vérifie de nouveau le hash
+avant chaque tentative. Le reçu identifie `headless-filesystem` et exige une
+relecture vérifiée sur disque.
+
+Un programme externe peut encore intervenir entre la dernière lecture du hash
+et le renommage. Si son écriture est entièrement écrasée dans cet intervalle,
+elle peut ne laisser aucune trace observable. Si la relecture après publication
+détecte un fichier différent, l’opération reste `outcome_unknown`. Le journal
+privé conserve le contenu d’origine, les octets publiés et ceux observés à la
+relecture. Status et recover préservent la modification externe. En
+`headless-filesystem` avec `MCP_WRITE_MODE=full`, un plan de retour arrière peut
+rétablir l’état d’origine si le hash courant correspond toujours au hash externe
+enregistré. Relisez la modification externe avant d’appliquer le retour arrière.
 
 Placez le cache partagé hors du coffre. Le journal est créé à côté du cache
 par défaut, ou dans le répertoire d’état local si le cache est dans le coffre.
@@ -139,9 +150,10 @@ Le compilateur headless valide le YAML local et préserve le BOM et les fins
 de ligne. En live, Desktop fournit la sérialisation YAML et les types natifs.
 
 Après une interruption, appelez status avec la référence d’origine. Recover
-peut reprendre un plan qui n’a pas atteint le point de publication. Après
-un effet incertain à ce point, status et recover exigent la preuve enregistrée
-sur disque. Pour annuler une écriture terminée, planifiez un retour arrière en
+peut reprendre une écriture si le journal montre qu’elle n’a pas atteint la mise
+en attente de publication. À partir de cette étape, status et recover ne peuvent
+certifier l’effet qu’avec la preuve enregistrée sur disque. Pour annuler une
+écriture terminée, planifiez un retour arrière en
 indiquant le chemin et la référence d’origine, puis appliquez ce nouveau plan.
 Le hash doit toujours correspondre au résultat de l’écriture d’origine.
 Une note existante retrouve son contenu antérieur avec la politique de dates

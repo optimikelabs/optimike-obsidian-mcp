@@ -2,6 +2,7 @@ import "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
 import { fork } from "node:child_process";
 import { once } from "node:events";
+import { renameSync, writeFileSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -12,6 +13,9 @@ const initial = "\uFEFF---\r\nlabel: first\r\n---\r\n\r\nOriginal body.\r\n";
 const excluded = "Archive/Old.md";
 const templated = "Snippets/Starter.md";
 const raced = "Archive/Race.md";
+const postflightRace = "Archive/Postflight.md";
+const published = initial.replace("Original body.", "Published by the plan.");
+const interference = initial.replace("Original body.", "Synced by another writer.");
 const dateSettings = {
   headerCreated: "created_at",
   headerUpdated: "updated_at",
@@ -31,16 +35,28 @@ const dateSettings = {
 };
 const time = Date.parse("2026-09-05T11:12:13Z");
 
-async function crashAfterFilesystemEffect() {
+async function injectAfterFilesystemEffect() {
   const [vault, state, ref, key] = process.argv.slice(3);
   const { FilesystemNoteBackend } = await import("../dist/services/operations/filesystemNoteBackend.js");
   const { ObsidianNoteReplaceJournal } = await import("../dist/services/operations/obsidianNoteReplaceJournal.js");
   const { ObsidianNoteReplaceOperationAdapter } = await import("../dist/services/operations/obsidianNoteReplaceOperationAdapter.js");
   const journal = new ObsidianNoteReplaceJournal(state);
-  const backend = new FilesystemNoteBackend(vault, state, journal, () => time, () => process.exit(87));
-  const adapter = new ObsidianNoteReplaceOperationAdapter(backend, journal, undefined, { filesystem: backend });
-  await adapter.apply(ref, key);
-  process.exitCode = 1;
+  const crash = process.argv[2] === "crash-after-effect";
+  const backend = new FilesystemNoteBackend(vault, state, journal, () => time, () => {
+    if (crash) process.exit(87);
+    const external = path.join(vault, "Archive", ".external-replacement.tmp");
+    writeFileSync(external, interference);
+    renameSync(external, path.join(vault, postflightRace));
+  });
+  try {
+    const adapter = new ObsidianNoteReplaceOperationAdapter(backend, journal, undefined, { filesystem: backend });
+    const receipt = await adapter.apply(ref, key);
+    assert.equal(receipt.outcome, "outcome_unknown");
+    const evidence = journal.get(receipt.operationId).filesystem;
+    assert.equal(evidence.beforeContent, initial);
+    assert.equal(evidence.stagedContent, published);
+    assert.deepEqual(Buffer.from(evidence.divergentObservation.bytesBase64, "base64"), Buffer.from(interference));
+  } finally { journal.close(); }
 }
 
 async function fixtures(vault) {
@@ -50,7 +66,7 @@ async function fixtures(vault) {
     [".obsidian/plugins/templater-obsidian/data.json", JSON.stringify({ templates_folder: "Snippets" })],
     ["AGENTS.md", "# Vault instructions\n\nUse a governed plan for every note write.\n"],
     ["Note.md", initial], [excluded, initial], [templated, initial],
-    ["Archive/Keep.md", initial], [raced, initial], [".hidden.md", initial],
+    ["Archive/Keep.md", initial], [raced, initial], [postflightRace, initial], [".hidden.md", initial],
   ]);
   for (const [relative, content] of files) {
     const target = path.join(vault, relative);
@@ -103,10 +119,27 @@ async function integration() {
     LOGS_DIR: logs,
     TZ: "UTC",
   };
+  // The public MCP boundary deliberately redacts the underlying exception.
+  // Capture its call site for unexpected failure of this synthetic plan only.
+  const errorModule = new URL("../dist/utils/internal/errorHandler.js", import.meta.url).href;
+  const diagnosePlan = `import { ErrorHandler } from ${JSON.stringify(errorModule)};
+    const original = ErrorHandler.handleError;
+    ErrorHandler.handleError = function (error, options) {
+      if (options.operation === "obsidian_text_patch_plan" && options.input?.idempotencyKey === "race-a") {
+        const message = String(error?.message ?? error).replaceAll(process.env.OBSIDIAN_VAULT, "<fixture>");
+        const site = error?.stack?.match(/dist[\\\\/][^\\r\\n)]+/u)?.[0] ?? "unknown";
+        process.stderr.write("Synthetic plan failure: " + message + " at " + site + "\\n");
+      }
+      return original.call(this, error, options);
+    };`;
   async function start(mode) {
+    const args = mode === "headless-guarded" ? ["--import", "data:text/javascript," + encodeURIComponent(diagnosePlan)] : [];
     const transport = new StdioClientTransport({
-      command: process.execPath, args: ["dist/index.js"], env: { ...env, OBSIDIAN_RUNTIME_MODE: mode,
+      command: process.execPath, args: [...args, "dist/index.js"], stderr: "pipe", env: { ...env, OBSIDIAN_RUNTIME_MODE: mode,
         MCP_WRITE_MODE: mode === "headless-guarded" ? "guarded" : "full" },
+    });
+    transport.stderr?.on("data", chunk => {
+      if (String(chunk).includes("Synthetic plan failure:")) process.stderr.write(chunk);
     });
     const client = new Client({ name: "governed-headless-fixture", version: "1" });
     liveClients.push(client);
@@ -185,7 +218,7 @@ async function integration() {
       expectVerified(await call(guarded, "frontmatter_patch_recover", { planRef: plan.planRef, idempotencyKey: relative }));
       assert.equal((await read(relative)).includes("updated_at:"), property);
     }
-    for (const relative of ["../escaped.md", ".hidden.md"]) await call(first, "text_patch_plan", patch(relative, relative), true);
+    for (const relative of ["../escaped.md", ".hidden.md", "archive/Race.md"]) await call(first, "text_patch_plan", patch(relative, relative), true);
     await call(guarded, "frontmatter_patch_plan", { path: "Note.md", idempotencyKey: "forge-date",
       operations: [{ op: "set", key: "updated_at", value: "false" }] }, true);
 
@@ -217,6 +250,26 @@ async function integration() {
     assert.equal(await read("Note.md"), phone);
     await call(first, "operation_revert_plan", { path: "Note.md", operationRef: plan.planRef, idempotencyKey: "stale-revert" }, true);
 
+    const changed = await call(first, "note_replace_plan", { path: postflightRace, nextContent: published, idempotencyKey: "postflight-race" });
+    const external = fork(new URL(import.meta.url), ["external-after-effect", vault, state, changed.planRef, "postflight-race"],
+      { env: { ...env, OBSIDIAN_RUNTIME_MODE: "headless-filesystem" }, stdio: ["ignore", "ignore", "inherit", "ipc"] });
+    assert.deepEqual(await once(external, "exit"), [0, null]);
+    assert.equal(await read(postflightRace), interference);
+    const uncertain = await call(second, "note_replace_status", { planRef: changed.planRef });
+    assert.equal(uncertain.outcome, "outcome_unknown");
+    assert.equal(uncertain.postflight.status, "unverified");
+    const unreplayed = await call(first, "note_replace_recover", { planRef: changed.planRef, idempotencyKey: "postflight-race" });
+    assert.equal(unreplayed.outcome, "outcome_unknown");
+    assert.equal(await read(postflightRace), interference);
+    const undoRace = await call(first, "operation_revert_plan", { path: postflightRace, operationRef: changed.planRef, idempotencyKey: "undo-postflight" });
+    await writeFile(path.join(vault, postflightRace), published);
+    assert.equal((await call(second, "note_replace_status", { planRef: changed.planRef })).outcome, "outcome_unknown");
+    assert.equal((await call(first, "operation_revert_apply", { planRef: undoRace.planRef, idempotencyKey: "undo-postflight" })).outcome, "conflict");
+    await writeFile(path.join(vault, postflightRace), interference);
+    const undo = await call(first, "operation_revert_plan", { path: postflightRace, operationRef: changed.planRef, idempotencyKey: "undo-current-postflight" });
+    expectVerified(await call(first, "operation_revert_apply", { planRef: undo.planRef, idempotencyKey: "undo-current-postflight" }));
+    assert.equal(await read(postflightRace), initial);
+
     const settingsPath = path.join(vault, ".obsidian/plugins/frontmatter-date-manager/data.json");
     const policyDrift = await call(first, "note_replace_plan", {
       path: "Note.md", nextContent: phone.replace("Phone update.", "Update under changed policy."), idempotencyKey: "policy-drift",
@@ -236,7 +289,7 @@ async function integration() {
   }
 }
 
-if (process.argv[2] === "crash-after-effect") await crashAfterFilesystemEffect();
+if (["crash-after-effect", "external-after-effect"].includes(process.argv[2])) await injectAfterFilesystemEffect();
 else {
   process.env.TZ = "UTC";
   await checkDates();

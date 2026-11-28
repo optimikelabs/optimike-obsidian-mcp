@@ -107,10 +107,20 @@ calls as live for supported note families. Creation uses plan, apply and status.
 Plans bind the vault and the SHA-256 of the bytes read from disk, or path
 absence for creation. Apply uses the sealed reference and idempotency key.
 The filesystem authority serializes cooperating processes on the same host,
-syncs staged bytes, checks the target again and publishes atomically. A sync
-edit visible at that final check conflicts. External writers that ignore the
-lock can still race the final check and rename. Commit receipts identify
-`headless-filesystem` and require a verified re-read from disk.
+syncs staged bytes, checks the target again immediately before publication and
+publishes atomically. A Sync edit visible at that check conflicts. On Windows,
+the authority retries `EPERM` and `EBUSY` from rename up to four times and checks
+the hash again before each attempt. Commit receipts identify `headless-filesystem`
+and require a verified re-read from disk.
+
+An external writer can still edit between the final hash read and rename. An
+edit overwritten entirely in that interval may leave no observable evidence.
+If postflight detects a different file after publication, the operation stays
+`outcome_unknown`. The private journal retains the original before image, the
+exact bytes published, and the different bytes observed. Status and recover
+preserve the external edit. In `headless-filesystem` with `MCP_WRITE_MODE=full`,
+a separate revert can restore the original state if the current note still
+matches the recorded external hash. Review that edit before applying the revert.
 
 Put the shared cache outside the vault. The default governed journal is next
 to it, with a fallback to the local note-journal state directory if the cache
@@ -134,8 +144,8 @@ The headless compiler validates local YAML and preserves BOM and line endings.
 Desktop provides native YAML serialization and metadata types in live mode.
 
 After an interrupted apply, call status on the original reference. Recover
-can resume a write that has not reached publication. Once a staged effect
-has an uncertain outcome, status and recover require the recorded disk proof.
+can resume a write if the journal shows it never reached staging. Once staged,
+status and recover can certify the effect only from the recorded disk proof.
 To undo a committed write, plan a revert using its original plan reference
 and path, then apply the new plan. The current hash must match the original
 operation's after hash. Existing notes restore the retained content with

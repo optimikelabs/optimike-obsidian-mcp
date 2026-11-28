@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, realpathSync, statSync, type BigIntStats } from "node:fs";
-import { lstat, open, readFile, realpath, rename, rm } from "node:fs/promises";
+import { lstat, open, readFile, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
@@ -9,7 +9,7 @@ import { load } from "js-yaml";
 import { config } from "../../config/index.js";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { requestContextService } from "../../utils/index.js";
-import { VaultFileService } from "../vaultFileService.js";
+import { renameWithPrecondition, VaultFileService } from "../vaultFileService.js";
 import { nativeNotePath } from "../nativeNoteMoveContract.js";
 import { createPolicyDigest, type NoteCreateApply, type NoteCreatePolicy } from "../noteCreateContract.js";
 import type { AtomicWriteReadRequest, AtomicWriteCasRequest, AtomicWriteReadResponse, AtomicWriteStatusResponse } from "../obsidianRestAPI/types.js";
@@ -113,12 +113,13 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
     if (this.vaultIdentity() !== this.bindingFingerprint) throw conflict("The headless vault identity changed.");
   }
 
-  private async physical(relative: string, allowAbsent = false) {
+  private async physical(relative: string, allowAbsent = false, exactSpelling = false) {
     this.assertVault();
     const parts = relative.split("/");
     let target = this.root;
     for (const [index, segment] of parts.entries()) {
-      target = path.join(target, segment);
+      const parent = target;
+      target = path.join(parent, segment);
       const last = index === parts.length - 1;
       let entry;
       try { entry = await lstat(target); } catch (error) {
@@ -127,6 +128,12 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
       }
       if (entry.isSymbolicLink() || (last ? !entry.isFile() || entry.nlink !== 1 : !entry.isDirectory())) {
         throw new McpError(BaseErrorCode.FORBIDDEN, "Governed filesystem paths require ordinary files and directories.");
+      }
+      // On Windows, realpath can return an alias or another spelling of an
+      // ancestor. The directory entry itself determines the date-rule path.
+      if (exactSpelling && !(await readdir(parent)).includes(segment)) {
+        throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Use the existing vault path with its exact spelling.",
+          { reasonCode: "headless_note_path_spelling" });
       }
     }
     return target;
@@ -137,21 +144,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
       throw new McpError(BaseErrorCode.VALIDATION_ERROR, "A visible vault-relative Markdown path is required.");
     }
     this.writer.resolveVaultPath(relative, this.context);
-    return this.physical(relative, allowAbsent).then(async target => {
-      // Resolve the parent's actual spelling before applying path-based date
-      // rules on case-insensitive filesystems.
-      const actual = await realpath(target).catch(async error => {
-        if (!allowAbsent || !absent(error)) throw error;
-        return path.join(await realpath(path.dirname(target)), path.basename(target));
-      });
-      // Windows can report a different spelling for the drive or vault root.
-      // Only the vault-relative spelling affects the exclusion rules.
-      const actualRelative = path.relative(this.root, actual).split(path.sep).join("/");
-      if (actualRelative !== relative) {
-        throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Use the existing vault path with its exact spelling.");
-      }
-      return target;
-    });
+    return this.physical(relative, allowAbsent, true);
   }
 
   private async policy() {
@@ -193,16 +186,21 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
     return { ok: true, contractVersion: 1, bindingFingerprint: this.bindingFingerprint, canonicalYaml: yaml, warnings: [] };
   }
 
-  private async snapshot(relative: string, allowAbsent = false) {
-    const filename = await this.target(relative, allowAbsent);
+  private async diskSnapshot(relative: string) {
+    const filename = await this.target(relative);
     const handle = await open(filename, "r");
     try {
       const stat = await handle.stat({ bigint: true });
       if (!stat.isFile() || stat.size > 5 * 1024 * 1024) throw conflict("The note is too large or is no longer a regular file.");
       const bytes = await handle.readFile();
-      const content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
-      return { content, size: bytes.length, sha256: hash(bytes), stat };
+      if (bytes.length > 5 * 1024 * 1024) throw conflict("The note grew beyond the verification limit.");
+      return { bytes, size: bytes.length, sha256: hash(bytes), stat };
     } finally { await handle.close(); }
+  }
+
+  private async snapshot(relative: string) {
+    const { bytes, ...proof } = await this.diskSnapshot(relative);
+    return { ...proof, content: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes) };
   }
 
   async read({ path: relative }: AtomicWriteReadRequest): Promise<AtomicWriteReadResponse> {
@@ -229,12 +227,31 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
     return { content, policyDigest: policy.digest };
   }
 
+  private pathLock(relative: string) {
+    return path.join(this.root, relative.normalize("NFC").toLowerCase());
+  }
+
   async matchesEffect(plan: ObsidianNoteReplacePlan) {
+    return this.locks.run(this.pathLock(plan.path), () => this.verifyPublication(plan));
+  }
+
+  private async verifyPublication(plan: ObsidianNoteReplacePlan) {
     if (plan.bindingFingerprint !== this.bindingFingerprint) return false;
-    const staged = this.journal.get(plan.operationId)?.filesystem;
-    if (!staged?.stagedIdentity || !staged.stagedSha256) return false;
-    const observed = await this.snapshot(plan.path).catch(error => { if (absent(error)) return undefined; throw error; });
-    return observed?.sha256 === staged.stagedSha256 && identity(observed.stat) === staged.stagedIdentity;
+    const current = this.journal.get(plan.operationId);
+    if (current?.status === "committed") return true;
+    if (current?.status !== "applying" && current?.status !== "outcome_unknown") return false;
+    const staged = current.filesystem;
+    if (!staged?.stagedIdentity || !staged.stagedSha256 || staged.divergentObservation !== undefined) return false;
+    const observed = await this.diskSnapshot(plan.path).catch(error => { if (absent(error)) return undefined; throw error; });
+    const sameIdentity = observed !== undefined && identity(observed.stat) === staged.stagedIdentity;
+    if (sameIdentity && observed.sha256 === staged.stagedSha256) return true;
+    // A differing inode by itself could mean the process died before rename.
+    // Only a successful publish or its surviving inode can authorize a revert.
+    if (staged.publicationConfirmed || sameIdentity) {
+      this.journal.recordFilesystemDivergence(plan.operationId,
+        observed ? { sha256: observed.sha256, bytesBase64: observed.bytes.toString("base64") } : null);
+    }
+    return false;
   }
 
   async sealRevert(relative: string, source: string | undefined, expectedHash: string) {
@@ -298,7 +315,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
 
   async applyRevert(plan: ObsidianNoteReplacePlan) {
     if (plan.projection?.proof.restoreAbsence !== true) return this.publish(plan, plan.beforeSha256);
-    return this.locks.run(path.join(this.root, plan.path.normalize("NFC").toLowerCase()), async () => {
+    return this.locks.run(this.pathLock(plan.path), async () => {
       const target = await this.target(plan.path, true);
       const observed = await this.snapshot(plan.path).catch(error => {
         if (absent(error)) throw conflict("The sealed note no longer exists.");
@@ -314,11 +331,12 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
         throw new McpError(BaseErrorCode.FORBIDDEN, "Reverting creation requires journal storage on the same filesystem as the vault.");
       }
       this.journal.recordFilesystemStage(plan.operationId, plan.executionOwner!.attemptId, identity(observed.stat), plan.afterSha256);
-      const latest = await this.snapshot(plan.path);
-      if (latest.sha256 !== plan.beforeSha256 || identity(latest.stat) !== identity(observed.stat)) {
-        throw conflict("The note changed just before the revert.");
-      }
-      await rename(target, this.removedPath(plan));
+      await renameWithPrecondition(target, this.removedPath(plan), async () => {
+        const latest = await this.snapshot(plan.path);
+        if (latest.sha256 !== plan.beforeSha256 || identity(latest.stat) !== identity(observed.stat)) {
+          throw conflict("The note changed just before the revert.");
+        }
+      });
       if (process.platform !== "win32") {
         for (const dir of [path.dirname(target), directory]) {
           const handle = await open(dir, "r");
@@ -332,7 +350,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
 
   private async publish(plan: ObsidianNoteReplacePlan, expectedHash?: string) {
     const relative = plan.path;
-    return this.locks.run(path.join(this.root, relative.normalize("NFC").toLowerCase()), async () => {
+    return this.locks.run(this.pathLock(relative), async () => {
       await this.target(relative, true);
       if (!plan.filesystem || plan.bindingFingerprint !== this.bindingFingerprint ||
           hash(plan.nextContent) !== plan.afterSha256) throw conflict("The headless filesystem seal is invalid.");
@@ -345,11 +363,12 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
         await this.target(relative, true);
         if ((await this.policy()).digest !== plan.filesystem?.policyDigest) throw conflict("The date policy changed after planning.");
         if (staged.ino === 0n) throw conflict("The filesystem cannot prove the identity of staged bytes.");
-        this.journal.recordFilesystemStage(plan.operationId, plan.executionOwner!.attemptId, identity(staged), sha256);
+        this.journal.recordFilesystemStage(plan.operationId, plan.executionOwner!.attemptId, identity(staged), sha256, content);
       };
-      await this.writer.publishSealedNote(relative, content, expectedHash, beforePublish, this.context);
+      const confirmPublication = () => this.journal.confirmFilesystemPublication(plan.operationId, plan.executionOwner!.attemptId);
+      await this.writer.publishSealedNote(relative, content, expectedHash, beforePublish, confirmPublication, this.context);
       this.afterPublish?.();
-      if (!await this.matchesEffect(plan)) throw new Error("The headless postflight could not verify the published file.");
+      if (!await this.verifyPublication(plan)) throw new Error("The headless postflight could not verify the published file.");
       return { sha256, size: Buffer.byteLength(content, "utf8") };
     });
   }
@@ -402,7 +421,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
   async inspect(relative: string) {
     const base = { contractVersion: 1, path: relative, bindingFingerprint: this.bindingFingerprint };
     try {
-      const read = await this.snapshot(relative, true);
+      const read = await this.snapshot(relative);
       return { ...base, exists: true, content: read.content, sha256: read.sha256 };
     } catch (error) { if (absent(error)) return { ...base, exists: false }; throw error; }
   }

@@ -14,6 +14,7 @@ import {
 } from "node:fs/promises";
 import type { BigIntStats } from "node:fs";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { dump, load } from "js-yaml";
 import { config } from "../config/index.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
@@ -43,6 +44,22 @@ const retryLock = Symbol("retryLock");
 
 function hasFsCode(error: unknown, code: string): boolean {
   return (error as NodeJS.ErrnoException | undefined)?.code === code;
+}
+
+/** A Windows reader can temporarily deny rename. Recheck the sealed input
+ * on every attempt so waiting cannot authorize a write over new content. */
+export async function renameWithPrecondition(source: string, target: string, recheck: () => Promise<void>) {
+  for (let attempt = 0; ; attempt += 1) {
+    await recheck();
+    try {
+      await rename(source, target);
+      return;
+    } catch (error) {
+      if (process.platform !== "win32" || attempt >= 4 ||
+          (!hasFsCode(error, "EPERM") && !hasFsCode(error, "EBUSY"))) throw error;
+      await delay(25 * (attempt + 1));
+    }
+  }
 }
 
 async function withFileLocks<T>(
@@ -418,8 +435,19 @@ export class VaultFileService {
     content: string,
     snapshotHash: string | undefined,
     context: RequestContext,
-    beforePublish?: (staged: BigIntStats) => Promise<void>,
   ): Promise<VaultFileReadResult> {
+    await this.publishFile(filePath, content, snapshotHash, context);
+    return this.read(filePath, context);
+  }
+
+  private async publishFile(
+    filePath: string,
+    content: string,
+    snapshotHash: string | undefined,
+    context: RequestContext,
+    beforePublish?: (staged: BigIntStats) => Promise<void>,
+    confirmPublication?: () => void,
+  ): Promise<void> {
     const absolutePath = this.resolveVaultPath(filePath, context);
     const parent = path.dirname(absolutePath);
     await this.resolveRealPathForWrite(parent, context);
@@ -451,7 +479,6 @@ export class VaultFileService {
       // This recheck narrows the race with external writers. Another process
       // can still change the target between the snapshot check and the rename.
       await this.assertRealPathInsideVault(parent, context);
-      await this.assertUnchanged(filePath, snapshotHash, context, beforePublish !== undefined);
       if (beforePublish && snapshotHash === undefined) {
         // Publishing via an exclusive link makes absent-only creation atomic
         // even against a writer that does not use our path lock.
@@ -459,9 +486,14 @@ export class VaultFileService {
           if (!hasFsCode(error, "EEXIST")) throw error;
           throw new McpError(BaseErrorCode.CONFLICT, "The create target appeared before publication.");
         });
+      } else if (beforePublish) {
+        await renameWithPrecondition(tempPath, absolutePath,
+          () => this.assertUnchanged(filePath, snapshotHash, context, true));
       } else {
+        await this.assertUnchanged(filePath, snapshotHash, context);
         await rename(tempPath, absolutePath);
       }
+      confirmPublication?.();
       if (beforePublish && process.platform !== "win32") {
         const directory = await open(parent, "r");
         try { await directory.sync(); } finally { await directory.close(); }
@@ -469,16 +501,15 @@ export class VaultFileService {
     } finally {
       await rm(tempPath, { force: true });
     }
-    return this.read(filePath, context);
   }
 
   /** Filesystem effect point used by the durable note adapter, under its
    * cross-process lock. expectedHash undefined means exclusive creation. */
   async publishSealedNote(filePath: string, content: string, expectedHash: string | undefined,
-    beforePublish: (staged: BigIntStats) => Promise<void>, context: RequestContext) {
+    beforePublish: (staged: BigIntStats) => Promise<void>, confirmPublication: () => void, context: RequestContext) {
     return this.withLockedFiles([filePath], context, async () => {
       await this.assertUnchanged(filePath, expectedHash, context, true);
-      return this.replaceFile(filePath, content, expectedHash, context, beforePublish);
+      await this.publishFile(filePath, content, expectedHash, context, beforePublish, confirmPublication);
     });
   }
 

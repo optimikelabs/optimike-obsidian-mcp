@@ -149,7 +149,10 @@ creation. Whole-note replacement and revert are available in
 `headless-filesystem`. Use `obsidian_note_replace_plan`, `obsidian_note_replace_apply`,
 `obsidian_note_replace_status` and `obsidian_note_replace_recover` for replacement.
 Status and same-plan recovery use the serving authority's
-journal. The `obsidian_list_pending_operations` cockpit lists the journal without calling a
+journal. If a different file is observed after filesystem publication, the
+operation remains `outcome_unknown` and the journal retains both versions. A
+separately sealed revert in full write mode can CAS on the observed hash.
+The `obsidian_list_pending_operations` cockpit lists the journal without calling a
 backend. See the [Headless Server Profile](headless-server-profile.md).
 
 Handoff delivery is a transport contract, not a runtime-mode write capability:

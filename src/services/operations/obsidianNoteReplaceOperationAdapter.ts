@@ -538,7 +538,8 @@ function receipt(
   const current = state(plan);
   const terminal = current.phase === "terminal";
   const recoverable =
-    plan.status === "applying" || plan.status === "outcome_unknown";
+    plan.status === "applying" ||
+    (plan.status === "outcome_unknown" && plan.filesystem?.divergentObservation === undefined);
   const digest = planDigest(profile, plan);
   const settlementCheckAt =
     plan.modifiedTimeSettlementPolicy &&
@@ -951,6 +952,11 @@ export class ObsidianNoteReplaceOperationAdapter
       return receipt(this.profile, plan);
     }
     if (plan.status !== "outcome_unknown") {
+      return receipt(this.profile, plan);
+    }
+    if (this.options.filesystem && plan.filesystem?.stagedIdentity) {
+      // Reconciliation may prove the first effect. It may never replay a
+      // publication attempt, even if the old bytes have reappeared.
       return receipt(this.profile, plan);
     }
     plan = this.beginModifiedTimeSettlementObservationOrReload(plan);
@@ -1379,6 +1385,10 @@ export class ObsidianNoteReplaceOperationAdapter
     executionAttemptId?: string,
     completionRead?: z.infer<typeof ReadSchema>,
   ): Promise<ObsidianNoteReplacePlan> {
+    if (this.options.filesystem && plan.filesystem) {
+      if (await this.options.filesystem.matchesEffect(plan)) return this.commitAfterVerifiedProofOrReload(plan);
+      return this.journal.get(plan.operationId) ?? plan;
+    }
     // The sealed delay cannot yield terminal proof yet. Avoid redundant backend reads.
     const early = plan.modifiedTimeSettlementPolicy && this.modifiedTimeSettlementObservationRemainingMs(plan) > 0;
     const token = plan.settlementDeferred?.kind === 'postflight' ? plan.settlementDeferred.completionToken : undefined;
@@ -1463,7 +1473,7 @@ export class ObsidianNoteReplaceOperationAdapter
         }
       }
     }
-    if (this.options.filesystem ? await this.options.filesystem.matchesEffect(plan) : read.sha256 === plan.afterSha256) {
+    if (read.sha256 === plan.afterSha256) {
       if (observesLiveExecutor) {
         return this.commitAfterVerifiedProofOrReload(plan);
       }
