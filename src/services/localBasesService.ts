@@ -2,6 +2,7 @@ import path from "node:path";
 import { readdir, readFile } from "node:fs/promises";
 import { load } from "js-yaml";
 import { config } from "./../config/index.js";
+import { compileBaseQueryFilter } from "./baseQueryFilter.js";
 import type { VaultCacheService } from "./obsidianRestAPI/vaultCache/index.js";
 import type {
   BaseQueryRequest,
@@ -70,60 +71,6 @@ function readProperty(row: LocalBaseRow, prop: string): unknown {
   if (prop === "file.name") return row.file.name;
   if (prop.startsWith("file.")) return row.props[prop];
   return row.props[prop];
-}
-
-function scalarMatches(actual: unknown, expected: unknown): boolean {
-  if (Array.isArray(actual)) {
-    return actual.map(String).includes(String(expected));
-  }
-  return actual === expected;
-}
-
-function matchesFilter(
-  row: LocalBaseRow,
-  filter: Record<string, unknown>,
-): boolean {
-  for (const [key, expected] of Object.entries(filter)) {
-    const actual = readProperty(row, key);
-    if (Array.isArray(expected)) {
-      if (!expected.some((item) => scalarMatches(actual, item))) {
-        return false;
-      }
-      continue;
-    }
-    if (isRecord(expected)) {
-      for (const [operator, value] of Object.entries(expected)) {
-        if (operator === "eq" && !scalarMatches(actual, value)) return false;
-        if (operator === "ne" && scalarMatches(actual, value)) return false;
-        if (
-          operator === "contains" &&
-          !String(actual ?? "").includes(String(value))
-        ) {
-          return false;
-        }
-        if (
-          operator === "in" &&
-          (!Array.isArray(value) ||
-            !value.some((item) => scalarMatches(actual, item)))
-        ) {
-          return false;
-        }
-        if (operator === "gt" && !(Number(actual) > Number(value)))
-          return false;
-        if (operator === "gte" && !(Number(actual) >= Number(value)))
-          return false;
-        if (operator === "lt" && !(Number(actual) < Number(value)))
-          return false;
-        if (operator === "lte" && !(Number(actual) <= Number(value)))
-          return false;
-      }
-      continue;
-    }
-    if (!scalarMatches(actual, expected)) {
-      return false;
-    }
-  }
-  return true;
 }
 
 function compareValues(a: unknown, b: unknown): number {
@@ -283,6 +230,7 @@ export class LocalBasesService {
       limitations: string[];
     }
   > {
+    const filter = compileBaseQueryFilter(request.filter, false);
     await this.getParsedBase(baseId, context);
     await ensureCacheReady(this.vaultCacheService);
     const rows: LocalBaseRow[] = [];
@@ -308,9 +256,9 @@ export class LocalBasesService {
       });
     }
 
-    const filtered = request.filter
-      ? rows.filter((row) => matchesFilter(row, request.filter!))
-      : rows;
+    const filtered = rows.filter((row) =>
+      filter.matches({ read: (key) => readProperty(row, key) }),
+    );
     const sort = request.sort ?? [];
     const sorted = [...filtered].sort((a, b) => {
       for (const item of sort) {
@@ -336,7 +284,7 @@ export class LocalBasesService {
       page,
       rows: paged,
       limitations: [
-        "Local fallback supports direct equality plus simple eq/ne/in/contains/gt/gte/lt/lte filters.",
+        "Local fallback supports property tables, logical groups, simple comparisons, and truthy property filters.",
         "Base-level filters, view filters, formulas, and calculated properties are not evaluated.",
       ],
     };

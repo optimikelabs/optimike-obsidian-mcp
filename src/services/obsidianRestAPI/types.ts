@@ -487,7 +487,7 @@ export interface BaseSchemaResponse {
  */
 export interface BaseQueryRequest {
   view?: string;
-  filter?: Record<string, unknown>;
+  filter?: unknown;
   sort?: Array<{
     prop: string;
     dir?: "asc" | "desc";
@@ -513,6 +513,7 @@ export interface BaseQueryRow {
  * Response payload emitted by the query endpoint.
  */
 export interface BaseQueryResponse {
+  filterVersion?: number;
   total: number;
   page: number;
   rows: BaseQueryRow[];

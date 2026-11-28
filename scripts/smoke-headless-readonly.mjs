@@ -736,7 +736,7 @@ async function main() {
           name: "bases_query",
           arguments: {
             base_id: "Smoke.base",
-            filter: { type: "root" },
+            filter: { and: [{ type: { eq: "root" } }, 'file.name == "Root"'] },
             sort: [{ prop: "file.name", dir: "asc" }],
             limit: 10,
             page: 1,
@@ -746,6 +746,7 @@ async function main() {
       );
       assertTextIncludes(query, "local-fallback", "bases query");
       assertTextIncludes(query, "Root.md", "bases query");
+      assertTextIncludes(query, '"total": 1', "bases query");
 
       const baseValidation = await withTimeout(
         client.callTool({

@@ -17,6 +17,9 @@ const bindingFingerprint = sha256("governed-base-mcp-fixture");
 let yaml =
   "formulas:\n  score: old\nviews:\n  - type: table\n    name: Préservée\n";
 let writes = 0;
+let queryRequests = 0;
+let queryPayload;
+let filterVersion;
 
 // Replay of the Bases Bridge engine routes. Statuses follow the live check of
 // 2026-11-20; an older Bridge (engine off) answers 404.
@@ -188,6 +191,11 @@ const server = http.createServer((req, res) => {
         bases: [fixturePath, "Canary/Missing.base"].map((path) => ({ id: path, name: path, path })),
       });
     }
+    if (req.method === "POST" && url.pathname.endsWith("/query")) {
+      queryRequests += 1;
+      queryPayload = await body(req);
+      return json(res, 200, { filterVersion, total: 0, page: 1, rows: [], warnings: [] });
+    }
     json(res, 404, { error: "fixture route not found" });
   })().catch((error) => json(res, 500, { error: String(error) }));
 });
@@ -249,6 +257,33 @@ function parsed(result) {
 
 try {
   await client.connect(transport);
+  for (const [filter, node] of [
+    ['status == "open"', "filter"],
+    [{ not: { status: { unsupported: "open" } } }, "filter.not.property[0]"],
+  ]) {
+    const result = await client.callTool({
+      name: "bases_query",
+      arguments: { base_id: fixturePath, filter },
+    });
+    const response = parsed(result);
+    assert.equal(result.isError, true, JSON.stringify(response));
+    assert.equal(response.error.code, "VALIDATION_ERROR");
+    assert.equal(response.error.details.filterNode, node);
+    assert.equal(queryRequests, 0);
+  }
+  const propertyFilter = { status: { in: ["open", "pending"] } };
+  const queryWithPropertyFilter = () => client.callTool({
+    name: "bases_query",
+    arguments: { base_id: fixturePath, filter: propertyFilter },
+  });
+  const legacy = await queryWithPropertyFilter();
+  assert.equal(legacy.isError, true);
+  assert.equal(parsed(legacy).error.details.reasonCode, "base_query_filter_bridge_upgrade_required");
+  filterVersion = 1;
+  const supported = await queryWithPropertyFilter();
+  assert.equal(supported.isError, false);
+  assert.deepEqual(queryPayload.filter, propertyFilter);
+  assert.deepEqual(parsed(supported).rows, []);
   const tools = await client.listTools();
   assert.deepEqual(
     tools.tools

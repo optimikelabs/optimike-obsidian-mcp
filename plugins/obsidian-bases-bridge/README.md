@@ -157,7 +157,26 @@ est `bases_formula_patch_*`, pas l’envoi de YAML arbitraire.
 ## Requêtes (`/query`)
 
 `POST /bases/:id/query` accepte `view`, `filter`, `sort`, `limit`, `page` et
-`evaluate`. `source` dit d’où viennent les lignes et les valeurs :
+`evaluate`. Le filtre de requête est un objet JSON. Une table de propriétés
+comme `{"status":"open","priority":{"gte":2}}` exige que chaque condition soit
+vraie. Les valeurs acceptées sont les scalaires, les tableaux non vides de scalaires
+(une valeur suffit) et les objets d’opérateurs `eq`, `ne`, `in`,
+`contains`, `gt`, `gte`, `lt` et `lte`. Les groupes `and` et `or`
+prennent un tableau non vide, et `not` prend un seul nœud. Pour une expression,
+mettez les chaînes entre guillemets, par exemple `{"and":["status == \"open\""]}`.
+Utilisez une table quand le nom de la propriété contient des espaces.
+`in` exige au moins une valeur. Avec le moteur actif, une table peut
+comparer le texte d'un résultat `formula.*` à un nombre ou un booléen.
+Les résultats de formule renvoyés restent au format texte.
+
+Le Bridge valide tout le filtre avant de sélectionner les lignes. Une chaîne
+à la racine ou un nœud non pris en charge renvoie HTTP 400 et
+`error.code: "INVALID_PARAMS"`. `error.node` indique la position du nœud,
+avec des indices à partir de zéro. Dans le MCP, l’erreur correspondante
+est `VALIDATION_ERROR`. Les tables de propriétés sont prises en charge à
+partir de Bases Bridge 1.3.1, avec `filterVersion: 1` dans la réponse REST.
+
+`source` indique d’où viennent les lignes et les valeurs.
 
 - `evaluate: true` → `source: "engine"`. Le moteur d’Obsidian (même chemin que
   `/engine/evaluate`, avec les mêmes canaris) sélectionne d’abord les lignes de
