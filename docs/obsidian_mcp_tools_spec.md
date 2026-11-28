@@ -87,7 +87,7 @@ The family is live/hybrid-live only and has no recover or undo operation. Missin
 - `obsidian_read_note`: read a vault note by path, with cache fallback.
 - `obsidian_note_links`: live/hybrid-live only. Observe a bounded semantic neighborhood from Obsidian Desktop public `MetadataCache` APIs: outgoing links, embeds and frontmatter links with effective resolution; requested subpaths with heading/block validity when demonstrable; unresolved aggregates; and backlinks reconstructed from resolved relations. It reports provenance, truncation, explicit collection availability, a best-effort non-atomic snapshot and cache freshness as `unknown` when the public API cannot prove it. An unavailable source cache reports `coverage.outgoing.total: null` rather than fabricating zero links. It performs no write and makes no graph-preservation claim.
 - `obsidian_list_notes`: list notes and folders, using REST or cache/filesystem.
-- `obsidian_global_search`: text/regex search across cached vault content.
+- `obsidian_global_search`: text/regex search across live vault content, with a shared-cache fallback and up to 500 result files per page (`pageSize`).
 - `obsidian_update_note`: live REST note update for an explicit `filePath` or
   the live `activeFile`, or guarded headless append/prepend for an explicit
   `filePath` in filesystem modes.
@@ -98,6 +98,11 @@ The family is live/hybrid-live only and has no recover or undo operation. Missin
   `operational` in favour of the governed `obsidian_note_delete_*` family, see
   [governed note deletion](governed-note-delete.md)); in `headless-filesystem`,
   explicit filesystem delete requires `expectedHash` or `expectedMtime`.
+
+Live compact lists and both search response modes preserve each result's Obsidian
+`path`. When a unique spelling containing U+00A0 or U+202F can be verified in the
+configured local vault, the result also includes a vault-relative `diskPath`
+if it differs. Use it for filesystem access.
 
 ## Governed Atomic Note Replacement
 

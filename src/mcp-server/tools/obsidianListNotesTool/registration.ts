@@ -48,7 +48,7 @@ export const registerObsidianListNotesTool = async (
 ): Promise<void> => {
   const toolName = "obsidian_list_notes";
   const toolDescription =
-    "Lists files and subdirectories within a specified Obsidian vault folder. Supports optional filtering by extension or name regex, and recursive listing to a specified depth (-1 for infinite). Returns an object containing the listed directory path, a formatted tree string of its contents, and the total entry count. Use an empty string or '/' for dirPath to list the vault root.";
+    "Lists files and subdirectories within a specified Obsidian vault folder. Supports filtering by extension or name regex and recursive listing to a specified depth (-1 for infinite). Returns the directory path, the total entry count, and either paginated compact entries or a formatted tree string. Live compact entries retain the Obsidian path and include a vault-relative diskPath when a unique local spelling containing U+00A0 or U+202F differs. Use diskPath for filesystem access when present. Use an empty string or '/' for dirPath to list the vault root.";
 
   // Create a context specifically for the registration process.
   const registrationContext: RequestContext =
