@@ -29,6 +29,8 @@ import {
   OperonUpdateRecurrenceSchema,
 } from "../../../services/operon/contract.js";
 import { config } from "../../../config/index.js";
+import { filesystemOperonService, type FilesystemOperonService } from "../../../services/operon/filesystemService.js";
+import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { OperonService } from "../../../services/operon/service.js";
 import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
 import { mcpSchema } from "../../mcpSchema.js";
@@ -66,6 +68,7 @@ async function runTool(
   toolName: string,
   params: unknown,
   operation: () => Promise<unknown>,
+  filesystem?: FilesystemOperonService,
 ) {
   try {
     const result = await operation();
@@ -81,11 +84,14 @@ async function runTool(
         {
           type: "text" as const,
           text: JSON.stringify(
-            publicMcpToolErrorPayload(error, {
-              operation: toolName,
-              toolName,
-              params,
-            }),
+            {
+              ...filesystem?.provenance(),
+              ...publicMcpToolErrorPayload(error, {
+                operation: toolName,
+                toolName,
+                params,
+              }),
+            },
             null,
             2,
           ),
@@ -105,8 +111,13 @@ async function runTool(
 const RECOVERY_BLOCKED_NOTICE =
   "UNAVAILABLE in this runtime: OPERON_MUTATION_ALLOWED_PATH_PREFIXES is set, so every call is refused with reasonCode operon_recovery_blocked_by_path_scope (a refusal, not an empty list; retrying cannot succeed). Do not call it; ask the vault owner to review uncertain Operon mutations. ";
 
-export async function registerOperonTools(server: McpServer): Promise<void> {
+export async function registerOperonTools(
+  server: McpServer, headless = false, cache?: VaultCacheService,
+): Promise<void> {
+  const filesystem = headless ? filesystemOperonService(cache) : undefined;
+  const runRead: typeof runTool = (name, params, operation) => runTool(name, params, operation, filesystem);
   const service = new OperonService();
+  const reader = filesystem ?? service;
   const recoveryNotice =
     config.operonMutationAllowedPathPrefixes.length > 0
       ? RECOVERY_BLOCKED_NOTICE
@@ -114,34 +125,37 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
   server.registerTool(
     "operon_status",
     {
-      description:
-        "Inspect the live Optimike Operon Bridge and the persisted MCP snapshot. forceRefresh=true rebuilds the snapshot only when Obsidian Desktop, Local REST API, Operon, and the Bridge are available. This surface is read-only.",
+      description: filesystem
+        ? "Report filesystem Operon readiness, shared-cache freshness and task count. forceRefresh refreshes the shared cache from the vault copy."
+        : "Inspect the live Optimike Operon Bridge and the persisted MCP snapshot. forceRefresh=true rebuilds the snapshot only when Obsidian Desktop, Local REST API, Operon, and the Bridge are available. This surface is read-only.",
       inputSchema: mcpSchema(ForceRefreshSchema.shape),
       annotations: READ_ONLY_ANNOTATIONS,
     },
     async (params: z.infer<typeof ForceRefreshSchema>) =>
-      runTool("operon_status", params, () =>
-        service.status(params.forceRefresh),
+      runRead("operon_status", params, () =>
+        reader.status(params.forceRefresh),
       ),
   );
   server.registerTool(
     "operon_get_configuration",
     {
-      description:
-        "Read the task-semantic Operon configuration from the live plugin runtime: language, stable workflow/status IDs, priority definitions, canonical-to-visible key mappings, creation targets/templates, task automations, excluded folders, and documentation location. A saved-filter catalog is included only when the official runtime exposes one. Falls back only to an explicitly stale persisted snapshot.",
+      description: filesystem
+        ? "Read the synchronized Operon settings, including workflow IDs, field mappings and available saved-filter definitions."
+        : "Read the task-semantic Operon configuration from the live plugin runtime: language, stable workflow/status IDs, priority definitions, canonical-to-visible key mappings, creation targets/templates, task automations, excluded folders, and documentation location. A saved-filter catalog is included only when the official runtime exposes one. Falls back only to an explicitly stale persisted snapshot.",
       inputSchema: mcpSchema(ForceRefreshSchema.shape),
       annotations: READ_ONLY_ANNOTATIONS,
     },
     async (params: z.infer<typeof ForceRefreshSchema>) =>
-      runTool("operon_get_configuration", params, () =>
-        service.configuration(params.forceRefresh),
+      runRead("operon_get_configuration", params, () =>
+        reader.configuration(params.forceRefresh),
       ),
   );
   server.registerTool(
     "operon_list_tasks",
     {
-      description:
-        "List Operon tasks from a live-generation-validated snapshot or an explicitly stale persisted fallback. Supports pagination and optional filters. No task mutation is performed.",
+      description: filesystem
+        ? "List and filter filesystem-indexed Operon tasks with shared-cache freshness and pagination."
+        : "List Operon tasks from a live-generation-validated snapshot or an explicitly stale persisted fallback. Supports pagination and optional filters. No task mutation is performed.",
       inputSchema: mcpSchema(OperonQuerySchema.shape),
       annotations: READ_ONLY_ANNOTATIONS,
     },
@@ -149,15 +163,16 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
       params: z.infer<typeof OperonQuerySchema>,
       ctx?: { mcpReq?: { signal?: AbortSignal } },
     ) =>
-      runTool("operon_list_tasks", params, () =>
-        service.query(params, ctx?.mcpReq?.signal),
+      runRead("operon_list_tasks", params, () =>
+        reader.query(params, ctx?.mcpReq?.signal),
       ),
   );
   server.registerTool(
     "operon_query_tasks",
     {
-      description:
-        "Query Operon tasks by identity, text, source, checkbox, stable workflow/status IDs, visible workflow labels, priority, tier, path, tags, parent, dates, canonical/custom fields, or unmanaged file-task properties. Prefer pipelineIds/statusIds from operon_get_configuration so UI language changes do not break automations. fieldEquals matches a whole value (a list only in full and in order); use fieldIncludes for list membership, e.g. fieldIncludes: { assignees: \"Claude\" }. Responses always declare source and freshness.",
+      description: filesystem
+        ? "Query filesystem-indexed Operon tasks by stable IDs, status, dates, fields and file properties."
+        : "Query Operon tasks by identity, text, source, checkbox, stable workflow/status IDs, visible workflow labels, priority, tier, path, tags, parent, dates, canonical/custom fields, or unmanaged file-task properties. Prefer pipelineIds/statusIds from operon_get_configuration so UI language changes do not break automations. fieldEquals matches a whole value (a list only in full and in order); use fieldIncludes for list membership, e.g. fieldIncludes: { assignees: \"Claude\" }. Responses always declare source and freshness.",
       inputSchema: mcpSchema(OperonQuerySchema.shape),
       annotations: READ_ONLY_ANNOTATIONS,
     },
@@ -165,28 +180,30 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
       params: z.infer<typeof OperonQuerySchema>,
       ctx?: { mcpReq?: { signal?: AbortSignal } },
     ) =>
-      runTool("operon_query_tasks", params, () =>
-        service.query(params, ctx?.mcpReq?.signal),
+      runRead("operon_query_tasks", params, () =>
+        reader.query(params, ctx?.mcpReq?.signal),
       ),
   );
   server.registerTool(
     "operon_query_saved_filter",
     {
-      description:
-        "Evaluate one saved Operon filter through Operon's native filter engine. filterSetId must be an exact ID obtained from Operon's UI/configuration or an operator workflow; Operon 3.2 can execute a filter but does not expose the saved-filter catalog through its official Developer API. optional scopePath limits results to one note or folder. This capability is live-only because headless snapshots cannot reproduce plugin filter semantics.",
+      description: filesystem
+        ? "Evaluate a saved Operon filter by exact ID using synchronized settings. Unsupported conditions require the Desktop Bridge."
+        : "Evaluate one saved Operon filter through Operon's native filter engine. filterSetId must be an exact ID obtained from Operon's UI/configuration or an operator workflow; Operon 3.2 can execute a filter but does not expose the saved-filter catalog through its official Developer API. optional scopePath limits results to one note or folder. This capability is live-only because headless snapshots cannot reproduce plugin filter semantics.",
       inputSchema: mcpSchema(OperonFilterQuerySchema.shape),
       annotations: READ_ONLY_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonFilterQuerySchema>) =>
-      runTool("operon_query_saved_filter", params, () =>
-        service.querySavedFilter(params),
+      runRead("operon_query_saved_filter", params, () =>
+        reader.querySavedFilter(params),
       ),
   );
   server.registerTool(
     "operon_get_task",
     {
-      description:
-        "Read one Operon task by stable operonId: from the live-generation-validated snapshot when it is current, otherwise from a live single-task read fenced on the same index generation, or from the last persisted stale fallback.",
+      description: filesystem
+        ? "Read one filesystem-indexed Operon task by its stable operonId."
+        : "Read one Operon task by stable operonId: from the live-generation-validated snapshot when it is current, otherwise from a live single-task read fenced on the same index generation, or from the last persisted stale fallback.",
       inputSchema: mcpSchema(GetTaskSchema.shape),
       annotations: READ_ONLY_ANNOTATIONS,
     },
@@ -194,21 +211,22 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
       params: z.infer<typeof GetTaskSchema>,
       ctx?: { mcpReq?: { signal?: AbortSignal } },
     ) =>
-      runTool("operon_get_task", params, () =>
-        service.getTask(params, ctx?.mcpReq?.signal),
+      runRead("operon_get_task", params, () =>
+        reader.getTask(params, ctx?.mcpReq?.signal),
       ),
   );
   server.registerTool(
     "operon_validate",
     {
-      description:
-        "Validate the live Operon duplicate/source/workflow graph when available, otherwise run a limited snapshot-only validation and state its limitations.",
+      description: filesystem
+        ? "Check filesystem Operon tasks for duplicate IDs, workflow mismatches and unresolved relationships."
+        : "Validate the live Operon duplicate/source/workflow graph when available, otherwise run a limited snapshot-only validation and state its limitations.",
       inputSchema: mcpSchema(ForceRefreshSchema.shape),
       annotations: READ_ONLY_ANNOTATIONS,
     },
     async (params: z.infer<typeof ForceRefreshSchema>) =>
-      runTool("operon_validate", params, () =>
-        service.validate(params.forceRefresh),
+      runRead("operon_validate", params, () =>
+        reader.validate(params.forceRefresh),
       ),
   );
 
@@ -226,13 +244,14 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
   server.registerTool(
     "operon_find_tasks",
     {
-      description:
-        "Run Operon's native ranked task/project finder with bounded filters, scopes, representations, project mode, cursor, and at most 50 rows. Prefer this over broad text query when ranking, overdue/today/recent scope, or project-tree counts matter.",
+      description: filesystem
+        ? "Find filesystem-indexed Operon tasks and projects by text, workflow, dates or scope. Ranking is local to the filesystem reader."
+        : "Run Operon's native ranked task/project finder with bounded filters, scopes, representations, project mode, cursor, and at most 50 rows. Prefer this over broad text query when ranking, overdue/today/recent scope, or project-tree counts matter.",
       inputSchema: mcpSchema(OperonTaskFinderSchema.shape),
       annotations: READ_ONLY_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonTaskFinderSchema>) =>
-      runTool("operon_find_tasks", params, () => service.findTasks(params)),
+      runRead("operon_find_tasks", params, () => reader.findTasks(params)),
   );
   server.registerTool(
     "operon_resolve_task",
@@ -248,14 +267,15 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
   server.registerTool(
     "operon_get_relationships",
     {
-      description:
-        "Read the bounded native relationship graph for one stable operonId, including explicit, derived, and inferred edges plus hydrated task summaries. Depth is capped at 3 and results at 100.",
+      description: filesystem
+        ? "Read stored Operon relationships and their derived edges from the shared vault cache. Depth is capped at 3."
+        : "Read the bounded native relationship graph for one stable operonId, including explicit, derived, and inferred edges plus hydrated task summaries. Depth is capped at 3 and results at 100.",
       inputSchema: mcpSchema(OperonRelationshipsSchema.shape),
       annotations: READ_ONLY_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonRelationshipsSchema>) =>
-      runTool("operon_get_relationships", params, () =>
-        service.relationships(params),
+      runRead("operon_get_relationships", params, () =>
+        reader.relationships(params),
       ),
   );
   server.registerTool(
@@ -273,12 +293,13 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
   server.registerTool(
     "operon_get_timer_state",
     {
-      description:
-        "Read Operon's native active timer and in-flight timer transition state. This is observation only; timer start, stop, and session edits remain operator-controlled outside MCP.",
+      description: filesystem
+        ? "Returns an explicit unavailable error because active timer state requires the live Obsidian Desktop Bridge."
+        : "Read Operon's native active timer and in-flight timer transition state. This is observation only; timer start, stop, and session edits remain operator-controlled outside MCP.",
       inputSchema: mcpSchema(z.object({})),
       annotations: READ_ONLY_ANNOTATIONS,
     },
-    async () => runTool("operon_get_timer_state", {}, () => service.timers()),
+    async () => runRead("operon_get_timer_state", {}, () => reader.timers()),
   );
   server.registerTool(
     "operon_adopt_task",

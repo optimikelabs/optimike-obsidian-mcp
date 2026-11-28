@@ -183,5 +183,5 @@ export async function registerRuntimeTools(
   await registerGovernedBaseFormulaTools(server, governedBaseFormulaRuntime);
   registerGovernedBaseConfigTools(server, governedBaseFormulaRuntime?.configPatch);
   await registerGovernedCanvasTools(server, governedCanvasRuntime);
-  await registerOperonTools(server);
+  await registerOperonTools(server, registrationMode.startsWith("headless-"), vaultCacheService);
 }

@@ -1664,7 +1664,7 @@ export type OperonRecoverMutation = z.infer<typeof OperonRecoverMutationSchema>;
 export type OperonMutationResult = z.infer<typeof OperonMutationResultSchema>;
 
 export interface OperonSnapshotEnvelope {
-  source: "operon-live" | "operon-cache";
+  source: "operon-live" | "operon-cache" | "filesystem";
   stale: boolean;
   snapshotAt: string;
   snapshotAgeMs: number;

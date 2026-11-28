@@ -28,6 +28,7 @@ import type {
   BaseAtomicStatusResponse,
 } from "./obsidianRestAPI/types.js";
 import { OperonService } from "./operon/service.js";
+import { filesystemOperonService } from "./operon/filesystemService.js";
 import { getSemanticCacheService } from "./semanticCache.js";
 import { detectSmartEnvQueryProvider } from "./smartEnvV3.js";
 
@@ -976,6 +977,19 @@ function operonCapabilities(input: CapabilityManifestProjectionInput): {
   read: CapabilityManifestEntry;
   write: CapabilityManifestEntry;
 } {
+  if (input.registrationMode.startsWith("headless-")) {
+    const configured = input.operon.state === "ready" && input.operon.value.configured === true;
+    const available = configured && input.cacheReady;
+    const reason = available ? "ready" : configured ? "operon_index_not_ready" :
+      input.operon.state === "timed_out" ? "bridge_probe_timed_out" :
+      input.operon.state === "ready" && input.operon.value.degraded !== true ? "operon_not_present" : "operon_incompatible";
+    return {
+      read: entry(input, "operon-read", available, available, reason,
+        available ? "none" : configured ? "refresh_vault_cache" :
+          input.operon.state === "timed_out" ? "retry_capability_probe" : "load_or_update_operon"),
+      write: unavailableOperonWrite(input, "operon_live_required", "use_live_runtime"),
+    };
+  }
   if (input.operon.state === "timed_out") {
     return {
       read: entry(input, "operon-read", false, false,
@@ -1439,7 +1453,9 @@ export async function collectCapabilityManifest(options: {
       : undefined);
   const operonProbe =
     options.probes?.operon ??
-    (() => operonService.status(false, CAPABILITY_PROBE_TIMEOUT_MS));
+    (options.registrationMode.startsWith("headless-")
+      ? () => filesystemOperonService().configurationReadiness()
+      : () => operonService.status(false, CAPABILITY_PROBE_TIMEOUT_MS));
   const semanticIndexProbe =
     semanticEnabled &&
     config.enableQueryEmbedding &&
