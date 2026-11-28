@@ -2,15 +2,16 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 type Embed = (text: string) => Promise<number[]>;
-type Observation = { dimension: number; ok: boolean; at: number };
+type Observation = { dimension: number; ok: boolean; at: number; generationKey?: string };
 const observations = new WeakMap<Embed, Observation>();
 export const SEMANTIC_HEALTH_TTL_MS = 60_000;
-export function recordSemanticSearch(embed: Embed, dimension: number, ok: boolean, now = Date.now()): void {
-  observations.set(embed, { dimension, ok, at: now });
+export function recordSemanticSearch(embed: Embed, dimension: number, ok: boolean, now = Date.now(), generationKey?: string): void {
+  observations.set(embed, { dimension, ok, at: now, generationKey });
 }
-export function semanticSearchHealth(embed: Embed, dimension: number, now = Date.now()): "verified" | "failed" | "unverified" {
+export function semanticSearchHealth(embed: Embed, dimension: number, now = Date.now(), generationKey?: string): "verified" | "failed" | "unverified" {
   const value = observations.get(embed);
-  if (!value || value.dimension !== dimension || now < value.at || now - value.at > SEMANTIC_HEALTH_TTL_MS) return "unverified";
+  if (!value || value.dimension !== dimension || value.generationKey !== generationKey ||
+      now < value.at || now - value.at > SEMANTIC_HEALTH_TTL_MS) return "unverified";
   return value.ok ? "verified" : "failed";
 }
 export function validQueryVector(vector: number[], dimension: number): boolean {

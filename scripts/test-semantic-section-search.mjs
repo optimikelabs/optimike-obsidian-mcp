@@ -4,7 +4,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import { createServer } from "node:http";
-import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { appendFile, cp, mkdir, mkdtemp, rename, rm, truncate, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { McpServer, InMemoryTransport } from "@modelcontextprotocol/server";
@@ -15,11 +16,14 @@ const root = await mkdtemp(path.join(os.tmpdir(), "semantic-sections-"));
 const source = path.join(root, ".smart-env");
 const dbPath = path.join(root, "cache.sqlite");
 let embedRequests = 0;
+let beforeEmbedReply;
+let queryVector = [1, 0, 0, 0];
 const http = createServer(async (req, res) => {
   for await (const chunk of req) void chunk;
   embedRequests += 1;
+  await beforeEmbedReply?.();
   res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ embeddings: [[1, 0, 0, 0]] }));
+  res.end(JSON.stringify({ embeddings: [queryVector] }));
 });
 await new Promise((resolve) => http.listen(0, "127.0.0.1", resolve));
 Object.assign(process.env, {
@@ -27,6 +31,7 @@ Object.assign(process.env, {
   OBSIDIAN_RUNTIME_MODE: "headless-readonly",
   OBSIDIAN_VAULT: root,
   SMART_ENV_DIR: source,
+  SMART_ENV_GENERATION_POINTER: path.join(root, "CURRENT"),
   OBSIDIAN_SHARED_CACHE_DB_PATH: dbPath,
   SMART_ENV_CACHE_TTL_MS: "0",
   SEMANTIC_SEARCH_PREWARM: "false",
@@ -36,6 +41,8 @@ Object.assign(process.env, {
 });
 delete process.env.QUERY_EMBEDDER_MODEL;
 delete process.env.OLLAMA_BASE_URL;
+const pointer = process.env.SMART_ENV_GENERATION_POINTER;
+delete process.env.SMART_ENV_GENERATION_POINTER;
 
 const { smartTextHash } = await import("../dist/services/smartEnvV3.js");
 const { SemanticCacheService, getSemanticCacheService } = await import(
@@ -44,11 +51,38 @@ const { SemanticCacheService, getSemanticCacheService } = await import(
 const { registerSemanticSearchTool } = await import(
   "../dist/mcp-server/tools/semanticSearchTool/registration.js"
 );
+const { registerRuntimeTools } = await import(
+  "../dist/mcp-server/tools/runtimeTools/registration.js"
+);
 
 const model = { provider_key: "ollama", model_key: "fixture-embed", dims: 4 };
 const fingerprint = `mf_${smartTextHash(
   JSON.stringify({ provider_key: "ollama", model_key: "fixture-embed", dimensions: 4, max_tokens: 0 }),
 )}`;
+const publish = async (id) => {
+  await writeFile(pointer + ".next", id + "\n", "utf8");
+  await rename(pointer + ".next", pointer);
+};
+const generationRoot = path.join(root, "generations");
+async function writeGeneration(id, records, notes, sections) {
+  const directory = path.join(generationRoot, id);
+  await cp(source, directory, { recursive: true });
+  await writeFile(path.join(directory, "smart_sources", "smart_sources.ajson"), records.join(",\n"));
+  const writeVectors = async (folder, rows) => {
+    const bytes = floats(rows);
+    await writeFile(path.join(directory, folder, fingerprint), bytes);
+    return { count: rows.length, sha256: createHash("sha256").update(bytes).digest("hex") };
+  };
+  await writeFile(path.join(directory, "generation.json"), JSON.stringify({
+    generation: id, model: { ...model, dimensions: model.dims }, fingerprint,
+    vectors: {
+      encoding: "float32le",
+      notes: await writeVectors("smart_sources", notes),
+      sections: await writeVectors("smart_blocks", sections),
+    },
+  }));
+  return directory;
+}
 const alpha = [
   "---",
   "tags: [keep]",
@@ -140,6 +174,15 @@ const search = async (args) => {
   });
   return { isError: response.isError, value: JSON.parse(response.content[0].text) };
 };
+const runtimeStatus = async () => {
+  const response = await client.callTool({ name: "obsidian_runtime_status", arguments: {} });
+  assert.equal(response.isError, false);
+  const status = JSON.parse(response.content[0].text);
+  return {
+    cache: status.semanticCache,
+    capability: status.capabilityManifest.capabilities.find(({ id }) => id === "semantic-search"),
+  };
+};
 
 try {
   // One cold read publishes both caches: sections first, then notes.
@@ -163,11 +206,15 @@ try {
   reopened.db.close();
 
   await registerSemanticSearchTool(server);
+  await registerRuntimeTools(server, undefined, undefined, undefined, undefined, undefined, {
+    operon: async () => { throw new Error("No Operon in the semantic fixture"); },
+  });
   await server.connect(serverTransport);
   await client.connect(clientTransport);
 
   const notes = await search({});
   assert.equal(notes.isError, false);
+  assert.equal(notes.value.generation_id, undefined, "the unset pointer preserves the legacy response");
   assert.deepEqual(
     Object.keys(notes.value.results[0]).sort(),
     ["path", "score", "snippet", "title"],
@@ -224,6 +271,73 @@ try {
       .map((result) => [result.kind, result.score]),
   );
   assert.ok(new Set(both.value.results.map((result) => result.kind)).size === 2);
+
+  await writeGeneration("a", [
+    record("Notes/Alpha.md", alpha, 0, ["#keep"], { "#Alpha": block(alpha, 4, 6, 0) }),
+    record("Other/Beta.md", beta, 1, undefined, { "#Beta": block(beta, 1, 2, 1) }),
+  ], [[0, 1, 0, 0], [1, 0, 0, 0]], [[0, 1, 0, 0], [1, 0, 0, 0]]);
+  const generationB = await writeGeneration("b", [
+    record("Notes/Alpha.md", alpha, 0, ["#keep"], { "#Alpha##Target": block(alpha, 7, 9, 0) }),
+  ], [[1, 0, 0, 0]], [[1, 0, 0, 0]]);
+  await publish("a");
+  Object.assign(process.env, {
+    SMART_ENV_GENERATION_POINTER: pointer,
+    SMART_ENV_QUERY_FINGERPRINT: fingerprint,
+    OLLAMA_BASE_URL: `http://127.0.0.1:${http.address().port}`,
+  });
+  const warmA = await search({ granularity: "both" });
+  assert.equal(warmA.value.generation_id, "a", "the pointer takes precedence over a warm legacy cache");
+  assert.equal(warmA.value.results[0].path, "Other/Beta.md");
+  assert.equal((await runtimeStatus()).cache.generationId, "a");
+
+  beforeEmbedReply = async () => {
+    beforeEmbedReply = undefined;
+    await publish("b");
+  };
+  const inFlightA = await search({ granularity: "both" });
+  assert.deepEqual(inFlightA.value.results, warmA.value.results, "a swap during the request cannot change its results");
+  const beforeB = await runtimeStatus();
+  assert.equal(beforeB.cache.source, "external");
+  assert.equal(beforeB.cache.generationId, "b");
+  assert.equal(beforeB.cache.manifest, null, "status cannot project A's persisted manifest under B");
+  assert.equal(beforeB.capability.reasonCode, "semantic_query_unverified",
+    "B cannot reuse A's successful live encoder observation");
+  const b = await search({ granularity: "both" });
+  assert.equal(b.value.generation_id, "b");
+  assert.deepEqual(
+    b.value.results.map(({ path, kind, score }) => [path, kind, score]),
+    [["Notes/Alpha.md", "note", 1], ["Notes/Alpha.md", "section", 1]],
+    "B replaces A's note scores and section references, including the deleted note",
+  );
+  assert.equal((await runtimeStatus()).capability.reasonCode, "ready");
+  queryVector = [1, 0];
+  const wrongDimension = await search({});
+  assert.equal(wrongDimension.isError, true);
+  assert.equal(wrongDimension.value.error.details.reasonCode, "semantic_query_vector_invalid");
+  queryVector = [1, 0, 0, 0];
+  const requestsBeforeRefusals = embedRequests;
+  process.env.QUERY_EMBEDDER_MODEL = "different-model";
+  assert.equal((await search({})).isError, true, "equal dimensions cannot make a different query model compatible");
+  delete process.env.QUERY_EMBEDDER_MODEL;
+  process.env.SMART_ENV_QUERY_FINGERPRINT = "mf_wrong";
+  assert.equal((await search({})).isError, true, "the registry must match the operator-pinned fingerprint");
+  process.env.SMART_ENV_QUERY_FINGERPRINT = fingerprint;
+  await publish("../a");
+  assert.equal((await search({})).isError, true, "an invalid pointer cannot fall back to the last generation or legacy index");
+  await publish("missing");
+  assert.equal((await search({})).isError, true, "a missing generation cannot reuse cached results");
+  await publish("b");
+  await truncate(path.join(generationB, "smart_blocks", fingerprint), 4);
+  assert.equal((await search({})).isError, true, "a truncated block file invalidates a warm generation even during a note search");
+  const unavailableStatus = await runtimeStatus();
+  assert.equal(unavailableStatus.cache.reasonCode, "semantic_index_unavailable");
+  assert.equal(unavailableStatus.capability.reasonCode, "semantic_index_unavailable");
+  await rm(pointer);
+  assert.equal((await search({})).isError, true, "a configured but missing pointer fails closed");
+  assert.equal(embedRequests, requestsBeforeRefusals, "invalid generations are refused before query encoding");
+  delete process.env.SMART_ENV_GENERATION_POINTER;
+  delete process.env.SMART_ENV_QUERY_FINGERPRINT;
+  delete process.env.OLLAMA_BASE_URL;
 
   // Edited after indexing: a shifted section is found again; a rewritten one
   // keeps its indexed lines but is reported unverified, without a snippet.
