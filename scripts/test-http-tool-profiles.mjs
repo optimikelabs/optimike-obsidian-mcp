@@ -12,6 +12,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { SignJWT } from "jose";
+import toolCatalog from "../evals/tool-catalog.v1.json" with { type: "json" };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const jwtSecret =
@@ -300,6 +301,9 @@ try {
   const fullNames = toolNames(fullList);
   const legacyNames = toolNames(legacyList);
 
+  for (const [profile, names] of [["standard", standardNames], ["tasks", tasksNames], ["full", fullNames]]) {
+    assert.deepEqual(names, toolCatalog.profiles[profile].modes["headless-readonly"], `${profile} HTTP catalogue`);
+  }
   for (const names of [standardNames, tasksNames, fullNames]) {
     for (const name of ["obsidian_get_frontmatter", "obsidian_note_links"]) {
       assert.ok(names.includes(name), `headless HTTP profile lost ${name}`);

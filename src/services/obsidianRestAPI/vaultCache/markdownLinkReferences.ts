@@ -12,6 +12,114 @@ export type MarkdownLinkReference = Pick<
 
 const wikiLink = /(?<!\\)(!)?\[\[([^\]\r\n|]+)(?:\|([^\]\r\n]*))?\]\]/gu;
 const scheme = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/iu;
+const htmlTag = /^<(\/?)([a-z][\w:-]*)(?=[\s/>])(?:"[^"]*"|'[^']*'|[^<>"'])*>$/iu;
+
+type Span = { start: number; end: number };
+
+function parseMarkdown(source: string) {
+  return fromMarkdown(source, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] });
+}
+
+function* walk(root: Nodes): IterableIterator<Nodes> {
+  const pending = [root];
+  while (pending.length) {
+    const node = pending.pop()!;
+    yield node;
+    if ("children" in node) {
+      for (let i = node.children.length - 1; i >= 0; i--) pending.push(node.children[i]);
+    }
+  }
+}
+
+function opaqueSpans(root: Nodes, source: string): Span[] {
+  const spans: Span[] = [];
+  const openTags = new Map<string, number[]>();
+  for (const node of walk(root)) {
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    if (start === undefined || end === undefined) continue;
+    if (node.type === "code" || node.type === "inlineCode") {
+      spans.push({ start, end });
+    } else if (node.type === "html") {
+      spans.push({ start, end });
+      const tag = htmlTag.exec(node.value);
+      if (!tag || node.value.endsWith("/>")) continue;
+      const name = tag[2].toLowerCase();
+      if (tag[1]) {
+        const open = openTags.get(name)?.pop();
+        if (open !== undefined) spans.push({ start: open, end });
+      } else {
+        const offsets = openTags.get(name) ?? [];
+        offsets.push(start);
+        openTags.set(name, offsets);
+      }
+    }
+  }
+  const codeOrHtml = spanFilter(spans.sort((a, b) => a.start - b.start));
+  if (!source.includes("$")) return spans;
+  const formulas: Span[] = [];
+  let opener: { start: number; width: number } | undefined;
+  let escapedAt = -1;
+  for (const match of source.matchAll(/(\\+)|(\$+)|\r\n?|\n/gu)) {
+    if (match[1]) {
+      escapedAt = match[1].length % 2 ? match.index + match[1].length : -1;
+      continue;
+    }
+    if (!match[2]) {
+      if (opener?.width === 1) opener = undefined;
+      continue;
+    }
+    const start = match.index;
+    if (start === escapedAt) continue;
+    const width = match[2].length;
+    if (width > 2 || codeOrHtml(start, start + width)) continue;
+    if (!opener) {
+      opener = { start, width };
+    } else if (opener.width === width) {
+      formulas.push({ start: opener.start, end: start + width });
+      opener = undefined;
+    }
+  }
+  return spans.concat(formulas).sort((a, b) => a.start - b.start);
+}
+
+/** Call with increasing start offsets. */
+function spanFilter(spans: readonly Span[]) {
+  let cursor = 0;
+  return (start: number, end: number) => {
+    while (cursor < spans.length && spans[cursor].end <= start) cursor++;
+    return cursor < spans.length && spans[cursor].start < end;
+  };
+}
+
+function maskComments(body: string, opaque: readonly Span[]): string {
+  const blocksOpener = spanFilter(opaque);
+  const chunks: string[] = [];
+  let open: number | undefined;
+  let consumed = 0;
+  for (const { index } of body.matchAll(/(?<!\\)%%/gu)) {
+    if (open === undefined) {
+      if (!blocksOpener(index, index + 2)) open = index;
+      continue;
+    }
+    const end = index + 2;
+    const lines = body.slice(open, end).split(/(\r\n?|\n)/u);
+    const visibleSuffix = /[^\S\r\n]*[^\s]/uy;
+    visibleSuffix.lastIndex = end;
+    const hasTrailingText = visibleSuffix.test(body);
+    if (hasTrailingText) {
+      // Visible text on the closing line must not become indented code.
+      lines[lines.length - 1] = "x" + " ".repeat(lines[lines.length - 1].length - 1);
+    }
+    for (let i = 0; i < lines.length - (hasTrailingText ? 1 : 0); i += 2) {
+      lines[i] = " ".repeat(lines[i].length);
+    }
+    chunks.push(body.slice(consumed, open), lines.join(""));
+    open = undefined;
+    consumed = end;
+  }
+  return consumed ? chunks.join("") + body.slice(consumed) : body;
+}
 
 function makeReference(
   kind: MarkdownLinkReference["kind"],
@@ -30,7 +138,6 @@ function makeReference(
     } catch {
       return undefined;
     }
-    if (linkPath && !linkPath.toLowerCase().endsWith(".md")) return undefined;
   }
   if (scheme.test(linkPath) || (!linkPath && !subpath)) return undefined;
   return {
@@ -67,20 +174,21 @@ export function extractMarkdownLinkReferences(content: string): MarkdownLinkRefe
   }
 
   if (!body.includes("[")) return references;
-  // Blanking Obsidian comments keeps the parser's offsets in the original note.
-  const source = body.replace(/%%[\s\S]*?%%/gu, (comment) => comment.replace(/[^\r\n]/gu, " "));
-  const root = fromMarkdown(source, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] });
-  const blocked: Array<{ start: number; end: number }> = [];
+  const initial = parseMarkdown(body);
+  const initialOpaque = opaqueSpans(initial, body);
+  const source = body.includes("%%") ? maskComments(body, initialOpaque) : body;
+  const root = source === body ? initial : parseMarkdown(source);
+  const blocked = source === body ? initialOpaque : opaqueSpans(root, source);
+  const isOpaque = spanFilter(blocked.slice());
   const located: Array<{ start: number; end: number; reference: MarkdownLinkReference }> = [];
   const definitions = new Map<string, Definition>();
   const indirectLinks: Array<Extract<Nodes, { type: "linkReference" | "imageReference" }>> = [];
-  const pending: Nodes[] = [root];
-  while (pending.length) {
-    const node = pending.pop()!;
+  for (const node of walk(root)) {
     const start = node.position?.start.offset;
     const end = node.position?.end.offset;
     if (start !== undefined && end !== undefined) {
       if (node.type === "link" || node.type === "image") {
+        if (isOpaque(start, start + 1)) continue;
         const reference = makeReference(node.type === "image" ? "embed" : "link",
           node.url, body.slice(start, end), displayLabel(node), true);
         if (reference) located.push({ start, end, reference });
@@ -88,20 +196,15 @@ export function extractMarkdownLinkReferences(content: string): MarkdownLinkRefe
         continue;
       }
       if (node.type === "linkReference" || node.type === "imageReference") {
+        if (isOpaque(start, start + 1)) continue;
         indirectLinks.push(node);
         blocked.push({ start, end });
         continue;
       }
-      if (node.type === "definition" && !definitions.has(node.identifier)) {
+      if (node.type === "definition" && !isOpaque(start, start + 1) && !definitions.has(node.identifier)) {
         definitions.set(node.identifier, node);
-      }
-      if (node.type === "code" || node.type === "inlineCode" || node.type === "html" || node.type === "definition") {
         blocked.push({ start, end });
-        continue;
       }
-    }
-    if ("children" in node) {
-      for (let i = node.children.length - 1; i >= 0; i--) pending.push(node.children[i]);
     }
   }
   for (const node of indirectLinks) {
@@ -114,12 +217,11 @@ export function extractMarkdownLinkReferences(content: string): MarkdownLinkRefe
     if (reference) located.push({ start, end, reference });
   }
 
-  let blockedIndex = 0;
+  const isBlocked = spanFilter(blocked.sort((a, b) => a.start - b.start));
   for (const match of source.matchAll(wikiLink)) {
     const start = match.index;
     const end = start + match[0].length;
-    while (blockedIndex < blocked.length && blocked[blockedIndex].end <= start) blockedIndex++;
-    if (blockedIndex < blocked.length && blocked[blockedIndex].start < end) continue;
+    if (isBlocked(start, end)) continue;
     const reference = makeReference(match[1] ? "embed" : "link", match[2], body.slice(start, end), match[3]);
     if (reference) located.push({ start, end, reference });
   }

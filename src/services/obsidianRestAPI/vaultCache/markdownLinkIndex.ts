@@ -16,6 +16,8 @@ function coverage(total: number, returned: number) {
 }
 
 type LinkCount = { link_path: string; count: number };
+type Target = { path: string; ambiguous?: true };
+const INDEX_REVISION = "v2:";
 
 /** Store unresolved spellings on disk; resolve against the current file set at read time.
  * Adding/removing an ambiguous destination can then affect unchanged sources. */
@@ -24,6 +26,7 @@ export class MarkdownLinkIndex {
   private readonly refsDelete;
   private readonly refInsert;
   private readonly fileByFoldedPath;
+  private readonly targetsByFoldedPath;
   private readonly filesByBasename;
 
   constructor(private readonly db: DatabaseSync) {
@@ -47,6 +50,14 @@ export class MarkdownLinkIndex {
       );
       CREATE INDEX IF NOT EXISTS idx_markdown_link_incoming ON markdown_link_refs(basename, source, link_path);
       CREATE INDEX IF NOT EXISTS idx_markdown_link_text ON markdown_link_refs(source, link_text, link_path);
+      CREATE INDEX IF NOT EXISTS idx_markdown_link_path ON markdown_link_refs(source, link_path, link_text);
+      CREATE TABLE IF NOT EXISTS markdown_link_excluded_targets (
+        path TEXT PRIMARY KEY,
+        folded_path TEXT NOT NULL,
+        basename TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_excluded_link_folded_path ON markdown_link_excluded_targets(folded_path);
+      CREATE INDEX IF NOT EXISTS idx_excluded_link_basename ON markdown_link_excluded_targets(basename);
     `);
     this.fileUpsert = db.prepare(`
       INSERT INTO markdown_link_files (path, folded_path, basename, hash) VALUES (?, ?, ?, ?)
@@ -59,20 +70,33 @@ export class MarkdownLinkIndex {
       VALUES (?, ?, ?, ?, ?, ?)
     `);
     this.fileByFoldedPath = db.prepare("SELECT path FROM markdown_link_files WHERE folded_path = ?");
-    this.filesByBasename = db.prepare("SELECT path FROM markdown_link_files WHERE basename = ?");
+    this.targetsByFoldedPath = db.prepare(`
+      SELECT path FROM markdown_link_files WHERE folded_path = ?
+      UNION SELECT path FROM markdown_link_excluded_targets WHERE folded_path = ?
+    `);
+    this.filesByBasename = db.prepare(`
+      SELECT path FROM markdown_link_files WHERE basename = ?
+      UNION SELECT path FROM markdown_link_excluded_targets WHERE basename = ?
+    `);
   }
 
   coversCache(): boolean {
     return !this.db.prepare(`
       SELECT 1 FROM file_cache AS file
       LEFT JOIN markdown_link_files AS indexed USING(path)
-      WHERE indexed.hash IS NULL OR indexed.hash <> file.hash LIMIT 1
-    `).get();
+      WHERE indexed.hash IS NULL OR indexed.hash <> ? || file.hash LIMIT 1
+    `).get(INDEX_REVISION);
+  }
+
+  replaceExcludedTargets(paths: readonly string[]): void {
+    this.db.exec("DELETE FROM markdown_link_excluded_targets");
+    const insert = this.db.prepare("INSERT INTO markdown_link_excluded_targets VALUES (?, ?, ?)");
+    for (const filePath of paths) insert.run(filePath, filePath.toLowerCase(), basenameKey(filePath));
   }
 
   update(filePath: string, hash: string, content: string): void {
     const basename = basenameKey(filePath);
-    if (!this.fileUpsert.run(filePath, filePath.toLowerCase(), basename, hash).changes) return;
+    if (!this.fileUpsert.run(filePath, filePath.toLowerCase(), basename, INDEX_REVISION + hash).changes) return;
     this.refsDelete.run(filePath);
     for (const [ordinal, reference] of extractMarkdownLinkReferences(content).entries()) {
       this.refInsert.run(filePath, ordinal, reference.linkPath ? basenameKey(reference.linkPath) : basename,
@@ -80,45 +104,45 @@ export class MarkdownLinkIndex {
     }
   }
 
-  private uniquePath(candidates: Iterable<Record<string, unknown>>, wanted: string, suffix = false): string | undefined {
-    const foldedWanted = wanted.toLowerCase();
-    let foldedMatch: string | undefined;
-    let exactMatch: string | undefined;
-    let foldedCount = 0;
-    let exactCount = 0;
+  findNotePath(wanted: string): string | undefined {
+    const matches = this.fileByFoldedPath.all(wanted.toLowerCase()) as { path: string }[];
+    return (matches.find((row) => row.path === wanted) ?? (matches.length === 1 ? matches[0] : undefined))?.path;
+  }
+
+  private explicitTarget(wanted: string): Target | undefined {
+    const folded = wanted.toLowerCase();
+    return this.chooseTarget(this.targetsByFoldedPath.iterate(folded, folded), wanted);
+  }
+
+  private chooseTarget(candidates: Iterable<Record<string, unknown>>, preferred?: string, suffix?: string): Target | undefined {
+    let best: string | undefined;
+    let bestRank = Infinity;
+    let matches = 0;
     for (const row of candidates) {
       const candidate = row.path as string;
-      if (suffix && !candidate.toLowerCase().endsWith(foldedWanted)) continue;
-      foldedMatch = candidate;
-      foldedCount++;
-      if (suffix ? candidate.endsWith(wanted) : candidate === wanted) {
-        exactMatch = candidate;
-        exactCount++;
-        if (exactCount === 2) return undefined;
+      if (suffix && !candidate.toLowerCase().endsWith(suffix)) continue;
+      const rank = candidate === preferred ? 0 : candidate.toLowerCase() === preferred?.toLowerCase() ? 1 : 2;
+      matches++;
+      if (!best || rank < bestRank || (rank === bestRank &&
+          (candidate.length < best.length || (candidate.length === best.length && candidate < best)))) {
+        best = candidate;
+        bestRank = rank;
       }
     }
-    if (exactCount === 1) return exactMatch;
-    if (foldedCount === 1) return foldedMatch;
-    return undefined;
+    return best ? { path: best, ...(matches > 1 ? { ambiguous: true as const } : {}) } : undefined;
   }
 
-  findNotePath(wanted: string): string | undefined {
-    return this.uniquePath(this.fileByFoldedPath.iterate(wanted.toLowerCase()), wanted);
-  }
-
-  private resolve(source: string, linkPath: string): string | undefined {
-    if (!linkPath) return source;
+  private resolve(source: string, linkPath: string): Target | undefined {
+    if (!linkPath) return { path: source };
     const target = markdownPath(linkPath);
-    if (target.startsWith("/")) return this.findNotePath(path.posix.normalize(target));
+    if (target.startsWith("/")) return this.explicitTarget(path.posix.normalize(target));
     const relative = path.posix.normalize(path.posix.join(path.posix.dirname(source).slice(1), target));
-    if (!relative.startsWith("../")) {
-      const match = this.findNotePath("/" + relative);
-      if (match) return match;
-    }
+    const local = relative.startsWith("../") ? undefined : "/" + relative;
+    if (target.startsWith("./") || target.startsWith("../")) return local ? this.explicitTarget(local) : undefined;
     const normalized = path.posix.normalize(target);
-    if (target.startsWith("./") || target.startsWith("../") || normalized.startsWith("../")) return undefined;
-    const suffix = "/" + normalized;
-    return this.findNotePath(suffix) ?? this.uniquePath(this.filesByBasename.iterate(basenameKey(normalized)), suffix, true);
+    if (normalized.startsWith("../")) return local ? this.explicitTarget(local) : undefined;
+    const basename = basenameKey(normalized);
+    return this.chooseTarget(this.filesByBasename.iterate(basename, basename), local, "/" + normalized.toLowerCase());
   }
 
   read(filePath: string, limit: number): NoteLinksProjection {
@@ -135,7 +159,9 @@ export class MarkdownLinkIndex {
       const target = this.resolve(filePath, reference.linkPath);
       outgoing.push({
         ...reference,
-        resolution: target ? { status: "resolved", targetPath: target.slice(1) } : { status: "unresolved" },
+        resolution: target
+          ? { status: "resolved", targetPath: target.path.slice(1), ...(target.ambiguous ? { ambiguous: true } : {}) }
+          : { status: "unresolved" },
         subpathValidation: reference.subpath
           ? { status: "unknown", reason: target ? "target_cache_unavailable" : "target_file_unavailable" }
           : { status: "not_requested" },
@@ -145,12 +171,12 @@ export class MarkdownLinkIndex {
 
     let unresolvedTotal = 0;
     for (const row of this.db.prepare(`
-      SELECT link_path, link_text, count(*) AS count FROM markdown_link_refs
-      WHERE source = ? GROUP BY link_text, link_path ORDER BY link_text, link_path
-    `).iterate(filePath) as Iterable<LinkCount & { link_text: string }>) {
+      SELECT link_path, CASE WHEN link_path = '' THEN link_text ELSE link_path END AS unresolved_key, count(*) AS count
+      FROM markdown_link_refs WHERE source = ? GROUP BY link_path, unresolved_key ORDER BY unresolved_key
+    `).iterate(filePath) as Iterable<LinkCount & { unresolved_key: string }>) {
       if (this.resolve(filePath, row.link_path)) continue;
       unresolvedTotal++;
-      if (unresolved.length < limit) unresolved.push({ linkText: row.link_text, count: row.count });
+      if (unresolved.length < limit) unresolved.push({ linkText: row.unresolved_key, count: row.count });
     }
 
     let backlinkTotal = 0;
@@ -170,7 +196,7 @@ export class MarkdownLinkIndex {
         source = row.path;
         count = 0;
       }
-      if (this.resolve(row.path, row.link_path) === filePath) count += row.count;
+      if (this.resolve(row.path, row.link_path)?.path === filePath) count += row.count;
     }
     addBacklink();
 

@@ -8,6 +8,7 @@ import {
   selectAvailableToolProfileNames,
 } from "../dist/mcp-server/toolProfiles.js";
 import { TOOL_REGISTRATION_MODES } from "../dist/mcp-server/toolSurfaceRegistry.js";
+import toolCatalog from "../evals/tool-catalog.v1.json" with { type: "json" };
 
 const WITH_CACHE = ["vault-cache"];
 
@@ -243,6 +244,7 @@ const tasksSnapshot = compileToolProfileNames({
   registrationMode: "headless-readonly",
   availableStaticRequirements: WITH_CACHE,
 });
+assert.deepEqual(tasksSnapshot, toolCatalog.profiles.tasks.modes["headless-readonly"]);
 for (const required of [
   "operon_status",
   "operon_get_configuration",
@@ -329,6 +331,10 @@ const readonlyWithoutCache = compileToolProfileNames({
   registrationMode: "headless-readonly",
   availableStaticRequirements: [],
 });
+assert.deepEqual(readonlyWithoutCache, [
+  "obsidian_list_notes", "obsidian_read_note", "obsidian_runtime_status",
+  "obsidian_validate_format", "smart_semantic_search",
+]);
 for (const absent of [
   ...noteMetadataReads,
   "obsidian_global_search",

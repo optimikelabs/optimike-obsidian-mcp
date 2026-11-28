@@ -99,7 +99,7 @@ OBSIDIAN_VAULT_EXCLUDE_PATTERNS="tmp/**,**/tmp/**,Efforts/Archives/**"
 npm run check:vault-exclusions -- --vault=/path/to/vault
 ```
 
-This policy protects Optimike cache, search, Tasks, and local Bases fallback behavior. It does not stop Obsidian Headless/Sync from downloading files. For a durable server, use a pull-only copied vault first, then clean Sync-side content or use a server-specific vault/profile before any guarded write validation.
+This policy protects Optimike cache, search, Tasks, and local Bases fallback behavior. In headless modes the link scanner may inspect names in visible excluded paths to resolve references, while excluded content stays outside the cache. It does not stop Obsidian Headless/Sync from downloading files. For a durable server, use a pull-only copied vault first, then clean Sync-side content or use a server-specific vault/profile before any guarded write validation.
 
 ## Runtime Modes
 

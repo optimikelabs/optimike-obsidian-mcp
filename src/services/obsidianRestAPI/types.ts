@@ -222,7 +222,7 @@ export type NoteLinkObservation = {
   linkPath: string;
   subpath: string;
   resolution:
-    | { status: "resolved"; targetPath: string }
+    | { status: "resolved"; targetPath: string; ambiguous?: true }
     | { status: "unresolved" };
   subpathValidation: NoteSubpathValidation;
   provenance:

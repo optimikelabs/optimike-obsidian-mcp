@@ -17,13 +17,12 @@ const Input = z.object({
 async function readCachedKey(
   input: z.infer<typeof Input>, context: RequestContext, vaultCache?: VaultCacheService,
 ) {
-  const path = await vaultCache?.findFilesystemNote(input.filePath, context);
-  const entry = path ? await vaultCache?.getEntry(path) : undefined;
-  if (!entry || !vaultCache?.isReady()) {
+  if (!vaultCache) {
     throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Shared filesystem cache is unavailable.", context);
   }
+  const content = await vaultCache.readFilesystemNoteContent(input.filePath, context);
   return {
-    ...frontmatterKeyResponse(readMarkdownFrontmatter(entry.content).frontmatter, input.key),
+    ...frontmatterKeyResponse(readMarkdownFrontmatter(content).frontmatter, input.key),
     provenance: { source: "filesystem" },
   };
 }

@@ -166,6 +166,12 @@ function capability(manifest, id) {
 
 const ready = projectCapabilityManifest(input());
 assert.equal(ready.contractVersion, 1);
+assert.deepEqual(ready.capabilities.map(({ id }) => id).sort(), [
+  "governed-base-create", "governed-base-rows", "governed-base-write",
+  "governed-canvas-create", "governed-canvas-write", "governed-frontmatter-write", "governed-native-move", "governed-note-create",
+  "governed-note-delete", "governed-note-write", "local-rest", "operon-read", "operon-write",
+  "semantic-search", "vault-read",
+]);
 assert.equal(ready.summary.ready, 15);
 assert.equal(ready.admission.state, "not-applicable");
 // Catches: the dual-only applyConfirmation field leaking into legacy responses.
