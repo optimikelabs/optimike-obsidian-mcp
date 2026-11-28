@@ -34,10 +34,11 @@ son indexation, il a figé l’horloge JavaScript au `2026-03-29T00:30:00.000Z`.
 
 La capture UTC du même banc a donné les mêmes valeurs pour les cas retenus.
 Pour actualiser la référence, refaire une capture avec la version cible dans
-un profil isolé, puis examiner les écarts. `npm run check:bases-bridge` depuis
-la racine compare le handler simulé à la référence 1.15.1. Les compteurs
-d’appels, les pannes injectées et les limites de pagination testent le
-comportement du Bridge en simulation.
+un profil isolé, puis examiner les écarts. Depuis la racine,
+`npm run check:bases-bridge` compare le handler simulé à la référence 1.15.1.
+`npm run test:governed-base` lance aussi ces tests et utilise la fixture
+pour le rejeu MCP. Les compteurs d’appels, les pannes injectées et les limites
+de pagination testent le comportement du Bridge en simulation.
 
 ## Endpoints exposés
 
@@ -189,6 +190,8 @@ est `bases_formula_patch_*`, pas l’envoi de YAML arbitraire.
 - `evaluate: true` → `source: "engine"`. Le moteur d’Obsidian (même chemin que
   `/engine/evaluate`, avec les mêmes canaris) sélectionne d’abord les lignes de
   la vue avec les filtres globaux, les filtres de vue et la limite de la vue.
+  Le moteur calcule les formules utilisées par les filtres de vue pour
+  sélectionner les lignes.
   Le Bridge transmet aussi la configuration du tri de vue au handler natif.
   Dans la capture 1.15.1, les tris ascendant et descendant sur `note.priority`
   et le tri descendant sur `file.name` ont tous rendu les notes dans l’ordre

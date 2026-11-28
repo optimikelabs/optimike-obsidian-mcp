@@ -1,5 +1,7 @@
 {
   "obsidianVersion": "1.15.1",
+  "installerVersion": "1.14.5",
+  "archiveSha256": "42bf7f34782752f159d63c17ac6bac4ad01dd55709578f9879f76f8295abb2eb",
   "timezone": "Europe/Paris",
   "frozenClock": "2026-03-29T00:30:00.000Z",
   "top": [
