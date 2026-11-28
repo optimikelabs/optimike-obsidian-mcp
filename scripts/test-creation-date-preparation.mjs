@@ -1,3 +1,4 @@
+import "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
 import { load } from "js-yaml";
 import { createHash } from "node:crypto";
@@ -154,6 +155,29 @@ const fake = {
 const runtime = createGovernedNoteReplaceRuntime(fake);
 const text = new GovernedTextPatchRuntime(runtime);
 try {
+  const strictRequest = {
+    path: targetPath,
+    nextContent: initial.replace(/\r\n/g, "\n").replace("needle", "replacement"),
+    idempotencyKey: "strict-date-preparation-refusal",
+    expectedBeforeSha256: hash(initial),
+  };
+  await assert.rejects(runtime.planPublicDirect(strictRequest), error => {
+    const { error: refusal } = publicMcpToolErrorPayload(error, {
+      operation: "obsidian_note_replace_plan",
+      toolName: "obsidian_note_replace_plan",
+      params: strictRequest,
+    });
+    assert.equal(refusal.code, "CONFLICT");
+    assert.equal(refusal.details.reasonCode, "note_replace_date_preparation_required");
+    assert.equal(refusal.details.mutationMayHaveApplied, false);
+    assert.match(refusal.message, /gestionnaire de dates.*relisez-la avec obsidian_read_note/u);
+    return true;
+  },
+    "strict replacement must refuse even a matching base when date preparation would modify it");
+  assert.equal(preparations, 0);
+  assert.equal(content, initial);
+  assert.equal(runtime.findPlanByIdempotencyKey(strictRequest.idempotencyKey), undefined);
+
   content = "---\n{}\n---\nneedle\n";
   await assert.rejects(text.plan({ path: targetPath, operations: [{ op: "append_body", text: "blocked" }], idempotencyKey: "empty-mapping" }), error => error.details?.reasonCode === "frontmatter_empty_mapping_date_management");
   assert.equal(preparations, 0);

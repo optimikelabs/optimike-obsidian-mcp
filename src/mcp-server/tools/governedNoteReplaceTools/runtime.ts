@@ -84,6 +84,7 @@ type CallContext =
       path: string;
       nextContent: string;
       requireNativeFormat?: boolean;
+      callerExpectedBeforeSha256?: string;
       atomicWriteStatus?: unknown;
     }
   | { kind: "apply" | "recover"; path: string; requireNativeFormat?: boolean; atomicWriteStatus?: unknown };
@@ -92,6 +93,26 @@ type FrontmatterRecord = Record<string, unknown>;
 
 function normalizeKey(value: string): string {
   return value.trim().toLowerCase();
+}
+
+type PlanningRead = Awaited<ReturnType<AtomicWriteBackend["read"]>>;
+
+function verifyPlanningRead(path: string, source: PlanningRead): void {
+  if (source.path !== path ||
+      source.sha256 !== createHash("sha256").update(source.content, "utf8").digest("hex") ||
+      source.size !== Buffer.byteLength(source.content, "utf8")) {
+    throw new McpError(BaseErrorCode.CONFLICT, "The planning read could not be verified.", { reason: "note_source_proof_invalid" });
+  }
+}
+
+function assertCallerBase(expected: string, observed: string): void {
+  if (observed !== expected) {
+    throw new McpError(BaseErrorCode.CONFLICT, "The note changed since the caller read it.", {
+      reasonCode: "note_replace_base_changed",
+      observedSha256: observed,
+      mutationMayHaveApplied: false,
+    });
+  }
 }
 
 function assertSupportedMarkdownEnvelope(
@@ -407,6 +428,10 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
         );
       }
       assertCurrentWritePolicy("plan", payload.path, context.nextContent);
+      if (context.callerExpectedBeforeSha256 !== undefined) {
+        verifyPlanningRead(payload.path, result);
+        assertCallerBase(context.callerExpectedBeforeSha256, result.sha256);
+      }
       if (!context.atomicWriteStatus) {
         throw new McpError(
           BaseErrorCode.CONFLICT,
@@ -429,19 +454,34 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
     return result;
   }
 
-  async prepareForPlan(path: string, expectedSource?: { sha256: string; bindingFingerprint: string }, requireNativeFormat = false) {
+  async prepareForPlan(path: string, {
+    expectedSource,
+    requireNativeFormat = false,
+    callerExpectedBeforeSha256,
+  }: {
+    expectedSource?: { sha256: string; bindingFingerprint: string };
+    requireNativeFormat?: boolean;
+    callerExpectedBeforeSha256?: string;
+  } = {}) {
     const source = await this.delegate.read({ contractVersion: 1, path });
-    if (source.path !== path || source.sha256 !== createHash("sha256").update(source.content, "utf8").digest("hex") ||
-        source.size !== Buffer.byteLength(source.content, "utf8"))
-      throw new McpError(BaseErrorCode.CONFLICT, "The planning read could not be verified.", { reason: "note_source_proof_invalid" });
+    verifyPlanningRead(path, source);
+    const strictBase = callerExpectedBeforeSha256 !== undefined;
+    if (strictBase) assertCallerBase(callerExpectedBeforeSha256, source.sha256);
     const fenceKey = operationDigest({ domain: "obsidian-date-preparation-v1", path, bindingFingerprint: source.bindingFingerprint });
     const unverified = (check?: DatePreparationCheck) => new McpError(BaseErrorCode.CONFLICT,
       "La préparation des dates a pu modifier ou normaliser la note. Une revue administrative est nécessaire avant reprise : obsidian_operation_close avec datePreparationPaths.",
       { reasonCode: "date_preparation_unverified", mutationMayHaveApplied: true, ...(check ? { preparationCheck: check } : {}) });
-    // A lock whose attempt provably never reached its effect point is released
-    // (and that attempt revoked forever); any other lock needs owner review.
-    if (this.journal.hasDatePreparationFence(fenceKey) &&
-        !(await this.releaseUnstartedPreparation(fenceKey, source.bindingFingerprint))) throw unverified();
+    // Strict planning leaves any existing preparation fence for owner review.
+    // Other callers may revoke and release one whose attempt never reached its effect point.
+    if (this.journal.hasDatePreparationFence(fenceKey)) {
+      if (strictBase) {
+        throw new McpError(BaseErrorCode.CONFLICT, "A previous date preparation is still locked.", {
+          reasonCode: "note_replace_date_preparation_locked",
+          mutationMayHaveApplied: false,
+        });
+      }
+      if (!(await this.releaseUnstartedPreparation(fenceKey, source.bindingFingerprint))) throw unverified();
+    }
     if (expectedSource && (source.sha256 !== expectedSource.sha256 || source.bindingFingerprint !== expectedSource.bindingFingerprint))
       throw new McpError(BaseErrorCode.CONFLICT, "The note changed before date preparation.");
     const originalFormat = requireNativeFormat ? await inspectNativeFrontmatter(this.delegate, source.content, source.bindingFingerprint) : undefined;
@@ -452,6 +492,12 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
       ...(protection.createdPropertyNames.length || !status.datePreparation?.supported ? [] : config.mcpProtectedFrontmatterKeys.filter(key => /^(création|creation|created)$/iu.test(key)))])];
     const fm = parseFrontmatter(source.content);
     if (!created.some(key => entriesForKey(fm, normalizeKey(key)).length === 0)) return source;
+    if (strictBase) {
+      throw new McpError(BaseErrorCode.CONFLICT, "The note needs date preparation before strict replacement planning.", {
+        reasonCode: "note_replace_date_preparation_required",
+        mutationMayHaveApplied: false,
+      });
+    }
     if (requireNativeFormat && frontmatterEnvelope(originalFormat!.content)?.yaml.trim() === "{}")
       throw new McpError(BaseErrorCode.VALIDATION_ERROR, "An empty frontmatter mapping cannot be verified with automatic dates.", { reasonCode: "frontmatter_empty_mapping_date_management" });
     assertCurrentWritePolicy("plan", path, source.content);
@@ -901,7 +947,7 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
   }
 
   readForProjection(path: string, requireNativeFormat = false) {
-    return this.backend.prepareForPlan ? this.backend.prepareForPlan(path, undefined, requireNativeFormat) : this.backend.read({ contractVersion: 1, path });
+    return this.backend.prepareForPlan ? this.backend.prepareForPlan(path, { requireNativeFormat }) : this.backend.read({ contractVersion: 1, path });
   }
 
   releasePreparation(source: { datePreparation?: OperationReceipt["datePreparation"] }) {
@@ -979,10 +1025,19 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
     );
   }
 
-  plan(input: ObsidianNoteReplacePlanInput): Promise<OperationReceipt> {
+  plan(
+    input: ObsidianNoteReplacePlanInput,
+    callerExpectedBeforeSha256?: string,
+  ): Promise<OperationReceipt> {
     assertCurrentWritePolicy("plan", input.path, input.nextContent);
     return this.backend.withContext(
-      { kind: "plan", path: input.path, nextContent: input.nextContent, requireNativeFormat: !!input.frontmatterFormat },
+      {
+        kind: "plan",
+        path: input.path,
+        nextContent: input.nextContent,
+        requireNativeFormat: !!input.frontmatterFormat,
+        callerExpectedBeforeSha256,
+      },
       () => this.adapter.plan(input),
     );
   }
@@ -1013,22 +1068,32 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
       );
     }
     assertCurrentWritePolicy("plan", input.path, input.nextContent);
-    const identity = operationDigest({ path: input.path, nextContent: input.nextContent });
+    const { path, expectedBeforeSha256 } = input;
+    const strictBase = expectedBeforeSha256 !== undefined;
+    const identity = operationDigest({ path, nextContent: input.nextContent, ...(strictBase ? { expectedBeforeSha256 } : {}) });
     const existing = this.findPlanByIdempotencyKey(input.idempotencyKey);
     if (existing?.idempotencyIdentity === identity) return this.status(`${PLAN_REF_PREFIX}${existing.operationId}`);
-    if (existing) return this.plan(existing.idempotencyIdentity ? { ...input, idempotencyIdentity: identity } : input);
+    if (existing) return this.plan(existing.idempotencyIdentity || strictBase ? { ...input, idempotencyIdentity: identity } : input);
     assertSupportedMarkdownEnvelope(input.nextContent, "plan");
     if (!validateObsidianMarkdown(input.nextContent).ok) {
       throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The sealed next content is not valid conservative Obsidian Markdown.", { reason: "markdown_validation_failed" });
     }
     const before = await this.backend.read({ contractVersion: 1, path: input.path });
+    if (strictBase) {
+      verifyPlanningRead(path, before);
+      assertCallerBase(expectedBeforeSha256, before.sha256);
+    }
     const status = await this.backend.status();
     const keys = effectiveAtomicWriteProtectedFrontmatterKeys(status, config.mcpProtectedFrontmatterKeys);
     const beforeFormat = await inspectNativeFrontmatter(this.backend, before.content, before.bindingFingerprint);
     const format = await inspectNativeFrontmatter(this.backend, input.nextContent, before.bindingFingerprint);
     rejectNonCanonical(format);
     validateReplacement(beforeFormat.content, input.nextContent, "plan", keys);
-    const source = await this.backend.prepareForPlan(input.path, before, true);
+    const source = await this.backend.prepareForPlan(path, {
+      expectedSource: before,
+      requireNativeFormat: true,
+      callerExpectedBeforeSha256: expectedBeforeSha256,
+    });
     try {
     let nextContent = input.nextContent;
     if (source.datePreparation?.kind === "date-manager-before-plan") {
@@ -1049,7 +1114,7 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
     }
     const result = await this.plan({ ...input, nextContent, idempotencyIdentity: identity,
       frontmatterFormat: { normalization: { applied: false }, typeWarnings: format.warnings },
-      expectedBeforeSha256: source.sha256, expectedBindingFingerprint: source.bindingFingerprint, datePreparation: source.datePreparation });
+      expectedBeforeSha256: source.sha256, expectedBindingFingerprint: source.bindingFingerprint, datePreparation: source.datePreparation }, expectedBeforeSha256);
     if (source.datePreparation?.kind === "date-manager-before-plan" && this.inspect(result.planRef).beforeSha256 !== source.sha256) throw new DatePreparationPlanFailure(source.datePreparation);
     return result;
     } catch (error) {

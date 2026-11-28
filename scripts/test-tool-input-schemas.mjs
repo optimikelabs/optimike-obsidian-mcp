@@ -109,8 +109,19 @@ function checkRecursiveConstraints(tools) {
 
 // No live application is required: the canonical measurement helper starts an
 // authenticated local status fixture, exposing every live-profile registration.
+const validateSchema = new Ajv({ strict: false });
 for (const profile of await measureCanonicalLiveProfileSchemas()) {
   checkTools(profile.publicTools, `live-fixture/${profile.profile}`);
+  if (["standard", "authoring", "operational", "full"].includes(profile.profile)) {
+    const schema = profile.publicTools.find(tool => tool.name === "obsidian_note_replace_plan")?.inputSchema;
+    assert.ok(schema, `${profile.profile}: replacement plan is advertised`);
+    const validate = validateSchema.compile(schema);
+    const input = { path: "Fixture.md", nextContent: "after", idempotencyKey: "replacement" };
+    assert.equal(validate(input), true, `${profile.profile}: old callers can still omit the base`);
+    assert.equal(validate({ ...input, expectedBeforeSha256: "a".repeat(64) }), true);
+    assert.equal(validate({ ...input, expectedBeforeSha256: "a".repeat(63) }), false);
+    assert.equal(validate({ ...input, expectedBeforeSha256: "z".repeat(64) }), false);
+  }
   if (["tasks", "operational", "full"].includes(profile.profile)) {
     const pinSchema = profile.publicTools.find(tool => tool.name === "operon_set_pinned")?.inputSchema;
     const batchSchema = profile.publicTools.find(tool => tool.name === "operon_update_tasks")?.inputSchema;

@@ -84,7 +84,8 @@ The family is live/hybrid-live only and has no recover or undo operation. Missin
 
 ## Core Notes
 
-- `obsidian_read_note`: read a vault note by path, with cache fallback.
+- `obsidian_read_note`: read a vault note by path, with cache fallback and a
+  top-level `sha256` of the returned Markdown encoded as UTF-8.
 - `obsidian_note_links`: live/hybrid-live only. Observe a bounded semantic neighborhood from Obsidian Desktop public `MetadataCache` APIs: outgoing links, embeds and frontmatter links with effective resolution; requested subpaths with heading/block validity when demonstrable; unresolved aggregates; and backlinks reconstructed from resolved relations. It reports provenance, truncation, explicit collection availability, a best-effort non-atomic snapshot and cache freshness as `unknown` when the public API cannot prove it. An unavailable source cache reports `coverage.outgoing.total: null` rather than fabricating zero links. It performs no write and makes no graph-preservation claim.
 - `obsidian_list_notes`: list notes and folders, using REST or cache/filesystem.
 - `obsidian_global_search`: text/regex search across cached vault content.
@@ -107,7 +108,9 @@ current MCP write policy is revalidated before planning and before each effect.
 
 - `obsidian_note_replace_plan`: read one existing `.md` note, validate the
   complete next Markdown and protected frontmatter, then persist an opaque
-  sealed plan with before/after proofs. It does not write the note.
+  sealed plan with before/after proofs. Pass `expectedBeforeSha256` from the
+  source read to refuse a changed note or required date preparation before any
+  note change. If omitted, planning may prepare a missing creation date.
 - `obsidian_note_replace_apply`: apply only that `planRef` with its matching
   `idempotencyKey`; target, content, and hashes cannot be replaced by the
   caller.

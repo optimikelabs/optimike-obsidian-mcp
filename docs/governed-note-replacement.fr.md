@@ -32,16 +32,35 @@ artefacts publiés et diagnostics publics.
 
 ### `obsidian_note_replace_plan`
 
-Entrée : `path`, le `nextContent` complet et une `idempotencyKey` obligatoire.
+Fournir `path`, le `nextContent` complet, l’`idempotencyKey` et, en option,
+`expectedBeforeSha256`. Pour un remplacement préparé à partir d’une note
+existante, reprendre le champ `sha256` de la réponse `obsidian_read_note`
+utilisée. C’est le SHA-256 du Markdown renvoyé, encodé en UTF-8, sur 64
+caractères hexadécimaux minuscules dans les deux formats Markdown et JSON.
 
-Le planning n’applique pas le remplacement demandé. Une note non datée peut
-être d’abord datée par FDM, comme décrit dans le contrat de patch de texte.
-L’Atomic Write Bridge lit la note `.md`
-existante ; cette même lecture fournit le SHA-256 initial et le contenu utilisé
-pour comparer structurellement le frontmatter protégé. Le serveur valide le
-futur Markdown Obsidian, scelle cible, binding backend, hashes avant/après,
-digest de requête, clé d’idempotence et contenu privé nécessaire à la
-récupération, puis retourne un reçu avec un `planRef` opaque.
+Le serveur compare cette empreinte à la lecture en direct du Bridge avant toute
+préparation de date ou tout scellement. Si la note a changé, le plan renvoie
+`CONFLICT` avec `error.details.reasonCode: note_replace_base_changed` et
+`error.details.observedSha256`. Relire la note puis reconstruire le remplacement
+depuis cette version. Si une date de création doit être ajoutée, un plan avec
+une empreinte attendue renvoie `CONFLICT` avec
+`note_replace_date_preparation_required`. Ouvrir et enregistrer la note dans
+Obsidian, attendre le gestionnaire de dates, puis la relire avant de reconstruire
+le remplacement. Dans les deux cas, le refus laisse la note intacte.
+
+Si une préparation précédente conserve un verrou, le plan avec empreinte
+renvoie `note_replace_date_preparation_locked` et
+`mutationMayHaveApplied: false` pour la requête en cours. Le propriétaire
+résout la préparation précédente avec `obsidian_operation_close` et
+`datePreparationPaths`, puis l’appelant relit la note avant de reconstruire
+le remplacement.
+
+Sans `expectedBeforeSha256`, la lecture du Bridge fournit la base du plan et
+FDM peut d’abord dater une note non datée, comme décrit dans le contrat de patch
+de texte. Le serveur valide le remplacement et le frontmatter protégé, scelle
+la cible, l’identité du backend, les empreintes avant/après, le condensat de
+requête, la clé et le contenu privé de récupération, puis renvoie un `planRef`
+opaque.
 
 Le frontmatter fourni doit déjà être au format canonique natif d’Obsidian. La
 capacité de contrôle du Bridge est obligatoire et liée à l’identité du coffre.
@@ -51,9 +70,9 @@ requête. L’appelant peut le renvoyer ; le corps et les diagnostics du parseur
 ne sont pas exposés. Les écarts de type sont signalés sans refus. La capacité
 et la forme scellée sont revérifiées avant le CAS.
 
-La même clé et la même requête canonique retournent le même plan. Réutiliser la
-clé pour un autre remplacement est refusé. Plan n’est pas une simple lecture :
-il crée une intention durable de mutation et est bloqué par
+La même clé et la même requête canonique retournent le même plan. Changer
+l’empreinte attendue ou le remplacement exige une nouvelle clé dès qu’un plan
+existe. La planification crée une intention durable de mutation et est bloquée par
 `MCP_WRITE_MODE=readonly`.
 
 ### `obsidian_note_replace_apply`

@@ -241,10 +241,11 @@ pour un runtime contrôlé offrant des garanties de latence plus strictes.
 
 Séquence client :
 
-1. `obsidian_note_replace_plan(path, nextContent, idempotencyKey)` ;
-2. `obsidian_note_replace_apply(planRef, idempotencyKey)` ;
-3. après timeout ou réponse perdue, appeler `obsidian_note_replace_status` ;
-4. appeler `obsidian_note_replace_recover` uniquement si le reçu autorise la
+1. Lire la note avec `obsidian_read_note` et conserver son `sha256`.
+2. Appeler `obsidian_note_replace_plan` avec `path`, `nextContent`, `idempotencyKey` et l’empreinte lue dans `expectedBeforeSha256`.
+3. Appeler `obsidian_note_replace_apply(planRef, idempotencyKey)`.
+4. Après un timeout ou une réponse perdue, appeler `obsidian_note_replace_status`.
+5. Appeler `obsidian_note_replace_recover` uniquement si le reçu autorise la
    récupération du plan exact.
 
 Le `planRef` est opaque. Apply et recover n’acceptent jamais une nouvelle cible,

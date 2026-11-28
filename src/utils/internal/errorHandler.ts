@@ -238,6 +238,7 @@ const SAFE_ERROR_DETAIL_FIELDS = new Set([
   "recoveryAllowed",
   "applyAllowed",
   "mutationMayHaveApplied",
+  "observedSha256",
   // Closed, content-free sub-cause of date_preparation_unverified.
   "preparationCheck",
   "httpStatus",
@@ -483,6 +484,9 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "date_preparation_bridge_upgrade_required",
   "date_preparation_fdm_pending",
   "date_preparation_not_started",
+  "note_replace_base_changed",
+  "note_replace_date_preparation_required",
+  "note_replace_date_preparation_locked",
   "effect_attempt_limit_reached",
   "frontmatter_format_capability_missing",
   "frontmatter_format_changed",
@@ -623,7 +627,7 @@ function isSafeDiagnosticString(field: string, value: string): boolean {
   if (field === "profile") {
     return SAFE_PROFILES.has(value);
   }
-  if (field === "planDigest") return /^[a-f0-9]{64}$/u.test(value);
+  if (field === "planDigest" || field === "observedSha256") return /^[a-f0-9]{64}$/u.test(value);
   if (field === "preparationCheck") return isDatePreparationCheck(value);
   if (field === "reasonCode") return SAFE_PUBLIC_REASON_CODES.has(value);
   if (field === "hint") return isNoteNameHint(value) || isNativeMoveHint(value);
@@ -718,6 +722,12 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
     return "Le gestionnaire de dates ou une autre préparation occupe encore la file ; rien n'a été modifié par cette préparation. Relancez le plan dans une trentaine de secondes.";
   if (reasonCode === "date_preparation_not_started")
     return "La préparation des dates n'a pas démarré ; rien n'a été modifié par cette préparation. Relisez la note puis relancez le plan.";
+  if (reasonCode === "note_replace_base_changed")
+    return "La note a changé depuis la lecture initiale. Relisez-la avec obsidian_read_note et reconstruisez le remplacement à partir du contenu et de l’empreinte renvoyés.";
+  if (reasonCode === "note_replace_date_preparation_required")
+    return "La note doit recevoir une date de création. Ouvrez-la et enregistrez-la dans Obsidian, attendez que le gestionnaire de dates ait terminé, puis relisez-la avec obsidian_read_note et reconstruisez le remplacement à partir du contenu et de l’empreinte renvoyés.";
+  if (reasonCode === "note_replace_date_preparation_locked")
+    return "Une préparation de date précédente reste verrouillée. Demandez au propriétaire du coffre de la vérifier avec obsidian_operation_close et datePreparationPaths. Après résolution, relisez la note avec obsidian_read_note avant de reconstruire le remplacement.";
   if (reasonCode === "effect_attempt_limit_reached")
     return "La limite de tentatives de cette opération est atteinte. Consultez son statut avant toute nouvelle action ; ne rejouez pas un effet incertain.";
   if (reasonCode === "atomic_bridge_version_unsupported")
