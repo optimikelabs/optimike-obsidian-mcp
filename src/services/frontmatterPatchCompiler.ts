@@ -295,7 +295,7 @@ function scanYamlFeatures(lines: SourceLine[]): {
 }
 
 function parseFrontmatterSource(content: string): FrontmatterSource {
-  const opening = content.match(/^---(\r?\n)/u);
+  const opening = content.match(/^\uFEFF?---(\r?\n)/u);
   if (!opening) {
     fail(
       "Governed frontmatter patching requires an existing standard frontmatter block.",

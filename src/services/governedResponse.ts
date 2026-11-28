@@ -68,6 +68,9 @@ function compactReceipt(value: unknown, toolName: string): unknown {
     const proof = receipt[key] as { kind: string; digest: string } | undefined;
     if (proof) result[key] = { kind: proof.kind, digest: proof.digest };
   }
+  if ((receipt.backend as { kind?: string } | undefined)?.kind === "headless-filesystem") {
+    result.backend = receipt.backend;
+  }
   const projection = receipt.projection as Record<string, unknown> | undefined;
   if (projection)
     result.projection = {

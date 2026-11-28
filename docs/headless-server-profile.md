@@ -96,6 +96,52 @@ conflict detection, and the remaining race with other processes.
 
 Never use this phase to edit existing production notes until the server profile has its own rollback and monitoring story.
 
+## Governed Markdown writes
+
+`headless-guarded` exposes `obsidian_text_patch_*`, `obsidian_frontmatter_patch_*`,
+`obsidian_note_create_*` and `obsidian_list_pending_operations` in authoring
+profiles. `headless-filesystem` adds `obsidian_note_replace_*` and
+`obsidian_operation_revert_*`. Use the same plan, apply, status and recover
+calls as live for supported note families. Creation uses plan, apply and status.
+
+Plans bind the vault and the SHA-256 of the bytes read from disk, or path
+absence for creation. Apply uses the sealed reference and idempotency key.
+The filesystem authority serializes cooperating processes on the same host,
+syncs staged bytes, checks the target again and publishes atomically. A sync
+edit visible at that final check conflicts. External writers that ignore the
+lock can still race the final check and rename. Commit receipts identify
+`headless-filesystem` and require a verified re-read from disk.
+
+Put the shared cache outside the vault. The default governed journal is next
+to it, with a fallback to the local note-journal state directory if the cache
+is inside the vault. `MCP_HEADLESS_GOVERNED_JOURNAL_PATH` selects an absolute
+path outside the vault. All cooperating processes must share it and its lock
+directory on local storage. The journal contains private before images for
+the existing terminal retention period (30 days). Treat the journal like
+vault data.
+
+Keep the vault's `.obsidian` configuration available, including its enabled
+plugins list and Frontmatter Date Manager settings. The authority reads
+property names, the supported local-time format (minute or second precision)
+and ordered exclusion rules. It honors the core Templates and Templater
+folders. Managed creation uses the application timestamp on new notes and file birth
+time when initializing a missing creation property on an existing note.
+Set the server's `TZ` to the vault's intended local time zone. The plan seals
+the date policy. Apply sets modification from the server clock
+and records the exact staged hash before publication. Agents cannot supply
+those changes. Missing or ambiguous date settings close the write path.
+The headless compiler validates local YAML and preserves BOM and line endings.
+Desktop provides native YAML serialization and metadata types in live mode.
+
+After an interrupted apply, call status on the original reference. Recover
+can resume a write that has not reached publication. Once a staged effect
+has an uncertain outcome, status and recover require the recorded disk proof.
+To undo a committed write, plan a revert using its original plan reference
+and path, then apply the new plan. The current hash must match the original
+operation's after hash. Existing notes restore the retained content with
+date policy applied. Undoing a creation restores path absence and requires
+`MCP_WRITE_MODE=full` and journal storage on the same filesystem as the vault.
+
 ## Server Go/No-Go
 
 Go when `test:runtime`, `smoke:headless-server-profile`, a short then longer long-run validation, and `npm pack --dry-run` are green. No-go if the server vault still shares the live Desktop location, the cache lives inside the vault, or writes are enabled before snapshot/rollback.

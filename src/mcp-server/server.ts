@@ -333,7 +333,7 @@ function registerHeadlessGuardedWriteTools(
     "obsidian_update_note",
     {
       description:
-        "Headless-guarded direct filesystem append/prepend for explicit filePath targets on a copied or dedicated vault. Uses atomic file writes, path safety and optional preconditions, but has no durable plan/status/recovery receipt.",
+        "Headless-guarded direct filesystem append/prepend for explicit filePath targets on a copied or dedicated vault. Prefer obsidian_text_patch_plan or obsidian_note_replace_plan for governed writes with a durable receipt.",
       inputSchema: mcpSchema(
         z.object({
           targetType: z.literal("filePath"),
@@ -406,7 +406,7 @@ function registerHeadlessGuardedWriteTools(
     "obsidian_search_replace",
     {
       description:
-        "Headless-guarded direct filesystem exact search/replace for explicit filePath targets on a copied or dedicated vault. Optional hash/mtime preconditions prevent stale writes; no durable plan/status/recovery receipt is created.",
+        "Headless-guarded direct filesystem exact search/replace for explicit filePath targets on a copied or dedicated vault. Prefer obsidian_text_patch_plan for governed writes with a durable receipt.",
       inputSchema: mcpSchema(
         z.object({
           targetType: z.literal("filePath"),
@@ -480,7 +480,7 @@ function registerHeadlessGuardedWriteTools(
     "obsidian_manage_frontmatter",
     {
       description:
-        "Headless-guarded direct filesystem frontmatter setter for one key on a copied or dedicated vault. This fallback is exposed only when the live governed projection is unavailable and creates no durable receipt.",
+        "Headless-guarded direct filesystem frontmatter setter for one key on a copied or dedicated vault. Prefer obsidian_frontmatter_patch_plan for governed writes with a durable receipt.",
       inputSchema: mcpSchema(
         z.object({
           filePath: z.string().min(1),

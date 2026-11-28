@@ -23,7 +23,7 @@ Periodic Notes API extension is outside the core MCP contract.
 
 ## Candidate cycle M2–M6
 
-Optimike MCP 3.9.0 adds these capabilities after ordered local qualification. In live/hybrid-live, native move and durable creation use their independent Bridge grants; the single-row Base patch uses a Base query snapshot plus note-content CAS. The lifecycles are plan/apply/status only and are absent from headless/degraded runtimes. [Qualification and promotion protocol](cycle-20260920/CODEX-FINALISATION.md).
+Optimike MCP 3.9.0 adds these capabilities after ordered local qualification. In live/hybrid-live, native move and durable creation use their independent Bridge grants; the single-row Base patch uses a Base query snapshot plus note-content CAS. These lifecycles use plan/apply/status. Headless admits durable creation through its filesystem authority. [Qualification and promotion protocol](cycle-20260920/CODEX-FINALISATION.md).
 
 ## Recommended Use
 
@@ -33,7 +33,7 @@ Optimike MCP 3.9.0 adds these capabilities after ordered local qualification. In
 | `hybrid` with API available | Desktop workflows with cache durability                  | Required while live tools are used | Optional startup; >=5.0.2 for full surface | Full REST write tools while API is available                                                            | Bases Bridge REST                       | Robust desktop          |
 | `hybrid` without API        | Degraded read/search while Desktop is down               | Not required                       | Unavailable                                | No write tools                                                                                          | Not registered                          | Resilient degraded mode |
 | `headless-readonly`         | Server, CI, Codex, or copied Sync vault validation       | Not required                       | Not required                               | None                                                                                                    | Local readonly fallback                 | Safest headless mode    |
-| `headless-guarded`          | Very cautious note writes on a copied or dedicated vault | Not required                       | Not required                               | Append/prepend, search_replace, frontmatter set                                                         | Local readonly fallback                 | Cautious write step     |
+| `headless-guarded`          | Very cautious note writes on a copied or dedicated vault | Not required                       | Not required                               | Governed text and frontmatter patches, durable creation, bounded direct writes                                                         | Local readonly fallback                 | Cautious write step     |
 | `headless-filesystem`       | Explicit headless filesystem features                    | Not required                       | Not required                               | Bounded filesystem writes, move/delete with preconditions, tag index, batch frontmatter, Canvas helpers | Local fallback + minimal `.base` writes | Sandbox/copy required   |
 
 ## Capability Table
@@ -49,22 +49,24 @@ Optimike MCP 3.9.0 adds these capabilities after ordered local qualification. In
 | Tasks list/query                   | Cache/filesystem        | Cache/filesystem                        | Cache/filesystem         | Cache/filesystem        | Cache/filesystem                 | Cache/filesystem                                                          |
 | Smart semantic search              | `.smart-env` + embedder | `.smart-env` + compatible embedder      | `.smart-env` + embedder  | `.smart-env` + embedder | `.smart-env` + embedder          | `.smart-env` + embedder                                                   |
 | Runtime status/maintenance         | Yes                     | Yes                                     | Yes                      | Yes                     | Yes                              | Yes                                                                       |
-| Pending governed-operation cockpit | Yes                     | Yes                                     | No                       | No                      | No                               | No                                                                        |
+| Pending governed-operation cockpit | Yes | Yes | No | No | Yes | Yes |
 | External document roots            | Optional local config   | Optional local config                   | Optional local config    | Optional local config   | Optional local config            | Optional local config                                                     |
 | External reference scan/plan       | Local stdio             | Local stdio                             | Local stdio              | Local stdio             | Local stdio                      | Local stdio                                                               |
 | External move apply/rollback       | No                      | No                                      | No                       | No                      | No                               | Disabled on every platform: `native_handle_relative_mutation_unavailable` |
 | Format validation                  | Markdown/Base/Canvas    | Markdown/Base/Canvas                    | Markdown/Base/Canvas     | Markdown/Base/Canvas    | Markdown/Base/Canvas             | Markdown/Base/Canvas                                                      |
 | Update note                        | REST full tool          | REST full tool                          | No                       | No                      | Append/prepend only              | Append/prepend only                                                       |
-| Governed atomic note replacement   | Atomic Write Bridge CAS | Same while API and Bridge are available | No                       | No                      | No                               | No                                                                        |
-| Governed Markdown body text patch  | Same Atomic Write CAS   | Same while API and Bridge are available | No                       | No                      | No                               | No                                                                        |
+| Governed atomic note replacement | Atomic Write Bridge CAS | Same while API and Bridge are available | No | No | No | Filesystem CAS |
+| Governed Markdown body text patch | Same Atomic Write CAS | Same while API and Bridge are available | No | No | Filesystem CAS | Filesystem CAS |
 | Search/replace                     | REST full tool          | REST full tool                          | No                       | No                      | Exact filePath replacements only | Exact filePath replacements only                                          |
 | Frontmatter                        | REST full tool          | REST full tool                          | No                       | No                      | Single-key `set` only            | `set`, batch frontmatter dry-run/apply, and Bases rows                    |
+| Governed frontmatter patch | CAS Atomic Write Bridge | CAS Atomic Write Bridge | No | No | Filesystem CAS | Filesystem CAS |
+| Governed revert | No | No | No | No | No | Filesystem CAS |
 | Tags                               | REST full tool          | REST full tool                          | No                       | No                      | No                               | Frontmatter tags, inline tags, local index/audit, dry-run rename          |
 | Admin filesystem                   | No                      | No                                      | No                       | No                      | No                               | Archive, batch move, batch delete; dry-run by default                     |
 | Delete note                        | REST delete; governed trash deletion (opt-in, [contract](governed-note-delete.md)) | Same while API and Bridge are available | No                       | No                      | No                               | Filesystem delete requiring `expectedHash` or `expectedMtime`             |
 | Direct filesystem move/rename | No                      | No                                      | No                       | No                      | No                               | Filesystem move requiring `expectedHash` or `expectedMtime`               |
 | Governed native Markdown move M3 | Opt-in, full mode | Same while Desktop is live | No | No | No | No |
-| Durable Markdown creation M4 | Opt-in, guarded/full | Same while Desktop is live | No | No | No | No |
+| Durable Markdown creation M4 | Opt-in, guarded/full | Same while Desktop is live | No | No | Exclusive creation | Exclusive creation |
 | Governed existing Base row patch M5 | Note CAS + Base snapshot | Same while Desktop is live | No | No | No | No |
 | Active file / UI / commands        | Via Desktop/plugin      | Via Desktop/plugins while API available | No                       | No                      | No                               | No                                                                        |
 | Bases list/schema/query            | Bases Bridge REST       | Bases Bridge REST                       | No                       | Local readonly fallback | Local readonly fallback          | Local fallback with simple filters (`eq`, `contains`, `in`, comparisons)  |
@@ -141,18 +143,14 @@ confirmation in the owning Obsidian vault window; unattended consent fails
 closed after 45 seconds. See the [Operon MCP contract](operon-mcp-contract.md)
 and [CLI/API audit](operon-cli-audit.md).
 
-The governed note-replacement and body text-patch quartets are registered only when a shared live
-Obsidian REST service exists: `live`, or `hybrid` with API credentials. Their
-presence does not open writes. `obsidian_note_replace_plan`,
-`obsidian_note_replace_apply`, `obsidian_note_replace_status`, and
-`obsidian_note_replace_recover` remain bound to MCP write policy, protected
-frontmatter, the default-off Bridge write gate, backend identity, and atomic
-SHA-256 CAS. `obsidian_text_patch_plan/apply/status/recover` projects bounded
-append, prepend and literal body changes onto that same durable authority; it
-adds no journal and refuses frontmatter, task lines, regex and ambiguous paths.
-`obsidian_list_pending_operations` is registered on the same live boundary but
-is read-only in every profile and write mode. It inventories only the journals
-owned by that process and performs no backend call or journal transition.
+The governed note lifecycles use the Bridge in live and hybrid with
+the API. Headless uses the filesystem for body patches, frontmatter patches and
+creation. Whole-note replacement and revert are available in
+`headless-filesystem`. Use `obsidian_note_replace_plan`, `obsidian_note_replace_apply`,
+`obsidian_note_replace_status` and `obsidian_note_replace_recover` for replacement.
+Status and same-plan recovery use the serving authority's
+journal. The `obsidian_list_pending_operations` cockpit lists the journal without calling a
+backend. See the [Headless Server Profile](headless-server-profile.md).
 
 Handoff delivery is a transport contract, not a runtime-mode write capability:
 
@@ -172,8 +170,8 @@ Handoff delivery is a transport contract, not a runtime-mode write capability:
 | Runtime mode                    | Tools registered                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `headless-readonly`             | `bases_get_schema`, `bases_list`, `bases_query`, `list_all_tasks`, `obsidian_global_search`, `obsidian_list_notes`, `obsidian_read_note`, `obsidian_runtime_maintenance`, `obsidian_runtime_status`, `obsidian_validate_format`, `query_tasks`, `smart_semantic_search`                                                                                                                                                                        |
-| `headless-guarded`              | Everything in `headless-readonly`, plus `obsidian_manage_frontmatter`, `obsidian_search_replace`, `obsidian_update_note`                                                                                                                                                                                                                                                                                                                       |
-| `headless-filesystem`           | Everything in `headless-guarded`, plus `bases_create`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_admin_filesystem`, `obsidian_batch_frontmatter`, `obsidian_delete_note`, `obsidian_manage_canvas`, `obsidian_manage_tags`, `obsidian_move_note`                                                                                                                                                                                   |
+| `headless-guarded`              | Everything in `headless-readonly`, plus governed body and frontmatter patches, durable note creation, the pending-operations cockpit, `obsidian_manage_frontmatter`, `obsidian_search_replace`, `obsidian_update_note`                                                                                                                                                                                                                                                                                                                       |
+| `headless-filesystem`           | Everything in `headless-guarded`, plus governed replacement and revert, `bases_create`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_admin_filesystem`, `obsidian_batch_frontmatter`, `obsidian_delete_note`, `obsidian_manage_canvas`, `obsidian_manage_tags`, `obsidian_move_note`                                                                                                                                                                                   |
 | `hybrid` API unavailable        | `list_all_tasks`, `obsidian_global_search`, `obsidian_list_notes`, `obsidian_read_note`, `obsidian_runtime_maintenance`, `obsidian_runtime_status`, `obsidian_validate_format`, `query_tasks`, `smart_semantic_search`                                                                                                                                                                                                                         |
 | `hybrid` API available / `live` | Read/search/tasks/runtime/semantic tools including live-only `obsidian_note_links`, governed note replacement, text patch, Frontmatter, Base formula and Canvas `plan/apply/status/recover`, governed note deletion `obsidian_note_delete_plan/apply/status` (`operational` and `full`, see [governed note deletion](governed-note-delete.md)), governed Base and Canvas creation `bases_create_plan/apply/status` and `obsidian_canvas_create_plan/apply/status` (`authoring`, `operational` and `full`, see [governed Base and Canvas creation](governed-file-create.md)), plus REST write tools and Bases Bridge tools: `bases_check`, `bases_create`, `bases_functions`, `bases_get_schema`, `bases_list`, `bases_query`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_delete_note`, `obsidian_manage_frontmatter`, `obsidian_manage_tags`, `obsidian_search_replace`, `obsidian_update_note` |
 
@@ -189,7 +187,7 @@ Handoff delivery is a transport contract, not a runtime-mode write capability:
 
 `obsidian_text_patch_plan`, `obsidian_text_patch_apply`,
 `obsidian_text_patch_status`, and `obsidian_text_patch_recover` share the exact
-live/hybrid boundary and Atomic Write journal of governed note replacement.
+same runtime authority and durable note journal.
 They compile explicit append, prepend and literal-replacement intent before the
 child plan is created. Curated live profiles expose this quartet and suppress
 the direct update/search-replace fallbacks only after all four tools exist.
@@ -198,16 +196,15 @@ the direct update/search-replace fallbacks only after all four tools exist.
 
 `obsidian_frontmatter_patch_plan`, `obsidian_frontmatter_patch_apply`,
 `obsidian_frontmatter_patch_status`, and
-`obsidian_frontmatter_patch_recover` are registered only in `live`, or
-`hybrid` with API credentials. They reuse the default-off Atomic Write Bridge
-and P0 durable authority. They are absent from every headless mode and degraded
-hybrid operation.
+`obsidian_frontmatter_patch_recover` are available through the Atomic Write
+Bridge in live and hybrid with API, and through the filesystem in the two
+writable headless modes.
 
 ## Governed Base formula P2
 
 `bases_formula_patch_plan`, `bases_formula_patch_apply`,
-`bases_formula_patch_status`, and `bases_formula_patch_recover` follow the same
-live/hybrid registration boundary. They additionally require Bases Bridge
+`bases_formula_patch_status`, and `bases_formula_patch_recover` require live
+or hybrid with API, plus Bases Bridge
 1.1.0 Atomic V1 with atomic Base CAS enabled and legacy whole-file config
 writes disabled.
 
@@ -263,11 +260,11 @@ one absent file and never edit an existing Base or Canvas. See
 - External move has no current mutation mechanism. The retired hard-link/unlink
   design is historical only; a future audited native handle-relative primitive
   must define no-clobber and exact-hash repair guarantees independently.
-- Governed whole-note replacement is live-only, preserves protected frontmatter, and treats recovery as exact-plan reconciliation/resumption rather than undo.
+- Governed whole-note replacement is available through the live Bridge or headless filesystem. Recovery reconciles or resumes the sealed plan. A headless revert uses a new plan.
 - Headless write validation should create a new draft file in a sandbox folder. It should not edit existing notes in a real vault.
 
 ## Durable note creation M4
 
-Live/hybrid-live only: three tools, existing durable journal, independent `allowNoteCreates` grant, guarded/full policy. Legacy Bridges fail closed. Headless/degraded modes do not emulate this capability. [Contract, ambiguity and indexing limits](durable-note-create-m4.md).
+In live/hybrid-live, creation requires the independent `allowNoteCreates` grant. In either writable headless mode, publication requires that the target path remain absent. All three tools remain subject to MCP write policy. [Contract, ambiguity and indexing limits](durable-note-create-m4.md).
 
 M5 patches one existing Markdown row, selected through a warning-free Base query snapshot; it never writes the Base itself. No insert/delete-note, native engine completeness or cross-file atomicity. [Contract](base-row-patch-m5.md).

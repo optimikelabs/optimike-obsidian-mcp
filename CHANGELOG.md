@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Governed Markdown body and frontmatter patches, durable note creation and the
+  pending-operation cockpit work without Desktop in both writable headless modes.
+  `headless-filesystem` also supports whole-note replacement and governed revert.
+  Headless plans seal the on-disk hash and configured date policy. Applies use
+  cross-process locking, durable receipts and an on-disk postflight.
+
 ### Fixed
 
 - Serialize headless filesystem mutations per file within a server process.

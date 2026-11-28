@@ -1,0 +1,406 @@
+import { createHash } from "node:crypto";
+import { lstatSync, mkdirSync, realpathSync, statSync, type BigIntStats } from "node:fs";
+import { lstat, open, readFile, realpath, rename, rm } from "node:fs/promises";
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { setTimeout as delay } from "node:timers/promises";
+import { isDeepStrictEqual, TextDecoder } from "node:util";
+import { load } from "js-yaml";
+import { config } from "../../config/index.js";
+import { BaseErrorCode, McpError } from "../../types-global/errors.js";
+import { requestContextService } from "../../utils/index.js";
+import { VaultFileService } from "../vaultFileService.js";
+import { nativeNotePath } from "../nativeNoteMoveContract.js";
+import { createPolicyDigest, type NoteCreateApply, type NoteCreatePolicy } from "../noteCreateContract.js";
+import type { AtomicWriteReadRequest, AtomicWriteCasRequest, AtomicWriteReadResponse, AtomicWriteStatusResponse } from "../obsidianRestAPI/types.js";
+import { frontmatterEnvelope } from "../obsidianFrontmatterFormat.js";
+import { compileFrontmatterPatch } from "../frontmatterPatchCompiler.js";
+import { operationDigest } from "./contract.js";
+import { materializeFilesystemDates, normalizeDateKey, readFilesystemDatePolicy, sealFilesystemDates } from "./filesystemDatePolicy.js";
+import type { AtomicWriteBackend } from "./obsidianNoteReplaceOperationAdapter.js";
+import type { NoteCreateBackend } from "./noteCreateOperationAdapter.js";
+import type { ObsidianNoteReplacePlan, ObsidianNoteReplaceJournal } from "./obsidianNoteReplaceJournal.js";
+
+export const FILESYSTEM_AUTHORITY = "headless-filesystem" as const;
+const absent = (error: unknown) => (error as NodeJS.ErrnoException)?.code === "ENOENT";
+const hash = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
+// NTFS may preserve a replaced entry's creation time (file name tunneling).
+const identity = (s: BigIntStats) => process.platform === "win32" ?
+  `${s.dev}:${s.ino}` : `${s.dev}:${s.ino}:${s.birthtimeNs}`;
+const emptyCreatePolicy: NoteCreatePolicy = { version: 1, utcOffsetMinutes: 0, fields: [] };
+const frontmatter = (content: string): Record<string, unknown> =>
+  (load(frontmatterEnvelope(content)?.yaml ?? "") ?? {}) as Record<string, unknown>;
+
+function conflict(message: string) {
+  return new McpError(BaseErrorCode.CONFLICT, message);
+}
+
+function within(root: string, target: string) {
+  const relative = path.relative(root, target);
+  return relative === "" || (!path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(".." + path.sep));
+}
+
+/** Resolve existing ancestors before creating state so a configured junction
+ * or symlink cannot place the journal (including before images) in the vault. */
+export function filesystemJournalPath(vaultRoot: string, candidate: string, fallback?: string): string {
+  const root = realpathSync(vaultRoot);
+  const resolve = (target: string): string => {
+    try { return realpathSync(target); } catch (error) {
+      // A dangling symlink is also a configured redirection.
+      if (!absent(error) || path.dirname(target) === target) throw error;
+      try { lstatSync(target); } catch (missing) {
+        if (absent(missing)) return path.join(resolve(path.dirname(target)), path.basename(target));
+        throw missing;
+      }
+      throw new Error("A headless journal path contains an unresolved link.");
+    }
+  };
+  const resolved = resolve(path.resolve(candidate));
+  if (!within(root, resolved)) return resolved;
+  if (fallback) return filesystemJournalPath(vaultRoot, fallback);
+  throw new Error("The headless governed journal must be outside the vault.");
+}
+
+/** Advisory locks for cooperating local processes. Kernel SQLite locks are
+ * released on process death, without deleting a lock file or expiring a live
+ * owner. Shards bound the on-disk footprint; collisions only serialize writes. */
+class PathLocks {
+  constructor(private readonly directory: string) {
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+  }
+
+  async run<T>(key: string, write: () => Promise<T>): Promise<T> {
+    const db = new DatabaseSync(path.join(this.directory, hash(key).slice(0, 2) + ".sqlite"));
+    try {
+      const deadline = Date.now() + 15_000;
+      for (;;) {
+        try { db.exec("BEGIN IMMEDIATE"); break; } catch (error) {
+          if ((error as { errcode?: number }).errcode !== 5 || Date.now() >= deadline) throw error;
+          await delay(25);
+        }
+      }
+      return await write();
+    } finally {
+      // No SQL data changes are required to acquire or release the lock.
+      db.close();
+    }
+  }
+}
+
+export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBackend {
+  private readonly root: string;
+  private readonly bindingFingerprint: string;
+  private readonly writer: VaultFileService;
+  private readonly locks: PathLocks;
+  private readonly removedDirectory: string;
+  private readonly context = requestContextService.createRequestContext({ operation: "HeadlessGovernedNote" });
+
+  constructor(vaultRoot: string, journalPath: string, private readonly journal: ObsidianNoteReplaceJournal,
+    private readonly now = Date.now, private readonly afterPublish?: () => void) {
+    this.root = realpathSync(vaultRoot);
+    this.bindingFingerprint = this.vaultIdentity();
+    this.writer = new VaultFileService(this.root);
+    this.locks = new PathLocks(filesystemJournalPath(this.root, journalPath + ".locks"));
+    this.removedDirectory = filesystemJournalPath(this.root, journalPath + ".removed");
+  }
+
+  private vaultIdentity() {
+    return operationDigest({ backend: FILESYSTEM_AUTHORITY, root: this.root,
+      identity: identity(statSync(this.root, { bigint: true })) });
+  }
+
+  private assertVault() {
+    if (this.vaultIdentity() !== this.bindingFingerprint) throw conflict("The headless vault identity changed.");
+  }
+
+  private async physical(relative: string, allowAbsent = false) {
+    this.assertVault();
+    const parts = relative.split("/");
+    let target = this.root;
+    for (const [index, segment] of parts.entries()) {
+      target = path.join(target, segment);
+      const last = index === parts.length - 1;
+      let entry;
+      try { entry = await lstat(target); } catch (error) {
+        if (last && allowAbsent && absent(error)) return target;
+        throw error;
+      }
+      if (entry.isSymbolicLink() || (last ? !entry.isFile() || entry.nlink !== 1 : !entry.isDirectory())) {
+        throw new McpError(BaseErrorCode.FORBIDDEN, "Governed filesystem paths require ordinary files and directories.");
+      }
+    }
+    return target;
+  }
+
+  private target(relative: string, allowAbsent = false) {
+    try { nativeNotePath(relative); } catch {
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "A visible vault-relative Markdown path is required.");
+    }
+    this.writer.resolveVaultPath(relative, this.context);
+    return this.physical(relative, allowAbsent).then(async target => {
+      // Resolve the parent's actual spelling before applying path-based date
+      // rules on case-insensitive filesystems.
+      const actual = await realpath(target).catch(async error => {
+        if (!allowAbsent || !absent(error)) throw error;
+        return path.join(await realpath(path.dirname(target)), path.basename(target));
+      });
+      if (actual !== target) {
+        throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Use the existing vault path with its exact spelling.");
+      }
+      return target;
+    });
+  }
+
+  private async policy() {
+    const policy = await readFilesystemDatePolicy(async (relative, optional) => {
+      try {
+        const target = await this.physical(relative);
+        if ((await lstat(target)).size > 1024 * 1024) throw new Error("Oversized date configuration.");
+        return await readFile(target, "utf8");
+      } catch (error) { if (optional && absent(error)) return undefined; throw error; }
+    });
+    return { ...policy, digest: operationDigest({ datePolicy: policy.digest,
+      protectedKeys: config.mcpProtectedFrontmatterKeys.map(normalizeDateKey).sort() }) };
+  }
+
+  async status(): Promise<AtomicWriteStatusResponse> {
+    const policy = await this.policy();
+    return {
+      ok: true, contractVersion: 1, plugin: { id: FILESYSTEM_AUTHORITY, version: "1.0.0" },
+      backend: { kind: FILESYSTEM_AUTHORITY, bindingFingerprint: this.bindingFingerprint, atomicCas: true, writeEnabled: config.mcpWriteMode !== "readonly" },
+      limits: { markdownOnly: true },
+      noteCreate: { supported: true, exclusiveCreate: true, enabled: config.mcpWriteMode !== "readonly", bindingFingerprint: this.bindingFingerprint },
+      frontmatterFormat: { contractVersion: 1, supported: true },
+      protection: { contractVersion: 1, frontmatterDateProperties: { integrations: [{
+        pluginId: "frontmatter-date-manager",
+        createdPropertyName: policy.fdm.headerCreated,
+        modifiedPropertyName: policy.fdm.headerUpdated,
+        ...(policy.fdm.enableLastViewed ? { viewedPropertyName: policy.fdm.headerLastViewed ?? "viewed" } : {}),
+      }] } },
+    };
+  }
+
+  async inspectFrontmatterFormat(yaml: string) {
+    try {
+      const value = load(yaml);
+      if (value != null && (typeof value !== "object" || Array.isArray(value))) throw new Error();
+    } catch {
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The frontmatter must be a valid YAML mapping.", { reasonCode: "invalid_frontmatter" });
+    }
+    return { ok: true, contractVersion: 1, bindingFingerprint: this.bindingFingerprint, canonicalYaml: yaml, warnings: [] };
+  }
+
+  private async snapshot(relative: string, allowAbsent = false) {
+    const filename = await this.target(relative, allowAbsent);
+    const handle = await open(filename, "r");
+    try {
+      const stat = await handle.stat({ bigint: true });
+      if (!stat.isFile() || stat.size > 5 * 1024 * 1024) throw conflict("The note is too large or is no longer a regular file.");
+      const bytes = await handle.readFile();
+      const content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+      return { content, size: bytes.length, sha256: hash(bytes), stat };
+    } finally { await handle.close(); }
+  }
+
+  async read({ path: relative }: AtomicWriteReadRequest): Promise<AtomicWriteReadResponse> {
+    const { content, size, sha256 } = await this.snapshot(relative);
+    return { ok: true, contractVersion: 1, path: relative, bindingFingerprint: this.bindingFingerprint,
+      content, size, sha256 };
+  }
+
+  async seal(relative: string, proposed: string, source: AtomicWriteReadResponse) {
+    const policy = await this.policy();
+    const snapshot = await this.snapshot(relative);
+    if (snapshot.sha256 !== source.sha256) throw conflict("The note changed during plan preparation.");
+    const before = frontmatter(source.content), after = frontmatter(proposed);
+    for (const key of policy.keys.map(normalizeDateKey)) {
+      const entries = (fm: Record<string, unknown>) => Object.entries(fm).filter(([name]) => normalizeDateKey(name) === key);
+      const old = entries(before);
+      if (old.length > 1 || !isDeepStrictEqual(old, entries(after))) {
+        throw new McpError(BaseErrorCode.FORBIDDEN, "The date manager owns the configured timestamp properties.");
+      }
+    }
+    const content = sealFilesystemDates(policy, relative, proposed, this.now(),
+      { content: source.content, birthtimeMs: Number(snapshot.stat.birthtimeMs) });
+    if (Buffer.byteLength(content, "utf8") > 5 * 1024 * 1024) throw conflict("The sealed note is too large.");
+    return { content, policyDigest: policy.digest };
+  }
+
+  async matchesEffect(plan: ObsidianNoteReplacePlan) {
+    if (plan.bindingFingerprint !== this.bindingFingerprint) return false;
+    const staged = this.journal.get(plan.operationId)?.filesystem;
+    if (!staged?.stagedIdentity || !staged.stagedSha256) return false;
+    const observed = await this.snapshot(plan.path).catch(error => { if (absent(error)) return undefined; throw error; });
+    return observed?.sha256 === staged.stagedSha256 && identity(observed.stat) === staged.stagedIdentity;
+  }
+
+  async sealRevert(relative: string, source: string | undefined, expectedHash: string) {
+    const current = await this.snapshot(relative);
+    if (current.sha256 !== expectedHash) throw conflict("The note no longer matches the original operation's after proof.");
+    const policy = await this.policy();
+    let content = source ?? "";
+    if (source !== undefined) {
+      const original = frontmatter(source);
+      const dates = frontmatter(current.content);
+      // A prior write may have initialized creation. Keep that date when
+      // restoring the original user-authored content.
+      const created = policy.fdm.headerCreated;
+      if (!Object.keys(original).some(key => normalizeDateKey(key) === normalizeDateKey(created))) {
+        const key = Object.keys(dates).find(key => normalizeDateKey(key) === normalizeDateKey(created));
+        if (key && policy.managed(relative)) {
+          const fm = frontmatterEnvelope(current.content);
+          const originalLine = fm?.yaml.split(/\r?\n/u).find(line => line.startsWith(key + ": "));
+          const value = originalLine?.slice(key.length + 2).replace(/^['"]|['"]$/gu, "");
+          if (!value || !/^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d)?$/u.test(value)) {
+            throw conflict("The managed creation date cannot be restored losslessly.");
+          }
+          if (!frontmatterEnvelope(content)) {
+            const eol = content.includes("\r\n") ? "\r\n" : "\n";
+            const bom = content.startsWith("\uFEFF") ? "\uFEFF" : "";
+            content = `${bom}---${eol}---${eol}${content.slice(bom.length)}`;
+          }
+          content = compileFrontmatterPatch(content, [{ op: "set", key, value }]).nextContent;
+        }
+      }
+      content = sealFilesystemDates(policy, relative, content, this.now(),
+        { content: current.content, birthtimeMs: Number(current.stat.birthtimeMs) });
+    }
+    return { policyDigest: policy.digest, before: current.content, content,
+      afterSha256: source === undefined ? operationDigest({ absent: relative, binding: this.bindingFingerprint }) : hash(content),
+      bindingFingerprint: this.bindingFingerprint };
+  }
+
+  private removedPath(plan: ObsidianNoteReplacePlan) {
+    return path.join(this.removedDirectory, plan.operationId + ".md");
+  }
+
+  async revertPublished(plan: ObsidianNoteReplacePlan) {
+    if (plan.projection?.proof.restoreAbsence !== true) return this.matchesEffect(plan);
+    if (plan.bindingFingerprint !== this.bindingFingerprint || (await this.inspect(plan.path)).exists) return false;
+    const staged = this.journal.get(plan.operationId)?.filesystem?.stagedIdentity;
+    const removed = this.removedPath(plan);
+    const observed = await lstat(removed, { bigint: true }).catch(error => { if (absent(error)) return undefined; throw error; });
+    return Boolean(observed?.isFile() && identity(observed) === staged &&
+      hash(await readFile(removed)) === plan.beforeSha256);
+  }
+
+  async clearRevertWitness(plan: ObsidianNoteReplacePlan) {
+    if (plan.projection?.proof.restoreAbsence !== true) return;
+    // The journal still owns the before image after removal. Retain the
+    // staged original only until the verified terminal receipt is durable.
+    const removed = this.removedPath(plan);
+    const entry = await lstat(removed, { bigint: true }).catch(error => { if (absent(error)) return undefined; throw error; });
+    if (entry && identity(entry) === plan.filesystem?.stagedIdentity) await rm(removed);
+  }
+
+  async applyRevert(plan: ObsidianNoteReplacePlan) {
+    if (plan.projection?.proof.restoreAbsence !== true) return this.publish(plan, plan.beforeSha256);
+    return this.locks.run(path.join(this.root, plan.path.normalize("NFC").toLowerCase()), async () => {
+      const target = await this.target(plan.path, true);
+      const observed = await this.snapshot(plan.path).catch(error => {
+        if (absent(error)) throw conflict("The sealed note no longer exists.");
+        throw error;
+      });
+      if (plan.bindingFingerprint !== this.bindingFingerprint || observed.sha256 !== plan.beforeSha256 ||
+          (await this.policy()).digest !== plan.filesystem?.policyDigest) {
+        throw conflict("The note or date policy changed before the revert.");
+      }
+      const directory = filesystemJournalPath(this.root, this.removedDirectory);
+      mkdirSync(directory, { recursive: true, mode: 0o700 });
+      if ((await lstat(directory, { bigint: true })).dev !== observed.stat.dev) {
+        throw new McpError(BaseErrorCode.FORBIDDEN, "Reverting creation requires journal storage on the same filesystem as the vault.");
+      }
+      this.journal.recordFilesystemStage(plan.operationId, plan.executionOwner!.attemptId, identity(observed.stat), plan.afterSha256);
+      const latest = await this.snapshot(plan.path);
+      if (latest.sha256 !== plan.beforeSha256 || identity(latest.stat) !== identity(observed.stat)) {
+        throw conflict("The note changed just before the revert.");
+      }
+      await rename(target, this.removedPath(plan));
+      if (process.platform !== "win32") {
+        for (const dir of [path.dirname(target), directory]) {
+          const handle = await open(dir, "r");
+          try { await handle.sync(); } finally { await handle.close(); }
+        }
+      }
+      this.afterPublish?.();
+      if (!await this.revertPublished(plan)) throw new Error("The headless postflight could not verify removal.");
+    });
+  }
+
+  private async publish(plan: ObsidianNoteReplacePlan, expectedHash?: string) {
+    const relative = plan.path;
+    return this.locks.run(path.join(this.root, relative.normalize("NFC").toLowerCase()), async () => {
+      await this.target(relative, true);
+      if (!plan.filesystem || plan.bindingFingerprint !== this.bindingFingerprint ||
+          hash(plan.nextContent) !== plan.afterSha256) throw conflict("The headless filesystem seal is invalid.");
+      const policy = await this.policy();
+      if (policy.digest !== plan.filesystem.policyDigest) throw conflict("The date policy changed after planning.");
+      const content = materializeFilesystemDates(policy, relative, plan.nextContent, this.now(), expectedHash === undefined);
+      const sha256 = hash(content);
+      if (sha256 === expectedHash) throw conflict("The sealed write would leave the note unchanged.");
+      const beforePublish = async (staged: BigIntStats) => {
+        await this.target(relative, true);
+        if ((await this.policy()).digest !== plan.filesystem?.policyDigest) throw conflict("The date policy changed after planning.");
+        if (staged.ino === 0n) throw conflict("The filesystem cannot prove the identity of staged bytes.");
+        this.journal.recordFilesystemStage(plan.operationId, plan.executionOwner!.attemptId, identity(staged), sha256);
+      };
+      await this.writer.publishSealedNote(relative, content, expectedHash, beforePublish, this.context);
+      this.afterPublish?.();
+      if (!await this.matchesEffect(plan)) throw new Error("The headless postflight could not verify the published file.");
+      return { sha256, size: Buffer.byteLength(content, "utf8") };
+    });
+  }
+
+  async replace(request: AtomicWriteCasRequest, plan?: ObsidianNoteReplacePlan) {
+    if (!plan || request.path !== plan.path || request.expectedSha256 !== plan.beforeSha256) {
+      throw conflict("A sealed headless operation is required.");
+    }
+    const published = await this.publish(plan, request.expectedSha256);
+    return { ok: true as const, contractVersion: 1 as const, path: plan.path, bindingFingerprint: plan.bindingFingerprint,
+      beforeSha256: plan.beforeSha256, afterSha256: published.sha256, size: published.size };
+  }
+
+  async preflight(relative: string) {
+    const target = await this.target(relative, true);
+    try { await lstat(target); } catch (error) {
+      if (!absent(error)) throw error;
+      await this.writer.assertNewFileName(relative, target);
+      return { contractVersion: 1, path: relative, bindingFingerprint: this.bindingFingerprint,
+        absent: true, enabled: true, policy: emptyCreatePolicy, policyDigest: createPolicyDigest(emptyCreatePolicy) };
+    }
+    throw conflict("The create target already exists.");
+  }
+
+  async sealCreate(relative: string, content: string) {
+    const policy = await this.policy();
+    const keys = Object.keys(load(frontmatterEnvelope(content)?.yaml ?? "") ?? {}).map(normalizeDateKey);
+    if (policy.keys.some(key => keys.includes(normalizeDateKey(key)))) {
+      throw new McpError(BaseErrorCode.FORBIDDEN, "The date manager owns the configured timestamp properties.");
+    }
+    const fields = policy.managed(relative) ? [
+      ...(policy.fdm.enableCreateTime ? [{ propertyName: policy.fdm.headerCreated, role: "created" }] : []),
+      { propertyName: policy.fdm.headerUpdated, role: "modified" },
+    ] : [];
+    return { content: sealFilesystemDates(policy, relative, content, this.now()), policyDigest: policy.digest, fields };
+  }
+
+  async create(request: NoteCreateApply, plan?: ObsidianNoteReplacePlan) {
+    if (!plan || request.operationId !== plan.operationId) throw conflict("A sealed headless create is required.");
+    let outcome = "created";
+    try { await this.publish(plan); } catch (error) {
+      if (!(error instanceof McpError) || error.code !== BaseErrorCode.CONFLICT) throw error;
+      outcome = "conflict";
+    }
+    return { contractVersion: 1, operationId: request.operationId, path: request.path,
+      bindingFingerprint: request.bindingFingerprint, policyDigest: request.policyDigest,
+      contentSha256: request.contentSha256, outcome, reason: outcome };
+  }
+
+  async inspect(relative: string) {
+    const base = { contractVersion: 1, path: relative, bindingFingerprint: this.bindingFingerprint };
+    try {
+      const read = await this.snapshot(relative, true);
+      return { ...base, exists: true, content: read.content, sha256: read.sha256 };
+    } catch (error) { if (absent(error)) return { ...base, exists: false }; throw error; }
+  }
+}

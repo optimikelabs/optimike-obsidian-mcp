@@ -35,9 +35,10 @@ const InputSchema = z
 export function registerOperationCockpitTool(
   server: McpServer,
   sources: readonly PendingOperationSource[],
+  filesystem = false,
 ): void {
   if (sources.length === 0) return;
-  const cockpit = new OperationCockpit(sources);
+  const cockpit = new OperationCockpit(sources, Date.now, filesystem);
   server.registerTool(
     "obsidian_list_pending_operations",
     {

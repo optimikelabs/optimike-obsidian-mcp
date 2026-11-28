@@ -42,6 +42,7 @@ export type OperationReceipt = {
   beforeProof: OperationProof;
   afterProof?: OperationProof;
   postflight: {
+    source?: "filesystem-reread";
     reason?: "modified_time_settlement";
     checkAfter?: string;
     status:

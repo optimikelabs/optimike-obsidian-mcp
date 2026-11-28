@@ -155,6 +155,7 @@ const EnvSchema = z
     OBSIDIAN_CACHE_CONCURRENCY: z.coerce.number().int().positive().default(8),
     OBSIDIAN_VAULT_EXCLUDE_PATTERNS: z.string().optional(),
     OBSIDIAN_SHARED_CACHE_DB_PATH: z.string().optional(),
+    MCP_HEADLESS_GOVERNED_JOURNAL_PATH: z.string().refine(path.isAbsolute).optional(),
     OBSIDIAN_CONTENT_HOT_CACHE_LIMIT: z.coerce
       .number()
       .int()
@@ -614,6 +615,7 @@ export const config = {
       "optimike-obsidian-mcp",
       `obsidian-note-replace-${noteReplaceProfileId}.sqlite`,
     ),
+  headlessGovernedJournalPath: env.MCP_HEADLESS_GOVERNED_JOURNAL_PATH,
   obsidianNoteReplaceExecutionLeaseMs:
     env.MCP_OBSIDIAN_NOTE_REPLACE_EXECUTION_LEASE_MS,
   obsidianPlannedRetentionMs: env.MCP_OBSIDIAN_PLANNED_RETENTION_DAYS * 24 * 60 * 60 * 1000,

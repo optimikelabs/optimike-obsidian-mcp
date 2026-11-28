@@ -109,7 +109,8 @@ function checkRecursiveConstraints(tools) {
 
 // No live application is required: the canonical measurement helper starts an
 // authenticated local status fixture, exposing every live-profile registration.
-for (const profile of await measureCanonicalLiveProfileSchemas()) {
+const liveProfiles = await measureCanonicalLiveProfileSchemas();
+for (const profile of liveProfiles) {
   checkTools(profile.publicTools, `live-fixture/${profile.profile}`);
   if (["tasks", "operational", "full"].includes(profile.profile)) {
     const pinSchema = profile.publicTools.find(tool => tool.name === "operon_set_pinned")?.inputSchema;
@@ -177,7 +178,16 @@ try {
       });
       try {
         await client.connect(transport);
-        checkTools((await client.listTools()).tools, `${mode}/${profile}`);
+        const { tools } = await client.listTools();
+        checkTools(tools, `${mode}/${profile}`);
+        const live = liveProfiles.find(entry => entry.profile === profile).publicTools;
+        for (const tool of tools.filter(tool =>
+          /^obsidian_(?:text_patch|frontmatter_patch|note_create|note_replace)_/u.test(tool.name) ||
+          tool.name === "obsidian_list_pending_operations")) {
+          const matching = live.find(entry => entry.name === tool.name);
+          assert.deepEqual(tool.inputSchema, matching?.inputSchema, `${mode}/${profile}: ${tool.name} shares the live schema`);
+          assert.deepEqual(tool.annotations, matching?.annotations, `${mode}/${profile}: ${tool.name} shares the live annotations`);
+        }
       } finally {
         await client.close();
       }

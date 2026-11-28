@@ -74,6 +74,13 @@ export type ObsidianNoteReplacePlan = {
   beforeSha256: string;
   afterSha256: string;
   nextContent: string;
+  filesystem?: {
+    policyDigest: string;
+    beforeContent?: string;
+    projectedSha256?: string;
+    stagedIdentity?: string;
+    stagedSha256?: string;
+  };
   bindingFingerprint: string;
   status: ObsidianNoteReplaceStatus;
   createdAt: string;
@@ -125,6 +132,7 @@ export type ObsidianNoteReplaceJournalOptions = {
 };
 
 export type PendingOperationKind =
+  | "obsidian.operation.revert"
   | "obsidian.note.replace"
   | "obsidian.frontmatter.patch"
   | "obsidian.base.formula.patch"
@@ -701,6 +709,17 @@ export class ObsidianNoteReplaceJournal {
       throw new ObsidianNoteReplaceConcurrencyError();
     }
     return updated;
+  }
+
+  recordFilesystemStage(operationId: string, attemptId: string, stagedIdentity: string, stagedSha256: string): void {
+    const current = this.get(operationId);
+    if (!current?.filesystem || current.status !== "applying" ||
+        current.executionOwner?.attemptId !== attemptId) throw new ObsidianNoteReplaceConcurrencyError();
+    const updated = { ...current, filesystem: { ...current.filesystem, stagedIdentity, stagedSha256 } };
+    const result = this.db.prepare(
+      "UPDATE obsidian_note_replace_plans SET payload_json = ? WHERE operation_id = ? AND status = 'applying' AND payload_json = ?",
+    ).run(JSON.stringify(updated), operationId, JSON.stringify(current));
+    if (Number(result.changes) !== 1) throw new ObsidianNoteReplaceConcurrencyError();
   }
 
   deferSettlement(

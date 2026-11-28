@@ -68,7 +68,7 @@ export function preparationPlanRejection(error: unknown) {
 }
 
 export function frontmatterEnvelope(content: string): { start: number; end: number; yaml: string } | undefined {
-  const opening = /^---\r?\n/u.exec(content);
+  const opening = /^\uFEFF?---\r?\n/u.exec(content);
   if (!opening) return undefined;
   const close = /^---(?=\r?$)/gmu;
   close.lastIndex = opening[0].length;
@@ -80,7 +80,7 @@ export function frontmatterEnvelope(content: string): { start: number; end: numb
 export async function inspectNativeFrontmatter(backend: Pick<AtomicWriteBackend, "status" | "inspectFrontmatterFormat">, content: string, expectedBinding?: string) {
   let status;
   try { status = await backend.status(); } catch (error) {
-    if (error instanceof McpError && error.details?.reasonCode === "atomic_bridge_version_unsupported") throw error;
+    if (error instanceof McpError && ["atomic_bridge_version_unsupported", "headless_date_policy_unavailable"].includes(String(error.details?.reasonCode))) throw error;
     throw unavailable();
   }
   requireAtomicBridgeVersion(status);

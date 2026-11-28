@@ -99,6 +99,55 @@ avec d’autres processus.
 
 Ne jamais utiliser cette phase pour modifier des notes de production existantes tant que le profil serveur n’a pas son propre rollback et monitoring.
 
+## Écritures Markdown gouvernées
+
+`headless-guarded` expose `obsidian_text_patch_*`, `obsidian_frontmatter_patch_*`,
+`obsidian_note_create_*` et `obsidian_list_pending_operations` dans les profils
+qui permettent d’écrire. `headless-filesystem` ajoute `obsidian_note_replace_*`
+et `obsidian_operation_revert_*`. Les familles de notes reprennent les mêmes
+appels plan, apply, status et recover qu’en live. La création utilise plan,
+apply et status.
+
+Le plan lie le coffre et le SHA-256 des octets lus sur disque, ou l’absence du
+chemin pour une création. Apply réutilise la référence scellée et la clé
+d’idempotence. L’autorité filesystem sérialise les processus qui partagent le
+verrou local. Elle synchronise le fichier temporaire, revérifie la cible et
+publie atomiquement. Une modification Sync visible au dernier contrôle
+provoque un conflit. Un programme externe qui ignore le verrou peut encore
+intervenir entre cette vérification et le renommage. Le reçu identifie
+`headless-filesystem` et exige une relecture vérifiée sur disque.
+
+Placez le cache partagé hors du coffre. Le journal est créé à côté du cache
+par défaut, ou dans le répertoire d’état local si le cache est dans le coffre.
+`MCP_HEADLESS_GOVERNED_JOURNAL_PATH` accepte un chemin absolu hors du coffre.
+Les processus qui coopèrent partagent ce journal et son répertoire de verrous
+sur un stockage local. Le journal conserve les versions antérieures privées
+pendant la rétention des opérations terminées (30 jours). Protégez-le comme
+les données du coffre.
+
+Gardez les réglages `.obsidian` disponibles avec la liste des extensions
+actives et les réglages de Frontmatter Date Manager. L’autorité lit les noms
+de propriétés, le format local pris en charge (minute ou seconde) et les
+règles d’exclusion dans l’ordre. Elle respecte les dossiers Templates et
+Templater. La création prend l’heure de l’application pour une note neuve, ou la date
+de naissance du fichier quand une note existante n’a pas encore ce champ.
+Réglez `TZ` sur le fuseau horaire voulu pour le coffre. Le plan scelle la
+politique de dates. Apply renseigne la modification d’après
+l’horloge du serveur et enregistre le hash exact avant publication. L’agent
+ne fournit aucune de ces valeurs. Des réglages absents ou ambigus ferment la voie d’écriture.
+Le compilateur headless valide le YAML local et préserve le BOM et les fins
+de ligne. En live, Desktop fournit la sérialisation YAML et les types natifs.
+
+Après une interruption, appelez status avec la référence d’origine. Recover
+peut reprendre un plan qui n’a pas atteint le point de publication. Après
+un effet incertain à ce point, status et recover exigent la preuve enregistrée
+sur disque. Pour annuler une écriture terminée, planifiez un retour arrière en
+indiquant le chemin et la référence d’origine, puis appliquez ce nouveau plan.
+Le hash doit toujours correspondre au résultat de l’écriture d’origine.
+Une note existante retrouve son contenu antérieur avec la politique de dates
+en vigueur. Annuler une création rétablit l’absence du chemin et exige
+`MCP_WRITE_MODE=full` ainsi qu’un journal sur le même système de fichiers.
+
 ## Décision go/no-go serveur
 
 Go si `test:runtime`, `smoke:headless-server-profile`, une validation longue courte puis longue, et `npm pack --dry-run` sont verts. No-go si le vault serveur synchronise encore dans le même emplacement que le Desktop vivant, si le cache est dans le vault, ou si les écritures sont activées avant snapshot/rollback.

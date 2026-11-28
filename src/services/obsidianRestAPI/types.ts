@@ -83,14 +83,14 @@ export type AtomicWriteStatusResponse = {
   frontmatterFormat?: { contractVersion: 1; supported: boolean };
   datePreparation?: { contractVersion: 1; supported: true; fileStatProvenance?: { contractVersion: 1 } };
   effectFence?: { contractVersion: 1; supported: true; epoch: string; requireFence: boolean; legacyQuiescent: boolean };
-  noteCreate?: { supported: boolean; enabled: boolean; bindingFingerprint?: string };
+  noteCreate?: { supported: boolean; enabled: boolean; bindingFingerprint?: string; exclusiveCreate?: boolean };
   nativeMove?: { supported: boolean; enabled: boolean; bindingFingerprint?: string };
   ok: true;
   contractVersion: 1;
   plugin: { id: string; version: string };
   lifecycle?: BridgeLifecycleStatus;
   backend: {
-    kind: "obsidian-vault-process";
+    kind: "obsidian-vault-process" | "headless-filesystem";
     bindingFingerprint: string;
     atomicCas: true;
     writeEnabled: boolean;

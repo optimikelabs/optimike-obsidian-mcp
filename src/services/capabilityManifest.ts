@@ -80,6 +80,7 @@ export type CapabilityReasonCode =
   | "semantic_embedder_unavailable"
   | "semantic_query_unverified"
   | "bridge_unavailable"
+  | "headless_date_policy_unavailable"
   | "bridge_probe_timed_out"
   | "bridge_lifecycle_not_ready"
   | "bridge_contract_incompatible"
@@ -107,6 +108,7 @@ export type CapabilityNextAction =
   | "use_live_runtime"
   | "restart_mcp_runtime"
   | "configure_local_rest"
+  | "configure_headless_date_policy"
   | "start_obsidian_and_retry"
   | "verify_local_rest_credentials"
   | "refresh_vault_cache"
@@ -416,6 +418,9 @@ function entry(
   const profileAllows = visible(new Set(input.profileToolNames), id);
   const modeAllows = visible(new Set(input.modeToolNames), id);
   const isDiscoverable = visible(new Set(input.visibleToolNames), id);
+  const preferredTools = id === "governed-note-write" && input.registrationMode === "headless-guarded"
+    ? TOOL_FAMILIES[id].filter(tool => input.modeToolNames.includes(tool))
+    : TOOL_FAMILIES[id];
   if (!profileAllows) {
     return {
       id,
@@ -466,7 +471,7 @@ function entry(
           : "ready",
     reasonCode,
     nextAction,
-    preferredTools: TOOL_FAMILIES[id],
+    preferredTools,
   };
 }
 
@@ -648,6 +653,11 @@ function atomicCapability(
     | "governed-frontmatter-write"
     | "governed-canvas-write",
 ): CapabilityManifestEntry {
+  const headless = input.registrationMode === "headless-guarded" || input.registrationMode === "headless-filesystem";
+  if (headless && ["governed-note-write", "governed-frontmatter-write", "governed-note-create"].includes(id) &&
+      input.atomicWrite.state !== "ready") {
+    return entry(input, id, false, false, "headless_date_policy_unavailable", "configure_headless_date_policy");
+  }
   if (input.atomicWrite.state === "timed_out") {
     return entry(input, id, false, false,
       "bridge_probe_timed_out", "retry_capability_probe");
@@ -679,7 +689,7 @@ function atomicCapability(
   const contractReady =
     status.ok === true &&
     status.contractVersion === 1 &&
-    backend.atomicCas === true;
+    backend.atomicCas === true && (!headless || backend.kind === "headless-filesystem");
   const canvas = id === "governed-canvas-write";
   const native = id === "governed-native-move";
   const create = id === "governed-note-create" || id === "governed-base-create" || id === "governed-canvas-create";
@@ -713,7 +723,7 @@ function atomicCapability(
         nativeMove.preferenceReadable === true
       : canvas
         ? contractReady && lifecycleReady && backend.canvasAtomicCas === true
-        : contractReady && lifecycleReady;
+    : contractReady && lifecycleReady && (!headless || id === "governed-note-write" || id === "governed-frontmatter-write");
   const bridgeAuthorized = del
     ? noteDelete.enabled === true && trashUsable
     : create
