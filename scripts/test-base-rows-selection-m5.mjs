@@ -3,6 +3,7 @@ process.env.NODE_ENV = "test";
 process.env.OBSIDIAN_RUNTIME_MODE = "live";
 process.env.OBSIDIAN_API_KEY = "hermetic-fixture";
 const { BaseRowSelectionReader, baseRowTarget, restBaseRowSelection } = await import("../dist/services/baseRowSelection.js");
+const { queryBaseQualified } = await import("../dist/services/obsidianRestAPI/methods/basesMethods.js");
 const { createHash } = await import("node:crypto");
 const hash = s => createHash("sha256").update(s).digest("hex");
 const target = { baseId: "Views/Work.base", view: "Open", path: "Notes/A.md" };
@@ -68,12 +69,14 @@ for (const proof of [undefined, { contractVersion: 1, path: target.baseId, sha25
     async readAtomicBase({ path }) {
       return { ok: true, contractVersion: 1, path, yaml, sha256, size: Buffer.byteLength(yaml), bindingFingerprint };
     },
-    async queryBaseQualified(baseId, payload) {
-      qualified++;
-      assert.equal(baseId, target.baseId);
-      assert.deepEqual(payload, { view: target.view, evaluate: false, limit: 500, page: 1 });
-      return { total: 1, page: 1, rows: [{ file: { path: target.path } }], source: "fallback", evaluate: false, warnings: [],
-        baseSnapshot: { contractVersion: 1, path: baseId, sha256, bindingFingerprint } };
+    queryBaseQualified(baseId, payload, context) {
+      return queryBaseQualified(async ({ url, data }) => {
+        qualified++;
+        assert.equal(url, `/extensions/obsidian-bases-bridge/bases/${encodeURIComponent(target.baseId)}/query`);
+        assert.deepEqual(data, { view: target.view, evaluate: false, limit: 500, page: 1, selection: "supported-filter-snapshot" });
+        return { total: 1, page: 1, rows: [{ file: { path: target.path } }], source: "fallback", evaluate: false, warnings: [],
+          baseSnapshot: { contractVersion: 1, path: target.baseId, sha256, bindingFingerprint } };
+      }, baseId, payload, context);
     },
     async queryBase() {
       legacy++;

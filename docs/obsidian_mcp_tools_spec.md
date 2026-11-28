@@ -330,15 +330,21 @@ semantic manifest/vector metadata are cached locally for faster warm refreshes.
 - `bases_list`: list `.base` definitions via Bases Bridge REST or local fallback.
 - `bases_get_schema`: inspect a `.base` schema via REST or local fallback.
 - `bases_query`: query Bases via REST, or simple local fallback filters in
-  headless modes. Through the Bases Bridge, `evaluate` (default) lets
-  Obsidian's engine select the view's rows (filters, limit; view sort: see the
-  [Bridge README](../plugins/obsidian-bases-bridge/README.md#requêtes-query))
-  and compute formulas for the rows of the requested page only (`source: "engine"`, values
-  as the engine's text); request filters and sorts on `formula.*` use these
-  values and compute every row, in chunks of 100, up to 1,000 rows (past it, formula predicates and sorts are skipped:
-  `formula_filter_not_evaluated:too_many_rows:<rows>:1000`). Without it, or when the engine is
-  unavailable, `source: "fallback"` returns no formula value; when `evaluate`
-  was requested and the engine is unavailable, one warning per formula says so.
+  headless modes. In live queries with Bases Bridge 1.3.2, the Bridge sends
+  the Base and view filters, view sort configuration, and view limit to
+  Obsidian's engine in both `evaluate` modes (`source: "engine"`).
+  Use request-level sorting to reorder the selected rows. See the
+  [Bridge README](../plugins/obsidian-bases-bridge/README.md#requêtes-query).
+  `evaluate: false` omits formula columns and
+  `computed`. Obsidian still evaluates formulas needed by the view. Request
+  filters and sorts on `formula.*` also use computed values in both modes,
+  in chunks of 100 up to 1,000 rows. Above that cap the Bridge skips the formula
+  criteria and emits `formula_filter_not_evaluated:too_many_rows:<rows>:1000`.
+  `evaluate: true` (default) returns the engine's rendered formula values for
+  the requested page. If the engine cannot select rows, the query returns
+  `SERVICE_UNAVAILABLE` with reason `base_query_selection_unavailable`. If a
+  selected file disappears during the query, retry on `base_query_row_disappeared`.
+  An unknown view returns `NOT_FOUND` with reason `base_view_not_found`.
 - The optional `bases_query.filter` is a JSON object. A property table such as
   `{"status":"open","priority":{"gte":2}}` requires all its conditions.
   Values can be scalars, non-empty scalar arrays (any match), or operator objects with

@@ -64,6 +64,7 @@ async function queryRoute({
     status: path.endsWith("/b.md") ? "closed" : "open",
     priority: path.endsWith("/c.md") ? 1 : 2,
   }])),
+  removedAfterSelection,
 } = {}) {
   const { Bridge, TFile } = await loadBridge();
   const files = new Map();
@@ -88,7 +89,12 @@ async function queryRoute({
   });
   const calls = [];
   const rows = notes.map((path) => ({ path, name: files.get(path).basename }));
-  const handler = fakeBaseQueryHandler(vault, { rows, table, calls });
+  const nativeQuery = fakeBaseQueryHandler(vault, { rows, table, calls });
+  const handler = async (params) => {
+    const result = await nativeQuery(params);
+    if (removedAfterSelection) files.delete(removedAfterSelection);
+    return result;
+  };
   const routes = new Map();
   const api = {
     addRoute(path) {
@@ -126,12 +132,20 @@ async function queryRoute({
   };
   plugin.bindingFingerprint = "a".repeat(64);
   await plugin.registerRestExtension();
-  const post = routes.get("/extensions/obsidian-bases-bridge/bases/:id(*)/query").post;
-  return async (body) => {
+  return async (body, { qualified = false } = {}) => {
+    const prefix = qualified ? "/extensions/obsidian-bases-bridge" : "";
+    const post = routes.get(`${prefix}/bases/:id(*)/query`).post;
+    let status = 200;
     let payload;
-    const response = { statusCode: 200, json: (value) => (payload = value) };
-    await post({ params: { id: BASE_PATH }, body }, response);
-    return { payload, status: response.statusCode, calls, sha256: createHash("sha256").update(baseText, "utf8").digest("hex") };
+    const res = {
+      status(code) {
+        status = code;
+        return this;
+      },
+      json: (value) => (payload = value),
+    };
+    await post({ params: { id: BASE_PATH }, body }, res);
+    return { status, payload, calls, sha256: createHash("sha256").update(baseText, "utf8").digest("hex") };
   };
 }
 
@@ -167,7 +181,9 @@ test("the local scan matches the Bridge for supported expression trees", async (
     [{ and: ['due >= "2026-12-01"'] }, ["Notes/b.md"]],
     [{ and: ['started > "2026-11-28T10:00:00Z"'] }, ["Notes/b.md"]],
   ]) {
-    const { payload } = await query({ filter, evaluate: false });
+    const { payload } = await query({
+      filter, evaluate: false, selection: "supported-filter-snapshot",
+    }, { qualified: true });
     const compiled = compileBaseQueryFilter(filter, false);
     assert.ok(compiled);
     const matches = NOTES.filter((path) => compiled.matches({
@@ -184,13 +200,17 @@ test("a request property table narrows the rows selected by either source", asyn
   const query = await queryRoute({
     baseText: JSON.stringify({ views: [{ type: "table", name: "All" }] }),
   });
-  for (const evaluate of [false, true]) {
+  for (const request of [
+    { evaluate: false },
+    { evaluate: true },
+    { evaluate: false, selection: "supported-filter-snapshot" },
+  ]) {
     const { payload, status } = await query({
-      evaluate,
+      ...request,
       filter: { and: [{ status: "open", priority: { gte: 2 } }, 'file.inFolder("Notes")'] },
-    });
+    }, { qualified: Boolean(request.selection) });
     assert.equal(status, 200);
-    assert.equal(payload.source, evaluate ? "engine" : "fallback");
+    assert.equal(payload.source, request.selection ? "fallback" : "engine");
     assert.deepEqual(payload.rows.map((row) => row.file.path), ["Notes/a.md"]);
     assert.equal(payload.total, 1);
     assert.equal(payload.filterVersion, 1);
@@ -237,25 +257,75 @@ test("Top preserves native row order, basename concatenation and aliased wikilin
   assert.equal(calls.length, 2);
 });
 
-test("without the engine, every formula is reported instead of dropped", async () => {
+test("public queries refuse when the engine cannot select rows", async () => {
   const query = await queryRoute({ engine: false });
-  const { payload, sha256 } = await query({ view: "Top", evaluate: true, limit: 50 });
-
-  assert.equal(payload.source, "fallback");
-  assert.equal(payload.total, 2);
-  assert.ok(payload.rows.every((row) => row.computed === undefined && !("label" in row.props)));
-  assert.deepEqual(payload.warnings, [
-    "formula_not_evaluated:label:engine_unavailable",
-    "formula_not_evaluated:shout:engine_unavailable",
-    "view_limit_applied_with_bridge_order:2",
-  ]);
-  assert.equal(payload.baseSnapshot.sha256, sha256);
+  for (const evaluate of [false, true]) {
+    const { status, payload } = await query({ view: "Top", evaluate, limit: 50 });
+    assert.equal(status, 503);
+    assert.equal(payload.error.reasonCode, "base_query_selection_unavailable");
+    assert.equal(payload.rows, undefined);
+  }
 });
 
-test("evaluate:false keeps the Bridge snapshot without calling the engine", async () => {
+test("a selected file that disappears makes the query retryable", async () => {
+  const removedPath = "Notes/b.md";
+  const query = await queryRoute({ removedAfterSelection: removedPath });
+  const { status, payload } = await query({ view: "Top", evaluate: false });
+  assert.equal(status, 503);
+  assert.equal(payload.retryable, true);
+  assert.equal(payload.error.reasonCode, "base_query_row_disappeared");
+  assert.equal(payload.rows, undefined);
+  assert.ok(!JSON.stringify(payload).includes(removedPath));
+});
+
+test("a missing view refuses without echoing the caller value", async () => {
+  const query = await queryRoute();
+  const { status, payload } = await query({ view: "PRIVATE-VIEW-NAME", evaluate: false });
+  assert.equal(status, 404);
+  assert.equal(payload.error.reasonCode, "base_view_not_found");
+  assert.doesNotMatch(JSON.stringify(payload), /PRIVATE-VIEW-NAME/u);
+});
+
+test("evaluate:false preserves engine selection and skips formula column computation", async () => {
+  const config = {
+    ...BASE,
+    filters: 'file.path.endsWith("-open.md")',
+    properties: { "formula.label": { displayName: "Label" } },
+    views: [{ ...BASE.views[0], limit: 1 }],
+  };
+  const { counts, table } = countingTable();
+  const query = await queryRoute({
+    baseText: JSON.stringify(config),
+    notes: ["Notes/a-closed.md", "Other/b-open.md", "Notes/c-open.md", "Notes/d-open.md"],
+    table,
+  });
+  const request = { view: "Top", limit: 50 };
+  const { payload: evaluated } = await query({ ...request, evaluate: true });
+  assert.deepEqual(evaluated.rows.map((row) => row.file.path), ["Notes/c-open.md"]);
+  const computed = { ...counts };
+
+  const { payload: raw, sha256 } = await query({ ...request, evaluate: false }, { qualified: true });
+  assert.deepEqual(raw.rows.map((row) => row.file.path), evaluated.rows.map((row) => row.file.path));
+  assert.equal(raw.total, evaluated.total);
+  assert.equal(raw.source, "engine");
+  assert.equal(raw.evaluate, false);
+  assert.equal(raw.baseSnapshot.sha256, sha256);
+  assert.deepEqual(raw.warnings, []);
+  assert.equal(raw.rows[0].computed, undefined);
+  assert.ok(!("label" in raw.rows[0].props) && !("formula.label" in raw.rows[0].props));
+  assert.deepEqual(counts, computed, "evaluate:false computes no result columns");
+});
+
+test("the governed selection uses the Bridge snapshot without calling the engine", async () => {
   const unlimited = { ...BASE, views: [{ type: "table", name: "All", filters: 'file.inFolder("Notes")' }] };
   const query = await queryRoute({ baseText: JSON.stringify(unlimited) });
-  const { payload, calls, sha256 } = await query({ view: "All", evaluate: false, limit: 500, page: 1 });
+  const { payload, calls, sha256 } = await query({
+    view: "All",
+    evaluate: false,
+    limit: 500,
+    page: 1,
+    selection: "supported-filter-snapshot",
+  }, { qualified: true });
 
   assert.equal(payload.source, "fallback");
   assert.equal(payload.evaluate, false);
@@ -275,11 +345,11 @@ test("request filters and formula column settings use the engine's formula value
     properties: { "formula.label": { displayName: "Label" } },
   };
   const query = await queryRoute({ baseText: JSON.stringify(withSettings) });
-  const { payload } = await query({
+  const request = {
     view: "Top",
-    evaluate: true,
     filter: { and: ['formula.shout == "a!"'] },
-  });
+  };
+  const { payload } = await query({ ...request, evaluate: true });
 
   assert.equal(payload.source, "engine");
   assert.deepEqual(
@@ -288,6 +358,12 @@ test("request filters and formula column settings use the engine's formula value
   );
   assert.equal(payload.rows[0].props["formula.label"], nativeCapture.label.Label);
   assert.ok(!payload.warnings.some((warning) => warning.startsWith("Filtre sur formule")));
+
+  const { payload: raw } = await query({ ...request, evaluate: false });
+  assert.equal(raw.total, 1);
+  assert.deepEqual(raw.rows.map((row) => row.file.path), ["Notes/a.md"]);
+  assert.equal(raw.rows[0].computed, undefined);
+  assert.ok(!("formula.label" in raw.rows[0].props));
 });
 
 test("property tables compare formula text to numeric and boolean operands", async () => {

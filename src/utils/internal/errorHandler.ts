@@ -298,6 +298,9 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "frontmatter_envelope_invalid",
   "invalid_frontmatter",
   "ambiguous_base_view",
+  "base_query_row_disappeared",
+  "base_query_selection_unavailable",
+  "base_view_not_found",
   "ambiguous_delete_comment",
   "ambiguous_trailing_comment",
   "asset_bytes_invalid",
@@ -730,6 +733,12 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
     return BASE_QUERY_FILTER_ERROR;
   if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "base_query_filter_bridge_upgrade_required")
     return "Property-table filters require Bases Bridge 1.3.1 or later. Update the Bridge bundle and retry.";
+  if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "base_query_row_disappeared")
+    return "A selected Base row is no longer available. Run the query again.";
+  if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "base_query_selection_unavailable")
+    return "Obsidian's Bases engine could not select the requested rows.";
+  if (code === BaseErrorCode.NOT_FOUND && reasonCode === "base_view_not_found")
+    return "The requested Base view was not found.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_tool_arguments")
     return "Invalid tool arguments. See validationIssues for the field and reason.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === BASE_FORMULA_ENGINE_REFUSAL)

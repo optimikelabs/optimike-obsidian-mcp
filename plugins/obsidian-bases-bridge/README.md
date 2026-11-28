@@ -204,43 +204,45 @@ avec des indices à partir de zéro. Dans le MCP, l’erreur correspondante
 est `VALIDATION_ERROR`. Les tables de propriétés sont prises en charge à
 partir de Bases Bridge 1.3.1, avec `filterVersion: 1` dans la réponse REST.
 
-`source` indique d’où viennent les lignes et les valeurs.
+Avec le Bridge 1.3.2, les deux modes transmettent au moteur d’Obsidian les
+filtres globaux, les filtres de vue, le tri et la limite de la vue
+(`source: "engine"`). Le moteur évalue les formules nécessaires aux
+filtres ou au tri de la vue. Le Bridge applique ensuite `filter` et `sort` de
+la requête, puis la pagination. `baseSnapshot` décrit les octets exacts de la
+Base fournis au moteur.
 
-- `evaluate: true` → `source: "engine"`. Le moteur d’Obsidian (même chemin que
-  `/engine/evaluate`, avec les mêmes canaris) sélectionne d’abord les lignes de
-  la vue avec les filtres globaux, les filtres de vue et la limite de la vue.
-  Le moteur calcule les formules utilisées par les filtres de vue pour
-  sélectionner les lignes.
-  Le Bridge transmet aussi la configuration du tri de vue au handler natif.
-  Dans la capture 1.15.1, les tris ascendant et descendant sur `note.priority`
-  et le tri descendant sur `file.name` ont tous rendu les notes dans l’ordre
-  `a`, `b`, `c`, `d`. `filter` et `sort` de la requête s’appliquent ensuite
-  côté Bridge, puis la pagination.
-  Le moteur ne calcule les formules que pour les lignes de la page demandée, à
-  partir des octets exacts de la Base décrits par `baseSnapshot`. Seuls un
-  `filter` ou un `sort` de la requête sur `formula.*` font calculer toutes les
-  lignes, par lots de 100 entre lesquels Obsidian reprend la main, jusqu’à
-  1 000 lignes ; au-delà, les conditions et tris sur formule sont ignorés (les
-  autres conditions filtrent toujours) et `formula_filter_not_evaluated:too_many_rows:<lignes>:1000` le
-  signale : réduisez les lignes avec une vue ou un filtre sans formule. `computed`
-  et les clés de formule de `props` portent ces valeurs, sous la forme texte que
-  rend le moteur (`null` si vide). Mesuré par le Bridge sur 8 000 notes liées :
-  une page de 50 lignes 0,45 s, Obsidian répondant en 0,2 s au plus ; un filtre
-  et un tri sur formule sur 820 lignes 2,5 s, Obsidian bloqué 1,2 s au plus
-  par lot ; toutes les lignes d’un coup bloquaient Obsidian 15,9 s.
-- `evaluate: false`, ou moteur indisponible → `source: "fallback"`. Le Bridge
-  sélectionne les lignes avec ses filtres supportés et ne calcule aucune
-  formule : les clés de formule sont absentes de `props`, `computed` est absent.
-  Si `evaluate` était demandé, chaque formule est signalée dans `warnings`
-  (`formula_not_evaluated:<nom>:<raison>`). Un filtre ou un tri sur
-  `formula.*` est signalé et ignoré : une condition sur formule dans un `and`
-  est retirée, un `or` ou un `not` qui en contient une garde toutes les lignes. Quand la vue a une limite plus petite que le nombre
-  de lignes, seules les premières lignes dans l’ordre du Bridge sont gardées
-  et `view_limit_applied_with_bridge_order:<limite>` le signale : cet ordre
-  peut différer du tri d’Obsidian.
+Dans la capture Obsidian 1.15.1, les tris ascendant et descendant sur
+`note.priority` et le tri descendant sur `file.name` ont tous renvoyé les
+notes dans l’ordre `a`, `b`, `c`, `d`. Utilisez le tri de la requête pour
+ordonner les lignes sélectionnées par le moteur.
 
-L’ancien évaluateur de formules interne au Bridge est retiré : aucune valeur
-de formule ne vient plus d’une approximation.
+- `evaluate: true` renvoie les valeurs de formule des lignes de la page dans
+  `computed` et dans les clés de formule de `props`, sous la forme texte que
+  rend le moteur (`null` si vide).
+- `evaluate: false` omet ces champs et évite le calcul des colonnes de résultat.
+
+Dans les deux modes, un `filter` ou un `sort` de la requête sur `formula.*`
+nécessite les valeurs de toutes les lignes, par lots de 100 jusqu’à 1 000
+lignes. Au-delà, le Bridge ignore les conditions et tris sur formule et émet
+`formula_filter_not_evaluated:too_many_rows:<lignes>:1000`. Les autres critères
+s’appliquent toujours.
+
+Sur 8 000 notes liées avec `evaluate: true`, une page de 50 lignes prenait
+0,45 s, avec une réponse d’Obsidian en 0,2 s au plus. Un filtre et un tri sur
+formule sur 820 lignes prenaient 2,5 s, avec un blocage d’Obsidian de 1,2 s au
+plus par lot. Le calcul de toutes les lignes en une fois bloquait Obsidian
+pendant 15,9 s.
+
+Une sélection impossible renvoie HTTP 503 (`base_query_selection_unavailable`).
+Si un fichier sélectionné disparaît pendant la requête, le Bridge renvoie
+HTTP 503 avec `base_query_row_disappeared` et `retryable: true`.
+Une vue inconnue renvoie HTTP 404 (`base_view_not_found`). Si seules les
+colonnes de résultat ne peuvent pas être calculées après la sélection, les
+lignes sont renvoyées avec `formula_not_evaluated:<nom>:<raison>`.
+
+Installez ensemble le MCP et le Bridge de la même release. Le lecteur gouverné
+demande explicitement son [instantané de sélection](../../docs/base-row-patch-m5.md#sealed-selection)
+sur la route qualifiée du Bridge.
 
 ## Upsert robuste
 

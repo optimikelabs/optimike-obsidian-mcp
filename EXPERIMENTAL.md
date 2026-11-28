@@ -24,6 +24,7 @@ This branch leaves `main` and the individual pull requests unaffected.
 | [#234](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/234) | `e1f340c4fd00c2ddf7a3555c37100aa9cb4652db` | Bases Bridge 1.3.1 and headless share the request filter grammar and report the invalid node before selecting rows |
 | [#224](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/224) | `99b2afbc6ba6f9c2b54eb80fa12576fde13af82e` | The producer can bootstrap an external generation from compatible Smart Connections vectors and reproduce the 4.7.2 selection rules |
 | [#238](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/238) | `7a1065bba590fdd2d633bb7ec805c9de9b7d09ab` | Regex search anchors match each line in live and headless modes |
+| [#239](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/239) | `2f42c5da8dacd4e0527e0a699aa9c54d264bafb9` | Bases Bridge 1.3.2 uses native row selection in both live query modes and omits formula columns with `evaluate: false` |
 
 Run the read-only profile first. Test filesystem writes on a separate,
 disposable copy using synthetic notes. Write serialization is process-local.
@@ -48,7 +49,10 @@ The headless Bases scan validates request filters with #234's shared compiler
 before enforcing #204's explicit opt-in. It reads note properties with #228's
 CORE-schema parser, which preserves literal dates. The scan supports local
 property sorts. Formula evaluation and view queries still need Obsidian.
-Live property tables require Bases Bridge 1.3.1.
+Live property tables require Bases Bridge 1.3.1 or later. This branch ships
+1.3.2. Live queries explicitly refuse when native selection is unavailable.
+Governed Base row operations still request the supported-filter snapshot on
+the qualified Bridge route. Both paths use the shared request filter compiler.
 
 The strict external generation reader and the bootstrap tool share the Smart
 Environment readers. The external reader still checks the manifest model,

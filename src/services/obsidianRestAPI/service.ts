@@ -203,6 +203,9 @@ export class ObsidianRestApiService {
               const bridgeReasons = new Set(["request_rejected", "invalid_frontmatter", "resource_not_found", "write_not_authorized", "backend_binding_changed", "resource_changed", "read_failed", "write_failed", "atomic_write_creation_property_missing", "date_preparation_failed", "note_create_target_exists", "note_create_disabled", "note_create_request_invalid", "note_create_failed", "file_create_target_exists", "file_create_disabled", "file_create_request_invalid", "file_create_failed", "file_create_parent_missing", "effect_fence_refused", "date_preparation_fdm_pending", "note_has_backlinks", "trash_preference_permanent", "trash_preference_unavailable", "note_delete_disabled", "delete_backlink_limit", "note_not_found", "physical_path_unsupported", "invalid_note_path", ...NATIVE_MOVE_BRIDGE_REASONS]);
               const payload = axiosError.response.data as { error?: { reasonCode?: unknown } } | undefined;
               const reason = payload && typeof payload === "object" && payload.error && typeof payload.error === "object" ? payload.error.reasonCode : undefined;
+              bridgeReasons.add("base_query_selection_unavailable");
+              bridgeReasons.add("base_query_row_disappeared");
+              bridgeReasons.add("base_view_not_found");
               bridgeReasonCode = typeof reason === "string" && bridgeReasons.has(reason) ? reason : undefined;
               const publicReason = bridgeReasonCode ? { reasonCode: bridgeReasonCode } : {};
               // Handle specific HTTP status codes
