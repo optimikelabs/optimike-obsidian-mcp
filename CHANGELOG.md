@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at startup and detect quoted top-level Excalidraw keys.
 - Offer restoration only for verified displaced edits and keep newer on-disk
   edits in place. Clean empty exchange probes at startup.
+- Identify the concurrent edit a headless restore would replace and let operators
+  restore it from the committed revert. Report a busy path lock as retryable
+  before any write and record the attempt as failed.
 - Preserve the published and observed versions when a headless postflight
   detects a concurrent external edit. Keep the result uncertain and allow a
   separately sealed revert against the observed hash in full write mode.

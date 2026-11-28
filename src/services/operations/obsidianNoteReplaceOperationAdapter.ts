@@ -14,6 +14,8 @@ import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { supportedAtomicBridgeVersion } from "../atomicBridgeVersion.js";
 import {
   OPERATION_RUNTIME_CONTRACT_VERSION,
+  HEADLESS_VAULT_LOCK_BUSY,
+  isHeadlessVaultLockBusy,
   operationDigest,
   type OperationAdapter,
   type OperationOutcome,
@@ -24,6 +26,7 @@ import {
   ObsidianNoteReplaceConcurrencyError,
   ObsidianNoteReplaceJournal,
   displacedFilesystemEdit,
+  replacedConcurrentEdit,
   noteReplaceIdempotencyConflict,
   type ObsidianNoteReplacePlan,
   type ObsidianNoteReplaceProjection,
@@ -557,6 +560,7 @@ function receipt(
       : undefined;
   const committedSha256 =
     plan.filesystem?.stagedSha256 ?? plan.modifiedTimeSettlementEvidence?.observedSha256 ?? plan.afterSha256;
+  const concurrentEdit = replacedConcurrentEdit(plan);
   return {
     contractVersion: OPERATION_RUNTIME_CONTRACT_VERSION,
     operationId: plan.operationId,
@@ -627,6 +631,7 @@ function receipt(
       ...(plan.filesystem && plan.status === "committed" ? { source: "filesystem-reread" as const } : {}),
       ...(plan.filesystem && plan.failure === "headless_atomic_exchange_unavailable" ? { reason: plan.failure } : {}),
       ...(displacedFilesystemEdit(plan) ? { reason: "headless_displaced_edit" as const } : {}),
+      ...(plan.failure === HEADLESS_VAULT_LOCK_BUSY ? { reason: HEADLESS_VAULT_LOCK_BUSY, retryable: true as const } : {}),
       ...(settlementCheckAt !== undefined
         ? {
             reason: "modified_time_settlement" as const,
@@ -643,6 +648,7 @@ function receipt(
               ? "unverified"
               : "not_started",
     },
+    ...(concurrentEdit ? { replacesConcurrentEdit: concurrentEdit } : {}),
     admittedAt: plan.createdAt,
     updatedAt: plan.updatedAt,
     ...(terminal ? { terminalAt: plan.updatedAt } : {}),
@@ -1174,6 +1180,7 @@ export class ObsidianNoteReplaceOperationAdapter
         executionAttemptId,
       );
     } catch (error) {
+      if (this.options.filesystem && isHeadlessVaultLockBusy(error)) throw error;
       if (error instanceof Error && preDispatchErrors.delete(error)) {
         casDispatched = false;
       }

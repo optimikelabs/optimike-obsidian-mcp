@@ -1,12 +1,14 @@
 import { isolatedStateDirectory } from "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
 import { fork } from "node:child_process";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { existsSync, realpathSync, renameSync, rmSync, watch, writeFileSync } from "node:fs";
 import fsp, { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
@@ -17,6 +19,7 @@ const raced = "Archive/Race.md";
 const postflightRace = "Archive/Postflight.md";
 const interrupted = "Archive/Interrupted.md";
 const createCrash = "Archive/InterruptedCreate.md";
+const lockTimeout = "Archive/LockTimeout.md";
 const published = initial.replace("Original body.", "Published by the plan.");
 const interference = initial.replace("Original body.", "Synced by another writer.");
 const dateSettings = {
@@ -38,6 +41,20 @@ const dateSettings = {
   hashTrackingMode: "both",
 };
 const time = Date.parse("2026-09-05T11:12:13Z");
+const sha256 = value => createHash("sha256").update(value).digest("hex");
+
+async function holdVaultLock(filename) {
+  const db = new DatabaseSync(filename);
+  try {
+    db.exec("BEGIN IMMEDIATE");
+    const release = once(process, "message");
+    process.send("locked");
+    await release;
+  } finally {
+    db.close();
+    process.disconnect();
+  }
+}
 
 async function injectAfterFilesystemEffect() {
   const [mode, vault, state, ref, key] = process.argv.slice(2);
@@ -169,7 +186,7 @@ async function fixtures(vault) {
     ["AGENTS.md", "# Vault instructions\n\nUse a governed plan for every note write.\n"],
     ["Note.md", initial], [excluded, initial], [templated, initial],
     ["Archive/Keep.md", initial], [raced, initial], [postflightRace, initial], [".hidden.md", initial],
-    [interrupted, initial],
+    [interrupted, initial], [lockTimeout, initial],
   ]);
   for (const [relative, content] of files) {
     const target = path.join(vault, relative);
@@ -367,8 +384,13 @@ async function checkAtomicExchange() {
       ...oldPlan.projection, proof: oldProof, publicIdempotencyKey: "old-revert",
     } });
     await assert.rejects(reverts.apply(`obsidian-operation-revert:v1:${stale.operationId}`, "old-revert"), { code: "CONFLICT" });
-    assert.equal((await reverts.apply(revert.planRef, "restore-phone")).outcome, "committed");
+    const restoredPhone = await reverts.apply(revert.planRef, "restore-phone");
+    assert.equal(restoredPhone.outcome, "committed");
     assert.equal(await readFile(filename, "utf8"), interference);
+    const undoPhone = await reverts.plan({ path: raced, operationRef: restoredPhone.planRef, idempotencyKey: "undo-restore-phone" });
+    assert.equal(undoPhone.replacesConcurrentEdit.sha256, sha256(interference));
+    assert.equal((await reverts.apply(undoPhone.planRef, "undo-restore-phone")).outcome, "committed");
+    assert.equal(await readFile(filename, "utf8"), published);
 
     const third = initial.replace("Original body.", "Third party edit.");
     const fourth = initial.replace("Original body.", "Fourth edit.");
@@ -393,16 +415,38 @@ async function checkAtomicExchange() {
       const source = await racing.plan({ path: raced, idempotencyKey: key, nextContent: published });
       const receipt = await racing.apply(source.planRef, key);
       assert.equal(receipt.outcome, recoverable ? "outcome_unknown" : "conflict", key);
-      assert.equal((await racing.status(source.planRef)).postflight.reason, recoverable ? "headless_displaced_edit" : undefined, key);
+      const status = await racing.status(source.planRef);
+      assert.equal(status.postflight.reason, recoverable ? "headless_displaced_edit" : undefined, key);
       const evidence = JSON.stringify(journal.get(source.operationId).filesystem);
       for (const version of [interference, third]) assert.ok(evidence.includes(Buffer.from(version).toString("base64")), key);
       assert.equal(await readFile(filename, "utf8"), recoverable ? interference : third, key);
       const restore = () => reverts.plan({ path: raced, operationRef: source.planRef, idempotencyKey: `revert-${key}` });
       if (recoverable) {
+        assert.equal(status.replacesConcurrentEdit.sha256, sha256(interference), key);
+        assert.equal(status.replacesConcurrentEdit.modifiedAt, (await stat(filename)).mtime.toISOString(), key);
+        assert.ok(Number.isFinite(Date.parse(status.replacesConcurrentEdit.observedAt)), key);
         const plan = await restore();
-        assert.equal((await reverts.apply(plan.planRef, `revert-${key}`)).outcome, "committed", key);
-      } else await assert.rejects(restore, { code: "CONFLICT" });
-      assert.equal(await readFile(filename, "utf8"), third, key);
+        assert.equal(plan.replacesConcurrentEdit.sha256, sha256(interference), key);
+        assert.equal(plan.replacesConcurrentEdit.modifiedAt, status.replacesConcurrentEdit.modifiedAt, key);
+        const committed = await reverts.apply(plan.planRef, `revert-${key}`);
+        assert.equal(committed.outcome, "committed", key);
+        assert.equal(await readFile(filename, "utf8"), third, key);
+        const undo = idempotencyKey => reverts.plan({ path: raced, operationRef: committed.planRef, idempotencyKey });
+        if (key === "E") {
+          const stale = await undo("stale-revert-E");
+          await writeFile(filename, fourth);
+          assert.equal((await reverts.apply(stale.planRef, "stale-revert-E")).outcome, "conflict");
+          assert.equal(await readFile(filename, "utf8"), fourth);
+          await writeFile(filename, third);
+        }
+        const undoPlan = await undo(`undo-revert-${key}`);
+        assert.equal(undoPlan.replacesConcurrentEdit.sha256, sha256(third), key);
+        assert.equal((await reverts.apply(undoPlan.planRef, `undo-revert-${key}`)).outcome, "committed", key);
+        assert.equal(await readFile(filename, "utf8"), interference, key);
+      } else {
+        await assert.rejects(restore, { code: "CONFLICT" });
+        assert.equal(await readFile(filename, "utf8"), third, key);
+      }
     }
 
     for (const [key, mode, code, downtimeEdit] of [
@@ -566,6 +610,31 @@ async function integration() {
     assert.ok(write.preferredTools.includes("obsidian_text_patch_plan"));
     assert.ok(!write.preferredTools.includes("obsidian_note_replace_plan"));
 
+    const waiting = await call(first, "text_patch_plan", patch(lockTimeout, "lock-busy"));
+    const shard = sha256(lockTimeout.toLowerCase()).slice(0, 2) + ".sqlite";
+    const lockFile = path.join(isolatedStateDirectory, "optimike-obsidian-mcp", "headless-governed",
+      `${path.basename(journals[0], ".sqlite")}.locks`, shard);
+    const holder = fork(new URL(import.meta.url), ["hold-vault-lock", lockFile],
+      { env, stdio: ["ignore", "ignore", "inherit", "ipc"] });
+    const exited = once(holder, "exit");
+    try {
+      const [locked] = await Promise.race([once(holder, "message"), exited]);
+      assert.equal(locked, "locked");
+      const refused = await call(first, "text_patch_apply", { planRef: waiting.planRef, idempotencyKey: "lock-busy" }, true);
+      assert.equal(refused.error.details.reasonCode, "headless_vault_lock_busy");
+      assert.equal(refused.error.details.retryable, true);
+      assert.equal(await read(lockTimeout), initial);
+      const settled = await call(second, "text_patch_status", { planRef: waiting.planRef });
+      assert.equal(settled.outcome, "failed");
+      assert.equal(settled.postflight.reason, "headless_vault_lock_busy");
+      assert.equal(settled.recoveryAllowed, false);
+    } finally {
+      if (holder.connected) holder.send("release");
+      assert.deepEqual(await exited, [0, null]);
+    }
+    const retry = await call(first, "text_patch_plan", patch(lockTimeout, "lock-retry"));
+    expectVerified(await call(first, "text_patch_apply", { planRef: retry.planRef, idempotencyKey: "lock-retry" }));
+
     // Both plans read the same BOM+CRLF snapshot, then two independent
     // server processes race to publish exactly the same bytes.
     const plan1 = await call(guarded, "text_patch_plan", patch(raced, "race-a"));
@@ -728,6 +797,7 @@ async function integration() {
 }
 
 if (process.argv[2] === "observe-exchange") observePath(process.argv[3]);
+else if (process.argv[2] === "hold-vault-lock") await holdVaultLock(process.argv[3]);
 else if (process.argv[2]) await injectAfterFilesystemEffect();
 else {
   process.env.TZ = "UTC";
