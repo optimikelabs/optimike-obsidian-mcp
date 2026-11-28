@@ -15,6 +15,7 @@ import {
 } from "../mcp-server/tools/governedNoteReplaceTools/runtime.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import {
+  canonicalizeTextPatchOperations,
   compileTextPatch,
   type TextPatchOperation,
   type TextPatchProof,
@@ -26,12 +27,21 @@ import {
 import { assertWriteAllowed, type WriteOperation } from "./writePolicy.js";
 import { DatePreparationPlanFailure, frontmatterAssessment } from "./obsidianFrontmatterFormat.js";
 import type { ApplyConfirmationTarget } from "./applyConfirmation.js";
+import type { TextPatchProposalIdentity, TextPatchProposalTrace } from "./operations/obsidianNoteReplaceJournal.js";
 
 const OPERATION_KIND = "obsidian.text.patch" as const;
 const PUBLIC_PLAN_REF_PREFIX = "obsidian-text-patch:v1:";
 const CHILD_PLAN_REF_PREFIX = "obsidian-note-replace:v1:";
 const INTERNAL_KEY_DOMAIN = "obsidian.text.patch:v1\0";
 const SHA256 = /^[a-f0-9]{64}$/u;
+const PROPOSAL_KEY_PREFIX = "optimike:proposal:v1:";
+const PROPOSAL_ID = /^[a-z0-9][a-z0-9-]{0,63}$/u;
+
+export const TextPatchProposalSchema = z.object({
+  version: z.literal(1),
+  bindingFingerprint: z.string().regex(SHA256),
+  baseSha256: z.string().regex(SHA256),
+}).strict();
 
 const TextPatchProofSchema = z.object({
   contractVersion: z.literal(1),
@@ -92,6 +102,17 @@ export type GovernedTextPatchPlanInput = {
   operations: TextPatchOperation[];
   frontmatterOperations?: FrontmatterPatchOperation[];
   idempotencyKey: string;
+  proposal?: z.infer<typeof TextPatchProposalSchema>;
+};
+
+type TextPatchProposalResult = TextPatchProjectionReceipt | {
+  proposalId: string;
+  phase: "terminal";
+  outcome: NonNullable<TextPatchProposalTrace["terminalStatus"]>;
+  reason: "proposal_base_changed" | "expired_with_trace" | "receipt_purged";
+  applyAllowed: false;
+  recoveryAllowed: false;
+  trace?: { planRef: string; planDigest: string };
 };
 
 export type TextPatchProjectionReceipt = Omit<
@@ -341,19 +362,7 @@ function projectedReceipt(
       : {}),
     operationKind: OPERATION_KIND,
     planRef: publicReference(child.planRef),
-    planDigest: operationDigest({
-      contractVersion: 1,
-      operationKind: OPERATION_KIND,
-      childPlanDigest: child.planDigest,
-      intentDigest: projection.intentDigest,
-      proof: projection.proof,
-      ...(projection.frontmatterProof
-        ? {
-            frontmatterProof: projection.frontmatterProof,
-            composition: projection.composition,
-          }
-        : {}),
-    }),
+    planDigest: projectedPlanDigest(child.planDigest, projection),
     target: {
       kind: projection.frontmatterProof || view.frontmatterFormat?.normalization.applied
         ? "vault-markdown-body-and-frontmatter"
@@ -376,6 +385,31 @@ function projectedReceipt(
         : {}),
       proof: publicProof,
     },
+  };
+}
+
+function projectedPlanDigest(childPlanDigest: string, projection: StoredProjection): string {
+  return operationDigest({
+    contractVersion: 1,
+    operationKind: OPERATION_KIND,
+    childPlanDigest,
+    intentDigest: projection.intentDigest,
+    proof: projection.proof,
+    ...(projection.frontmatterProof
+      ? { frontmatterProof: projection.frontmatterProof, composition: projection.composition }
+      : {}),
+  });
+}
+
+function terminalProposal(trace: TextPatchProposalTrace, outcome: NonNullable<TextPatchProposalTrace["terminalStatus"]>): TextPatchProposalResult {
+  return {
+    proposalId: trace.id,
+    phase: "terminal",
+    outcome,
+    reason: outcome === "expired" ? "expired_with_trace" : trace.planRef ? "receipt_purged" : "proposal_base_changed",
+    applyAllowed: false,
+    recoveryAllowed: false,
+    ...(trace.planRef && trace.planDigest ? { trace: { planRef: trace.planRef, planDigest: trace.planDigest } } : {}),
   };
 }
 
@@ -403,6 +437,91 @@ export class GovernedTextPatchRuntime {
 
   async plan(
     input: GovernedTextPatchPlanInput,
+  ): Promise<TextPatchProposalResult> {
+    if (input.proposal !== undefined) return this.importProposal(input);
+    if (input.idempotencyKey.startsWith(PROPOSAL_KEY_PREFIX)) {
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "This idempotency key prefix is reserved for proposals.", {
+        reason: "proposal_input_invalid",
+      });
+    }
+    return this.planPatch(input);
+  }
+
+  private async replayProposal(identity: TextPatchProposalIdentity): Promise<TextPatchProposalResult | undefined> {
+    const trace = this.noteRuntime.getTextPatchProposal(identity.id);
+    if (!trace) return undefined;
+    if (trace.intentDigest !== identity.intentDigest) {
+      throw new McpError(BaseErrorCode.CONFLICT, "The proposal ID is already bound to different input.", {
+        reason: "proposal_identity_conflict",
+      });
+    }
+    if (trace.terminalStatus) return terminalProposal(trace, trace.terminalStatus);
+    try {
+      const receipt = await this.status(trace.planRef!);
+      if (receipt.planDigest !== trace.planDigest) {
+        throw new McpError(BaseErrorCode.CONFLICT, "The retained proposal digest does not match the operation receipt.");
+      }
+      if (receipt.outcome === "expired") return terminalProposal(trace, "expired");
+      return { ...receipt, idempotencyKey: trace.publicIdempotencyKey };
+    } catch (error) {
+      // The status lookup can trigger retention after the trace was read.
+      if (error instanceof McpError && error.code === BaseErrorCode.NOT_FOUND) {
+        const retained = this.noteRuntime.getTextPatchProposal(identity.id);
+        if (retained?.terminalStatus) return terminalProposal(retained, retained.terminalStatus);
+      }
+      throw error;
+    }
+  }
+
+  private async importProposal(input: GovernedTextPatchPlanInput): Promise<TextPatchProposalResult> {
+    const metadata = TextPatchProposalSchema.safeParse(input.proposal);
+    const key = normalizedPublicKey(input.idempotencyKey);
+    const id = key.slice(PROPOSAL_KEY_PREFIX.length);
+    if (!metadata.success || !key.startsWith(PROPOSAL_KEY_PREFIX) || !PROPOSAL_ID.test(id) ||
+        input.frontmatterOperations !== undefined) {
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Invalid version 1 body-patch proposal.", {
+        reason: "proposal_input_invalid",
+      });
+    }
+    const path = markdownPath(input.path);
+    if (/^[a-z]:|[\u0000-\u001f\u007f]/iu.test(path)) {
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The proposal path must be vault-relative.", {
+        reason: "markdown_path_invalid",
+      });
+    }
+    const operations = canonicalizeTextPatchOperations(input.operations);
+    assertWriteAllowed({ operation: "obsidian_text_patch_plan", action: "plan", target: path, targetType: "filePath" });
+    const { bindingFingerprint, baseSha256 } = metadata.data;
+    const identity: TextPatchProposalIdentity = {
+      id,
+      path,
+      publicIdempotencyKey: key,
+      beforeSha256: baseSha256,
+      bindingFingerprint,
+      intentDigest: operationDigest({
+        ...metadata.data,
+        key,
+        patch: canonicalIntent(path, operations),
+      }),
+    };
+    const replay = await this.replayProposal(identity);
+    if (replay) return replay;
+    try {
+      return await this.planPatch({ ...input, operations }, identity);
+    } catch (error) {
+      const concurrentWinner = await this.replayProposal(identity);
+      if (concurrentWinner) return concurrentWinner;
+      if (error instanceof McpError && error.details?.reason === "proposal_base_changed") {
+        this.noteRuntime.recordTextPatchProposalConflict(identity);
+        return (await this.replayProposal(identity))!;
+      }
+      return this.noteRuntime.rethrowProposalError(error, bindingFingerprint);
+    }
+  }
+
+  private async planPatch(
+    input: GovernedTextPatchPlanInput,
+    proposal?: TextPatchProposalIdentity,
   ): Promise<TextPatchProjectionReceipt> {
     const path = markdownPath(input.path);
     const publicKey = normalizedPublicKey(input.idempotencyKey);
@@ -412,14 +531,16 @@ export class GovernedTextPatchRuntime {
       input.operations,
       input.frontmatterOperations,
     );
-    const replay = await this.replayExisting(
+    const replay = proposal ? undefined : await this.replayExisting(
       internalKey,
       publicKey,
       requestedIntentDigest,
     );
     if (replay) return replay;
 
-    const source = await this.noteRuntime.readForProjection(path, true);
+    const source = proposal
+      ? await this.noteRuntime.readForTextPatchProposal(path, { sha256: proposal.beforeSha256, bindingFingerprint: proposal.bindingFingerprint })
+      : await this.noteRuntime.readForProjection(path, true);
     try {
     let compiled;
     let frontmatter;
@@ -442,7 +563,7 @@ export class GovernedTextPatchRuntime {
         frontmatter = compileFrontmatterPatch(normalized.content, input.frontmatterOperations, nativeEntries);
       }
     } catch (error) {
-      const concurrentWinner = await this.replayExisting(
+      const concurrentWinner = proposal ? undefined : await this.replayExisting(
         internalKey,
         publicKey,
         requestedIntentDigest,
@@ -491,6 +612,15 @@ export class GovernedTextPatchRuntime {
       expectedBindingFingerprint: source.bindingFingerprint,
       idempotencyIdentity: intentDigest,
       projection,
+      ...(proposal ? {
+        proposalSeal: {
+          identity: proposal,
+          reference: (receipt) => ({
+            planRef: publicReference(receipt.planRef),
+            planDigest: projectedPlanDigest(receipt.planDigest, projection),
+          }),
+        },
+      } : {}),
     });
     const view = this.noteRuntime.inspect(child.planRef);
     if (source.datePreparation?.kind === "date-manager-before-plan" && view.beforeSha256 !== source.sha256) throw new DatePreparationPlanFailure(source.datePreparation);

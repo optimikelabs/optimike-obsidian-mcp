@@ -233,6 +233,10 @@ export interface AtomicWriteBackend {
 }
 
 export type ObsidianNoteReplacePlanInput = {
+  proposalSeal?: {
+    identity: import("./obsidianNoteReplaceJournal.js").TextPatchProposalIdentity;
+    reference: (receipt: OperationReceipt) => { planRef: string; planDigest: string };
+  };
   path: string;
   nextContent: string;
   idempotencyKey: string;
@@ -709,6 +713,8 @@ export class ObsidianNoteReplaceOperationAdapter
     input: ObsidianNoteReplacePlanInput,
     afterSha256: string,
   ): OperationReceipt | undefined {
+    // A proposal may replay only through its durable association.
+    if (input.proposalSeal) return undefined;
     const existing = this.journal.getByIdempotencyKey(input.idempotencyKey);
     if (!existing) return undefined;
     const identityBound =
@@ -740,6 +746,11 @@ export class ObsidianNoteReplaceOperationAdapter
     }
     const statusReplay = this.replayIfDurableWinner(input, afterSha256);
     if (statusReplay) return statusReplay;
+    if (input.proposalSeal && status.backend.bindingFingerprint !== input.expectedBindingFingerprint) {
+      throw new McpError(BaseErrorCode.CONFLICT, "The proposal belongs to a different Atomic Write authority.", {
+        reason: "proposal_authority_mismatch",
+      });
+    }
     if (!status.backend.writeEnabled) {
       const replay = this.replayIfDurableWinner(input, afterSha256);
       if (replay) return replay;
@@ -765,9 +776,11 @@ export class ObsidianNoteReplaceOperationAdapter
     ) {
       const replay = this.replayIfDurableWinner(input, afterSha256);
       if (replay) return replay;
-      throw new Error(
-        "Atomic-write backend identity or target changed during planning.",
-      );
+      const message = "Atomic-write backend identity or target changed during planning.";
+      if (input.proposalSeal) {
+        throw new McpError(BaseErrorCode.CONFLICT, message, { reason: "proposal_authority_mismatch" });
+      }
+      throw new Error(message);
     }
     if (
       input.expectedBeforeSha256 !== undefined &&
@@ -778,6 +791,7 @@ export class ObsidianNoteReplaceOperationAdapter
       throw new McpError(
         BaseErrorCode.CONFLICT,
         `The ${this.profile.targetLabel} changed after the domain projection was compiled.`,
+        input.proposalSeal ? { reason: "proposal_changed_during_seal", retryable: true } : undefined,
       );
     }
     if (
@@ -830,27 +844,28 @@ export class ObsidianNoteReplaceOperationAdapter
           }
         : {}),
     });
-    return receipt(
-      this.profile,
-      this.journal.create({
-        idempotencyKey: input.idempotencyKey,
-        requestDigest,
-        ...(input.datePreparation ? { datePreparation: input.datePreparation } : {}),
-        ...(input.frontmatterFormat ? { frontmatterFormat: input.frontmatterFormat } : {}),
-        ...(input.idempotencyIdentity
-          ? { idempotencyIdentity: input.idempotencyIdentity }
-          : {}),
-        ...(sealedProjection ? { projection: sealedProjection } : {}),
-        path: input.path,
-        beforeSha256: read.sha256,
-        afterSha256,
-        nextContent: input.nextContent,
-        bindingFingerprint: read.bindingFingerprint,
-        ...(modifiedTimeSettlementPolicy
-          ? { modifiedTimeSettlementPolicy }
-          : {}),
-      }),
-    );
+    const newPlan = {
+      idempotencyKey: input.idempotencyKey,
+      requestDigest,
+      ...(input.datePreparation ? { datePreparation: input.datePreparation } : {}),
+      ...(input.frontmatterFormat ? { frontmatterFormat: input.frontmatterFormat } : {}),
+      ...(input.idempotencyIdentity ? { idempotencyIdentity: input.idempotencyIdentity } : {}),
+      ...(sealedProjection ? { projection: sealedProjection } : {}),
+      path: input.path,
+      beforeSha256: read.sha256,
+      afterSha256,
+      nextContent: input.nextContent,
+      bindingFingerprint: read.bindingFingerprint,
+      ...(modifiedTimeSettlementPolicy ? { modifiedTimeSettlementPolicy } : {}),
+    };
+    const seal = input.proposalSeal;
+    const plan = seal
+      ? this.journal.createTextPatchProposalPlan(newPlan, {
+          identity: seal.identity,
+          reference: (plan) => seal.reference(receipt(this.profile, plan)),
+        })
+      : this.journal.create(newPlan);
+    return receipt(this.profile, plan);
   }
 
   async apply(

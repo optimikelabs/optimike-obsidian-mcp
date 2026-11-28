@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import "./test-support/isolated-state.mjs";
+import { isolatedStateEnv } from "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -16,6 +16,7 @@ import http from "node:http";
 import { createServer } from "node:net";
 import { nativeFormatFixture } from "./fixtures/native-frontmatter-format.mjs";
 import path from "node:path";
+import { getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
 const modern = process.env.MCP_TEST_PROTOCOL_ERA === "modern";
 const { Client } = await import(
   modern
@@ -250,8 +251,8 @@ function parse(result) {
   return payload;
 }
 
-async function startClient(url, name) {
-  const transport = new StreamableHTTPClientTransport(new URL(url));
+async function startClient(url, name, options) {
+  const transport = new StreamableHTTPClientTransport(new URL(url), options);
   const client = new Client(
     { name, version: "1.0.0" },
     {
@@ -297,10 +298,12 @@ await fake.listen();
 const port = await unusedPort();
 let stderr = "";
 let stdout = "";
-const backend = spawn(process.execPath, ["dist/index.js"], {
-  cwd: process.cwd(),
+const backend = spawn(process.execPath, [path.resolve("dist/index.js")], {
+  cwd: root,
   env: {
-    ...process.env,
+    ...getDefaultEnvironment(),
+    ...isolatedStateEnv(),
+    APPDATA: isolatedStateEnv().LOCALAPPDATA,
     NODE_ENV: "test",
     MCP_TRANSPORT_TYPE: "http",
     MCP_PROTOCOL_MODE: modern ? "dual" : "legacy",
@@ -309,6 +312,7 @@ const backend = spawn(process.execPath, ["dist/index.js"], {
     MCP_HTTP_PORT_RETRIES: "0",
     MCP_LOG_LEVEL: "error",
     MCP_WRITE_MODE: "full",
+    MCP_VAULT_INSTRUCTIONS: "enforce",
     MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH: journalPath,
     LOGS_DIR: logsPath,
     OBSIDIAN_RUNTIME_MODE: "live",
@@ -336,6 +340,7 @@ const mcpUrl = `${baseUrl}/mcp`;
 let first;
 let second;
 let third;
+let lostClient;
 try {
   await waitForHealth(`${baseUrl}/healthz`, backend);
   first = await startClient(mcpUrl, "governed-http-first");
@@ -448,7 +453,7 @@ try {
     false,
   );
 
-  const textPatchPlan = await call(third, "obsidian_text_patch_plan", {
+  const proposal = {
     path: FIXTURE_PATH,
     operations: [
       {
@@ -457,8 +462,37 @@ try {
         replacement: "patched-over-http",
       },
     ],
-    idempotencyKey: "http-cross-session-text-patch",
+    idempotencyKey: "optimike:proposal:v1:http-cross-session",
+    proposal: {
+      version: 1,
+      bindingFingerprint: fake.bindingFingerprint,
+      baseSha256: sha256(fake.content),
+    },
+  };
+  let dropResponse = false;
+  lostClient = await startClient(mcpUrl, "governed-http-lost-response", {
+    fetch: async (input, init) => {
+      const response = await fetch(input, init);
+      if (dropResponse && init?.method === "POST") {
+        dropResponse = false;
+        await response.arrayBuffer();
+        throw new Error("Proposal import response lost");
+      }
+      return response;
+    },
   });
+  dropResponse = true;
+  await assert.rejects(call(lostClient, "obsidian_text_patch_plan", proposal), /Proposal import response lost/u);
+  await lostClient.close();
+  lostClient = undefined;
+  assert.equal(fake.content, nextContent);
+  assert.equal(fake.casRequests, 1);
+  const pendingTextPatch = await call(third, "obsidian_list_pending_operations", { limit: 100 });
+  const imported = pendingTextPatch.operations.find((item) => item.operationKind === "obsidian.text.patch");
+  assert.equal(imported?.state, "planned", "the first import sealed a plan before its response was lost");
+  assert.equal(imported.nextAction, "apply");
+  const textPatchPlan = await call(third, "obsidian_text_patch_plan", proposal);
+  assert.equal(textPatchPlan.planRef, imported.planRef);
   assert.equal(textPatchPlan.phase, "planned");
   assert.equal(JSON.stringify(textPatchPlan).includes(SECRET), false);
 
@@ -469,29 +503,9 @@ try {
     planRef: textPatchPlan.planRef,
   });
   assert.equal(textPatchStatus.phase, "planned");
-  const pendingTextPatch = await call(
-    first,
-    "obsidian_list_pending_operations",
-    { limit: 100 },
-  );
-  const textPatchItem = pendingTextPatch.operations.find(
-    (item) => item.planRef === textPatchPlan.planRef,
-  );
-  assert.deepEqual(
-    {
-      operationKind: textPatchItem?.operationKind,
-      state: textPatchItem?.state,
-      nextAction: textPatchItem?.nextAction,
-    },
-    {
-      operationKind: "obsidian.text.patch",
-      state: "planned",
-      nextAction: "apply",
-    },
-  );
   const textPatchCommit = await call(first, "obsidian_text_patch_apply", {
     planRef: textPatchPlan.planRef,
-    idempotencyKey: "http-cross-session-text-patch",
+    idempotencyKey: proposal.idempotencyKey,
   });
   assert.equal(textPatchCommit.outcome, "committed");
   assert.equal(fake.casRequests, 2);
@@ -533,12 +547,13 @@ try {
   }
 
   console.log(
-    `PASS: one process-wide governed note runtime carried sealed note-replacement and text-patch plans across real HTTP MCP sessions, committed once per plan, replayed safely, and terminated deterministically (${process.platform}).`,
+    `PASS: one process-wide governed note runtime carried sealed note replacement and an imported proposal across HTTP MCP sessions, recovered the lost import response, committed once per plan, and terminated deterministically (${process.platform}).`,
   );
 } finally {
   await first?.close();
   await second?.close();
   await third?.close();
+  await lostClient?.close();
   if (backend.exitCode === null && backend.signalCode === null) {
     const forcedExit = new Promise((resolve) =>
       backend.once("exit", () => resolve()),
