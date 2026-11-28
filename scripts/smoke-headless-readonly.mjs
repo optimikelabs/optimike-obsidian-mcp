@@ -786,6 +786,11 @@ async function main() {
       assertTextIncludes(schema, "file.name", "bases schema");
 
       for (const [regression, args, hint] of [
+        ["logical groups reject invalid leaves even in an unused branch", { filter: { or: ["type", "unrecognized()"] } }, /and, or, not/u],
+        ["a property array of operators cannot silently match nothing", { filter: { type: [{ eq: "root" }] } }, /direct equality/u],
+        ["an empty operator object cannot silently match everything", { filter: { type: {} } }, /direct equality/u],
+        ["an opted-in scan cannot filter against an unevaluated formula", { property_only: true, filter: { not: "formula.score == 2" } }, /formula/u],
+        ["an opted-in scan cannot silently sort on an unevaluated formula", { property_only: true, sort: [{ prop: "formula.score" }] }, /formula/u],
         ["an unknown filter operator must not match every note", { filter: { type: { exists: true } } }, /eq, ne, in, contains/u],
         ["an unsupported file property must not filter against missing values", { filter: { "file.folder": "Projects" } }, /file\.path, file\.name, file\.ctime, file\.mtime, file\.size/u],
         ["an opted-in scan must not sort on a note namespace it cannot resolve", { property_only: true, sort: [{ prop: "note.type" }] }, /unprefixed frontmatter/u],
@@ -824,7 +829,15 @@ async function main() {
         assert.equal(payload.rows, undefined, regression);
       }
 
-      const propertyQuery = { filter: { type: { eq: "root" } }, limit: 1 };
+      const propertyQuery = {
+        filter: {
+          and: [
+            { or: [{ type: { eq: "root" } }, 'type == "area"'] },
+            { not: 'type == "area"' },
+          ],
+        },
+        limit: 1,
+      };
       for (const [regression, args] of [
         ["plain queries remain usable without any opt-in", { base_id: "Plain.base" }],
         ["the request sort can replace the default view's grouping", {

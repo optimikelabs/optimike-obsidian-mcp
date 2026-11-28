@@ -39,7 +39,7 @@ export const BasesQueryInputSchema = z
     filter: z
       .record(z.any())
       .optional()
-      .describe("Filtre additionnel (JSON). En local, porte sur les propriétés des notes Markdown en cache."),
+      .describe("Filtre additionnel (JSON). En local, accepte des propriétés et des arbres and/or/not avec comparaisons simples ou propriétés évaluées comme booléens."),
     sort: z
       .array(SortSchema)
       .optional()

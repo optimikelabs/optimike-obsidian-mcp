@@ -187,9 +187,14 @@ Le serveur final peut exposer des capacités différentes selon les plugins Obsi
   - les filtres du parcours prennent en charge l’égalité directe, les tableaux,
     `eq`, `ne`, `contains`, `in`, `gt`, `gte`, `lt` et `lte`. Filtres
     et tris acceptent les clés de frontmatter sans préfixe et `file.path`,
-    `file.name`, `file.ctime`, `file.mtime` et `file.size`. Les opérateurs non
-    pris en charge, les autres clés `file.*` et les clés `note.*` renvoient
-    `VALIDATION_ERROR`, même avec `property_only: true`
+    `file.name`, `file.ctime`, `file.mtime` et `file.size`. Combiner les
+    conditions avec `{"and":[...]}`, `{"or":[...]}` ou `{"not":...}`.
+    Chaque groupe a une seule clé logique. Une feuille peut être une table de
+    propriétés locale, une comparaison comme `type == "project"` ou une
+    propriété évaluée comme booléen, par exemple `active`. Les formes inconnues,
+    objets opérateurs vides et tableaux d’objets opérateurs renvoient
+    `VALIDATION_ERROR`. Les références à des formules dans les filtres et tris
+    sont refusées même avec `property_only: true`
 
 - Smart Connections
   - requis pour la recherche sémantique

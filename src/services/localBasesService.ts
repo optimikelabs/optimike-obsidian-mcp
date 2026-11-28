@@ -13,6 +13,7 @@ import type {
 } from "./obsidianRestAPI/types.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import type { RequestContext } from "../utils/index.js";
+import { compileLocalBaseFilter, isLocalBaseProperty } from "./localBaseFilter.js";
 import {
   createVaultExclusionMatcher,
   isVaultPathExcluded,
@@ -33,13 +34,6 @@ type LocalBaseRow = {
   };
   props: Record<string, unknown>;
 };
-
-const LOCAL_FILE_PROPERTIES = new Set([
-  "file.path", "file.name", "file.ctime", "file.mtime", "file.size",
-]);
-const LOCAL_FILTER_OPERATORS = new Set([
-  "eq", "ne", "in", "contains", "gt", "gte", "lt", "lte",
-]);
 
 async function ensureCacheReady(
   vaultCacheService: VaultCacheService,
@@ -81,67 +75,6 @@ function readProperty(row: LocalBaseRow, prop: string): unknown {
   if (prop === "file.path") return row.file.path;
   if (prop === "file.name") return row.file.name;
   return row.props[prop];
-}
-
-function isUnsupportedLocalProperty(prop: string): boolean {
-  return (
-    prop.startsWith("note.") ||
-    (prop.startsWith("file.") && !LOCAL_FILE_PROPERTIES.has(prop))
-  );
-}
-
-function scalarMatches(actual: unknown, expected: unknown): boolean {
-  if (Array.isArray(actual)) {
-    return actual.map(String).includes(String(expected));
-  }
-  return actual === expected;
-}
-
-function matchesFilter(
-  row: LocalBaseRow,
-  filter: Record<string, unknown>,
-): boolean {
-  for (const [key, expected] of Object.entries(filter)) {
-    const actual = readProperty(row, key);
-    if (Array.isArray(expected)) {
-      if (!expected.some((item) => scalarMatches(actual, item))) {
-        return false;
-      }
-      continue;
-    }
-    if (isRecord(expected)) {
-      for (const [operator, value] of Object.entries(expected)) {
-        if (operator === "eq" && !scalarMatches(actual, value)) return false;
-        if (operator === "ne" && scalarMatches(actual, value)) return false;
-        if (
-          operator === "contains" &&
-          !String(actual ?? "").includes(String(value))
-        ) {
-          return false;
-        }
-        if (
-          operator === "in" &&
-          (!Array.isArray(value) ||
-            !value.some((item) => scalarMatches(actual, item)))
-        ) {
-          return false;
-        }
-        if (operator === "gt" && !(Number(actual) > Number(value)))
-          return false;
-        if (operator === "gte" && !(Number(actual) >= Number(value)))
-          return false;
-        if (operator === "lt" && !(Number(actual) < Number(value)))
-          return false;
-        if (operator === "lte" && !(Number(actual) <= Number(value)))
-          return false;
-      }
-      continue;
-    }
-    if (!scalarMatches(actual, expected)) {
-      return false;
-    }
-  }
-  return true;
 }
 
 function compareValues(a: unknown, b: unknown): number {
@@ -303,18 +236,13 @@ export class LocalBasesService {
     }
   > {
     const base = await this.getParsedBase(baseId, context);
-    const filter = request.filter;
-    const filterKeys = Object.keys(filter ?? {});
+    const filter = compileLocalBaseFilter(request.filter);
     const sort = request.sort ?? [];
-    const usesUnsupportedOperator = Object.values(filter ?? {}).some(
-      (value) =>
-        isRecord(value) &&
-        Object.keys(value).some((operator) => !LOCAL_FILTER_OPERATORS.has(operator)),
-    );
+    const referencesFormula = filter?.usesFormula || sort.some(({ prop }) => prop.startsWith("formula."));
     if (
-      usesUnsupportedOperator ||
-      filterKeys.some(isUnsupportedLocalProperty) ||
-      sort.some(({ prop }) => isUnsupportedLocalProperty(prop))
+      !filter ||
+      sort.some(({ prop }) => !isLocalBaseProperty(prop)) ||
+      (request.property_only && referencesFormula)
     ) {
       throw new McpError(
         BaseErrorCode.VALIDATION_ERROR,
@@ -333,8 +261,7 @@ export class LocalBasesService {
         isRecord(defaultView?.groupBy));
     const usesFormulas =
       (isRecord(formulas) && Object.keys(formulas).length > 0) ||
-      filterKeys.some((key) => key.startsWith("formula.")) ||
-      sort.some(({ prop }) => prop.startsWith("formula."));
+      referencesFormula;
     const requiresObsidian =
       request.view !== undefined ||
       request.evaluate === true ||
@@ -373,9 +300,7 @@ export class LocalBasesService {
       });
     }
 
-    const filtered = filter
-      ? rows.filter((row) => matchesFilter(row, filter))
-      : rows;
+    const filtered = rows.filter((row) => filter.matches((key) => readProperty(row, key)));
     const sorted = [...filtered].sort((a, b) => {
       for (const item of sort) {
         const direction = item.dir === "desc" ? -1 : 1;
@@ -403,7 +328,7 @@ export class LocalBasesService {
       limitations: [
         "Rows and total describe cached Markdown notes matched by the request's property filter.",
         "Non-Markdown files are not listed.",
-        "Local fallback supports direct equality plus simple eq/ne/in/contains/gt/gte/lt/lte filters.",
+        "Local fallback supports property filters and and/or/not trees with simple comparison and truthy expressions.",
         "Base filters, view rules (filters, grouping, order and limits), formulas and calculated properties are ignored.",
       ],
     };

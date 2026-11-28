@@ -359,8 +359,11 @@ local fallback. The Base must exist. The scan applies ad-hoc filters and sorts
 to raw properties and paginates their matches. Results report
 `source: "local-fallback"`, `mode: "property-scan"`, `evaluate: false`, and
 `limitations`. The rows and total exclude non-Markdown files, even for plain
-queries. Unsupported local operators, unsupported `file.*` keys, and `note.*`
-keys return `VALIDATION_ERROR`. See the [supported local filters and properties](../OPERATIONS.md#required-dependencies).
+queries. Local filters support `and`, `or`, and `not` trees with simple
+comparison expressions, bare truthy references, and local property maps.
+Unsupported filters and sorts return `VALIDATION_ERROR`. This includes
+`formula.*` references in an explicit property scan.
+See the [supported local filters and properties](../OPERATIONS.md#required-dependencies).
 On REST, the option is ignored and the Bridge receives its usual query.
 
 ## Canvas And Format Validation
