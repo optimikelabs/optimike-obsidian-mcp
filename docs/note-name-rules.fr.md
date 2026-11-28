@@ -46,9 +46,11 @@ résultats gardent leurs graphies exactes sur disque. Quand le chemin physique
 diffère du chemin Obsidian, les lectures renvoient `diskPath` à la racine de la
 réponse dans les deux formats, et chaque entrée de liste compacte a son propre
 `diskPath`. Utilisez ce champ pour accéder au fichier sur disque. Les listes en
-arbre affichent les noms enregistrés dans le cache. Local REST fournit le chemin
-Obsidian et ne communique pas le chemin physique. Les cibles d'écriture restent
-soumises aux règles ci-dessus.
+arbre affichent les noms enregistrés dans le cache. En mode live, les listes
+compactes et les résultats de recherche conservent le chemin Obsidian fourni
+par Local REST et ajoutent `diskPath` lorsqu'une graphie physique unique
+contenant U+00A0 ou U+202F diffère de ce chemin et peut être vérifiée dans le
+coffre local configuré. Les cibles d'écriture restent soumises aux règles ci-dessus.
 
 ## D'où vient chaque contrainte
 

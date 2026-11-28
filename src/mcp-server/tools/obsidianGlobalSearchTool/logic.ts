@@ -7,6 +7,7 @@ import {
 } from "../../../services/obsidianRestAPI/index.js";
 import { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
+import { addLiveDiskPaths } from "../../../utils/obsidian/liveDiskPaths.js";
 // Import formatTimestamp utility
 import { config } from "../../../config/index.js";
 import {
@@ -66,9 +67,10 @@ const ObsidianGlobalSearchInputSchema = z
       .number()
       .int()
       .positive()
+      .max(500)
       .optional()
       .default(50)
-      .describe("Maximum number of result files per page. Defaults to 50."),
+      .describe("Maximum number of result files per page (up to 500). Defaults to 50."),
     page: z
       .number()
       .int()
@@ -114,6 +116,7 @@ export interface MatchContext {
 // Updated GlobalSearchResult to use formatted time strings and include numeric mtime for sorting
 export interface GlobalSearchResult {
   path: string;
+  diskPath?: string;
   filename: string;
   matches: MatchContext[];
   matchCount: number;
@@ -125,6 +128,7 @@ export interface GlobalSearchResult {
 
 export interface CompactGlobalSearchResult {
   path: string;
+  diskPath?: string;
   filename: string;
   matchCount: number;
   modifiedTime: string;
@@ -529,10 +533,14 @@ export const processObsidianGlobalSearch = async (
   });
 
   const paginatedResults = allFilteredResults.slice(startIndex, endIndex);
+  if (!apiFailedOrTimedOut) {
+    await addLiveDiskPaths(config.obsidianVaultPath, paginatedResults);
+  }
   const responseResults =
     params.responseMode === "compact"
       ? paginatedResults.map((result) => ({
           path: result.path,
+          ...(result.diskPath !== undefined ? { diskPath: result.diskPath } : {}),
           filename: result.filename,
           matchCount: result.matchCount,
           modifiedTime: result.modifiedTime,

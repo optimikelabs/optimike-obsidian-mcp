@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Live JSON note reads and frontmatter key reads use the YAML from the same Local REST response when cached properties disagree. They signal affected keys with `metadataCacheStale` and require no additional REST request (#230).
 
+- Live compact listings and global search results include a vault-relative `diskPath` when a single local spelling with U+00A0 or U+202F differs from the Obsidian path.
+
 - `obsidian_read_note` accepts existing paths containing U+00A0, U+202F or decomposed Unicode. `obsidian_list_notes` accepts these folder spellings, and filesystem-backed reads and compact listings include `diskPath` when the physical spelling differs from the returned vault path (#231).
 
 - `bases_query` rejects unsupported request filter nodes before selecting rows and reports their position. A bare string yields `VALIDATION_ERROR`. Bases Bridge 1.3.1 applies property tables with the same operators as the headless scanner. Upgrade the Bridge to use property tables over REST. (#211)
