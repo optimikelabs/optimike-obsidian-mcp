@@ -93,9 +93,9 @@ await assert.rejects(
       { requestId: "m2-test" },
       undefined,
     ),
-  /requires a live Obsidian Desktop metadata cache/u,
+  { code: "SERVICE_UNAVAILABLE", message: "Note links require Obsidian Desktop or the shared filesystem cache." },
 );
 
 console.log(
-  "PASS: M2 note-links MCP projection is live-only, bounded and preserves honest cache freshness",
+  "PASS: M2 note-links forwards the live contract and refuses calls without a usable backend",
 );

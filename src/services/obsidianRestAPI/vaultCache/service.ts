@@ -13,6 +13,7 @@ import path from "node:path";
 import { config } from "../../../config/index.js";
 import {
   createVaultExclusionMatcher,
+  DEFAULT_VAULT_EXCLUDE_PATTERNS,
   isVaultPathExcluded,
   normalizeVaultRelativePath,
 } from "../../vaultExclusions.js";
@@ -157,6 +158,7 @@ export class VaultCacheService {
   private readonly db: DatabaseSync;
   private readonly markdownLinks?: MarkdownLinkIndex;
   private readonly filesystemIndexScope?: string;
+  private readonly technicalExclusions = createVaultExclusionMatcher(DEFAULT_VAULT_EXCLUDE_PATTERNS);
   private checkedFilesystemVersion?: number;
   private readonly vaultExclusionMatcher = createVaultExclusionMatcher(
     config.obsidianVaultExcludePatterns,
@@ -189,13 +191,13 @@ export class VaultCacheService {
     if (!obsidianService && config.obsidianRuntimeMode.startsWith("headless-")) {
       this.markdownLinks = new MarkdownLinkIndex(this.db);
       this.filesystemIndexScope = createHash("sha256").update(JSON.stringify([
-        getVaultRoot(), config.obsidianVaultExcludePatterns,
+        "path-targets-v2", getVaultRoot(), config.obsidianVaultExcludePatterns,
       ])).digest("hex");
     }
     this.ensureMetadata();
     this.loadMetadataSnapshot();
     if (this.markdownLinks && this.isCacheReady) {
-      this.isCacheReady = this.verifyFilesystemIndex();
+      this.isCacheReady = this.hasFilesystemIndexScope();
     }
     logger.info(
       "VaultCacheService initialized with persistent shared store.",
@@ -450,14 +452,11 @@ export class VaultCacheService {
     if (!normalized) {
       throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Expected a vault-relative Markdown note path.", context);
     }
-    if (!this.isReady()) {
-      await this.buildVaultCache();
-      await this.waitUntilReady();
-    }
+    if (this.refreshRun) await this.refreshRun;
+    if (!this.isReady()) await this.buildVaultCache();
     if (this.isReady() && this.markdownLinks && !this.verifyFilesystemIndex()) {
-      // Another process can write REST rows and its own refresh marker to this DB.
-      // Reconcile the whole graph because changed backlink sources can be anywhere.
-      await this.refreshCache(true);
+      if (!this.hasFilesystemIndexScope()) await this.refreshCache(true);
+      else await this.reconcileFilesystemIndex();
     }
     if (!this.isReady() || !this.markdownLinks || !this.verifyFilesystemIndex()) {
       throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Shared filesystem cache reconciliation is incomplete.", context);
@@ -528,12 +527,36 @@ export class VaultCacheService {
     const version = this.db.prepare("PRAGMA data_version").get()!.data_version as number;
     if (version === this.checkedFilesystemVersion) return true;
     this.contentHotCache.clear();
-    if (this.readMetadataValue("last_refresh_source") !== "filesystem" ||
-        this.readMetadataValue("refresh_state") !== "complete" ||
-        this.readMetadataValue("filesystem_link_inventory") !== this.filesystemIndexScope ||
-        !this.markdownLinks.coversCache()) return false;
+    if (this.readMetadataValue("refresh_state") !== "complete" ||
+        !this.hasFilesystemIndexScope() ||
+        !this.markdownLinks.coversCache(this.acceptFilesystemSource)) return false;
     if (remember) this.checkedFilesystemVersion = version;
     return true;
+  }
+
+  private hasFilesystemIndexScope(): boolean {
+    return this.filesystemIndexScope !== undefined &&
+      this.readMetadataValue("filesystem_link_inventory") === this.filesystemIndexScope;
+  }
+
+  private readonly acceptFilesystemSource = (filePath: string): boolean =>
+    !!normalizedCacheFilePath(filePath) &&
+    !isVaultPathExcluded(filePath, this.technicalExclusions) &&
+    !isVaultPathExcluded(filePath, this.vaultExclusionMatcher);
+
+  private async reconcileFilesystemIndex(): Promise<void> {
+    await this.serializeCacheWrite(async () => {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        if (this.hasFilesystemIndexScope() && this.readMetadataValue("refresh_state") === "complete") {
+          this.markdownLinks?.reconcileCachedRows(this.acceptFilesystemSource);
+        }
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    });
   }
 
   /** Legacy post-write callers do not reinterpret a cache failure as a failed mutation. */
@@ -819,7 +842,7 @@ export class VaultCacheService {
     }
 
     if (this.markdownLinks) {
-      isInitialBuild ||= !this.verifyFilesystemIndex();
+      isInitialBuild ||= !this.hasFilesystemIndexScope();
       this.checkedFilesystemVersion = undefined;
     }
 
@@ -846,10 +869,10 @@ export class VaultCacheService {
       this.upsertMetadataValue("refresh_state", "building");
       const startTime = Date.now();
       const refreshSource = await this.pickRefreshSource();
-      const excludedTargets = this.markdownLinks ? [] as string[] : undefined;
+      const pathTargets = this.markdownLinks ? [] as string[] : undefined;
       const remoteFiles =
         refreshSource === "filesystem"
-          ? await this.listAllMarkdownFilesFromFilesystem(context, excludedTargets)
+          ? await this.listAllMarkdownFilesFromFilesystem(context, pathTargets)
           : await this.listAllMarkdownFiles("/", context);
       const remoteFileSet = new Set(remoteFiles);
       const cachedFileSet = new Set(this.metadataCache.keys());
@@ -992,8 +1015,9 @@ export class VaultCacheService {
         this.upsertMetadataValue("refresh_state", this.isCacheReady
           ? (this.eventWorkPending ? "pending-events" : "complete") : "incomplete");
         if (this.isCacheReady) {
-          if (this.markdownLinks && excludedTargets && this.filesystemIndexScope && refreshSource === "filesystem") {
-            this.markdownLinks.replaceExcludedTargets(excludedTargets);
+          if (this.markdownLinks && pathTargets && this.filesystemIndexScope && refreshSource === "filesystem") {
+            this.markdownLinks.reconcileCachedRows(this.acceptFilesystemSource);
+            this.markdownLinks.replacePathTargets(pathTargets);
             this.upsertMetadataValue("filesystem_link_inventory", this.filesystemIndexScope);
           }
           this.upsertMetadataValue("last_refresh_at", String(Date.now()));
@@ -1270,7 +1294,7 @@ export class VaultCacheService {
 
   private async listAllMarkdownFilesFromFilesystem(
     context: RequestContext,
-    excludedTargets?: string[],
+    pathTargets?: string[],
   ): Promise<string[]> {
     const vaultRoot = getVaultRoot();
     if (!vaultRoot) {
@@ -1301,12 +1325,13 @@ export class VaultCacheService {
         const excluded = isVaultPathExcluded(relativePath, this.vaultExclusionMatcher);
         const fullPath = path.join(directory, entry.name);
         if (entry.isDirectory()) {
-          const excludedHiddenDirectory = entry.name.startsWith(".") &&
-            isVaultPathExcluded(relativePath + "/__cache_probe__.md", this.vaultExclusionMatcher);
-          if (excludedTargets ? !excludedHiddenDirectory : !excluded) await walk(fullPath);
-        } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
-          const notePath = vaultRelativePathFromAbsolute(fullPath, vaultRoot);
-          (excluded ? excludedTargets : markdownFiles)?.push(notePath);
+          const technical = isVaultPathExcluded(relativePath + "/__cache_probe__.md", this.technicalExclusions);
+          if (pathTargets ? !technical : !excluded) await walk(fullPath);
+        } else if (entry.isFile()) {
+          const filePath = vaultRelativePathFromAbsolute(fullPath, vaultRoot);
+          if (pathTargets && isVaultPathExcluded(relativePath, this.technicalExclusions)) continue;
+          if (!excluded && entry.name.toLowerCase().endsWith(".md")) markdownFiles.push(filePath);
+          else pathTargets?.push(filePath);
         }
       }
     };

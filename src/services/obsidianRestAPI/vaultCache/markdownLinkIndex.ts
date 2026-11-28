@@ -17,7 +17,7 @@ function coverage(total: number, returned: number) {
 
 type LinkCount = { link_path: string; count: number };
 type Target = { path: string; ambiguous?: true };
-const INDEX_REVISION = "v2:";
+const INDEX_REVISION = "v3:";
 
 /** Store unresolved spellings on disk; resolve against the current file set at read time.
  * Adding/removing an ambiguous destination can then affect unchanged sources. */
@@ -80,15 +80,30 @@ export class MarkdownLinkIndex {
     `);
   }
 
-  coversCache(): boolean {
-    return !this.db.prepare(`
-      SELECT 1 FROM file_cache AS file
+  coversCache(acceptPath: (path: string) => boolean): boolean {
+    const rows = this.db.prepare(`
+      SELECT file.path FROM file_cache AS file
       LEFT JOIN markdown_link_files AS indexed USING(path)
-      WHERE indexed.hash IS NULL OR indexed.hash <> ? || file.hash LIMIT 1
-    `).get(INDEX_REVISION);
+      WHERE indexed.hash IS NULL OR indexed.hash <> ? || file.hash
+    `);
+    for (const row of rows.iterate(INDEX_REVISION)) {
+      if (acceptPath(row.path as string)) return false;
+    }
+    return true;
   }
 
-  replaceExcludedTargets(paths: readonly string[]): void {
+  reconcileCachedRows(acceptPath: (path: string) => boolean): void {
+    const rows = this.db.prepare(`
+      SELECT file.path, file.hash, file.content FROM file_cache AS file
+      LEFT JOIN markdown_link_files AS indexed USING(path)
+      WHERE indexed.hash IS NULL OR indexed.hash <> ? || file.hash
+    `);
+    for (const row of rows.iterate(INDEX_REVISION)) {
+      if (acceptPath(row.path as string)) this.update(row.path as string, row.hash as string, row.content as string);
+    }
+  }
+
+  replacePathTargets(paths: readonly string[]): void {
     this.db.exec("DELETE FROM markdown_link_excluded_targets");
     const insert = this.db.prepare("INSERT INTO markdown_link_excluded_targets VALUES (?, ?, ?)");
     for (const filePath of paths) insert.run(filePath, filePath.toLowerCase(), basenameKey(filePath));
@@ -134,14 +149,22 @@ export class MarkdownLinkIndex {
 
   private resolve(source: string, linkPath: string): Target | undefined {
     if (!linkPath) return { path: source };
-    const target = markdownPath(linkPath);
+    const basename = basenameKey(linkPath);
+    const extension = path.posix.extname(linkPath).toLowerCase();
+    if (extension && extension !== ".md") {
+      const attachment = this.resolvePath(source, linkPath, basename);
+      if (attachment) return attachment;
+    }
+    return this.resolvePath(source, markdownPath(linkPath), basename);
+  }
+
+  private resolvePath(source: string, target: string, basename: string): Target | undefined {
     if (target.startsWith("/")) return this.explicitTarget(path.posix.normalize(target));
     const relative = path.posix.normalize(path.posix.join(path.posix.dirname(source).slice(1), target));
     const local = relative.startsWith("../") ? undefined : "/" + relative;
     if (target.startsWith("./") || target.startsWith("../")) return local ? this.explicitTarget(local) : undefined;
     const normalized = path.posix.normalize(target);
     if (normalized.startsWith("../")) return local ? this.explicitTarget(local) : undefined;
-    const basename = basenameKey(normalized);
     return this.chooseTarget(this.filesByBasename.iterate(basename, basename), local, "/" + normalized.toLowerCase());
   }
 

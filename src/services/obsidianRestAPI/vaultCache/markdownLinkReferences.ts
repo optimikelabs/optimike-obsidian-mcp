@@ -20,30 +20,38 @@ function parseMarkdown(source: string) {
   return fromMarkdown(source, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] });
 }
 
-function* walk(root: Nodes): IterableIterator<Nodes> {
-  const pending = [root];
+function* walk(root: Nodes): IterableIterator<{ node: Nodes; parent: Nodes }> {
+  const pending = [{ node: root, parent: root }];
   while (pending.length) {
-    const node = pending.pop()!;
-    yield node;
+    const entry = pending.pop()!;
+    const { node } = entry;
+    yield entry;
     if ("children" in node) {
-      for (let i = node.children.length - 1; i >= 0; i--) pending.push(node.children[i]);
+      for (let i = node.children.length - 1; i >= 0; i--) pending.push({ node: node.children[i], parent: node });
     }
   }
 }
 
 function opaqueSpans(root: Nodes, source: string): Span[] {
   const spans: Span[] = [];
-  const openTags = new Map<string, number[]>();
-  for (const node of walk(root)) {
+  const destinations: Span[] = [];
+  const tagsByParent = new WeakMap<Nodes, Map<string, number[]>>();
+  for (const { node, parent } of walk(root)) {
     const start = node.position?.start.offset;
     const end = node.position?.end.offset;
     if (start === undefined || end === undefined) continue;
     if (node.type === "code" || node.type === "inlineCode") {
       spans.push({ start, end });
+    } else if (node.type === "link") {
+      destinations.push({ start: node.children.at(-1)?.position?.end.offset ?? start, end });
+    } else if (node.type === "image" || node.type === "definition") {
+      destinations.push({ start, end });
     } else if (node.type === "html") {
       spans.push({ start, end });
       const tag = htmlTag.exec(node.value);
       if (!tag || node.value.endsWith("/>")) continue;
+      const openTags = tagsByParent.get(parent) ?? new Map<string, number[]>();
+      tagsByParent.set(parent, openTags);
       const name = tag[2].toLowerCase();
       if (tag[1]) {
         const open = openTags.get(name)?.pop();
@@ -57,6 +65,7 @@ function opaqueSpans(root: Nodes, source: string): Span[] {
   }
   const codeOrHtml = spanFilter(spans.sort((a, b) => a.start - b.start));
   if (!source.includes("$")) return spans;
+  const inDestination = spanFilter(destinations.sort((a, b) => a.start - b.start));
   const formulas: Span[] = [];
   let opener: { start: number; width: number } | undefined;
   let escapedAt = -1;
@@ -72,12 +81,14 @@ function opaqueSpans(root: Nodes, source: string): Span[] {
     const start = match.index;
     if (start === escapedAt) continue;
     const width = match[2].length;
-    if (width > 2 || codeOrHtml(start, start + width)) continue;
-    if (!opener) {
-      opener = { start, width };
-    } else if (opener.width === width) {
+    if (width > 2 || codeOrHtml(start, start + width) || inDestination(start, start + width)) continue;
+    const next = source[start + width] ?? "";
+    const previous = source[start - 1] ?? "";
+    if (opener?.width === width && (width === 2 || (/\S/u.test(previous) && !/\d/u.test(next)))) {
       formulas.push({ start: opener.start, end: start + width });
       opener = undefined;
+    } else if (!opener && (width === 2 || /\S/u.test(next))) {
+      opener = { start, width };
     }
   }
   return spans.concat(formulas).sort((a, b) => a.start - b.start);
@@ -86,8 +97,8 @@ function opaqueSpans(root: Nodes, source: string): Span[] {
 /** Call with increasing start offsets. */
 function spanFilter(spans: readonly Span[]) {
   let cursor = 0;
-  return (start: number, end: number) => {
-    while (cursor < spans.length && spans[cursor].end <= start) cursor++;
+  return (start: number, end: number, ignoreBefore = 0) => {
+    while (cursor < spans.length && (spans[cursor].end <= start || spans[cursor].start < ignoreBefore)) cursor++;
     return cursor < spans.length && spans[cursor].start < end;
   };
 }
@@ -99,7 +110,7 @@ function maskComments(body: string, opaque: readonly Span[]): string {
   let consumed = 0;
   for (const { index } of body.matchAll(/(?<!\\)%%/gu)) {
     if (open === undefined) {
-      if (!blocksOpener(index, index + 2)) open = index;
+      if (!blocksOpener(index, index + 2, consumed)) open = index;
       continue;
     }
     const end = index + 2;
@@ -117,6 +128,10 @@ function maskComments(body: string, opaque: readonly Span[]): string {
     chunks.push(body.slice(consumed, open), lines.join(""));
     open = undefined;
     consumed = end;
+  }
+  if (open !== undefined) {
+    chunks.push(body.slice(consumed, open), body.slice(open).replace(/[^\r\n]/g, " "));
+    return chunks.join("");
   }
   return consumed ? chunks.join("") + body.slice(consumed) : body;
 }
@@ -183,7 +198,7 @@ export function extractMarkdownLinkReferences(content: string): MarkdownLinkRefe
   const located: Array<{ start: number; end: number; reference: MarkdownLinkReference }> = [];
   const definitions = new Map<string, Definition>();
   const indirectLinks: Array<Extract<Nodes, { type: "linkReference" | "imageReference" }>> = [];
-  for (const node of walk(root)) {
+  for (const { node } of walk(root)) {
     const start = node.position?.start.offset;
     const end = node.position?.end.offset;
     if (start !== undefined && end !== undefined) {

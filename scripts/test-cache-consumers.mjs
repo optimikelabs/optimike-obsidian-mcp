@@ -23,6 +23,15 @@ test('comment delimiters in code leave adjacent links visible',()=>{
 test('math and HTML hide links while adjacent Markdown remains visible',()=>{
  assert.deepEqual(linkTexts('$[[InlineMath]]$ <span>[[InlineHtml]] [x](Hidden.md)</span> [[Visible]]\n\n$$\n[[BlockMath]]\n$$\n\n<div>\n[[BlockHtml]]\n</div>'),['Visible']);
 });
+test('currency and dollars in link destinations do not open or close math',()=>{
+ assert.deepEqual(['Costs $5 and [[Money]] then $10','$5 [[V]] $6','[a](A$1.md) [[V]] [b](B$2.md)'].map(linkTexts),[['Money'],['V'],['A$1.md','V','B$2.md']]);
+});
+test('unpaired inline HTML is scoped to its paragraph',()=>{
+ assert.deepEqual(linkTexts('a <span>x\n\n[[P2]]\n\n</span> [[V]]'),['P2','V']);
+});
+test('comment fences cannot shield later comments, including an open comment at EOF',()=>{
+ assert.deepEqual(linkTexts('%%\n```js\nx\n%%\n[[Visible]]\n%% [[Hidden]] %%\n%% [[EOF]]'),['Visible']);
+});
 
 test('filesystem links preserve observations and reconcile edits, destination ambiguity, and restart', async () => {
  const vault=fs.mkdtempSync(path.join(root,'links-'));
@@ -41,7 +50,7 @@ test('filesystem links preserve observations and reconcile edits, destination am
   '[[ada#Life|Lovelace]] ![[../B/Shared]] [encoded](../Space%20Name.md#Shown%20Here)',
   '[[#Local]] [[Shared]] [[Gone#a]] [[Gone#b]] [[Gone]] `[[Code]]` %% [[Comment]] %%',
   '[[./Shared]] [[A/Shared]] [reference][note]',
-  '![](img.png) [short](Another) [[Private/Target]]',
+  '![](img.png) ![](missing.png) [short](Another) [[Private/Target]] [[README]]',
   '', '[note]: ../Space%20Name.md',
  ].join('\r\n');
  write('Notes/Source.md',source);
@@ -52,6 +61,8 @@ test('filesystem links preserve observations and reconcile edits, destination am
  write('Space Name.md');
  write('Another.md','[[Notes/People/Ada]] [[Notes/People/Ada]]');
  write('Private/Target.md','[[Notes/People/Ada]]');
+ write('node_modules/pkg/README.md');
+ write('img.png');
  // Populate a cache from before the filesystem link index existed.
  config.obsidianRuntimeMode='hybrid';
  let cache=new VaultCacheService();
@@ -63,6 +74,7 @@ test('filesystem links preserve observations and reconcile edits, destination am
   config.obsidianRuntimeMode='headless-readonly';
   cache=new VaultCacheService();
   assert.equal(cache.isReady(),false);
+  cache.waitUntilReady=()=>{ throw new Error('headless reads must await reconciliation, never a readiness deadline'); };
   const result=await read('Notes/Source.md');
   assert.equal(result.path,'Notes/Source.md');
   assert.equal(result.provenance.sourceMetadata,'filesystem');
@@ -80,13 +92,15 @@ test('filesystem links preserve observations and reconcile edits, destination am
    ['link','./Shared',null,null,null],
    ['link','A/Shared','A/Shared.md',null,null],
    ['link','../Space Name.md','Space Name.md','reference',null],
-   ['embed','img.png',null,null,null],
+   ['embed','img.png','img.png',null,null],
+   ['embed','missing.png',null,null,null],
    ['link','Another','Another.md','short',null],
    ['link','Private/Target','Private/Target.md',null,null],
+   ['link','README',null,null,null],
   ]);
   assert.deepEqual(result.outgoing[1].position.start,{line:3,col:0,offset:source.indexOf('[[ada')});
   assert.deepEqual(result.outgoing[1].subpathValidation,{status:'unknown',reason:'target_cache_unavailable'});
-  assert.deepEqual(result.unresolved,[{linkText:'./Shared',count:1},{linkText:'Gone',count:3},{linkText:'img.png',count:1}]);
+  assert.deepEqual(result.unresolved,[{linkText:'./Shared',count:1},{linkText:'Gone',count:3},{linkText:'README',count:1},{linkText:'missing.png',count:1}]);
   assert.deepEqual(result.outgoing.find(({linkText})=>linkText==='Shared').resolution,{status:'resolved',targetPath:'A/Shared.md',ambiguous:true});
   await assert.rejects(read('Private/Target.md'),(error)=>error.code==='NOT_FOUND');
   assert.deepEqual((await read('Notes/People/Ada.md')).backlinks,[
@@ -96,8 +110,8 @@ test('filesystem links preserve observations and reconcile edits, destination am
   assert.deepEqual(bounded.backlinks,[{sourcePath:'Another.md',count:2}]);
   assert.deepEqual(bounded.coverage.backlinks,{available:true,total:2,returned:1,truncated:true});
   const boundedSource=await read('Notes/Source.md',1);
-  assert.deepEqual(boundedSource.coverage.outgoing,{available:true,total:15,returned:1,truncated:true});
-  assert.deepEqual(boundedSource.coverage.unresolved,{available:true,total:3,returned:1,truncated:true});
+  assert.deepEqual(boundedSource.coverage.outgoing,{available:true,total:17,returned:1,truncated:true});
+  assert.deepEqual(boundedSource.coverage.unresolved,{available:true,total:4,returned:1,truncated:true});
   await assert.rejects(read('Missing.md'),(error)=>error.code==='NOT_FOUND');
   await assert.rejects(read('Notes/../Another.md'),(error)=>error.code==='VALIDATION_ERROR');
 
@@ -114,22 +128,25 @@ test('filesystem links preserve observations and reconcile edits, destination am
   assert.equal(cache.isReady(),true);
   assert.deepEqual((await read('Notes/Shared.md')).backlinks,[{sourcePath:'Notes/Source.md',count:2}]);
 
+  let restContent='[[Notes/Shared]]';
   const rest=new VaultCacheService({
-   listFiles:async()=>['Another.md'],
+   listFiles:async()=>['A/Shared.md','Notes/Source.md','Notes/People/Ada.md','Notes/Shared.md','Space Name.md','Another.md'],
    getFileMetadata:async()=>({ctime:1,mtime:2,size:1}),
-   getFileContent:async()=>({path:'Another.md',content:'[[Notes/Shared]]',stat:{ctime:1,mtime:2,size:1}}),
+   getFileContent:async(p)=>({path:p,content:p==='/Another.md'?restContent:fs.readFileSync(file(p.slice(1)),'utf8'),stat:{ctime:1,mtime:2,size:1}}),
   });
   try {
+   cache.readCacheRow=()=>{ throw new Error('shared-cache reconciliation must not open disk notes'); };
    config.obsidianCacheSource='rest';
    await rest.refreshCache(true);
    assert.equal(cache.getStats().refreshSource,'rest');
    config.obsidianCacheSource='filesystem';
-   assert.deepEqual((await read('Notes/Shared.md')).backlinks,[{sourcePath:'Notes/Source.md',count:2}]);
+   assert.deepEqual((await read('Notes/Shared.md')).backlinks,[{sourcePath:'Another.md',count:1},{sourcePath:'Notes/Source.md',count:2}]);
    config.obsidianCacheSource='rest';
+   restContent='Changed through Local REST.';
    assert.deepEqual(await rest.updateFileVerified('Another.md',context),{ok:true,disposition:'updated'});
-   assert.equal(cache.getStats().refreshSource,'filesystem');
+   assert.equal(cache.getStats().refreshSource,'rest');
    config.obsidianCacheSource='filesystem';
-   assert.equal(await cache.readFilesystemNoteContent('Another.md',context),'Changed content with no links.');
+   assert.equal(await cache.readFilesystemNoteContent('Another.md',context),restContent);
    assert.deepEqual((await read('Notes/Shared.md')).backlinks,[{sourcePath:'Notes/Source.md',count:2}]);
   } finally {
    await rest.close();

@@ -97,11 +97,13 @@ for (const family of cycle.expectedSurface.threeMemberFamilies) {
   assert.deepEqual(governedLifecycleRoles(family), ["plan", "apply", "status"]);
 }
 const nonLiveModes = ["hybrid-degraded", "headless-readonly", "headless-guarded", "headless-filesystem"];
+const milestoneNames = new Set(cycle.milestones.flatMap(({ tools }) => tools));
 for (const registrationMode of nonLiveModes) {
   const nonLive = compileToolNames({ registrationMode, availableStaticRequirements: ["vault-cache"] });
-  for (const m of cycle.milestones) {
-    for (const name of m.tools) assert.ok(!nonLive.includes(name), `${name} must remain live-only; leaked into ${registrationMode}`);
-  }
+  assert.deepEqual(nonLive.filter((name) => milestoneNames.has(name)),
+    registrationMode.startsWith("headless-") ? expectedMilestoneTools.M2 : [], registrationMode);
+  const withoutCache = compileToolNames({ registrationMode, availableStaticRequirements: [] });
+  assert.deepEqual(withoutCache.filter((name) => milestoneNames.has(name)), [], `${registrationMode} without cache`);
 }
 assert.deepEqual(json("evals/tool-catalog.v1.json"), buildCatalog(), "Regenerate stale tool catalogue");
 const requiredContracts = [

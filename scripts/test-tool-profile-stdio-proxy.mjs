@@ -104,7 +104,7 @@ try {
   const implicit = await openProxy(vault, port);
   try {
     const names = (await implicit.listTools()).tools.map((tool) => tool.name);
-    assert.equal(names.length, 9);
+    assertHeadlessProfileNames(names, "standard");
     assert.ok(names.includes("smart_semantic_search"));
     assert.ok(!names.includes("external_read"));
   } finally {
@@ -115,7 +115,7 @@ try {
   try {
     const result = await standard.listTools();
     const names = result.tools.map((tool) => tool.name);
-    assert.equal(names.length, 9);
+    assertHeadlessProfileNames(names, "standard");
     assert.ok(names.includes("smart_semantic_search"));
     assert.ok(!names.includes("smart_search"));
     assert.ok(!names.includes("smart-search"));
@@ -149,7 +149,7 @@ try {
   try {
     const result = await tasks.listTools();
     const names = result.tools.map((tool) => tool.name);
-    assert.equal(names.length, 14);
+    assertHeadlessProfileNames(names, "tasks");
     assert.ok(names.includes("operon_status"));
     assert.ok(names.includes("operon_get_configuration"));
     assert.ok(names.includes("operon_list_tasks"));

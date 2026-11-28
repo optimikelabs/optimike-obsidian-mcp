@@ -109,7 +109,7 @@ try {
     });
     sessions.push(client);
     await client.connect(transport);
-    assert.equal((await client.listTools()).tools.length, 9);
+    assertHeadlessProfileNames((await client.listTools()).tools.map(({ name }) => name), "standard");
     await client.close();
   }
   // Raw frames prove metadata is revalidated; the SDK client normally fills it.
@@ -150,11 +150,7 @@ try {
       rawChild.stdin.write(JSON.stringify(body) + "\n");
     });
   const first = await exchange(envelope("tools/list", {}, 1));
-  assert.equal(
-    first.result.tools.length,
-    9,
-    "modern tools/list requires no initialize and no prior discovery",
-  );
+  assertHeadlessProfileNames(first.result.tools.map(({ name }) => name), "standard");
   const missing = envelope("tools/list", {}, 2);
   delete missing.params._meta[prefix + "clientCapabilities"];
   assert.equal(
@@ -166,7 +162,7 @@ try {
   invalid.params._meta[prefix + "protocolVersion"] = "2099-01-01";
   assert.equal((await exchange(invalid)).error.code, -32022);
   const after = await exchange(envelope("tools/list", {}, 4));
-  assert.equal(after.result.tools.length, 9);
+  assertHeadlessProfileNames(after.result.tools.map(({ name }) => name), "standard");
   assert.equal(stdoutError, undefined, "stdout is JSON-RPC only");
   const rawExit = new Promise((resolve) => rawChild.once("exit", resolve));
   rawChild.stdin.end();
