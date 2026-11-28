@@ -1,23 +1,22 @@
 import path from "node:path";
 import * as chrono from "chrono-node";
-import {
-  add,
-  addDays,
-  addMonths,
-  addWeeks,
-  addYears,
-  endOfISOWeek,
-  endOfMonth,
-  endOfYear,
-  format as formatDate,
-  startOfISOWeek,
-  startOfMonth,
-  startOfYear,
-  subDays,
-  subMonths,
-  subWeeks,
-  subYears,
-} from "date-fns";
+// The package entry loads unrelated date helpers before the server can listen.
+import { add } from "date-fns/add";
+import { addDays } from "date-fns/addDays";
+import { addMonths } from "date-fns/addMonths";
+import { addWeeks } from "date-fns/addWeeks";
+import { addYears } from "date-fns/addYears";
+import { endOfISOWeek } from "date-fns/endOfISOWeek";
+import { endOfMonth } from "date-fns/endOfMonth";
+import { endOfYear } from "date-fns/endOfYear";
+import { format as formatDate } from "date-fns/format";
+import { startOfISOWeek } from "date-fns/startOfISOWeek";
+import { startOfMonth } from "date-fns/startOfMonth";
+import { startOfYear } from "date-fns/startOfYear";
+import { subDays } from "date-fns/subDays";
+import { subMonths } from "date-fns/subMonths";
+import { subWeeks } from "date-fns/subWeeks";
+import { subYears } from "date-fns/subYears";
 
 export interface Task {
   id: string;
