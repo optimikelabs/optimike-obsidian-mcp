@@ -617,6 +617,7 @@ try {
 
   const baseQuery = await callTool(clientB, backend.baseUrl, "bases_query", {
     base_id: "Pilot.base",
+    property_only: true,
     filter: { type: "pilot" },
     sort: [{ prop: "file.name", dir: "asc" }],
     limit: 10,

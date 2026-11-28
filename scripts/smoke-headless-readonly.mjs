@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import "./test-support/isolated-state.mjs";
+import assert from "node:assert/strict";
 import {
   mkdtemp,
   rm,
@@ -132,7 +134,7 @@ async function createTempVault() {
       '  priority_label: \'if(priority, "P" + priority.toString(), "")\'',
       "filters:",
       "  and:",
-      "    - 'file.ext == \"md\"'",
+      "    - 'type == \"project\"'",
       "views:",
       "  - type: table",
       "    name: Active",
@@ -147,6 +149,16 @@ async function createTempVault() {
     ].join("\n"),
     "utf8",
   );
+  for (const [name, yaml] of [
+    ["Plain", "views:\n  - type: table\n    name: Plain\n"],
+    ["Filtered", "filters: 'type == \"project\"'\n"],
+    ["ViewFiltered", "views:\n  - type: table\n    name: Projects\n    filters: 'type == \"project\"'\n"],
+    ["ViewLimited", "views:\n  - type: table\n    name: First\n    limit: 1\n"],
+    ["ViewOrdered", "views:\n  - type: table\n    name: Ordered\n    order: [file.name]\n"],
+    ["Formulas", "formulas:\n  score: '1 + 1'\n"],
+  ]) {
+    await writeFile(path.join(vaultRoot, `${name}.base`), yaml, "utf8");
+  }
   await writeFile(
     path.join(vaultRoot, "Canvases", "Flow.canvas"),
     JSON.stringify(
@@ -219,6 +231,33 @@ async function main() {
       if (request.method === "GET" && request.url === "/vault/Projects/") {
         response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ files: ["Headless.md"] }));
+        return;
+      }
+      if (request.method === "POST" && request.url === "/bases/Smoke.base/query") {
+        const chunks = [];
+        for await (const chunk of request) chunks.push(chunk);
+        const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        response.setHeader("content-type", "application/json");
+        if (
+          payload.view !== "Active" ||
+          payload.evaluate !== true ||
+          "property_only" in payload
+        ) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: "Unexpected Bases query request" }));
+          return;
+        }
+        response.end(JSON.stringify({
+          source: "engine",
+          evaluate: true,
+          total: 1,
+          page: 1,
+          rows: [{
+            file: { path: "Projects/Headless.md", name: "Headless" },
+            props: { type: "project" },
+            computed: { priority_label: "P1" },
+          }],
+        }));
         return;
       }
       if (request.url?.startsWith("/vault/")) {
@@ -499,6 +538,20 @@ async function main() {
       "obsidian_runtime_maintenance",
       "obsidian_validate_format",
     ];
+    if (modeArg === "hybrid-live") {
+      const result = await withTimeout(
+        client.callTool({
+          name: "bases_query",
+          arguments: { base_id: "Smoke.base", view: "Active", property_only: true },
+        }),
+        "live Bases query preserves REST evaluation and does not forward the local opt-in",
+      );
+      assert.equal(result.isError, false);
+      const payload = jsonOf(result, "live Bases query");
+      assert.equal(payload.source, "engine");
+      assert.deepEqual(payload.rows[0].computed, { priority_label: "P1" });
+    }
+
     if (
       ["headless-readonly", "headless-guarded", "headless-filesystem"].includes(
         modeArg,
@@ -731,21 +784,48 @@ async function main() {
       assertTextIncludes(schema, "local-fallback", "bases schema");
       assertTextIncludes(schema, "file.name", "bases schema");
 
-      const query = await withTimeout(
-        client.callTool({
-          name: "bases_query",
-          arguments: {
-            base_id: "Smoke.base",
-            filter: { type: "root" },
-            sort: [{ prop: "file.name", dir: "asc" }],
-            limit: 10,
-            page: 1,
-          },
-        }),
-        "bases query",
-      );
-      assertTextIncludes(query, "local-fallback", "bases query");
-      assertTextIncludes(query, "Root.md", "bases query");
+      for (const [regression, args] of [
+        ["requested view cannot silently become a vault-wide scan", { base_id: "Plain.base", view: "Plain" }],
+        ["top-level scalar filter cannot be ignored", { base_id: "Filtered.base" }],
+        ["the default view's filter cannot be ignored", { base_id: "ViewFiltered.base" }],
+        ["the default view's limit cannot be ignored", { base_id: "ViewLimited.base" }],
+        ["the default view's order cannot be ignored without a request sort", { base_id: "ViewOrdered.base" }],
+        ["explicit evaluation cannot silently be disabled", { base_id: "Plain.base", evaluate: true }],
+        ["configured formulas cannot silently disappear", { base_id: "Formulas.base" }],
+        ["formula filters cannot silently match against missing values", { base_id: "Plain.base", filter: { "formula.score": 2 } }],
+        ["formula sorts cannot silently order missing values", { base_id: "Plain.base", sort: [{ prop: "formula.score" }] }],
+      ]) {
+        const result = await withTimeout(
+          client.callTool({ name: "bases_query", arguments: args }),
+          regression,
+        );
+        assert.equal(result.isError, true, regression);
+        const payload = jsonOf(result, regression);
+        assert.equal(payload.error.code, "SERVICE_UNAVAILABLE", regression);
+        assert.match(payload.error.message, /Obsidian.*property_only/u, regression);
+        assert.equal(payload.rows, undefined, regression);
+      }
+
+      const propertyQuery = { filter: { type: "root" }, limit: 1 };
+      for (const [regression, args] of [
+        ["plain queries remain usable without any opt-in", { base_id: "Plain.base" }],
+        ["an opted-in scan returns Markdown outside the selected Base and labels it", {
+          base_id: "Smoke.base", view: "Active", evaluate: true, property_only: true,
+        }],
+      ]) {
+        const result = await withTimeout(
+          client.callTool({ name: "bases_query", arguments: { ...args, ...propertyQuery } }),
+          regression,
+        );
+        assert.equal(result.isError, false, regression);
+        const payload = jsonOf(result, regression);
+        assert.equal(payload.source, "local-fallback", regression);
+        assert.equal(payload.mode, "property-scan", regression);
+        assert.equal(payload.evaluate, false, regression);
+        assert.equal(payload.total, 1, regression);
+        assert.deepEqual(payload.rows.map((row) => row.file.path), ["/Root.md"], regression);
+        assert.ok(payload.limitations.length > 0, regression);
+      }
 
       const baseValidation = await withTimeout(
         client.callTool({

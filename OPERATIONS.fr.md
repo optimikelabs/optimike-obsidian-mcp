@@ -174,11 +174,17 @@ Le serveur final peut exposer des capacités différentes selon les plugins Obsi
 - Fallback local Bases
 
   - disponible en modes headless pour `bases_list`, `bases_get_schema` et `bases_query`
-  - renvoie `source: "local-fallback"`
-
-- supporte l’égalité directe, les arrays, `contains`, `in`, les comparaisons, le tri simple, la pagination et l’inspection de schéma
-
-  - n’évalue pas les formules, filtres plugin, propriétés calculées ni la sémantique exacte des vues UI
+  - sans l’API REST d’Obsidian, `bases_query` renvoie `SERVICE_UNAVAILABLE`
+    si la requête nécessite les filtres de la Base, les règles d’une vue,
+    des formules ou demande explicitement `evaluate: true`
+  - utiliser Obsidian avec le Bases Bridge pour ces requêtes, ou passer
+    `property_only: true` pour parcourir les propriétés Markdown en cache.
+    Une requête simple sans ces exigences fonctionne sans option supplémentaire
+  - le parcours renvoie `source: "local-fallback"`, `mode: "property-scan"`,
+    `evaluate: false` et `limitations`. Ses lignes et son total décrivent le
+    parcours Markdown, avec le filtre de propriétés, le tri et la pagination de la requête
+  - les filtres du parcours prennent en charge l’égalité directe, les tableaux,
+    `eq`, `ne`, `contains`, `in` et les comparaisons numériques
 
 - Smart Connections
   - requis pour la recherche sémantique

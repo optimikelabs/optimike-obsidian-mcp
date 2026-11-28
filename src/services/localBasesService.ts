@@ -54,6 +54,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function hasFilters(value: unknown): boolean {
+  if (isRecord(value)) return Object.keys(value).length > 0;
+  return Boolean(value);
+}
+
 function extractFrontmatter(content: string): Record<string, unknown> {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/u);
   if (!match) return {};
@@ -274,17 +279,43 @@ export class LocalBasesService {
 
   async queryBase(
     baseId: string,
-    request: BaseQueryRequest,
+    request: BaseQueryRequest & { property_only?: boolean },
     context: RequestContext,
   ): Promise<
-    Omit<BaseQueryResponse, "source" | "rows"> & {
+    BaseQueryResponse & {
       source: "local-fallback";
+      mode: "property-scan";
       rows: LocalBaseRow[];
       limitations: string[];
     }
   > {
-    await this.getParsedBase(baseId, context);
-    await ensureCacheReady(this.vaultCacheService);
+    const base = await this.getParsedBase(baseId, context);
+    const { filters, formulas, views } = base.config;
+    // The REST Bridge uses the first view when the caller omits `view`.
+    const defaultView = Array.isArray(views) ? views.find(isRecord) : undefined;
+    const usesDefaultViewOrder =
+      !request.sort?.length &&
+      ((Array.isArray(defaultView?.order) && defaultView.order.length > 0) ||
+        (Array.isArray(defaultView?.sort) && defaultView.sort.length > 0));
+    const usesFormulas =
+      (isRecord(formulas) && Object.keys(formulas).length > 0) ||
+      Object.keys(request.filter ?? {}).some((key) => key.startsWith("formula.")) ||
+      request.sort?.some(({ prop }) => prop.startsWith("formula."));
+    const requiresObsidian =
+      request.view !== undefined ||
+      request.evaluate === true ||
+      hasFilters(filters) ||
+      hasFilters(defaultView?.filters) ||
+      typeof defaultView?.limit === "number" ||
+      usesDefaultViewOrder ||
+      usesFormulas;
+    if (requiresObsidian && !request.property_only) {
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        "Base query requires Obsidian.",
+        { ...context, reasonCode: "base_query_requires_obsidian", retryable: false },
+      );
+    }
     const rows: LocalBaseRow[] = [];
 
     for (const entry of this.vaultCacheService.getEntriesByPrefix()) {
@@ -331,13 +362,15 @@ export class LocalBasesService {
 
     return {
       source: "local-fallback",
+      mode: "property-scan",
       evaluate: false,
       total: filtered.length,
       page,
       rows: paged,
       limitations: [
+        "Rows and total describe cached Markdown notes matched by the request's property filter.",
         "Local fallback supports direct equality plus simple eq/ne/in/contains/gt/gte/lt/lte filters.",
-        "Base-level filters, view filters, formulas, and calculated properties are not evaluated.",
+        "Base filters, view rules (filters, order and limits), formulas and calculated properties are ignored.",
       ],
     };
   }

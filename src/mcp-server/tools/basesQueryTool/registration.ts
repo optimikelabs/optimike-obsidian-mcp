@@ -19,7 +19,7 @@ import { mcpSchema } from "../../mcpSchema.js";
 
 const TOOL_NAME = "bases_query";
 const TOOL_DESCRIPTION =
-  "Exécute une requête sur une base (.base) avec filtres additionnels, tri et pagination.";
+  "Interroge une Base (.base) avec filtres additionnels, tri et pagination. Les règles de la Base et des vues ainsi que les formules nécessitent Obsidian et le Bases Bridge. Sans REST, réserver property_only aux parcours explicitement demandés des propriétés Markdown.";
 
 export async function registerBasesQueryTool(
   server: McpServer,

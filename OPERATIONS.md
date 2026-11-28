@@ -174,9 +174,16 @@ The final server can expose different capabilities depending on which Obsidian p
 - Local Bases fallback
 
   - available in headless modes for `bases_list`, `bases_get_schema`, and `bases_query`
-  - returns `source: "local-fallback"`
-  - supports direct equality, arrays, `contains`, `in`, comparisons, simple sorting, pagination, and schema inspection
-  - does not evaluate formulas, plugin filters, calculated properties, or exact UI view semantics
+  - without Obsidian REST, `bases_query` returns `SERVICE_UNAVAILABLE` when a
+    query needs Base filters, view rules, formulas, or explicit `evaluate: true`
+  - use Obsidian with the Bases Bridge for those queries, or set
+    `property_only: true` to scan cached Markdown properties. Plain queries
+    without those requirements work with no opt-in
+  - a scan reports `source: "local-fallback"`, `mode: "property-scan"`,
+    `evaluate: false`, and `limitations`. Its rows and total describe the
+    Markdown scan, with only the request's property filter, sort and pagination
+  - scan filters support direct equality, arrays, `eq`, `ne`, `contains`,
+    `in`, and numeric comparisons
 
 - Smart Connections
   - required for semantic search

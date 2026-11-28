@@ -35,11 +35,11 @@ export const BasesQueryInputSchema = z
       .string()
       .min(1)
       .optional()
-      .describe("Vue à utiliser pour l'ordre/les formules. Optionnel."),
+      .describe("Vue de la Base à interroger. Nécessite Obsidian, sauf pour un parcours property_only qui ignore la vue."),
     filter: z
       .record(z.any())
       .optional()
-      .describe("Filtre additionnel (JSON) appliqué par le bridge."),
+      .describe("Filtre additionnel (JSON). En local, porte sur les propriétés des notes Markdown en cache."),
     sort: z
       .array(SortSchema)
       .optional()
@@ -57,11 +57,15 @@ export const BasesQueryInputSchema = z
       .describe("Numéro de page (1-indexé)."),
     evaluate: z
       .boolean()
-      .default(true)
-      .describe("Quand true, force l'utilisation des valeurs évaluées si disponibles."),
+      .optional()
+      .describe("Demande les valeurs évaluées. Par défaut true via REST. En local, true exige property_only pour obtenir un parcours sans calcul."),
+    property_only: z
+      .boolean()
+      .optional()
+      .describe("Sans REST, accepte explicitement un parcours des propriétés des notes Markdown en cache. Ignore les filtres de la Base, les règles de vue et les formules. Sans effet via REST."),
   })
   .describe(
-    "Exécute une requête sur une base. Supporte filtres additionnels, tri, pagination et mode evaluate (engine).",
+    "Interroge une Base via Obsidian ou renvoie un parcours local de propriétés Markdown.",
   );
 
 export type BasesQueryInput = z.infer<typeof BasesQueryInputSchema>;
@@ -93,11 +97,19 @@ export async function processBasesQuery(
 
   if (obsidianService) {
     logger.debug("Querying base via REST bridge", context);
-    return obsidianService.queryBase(params.base_id, payload, context);
+    return obsidianService.queryBase(
+      params.base_id,
+      { ...payload, evaluate: params.evaluate ?? true },
+      context,
+    );
   }
   if (localBasesService) {
     logger.debug("Querying base via local fallback", context);
-    return localBasesService.queryBase(params.base_id, payload, context);
+    return localBasesService.queryBase(
+      params.base_id,
+      { ...payload, property_only: params.property_only },
+      context,
+    );
   }
   throw new Error("Base query requires either Obsidian REST or local Bases fallback.");
 }
