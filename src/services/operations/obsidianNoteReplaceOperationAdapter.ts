@@ -24,6 +24,7 @@ import {
 } from "./contract.js";
 import {
   ObsidianNoteReplaceConcurrencyError,
+  FILESYSTEM_OPERON_PROJECTION,
   ObsidianNoteReplaceJournal,
   displacedFilesystemEdit,
   replacedConcurrentEdit,
@@ -257,7 +258,7 @@ export type ObsidianNoteReplaceAdapterOptions = {
   now?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
   filesystem?: {
-    seal(path: string, content: string, source: AtomicWriteReadResponse): Promise<{ content: string; policyDigest: string }>;
+    seal(path: string, content: string, source: AtomicWriteReadResponse, requireAtomicExchange?: boolean, previewOnly?: boolean): Promise<{ content: string; policyDigest: string }>;
     matchesEffect(plan: ObsidianNoteReplacePlan): Promise<boolean>;
   };
 };
@@ -744,8 +745,11 @@ export class ObsidianNoteReplaceOperationAdapter
     return receipt(this.profile, existing);
   }
 
-  async plan(input: ObsidianNoteReplacePlanInput): Promise<OperationReceipt> {
+  async plan(input: ObsidianNoteReplacePlanInput, previewOnly = false): Promise<OperationReceipt> {
     validateInput(this.profile, input);
+    if (previewOnly && (!this.options.filesystem || input.projection?.kind !== FILESYSTEM_OPERON_PROJECTION || input.projection.proof.previewOnly !== true)) {
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Only an Operon filesystem preview can bypass the plan write gate.");
+    }
     let afterSha256 = createHash("sha256")
       .update(input.nextContent, "utf8")
       .digest("hex");
@@ -766,7 +770,7 @@ export class ObsidianNoteReplaceOperationAdapter
         reason: "proposal_authority_mismatch",
       });
     }
-    if (!status.backend.writeEnabled) {
+    if (!previewOnly && !status.backend.writeEnabled) {
       const replay = this.replayIfDurableWinner(input, afterSha256);
       if (replay) return replay;
       throw new Error(
@@ -827,11 +831,12 @@ export class ObsidianNoteReplaceOperationAdapter
     let filesystem: ObsidianNoteReplacePlan["filesystem"];
     let nextContent = input.nextContent;
     if (this.options.filesystem) {
-      const sealed = await this.options.filesystem.seal(input.path, nextContent, read);
+      const sealed = await this.options.filesystem.seal(input.path, nextContent, read,
+        input.projection?.kind === FILESYSTEM_OPERON_PROJECTION, previewOnly);
       filesystem = { policyDigest: sealed.policyDigest, beforeContent: read.content, projectedSha256: afterSha256 };
       nextContent = sealed.content;
       afterSha256 = createHash("sha256").update(nextContent, "utf8").digest("hex");
-      if (afterSha256 === read.sha256) {
+      if (afterSha256 === read.sha256 && !(previewOnly && input.projection?.proof.noChange === true)) {
         throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The sealed edit would leave the note unchanged.");
       }
     }
@@ -954,6 +959,7 @@ export class ObsidianNoteReplaceOperationAdapter
     reference: string,
     idempotencyKey: string,
     completionMode: SettlementCompletionMode = "verified",
+    validateReplay?: () => Promise<void>,
   ): Promise<OperationReceipt> {
     let plan = this.required(reference, idempotencyKey);
     if (plan.status === "committed") return receipt(this.profile, plan);
@@ -1027,6 +1033,17 @@ export class ObsidianNoteReplaceOperationAdapter
       );
     }
     if (read.sha256 !== plan.beforeSha256) {
+      if (this.options.filesystem && plan.projection?.kind === FILESYSTEM_OPERON_PROJECTION) {
+        // Operon publication requires a durable staging witness. Without one,
+        // different bytes prove a pre-publication conflict, not an uncertain write.
+        try {
+          const conflict = this.journal.settleUnstagedFilesystemRecovery(plan.operationId);
+          return receipt(this.profile, conflict);
+        } catch (error) {
+          if (!(error instanceof ObsidianNoteReplaceConcurrencyError)) throw error;
+          return receipt(this.profile, this.required(reference));
+        }
+      }
       return receipt(
         this.profile,
         this.uncertain(
@@ -1035,6 +1052,7 @@ export class ObsidianNoteReplaceOperationAdapter
         ),
       );
     }
+    await validateReplay?.();
     let applying: ObsidianNoteReplacePlan;
     try {
       applying = this.journal.transition(

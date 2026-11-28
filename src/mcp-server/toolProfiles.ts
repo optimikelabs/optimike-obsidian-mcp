@@ -67,16 +67,20 @@ const TASK_GROUPS = [
 
 const OPERON_LIVE_ONLY_READ_TOOLS = new Set([
   "operon_get_diagnostics",
-  "operon_resolve_task",
   "operon_build_context",
   "operon_get_timer_state",
-  "operon_list_pending_recoveries",
 ]);
 
 const OPERON_FILESYSTEM_READ_TOOLS = new Set([
   "operon_query_saved_filter",
   "operon_find_tasks",
   "operon_get_relationships",
+  "operon_resolve_task",
+]);
+
+const OPERON_FILESYSTEM_MUTATION_TOOLS = new Set([
+  "operon_create_task", "operon_update_task", "operon_transition_task",
+  "operon_list_pending_recoveries", "operon_recover_mutation",
 ]);
 
 export const TOOL_PROFILES: Readonly<
@@ -206,7 +210,9 @@ function modernRuntimeAvailable(
   entry: ToolSurfaceEntry,
   operonLive: boolean,
   operonFilesystem: boolean,
+  filesystemWrites: boolean,
 ): boolean {
+  if (OPERON_FILESYSTEM_MUTATION_TOOLS.has(entry.name)) return operonLive || filesystemWrites;
   if (entry.group === "tasks.operon.write") return operonLive;
   if (OPERON_FILESYSTEM_READ_TOOLS.has(entry.name)) return operonLive || operonFilesystem;
   if (
@@ -233,7 +239,7 @@ function finalizeProfileEntries(
   let selected =
     definition.id === "full" || definition.id === "operational"
       ? entries
-      : entries.filter((entry) => modernRuntimeAvailable(entry, operonLive, options.operonFilesystem ?? false));
+      : entries.filter((entry) => modernRuntimeAvailable(entry, operonLive, options.operonFilesystem ?? false, headlessFilesystem));
 
   // A concrete McpServer registers tools one at a time. During that transient
   // construction phase a governed family is necessarily incomplete. Keep the

@@ -1,14 +1,16 @@
 
 import { randomUUID } from "node:crypto";
+import { posix } from "node:path";
 import { config } from "../../config/index.js";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { parseToolInput } from "../../utils/internal/toolInputValidation.js";
 import { requestContextService } from "../../utils/index.js";
 import type { VaultCacheService } from "../obsidianRestAPI/vaultCache/index.js";
 import { VaultFileService } from "../vaultFileService.js";
+import { DEFAULT_VAULT_EXCLUDE_PATTERNS } from "../vaultExclusions.js";
 import {
   OPERON_CONTRACT_VERSION, OPERON_PUBLIC_INPUT_MESSAGES, OPERON_SNAPSHOT_SCHEMA_VERSION,
-  OperonCapabilitiesSchema, OperonQuerySchema, OperonTaskFinderSchema, OperonRelationshipsSchema,
+  OperonCapabilitiesSchema, OperonQuerySchema, OperonResolveTaskSchema, OperonTaskFinderSchema, OperonRelationshipsSchema,
   OperonFilterQuerySchema, queryOperonSnapshot, resolveOperonPriorityStableId, stripOperonTaskProperties,
   type OperonSnapshotEnvelope, type OperonTask, type OperonRelationships,
 } from "./contract.js";
@@ -17,12 +19,14 @@ import {
   projectFilesystemTask, splitOperonList, type FilesystemConfiguration,
 } from "./filesystemFormat.js";
 import { compileSavedFilter, localDate } from "./filesystemFilters.js";
+import { supportsFilesystemMutationFormat } from "./filesystemMutationFormat.js";
 
 const baseLimitations = [
   "Reads reflect the synchronized copy and the shared cache, not Obsidian Desktop.",
-  "Filesystem revisions cannot authorize native mutations. Active timers, native ranking and inferred runtime relationships are unavailable.",
+  "Filesystem revisions bind to this authority. Active timers, native ranking and inferred runtime relationships require Desktop.",
 ];
 const matchesPath = (path: string, scope: string) => path === scope || path.startsWith(scope + "/");
+const customCacheExclusions = config.obsidianVaultExcludePatterns.length > DEFAULT_VAULT_EXCLUDE_PATTERNS.length;
 
 const configurationDifferences = [
   { field: "language", status: "disk", reason: "The settings retain the configured language while the Bridge may default to auto." },
@@ -150,8 +154,13 @@ export class FilesystemOperonService {
   }
 
   async configurationReadiness(): Promise<Record<string, unknown>> {
-    const { data, legacyWithoutPipelines } = await this.readSettings();
-    return { configured: Boolean(data) && !legacyWithoutPipelines, ...(legacyWithoutPipelines ? { degraded: true } : {}) };
+    const { data, configuration, legacyWithoutPipelines } = await this.readSettings();
+    const configured = Boolean(data) && !legacyWithoutPipelines;
+    const readiness = { configured, ...(legacyWithoutPipelines ? { degraded: true } : {}) };
+    if (config.obsidianRuntimeMode !== "headless-filesystem") return readiness;
+    const manifest = await this.pluginData("manifest.json");
+    return { ...readiness, writableFormat: configured && !customCacheExclusions &&
+      supportsFilesystemMutationFormat(String(manifest?.version ?? ""), configuration) };
   }
 
   private async read(forceRefresh: boolean) {
@@ -161,7 +170,8 @@ export class FilesystemOperonService {
     this.clock = clock;
     const { timeZone } = clock;
     const version = typeof manifest?.version === "string" ? manifest.version : "unknown";
-    const settingsSignature = "filesystem-sha256:" + digest(JSON.stringify([configuration, version, clock, legacyWithoutPipelines]));
+    const settingsSignature = "filesystem-sha256:" + digest(JSON.stringify([configuration, version, clock, legacyWithoutPipelines,
+      ...(config.obsidianRuntimeMode === "headless-filesystem" ? [data] : [])]));
     const previous = this.configurationSignature === settingsSignature ? this.files : new Map<string, ParsedFile>();
     const next = new Map<string, ParsedFile>();
     const paths = configuration.indexing.excludedFolders.map(p => p.replace(/\\/gu, "/").replace(/^\/+|\/+$/gu, ""));
@@ -172,6 +182,7 @@ export class FilesystemOperonService {
     let usesBirthtime = false;
     let missingEntry = false;
     const start = this.provenance();
+    const metadataGeneration = this.cache.getMetadataGeneration();
     for (const entry of this.cache.getEntriesByPrefix()) {
       const path = entry.path.replace(/^\//u, "");
       if (path.split("/").some(segment => segment.startsWith(".")) || paths.some(excluded => excluded && matchesPath(path, excluded))) continue;
@@ -194,9 +205,12 @@ export class FilesystemOperonService {
           invalidFrontmatter: markdown.invalidFrontmatter,
           usesBirthtime: birthtime !== undefined,
           sourceDigest: markdown.tasks.length ? digest(content.content) : "",
-          tasks: markdown.tasks.map(raw => ({
-            ...projectFilesystemTask(raw, path, { mtime: entry.mtime, birthtime }, configuration, timeZone), operonVersion: version,
-          })),
+          tasks: markdown.tasks.map(raw => {
+            const task = projectFilesystemTask(raw, path, { mtime: entry.mtime, birthtime }, configuration, timeZone);
+            return { ...task, operonVersion: version, revision: config.obsidianRuntimeMode === "headless-filesystem"
+              ? "filesystem-sha256:" + digest(JSON.stringify([task.revision, digest(content.content), settingsSignature]))
+              : task.revision };
+          }),
         };
       }
       next.set(path, parsed);
@@ -213,7 +227,9 @@ export class FilesystemOperonService {
     this.configurationSignature = settingsSignature;
     if (changed) this.sequence++;
     const provenance = this.provenance();
-    if (missingEntry || start.partial || start.lastRefreshAt !== provenance.lastRefreshAt) {
+    const cacheChangedDuringRead = missingEntry || metadataGeneration !== this.cache.getMetadataGeneration() ||
+      start.lastRefreshAt !== provenance.lastRefreshAt;
+    if (cacheChangedDuringRead || start.partial) {
       provenance.partial = true;
       provenance.freshness = "uncertain";
     }
@@ -231,7 +247,7 @@ export class FilesystemOperonService {
       snapshotSchemaVersion: OPERON_SNAPSHOT_SCHEMA_VERSION, settingsSignature, generation: this.sequence,
       capabilities: OperonCapabilitiesSchema.parse({
         status: true, configuration: Boolean(data), list: true, get: true, query: true, validate: true,
-        finder: true, relationships: true, filterQuery: configuration.views.filters.length > 0,
+        finder: true, relationships: true, resolve: true, filterQuery: configuration.views.filters.length > 0,
         create: false, update: false, transition: false, convert: false,
       }),
       tasks, limitations,
@@ -239,9 +255,16 @@ export class FilesystemOperonService {
     const pinData = object(object(data?.state).pinnedTasks);
     const pinItems = pinData.itemsById ?? (await this.pluginData("state/pinned-tasks.json"))?.itemsById;
     const settings = object(data?.settings ?? data);
+    const taskCreation = object(object(data?.ui).taskCreationProfile);
+    const locations = taskCreation.fileTaskPipelineLocations ?? settings.fileTaskPipelineLocations;
     const recent = settings.taskFinderRecentModifiedDays ?? object(object(data?.ui).taskUiPreferences).taskFinderRecentModifiedDays;
     const recentDays = typeof recent === "number" && Number.isFinite(recent) ? Math.max(1, Math.min(7, Math.round(recent))) : 3;
-    return { snapshot, configuration, provenance, invalidFrontmatter, sourceDigests, recentDays, legacyWithoutPipelines,
+    return { snapshot, configuration, provenance, invalidFrontmatter, sourceDigests, recentDays, legacyWithoutPipelines, cacheChangedDuringRead,
+      filePipelineRouting: Array.isArray(locations) && locations.length > 0,
+      extraCreationRules: (taskCreation.assigneesRequired ?? settings.assigneesRequired) === true ||
+        Boolean(taskCreation.defaultInlineTaskTemplateId ?? settings.defaultInlineTaskTemplateId) ||
+        (taskCreation.inlineTaskUseLastTemplateAsDefault ?? settings.inlineTaskUseLastTemplateAsDefault) === true,
+      projectSerials: Array.isArray(settings.projectSerialScopes) && settings.projectSerialScopes.length > 0,
       pinned: pinItems ? new Set(Object.entries(object(pinItems)).filter(([, item]) => object(item).pinned === true).map(([id]) => id)) : null };
   }
 
@@ -252,6 +275,63 @@ export class FilesystemOperonService {
     this.pending = pending;
     try { return await pending; }
     finally { if (this.pending === pending) this.pending = undefined; }
+  }
+
+  async mutationSnapshot() {
+    let view = await this.view(true);
+    // A peer can publish cache rows after our metadata scan but before getEntry.
+    // Rebuild once before checking the task revision. A persistently incomplete
+    // snapshot still cannot authorize a mutation.
+    if (view.cacheChangedDuringRead) view = await this.view(true);
+    if (view.provenance.partial || !view.snapshot.capabilities.configuration || view.legacyWithoutPipelines ||
+        view.invalidFrontmatter.length || customCacheExclusions) {
+      return unavailable("operon_filesystem_mutation_snapshot_incomplete", "A complete Operon filesystem snapshot and workflow configuration are required for writes.");
+    }
+    const trackers = await this.pluginData("state/active-trackers.json");
+    if (trackers && !Array.isArray(trackers.active)) {
+      return unavailable("operon_filesystem_mutation_snapshot_incomplete", "Unsupported Operon active tracker state.");
+    }
+    const activeTrackers = new Set((Array.isArray(trackers?.active) ? trackers.active : []).map(value => object(value).taskId));
+    return { ...view, activeTrackers,
+      mutationBinding: digest(JSON.stringify([view.snapshot.settingsSignature, trackers, [...(view.pinned ?? [])].sort()])) };
+  }
+
+  async resolveTask(input: unknown) {
+    const { selector, limit } = parseToolInput(OperonResolveTaskSchema, input, OPERON_PUBLIC_INPUT_MESSAGES);
+    const view = await this.view();
+    if (view.provenance.partial) return unavailable("operon_filesystem_cache_partial", "Retry when the shared vault cache is ready.");
+    const graph = new TaskGraph(view.snapshot.tasks);
+    const locator = (row: OperonTask) => row.line === null
+      ? { representation: "file" as const, filePath: row.path }
+      : { representation: "inline" as const, filePath: row.path, lineNumber: row.line - 1 };
+    const noteName = (path: string) => posix.basename(path).replace(/\.md$/iu, "").normalize("NFC").toLowerCase();
+    const reason = { "operon-id": "exact-operon-id", "exact-locator": "exact-locator", "exact-path": "exact-path", "exact-name": "exact-note-name", search: "filesystem-text-match" }[selector.kind];
+    const rows = view.snapshot.tasks.filter(task => {
+      if ("expectedOperonId" in selector && selector.expectedOperonId && task.operonId !== selector.expectedOperonId) return false;
+      switch (selector.kind) {
+        case "operon-id": return task.operonId === selector.operonId;
+        case "exact-path": return task.path === selector.filePath;
+        case "exact-name": return noteName(task.path) === noteName(selector.noteName);
+        case "exact-locator": return JSON.stringify(locator(task)) === JSON.stringify(selector.locator);
+        case "search": return [task.description, task.path, task.operonId].some(text => text.toLowerCase().includes(selector.query.toLowerCase()));
+      }
+    });
+    const candidates = rows.sort((a, b) => a.description.localeCompare(b.description) || a.path.localeCompare(b.path) || (a.line ?? 0) - (b.line ?? 0))
+      .slice(0, selector.kind === "search" ? selector.limit : limit).map(task => {
+        const duplicate = graph.duplicates.has(task.operonId);
+        const source = locator(task);
+        return {
+          identity: { operonId: task.operonId, validity: duplicate ? "duplicate" : "canonical", mutationAllowed: !duplicate },
+          description: task.description.slice(0, 4096), locator: source, confidence: 1,
+          reasons: duplicate ? [reason, "duplicate-id"] : [reason],
+          selector: { kind: "exact-locator", locator: source, expectedOperonId: task.operonId },
+        };
+      });
+    const selected = rows.length === 1 && !graph.duplicates.has(rows[0].operonId) ? candidates[0] : undefined;
+    return this.native(view, "resolve", {
+      resolution: selected ? "resolved" : rows.length ? "ambiguous" : "not-found", candidates,
+      ...(selected ? { selected } : {}),
+    });
   }
 
   async query(input: unknown, signal?: AbortSignal) {
@@ -344,12 +424,12 @@ export class FilesystemOperonService {
       limitations, generation, settingsSignature, taskCount: snapshot.tasks.length, summary, violations };
   }
 
-  private native(view: Awaited<ReturnType<FilesystemOperonService["read"]>>, operation: "finder" | "relationships", result: object) {
+  private native(view: Awaited<ReturnType<FilesystemOperonService["read"]>>, operation: "finder" | "relationships" | "resolve", result: object) {
     const { stale, contractVersion, capabilities, limitations, operonVersion, bridgeVersion, generation, settingsSignature } = view.snapshot;
     return {
       ok: true, operation, ...view.provenance, stale, contractVersion, capabilities, limitations, operonVersion, bridgeVersion,
       result: {
-        ok: true, kind: operation === "finder" ? "task-finder-result" : "relationship-result",
+        ok: true, kind: { finder: "task-finder-result", relationships: "relationship-result", resolve: "entity-resolution-result" }[operation],
         contractVersion: 1, requestId: randomUUID(), freshness: {
           source: "source-file", coherence: view.provenance.partial ? "settling" : "unverified",
           observedAt: view.snapshot.snapshotAt, settled: !view.provenance.partial,

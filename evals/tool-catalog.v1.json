@@ -974,6 +974,7 @@
           "operon_list_tasks",
           "operon_query_saved_filter",
           "operon_query_tasks",
+          "operon_resolve_task",
           "operon_status",
           "operon_validate",
           "query_tasks",
@@ -996,6 +997,7 @@
           "operon_list_tasks",
           "operon_query_saved_filter",
           "operon_query_tasks",
+          "operon_resolve_task",
           "operon_status",
           "operon_validate",
           "query_tasks",
@@ -1011,14 +1013,20 @@
           "obsidian_read_note",
           "obsidian_runtime_status",
           "obsidian_validate_format",
+          "operon_create_task",
           "operon_find_tasks",
           "operon_get_configuration",
           "operon_get_relationships",
           "operon_get_task",
+          "operon_list_pending_recoveries",
           "operon_list_tasks",
           "operon_query_saved_filter",
           "operon_query_tasks",
+          "operon_recover_mutation",
+          "operon_resolve_task",
           "operon_status",
+          "operon_transition_task",
+          "operon_update_task",
           "operon_validate",
           "query_tasks",
           "smart_semantic_search"
@@ -5918,7 +5926,8 @@
       "profileModes": {
         "tasks": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "full": [
           "live",
@@ -6240,7 +6249,8 @@
       "profileModes": {
         "tasks": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "full": [
           "live",
@@ -6427,7 +6437,8 @@
       "profileModes": {
         "tasks": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "full": [
           "live",
@@ -6515,7 +6526,10 @@
       "profileModes": {
         "tasks": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
         ],
         "full": [
           "live",
@@ -6695,7 +6709,8 @@
       "profileModes": {
         "tasks": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "full": [
           "live",
@@ -6827,7 +6842,8 @@
       "profileModes": {
         "tasks": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "full": [
           "live",

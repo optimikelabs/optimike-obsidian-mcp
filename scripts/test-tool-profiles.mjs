@@ -269,6 +269,7 @@ for (const required of [
   "operon_validate",
   "operon_get_relationships",
   "operon_find_tasks",
+  "operon_resolve_task",
   "operon_query_saved_filter",
   "list_all_tasks",
   "query_tasks",
@@ -280,7 +281,6 @@ for (const required of [
 }
 for (const liveOnly of [
   "operon_get_diagnostics",
-  "operon_resolve_task",
   "operon_build_context",
   "operon_get_timer_state",
   "operon_create_task",
@@ -299,7 +299,7 @@ for (const liveOnly of [
 
 const selectedSnapshotTasks = selectAvailableToolProfileNames({
   profile: "tasks",
-  operonFilesystem: true,
+  registrationMode: "headless-readonly",
   availableNames: compileToolProfileNames({
     profile: "full",
     registrationMode: "headless-readonly",
@@ -307,6 +307,14 @@ const selectedSnapshotTasks = selectAvailableToolProfileNames({
   }),
 });
 assert.deepEqual(selectedSnapshotTasks, tasksSnapshot);
+
+const filesystemTaskTools = compileToolProfileNames({
+  profile: "tasks", registrationMode: "headless-filesystem", availableStaticRequirements: WITH_CACHE,
+});
+const filesystemOperonWrites = ["operon_create_task", "operon_update_task", "operon_transition_task",
+  "operon_list_pending_recoveries", "operon_recover_mutation"];
+assert.deepEqual(filesystemTaskTools.filter(name => name.startsWith("operon_")),
+  [...tasksSnapshot.filter(name => name.startsWith("operon_")), ...filesystemOperonWrites].sort((a, b) => a.localeCompare(b)));
 
 const selectedLiveTasks = selectAvailableToolProfileNames({
   profile: "tasks",

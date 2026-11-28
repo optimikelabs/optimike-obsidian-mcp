@@ -52,6 +52,7 @@ import {
   type ObsidianNoteReplacePlanInput,
 } from "../../../services/operations/obsidianNoteReplaceOperationAdapter.js";
 import {
+  FILESYSTEM_OPERON_PROJECTION,
   ObsidianNoteReplaceJournal,
   type ObsidianNoteReplacePlan,
   type PendingOperationRowsInput,
@@ -85,6 +86,7 @@ type ExpectedSource = { sha256: string; bindingFingerprint: string };
 type CallContext =
   | {
       kind: "plan";
+      previewOnly?: boolean;
       path: string;
       nextContent: string;
       proposal?: TextPatchProposalIdentity;
@@ -448,7 +450,7 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
           "The planning read target differs from the requested note target.",
         );
       }
-      assertCurrentWritePolicy("plan", payload.path, context.nextContent);
+      if (!context.previewOnly) assertCurrentWritePolicy("plan", payload.path, context.nextContent);
       if (context.callerExpectedBeforeSha256 !== undefined) {
         verifyPlanningRead(payload.path, result);
         assertCallerBase(context.callerExpectedBeforeSha256, result.sha256);
@@ -822,6 +824,7 @@ export class GovernedNoteReplaceRuntime {
   get isFilesystem(): boolean { return Boolean(this.backend.filesystem); }
   restoreInterruptedFilesystemReplacements() { return this.backend.filesystem?.restoreInterruptedReplacements(); }
   filesystemStatus() { return this.backend.filesystem!.status(); }
+  ownsFilesystemBinding(binding: string) { return this.backend.filesystem?.ownsBinding(binding) === true; }
   readonly noteCreate: NoteCreateOperationAdapter | undefined;
   readonly filesystemRevert: FilesystemRevert | undefined;
   readonly baseCreate: VaultFileCreateOperationAdapter | undefined;
@@ -1089,6 +1092,20 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
     return plan ? this.view(plan) : undefined;
   }
 
+  listPendingOperonPlans() {
+    const input: PendingOperationRowsInput = { fallbackOperationKind: FILESYSTEM_OPERON_PROJECTION,
+      admittedProjectionKinds: [FILESYSTEM_OPERON_PROJECTION], allowUnprojectedFallback: false, limit: 100 };
+    return (["applying", "outcome_unknown"] as const).flatMap(status => {
+      const page = this.journal.listPendingOperationRows({ ...input, status });
+      if (page.hasMore) throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "The pending filesystem Operon recovery list exceeds its bound.");
+      return page.rows.map(row => ({ ...row, planRef: PLAN_REF_PREFIX + row.operationId }));
+    });
+  }
+
+  bindOperonRecoveryKey(operationId: string, key: string) {
+    this.journal.bindOperonRecoveryKey(operationId, key);
+  }
+
   inspect(reference: string): GovernedNoteReplacePlanView {
     return this.view(this.required(reference));
   }
@@ -1112,18 +1129,20 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
   plan(
     input: ObsidianNoteReplacePlanInput,
     callerExpectedBeforeSha256?: string,
+    previewOnly = false,
   ): Promise<OperationReceipt> {
-    assertCurrentWritePolicy("plan", input.path, input.nextContent);
+    if (!previewOnly) assertCurrentWritePolicy("plan", input.path, input.nextContent);
     return this.backend.withContext(
       {
         kind: "plan",
+        previewOnly,
         path: input.path,
         nextContent: input.nextContent,
         requireNativeFormat: !!input.frontmatterFormat,
         callerExpectedBeforeSha256,
         proposal: input.proposalSeal?.identity,
       },
-      () => this.adapter.plan(input),
+      () => this.adapter.plan(input, previewOnly),
     );
   }
 
@@ -1133,6 +1152,9 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
     completionMode: SettlementCompletionMode = "verified",
   ): Promise<OperationReceipt> {
     const plan = this.required(reference);
+    if (plan.projection?.kind === FILESYSTEM_OPERON_PROJECTION && plan.projection.proof.previewOnly === true) {
+      throw new McpError(BaseErrorCode.FORBIDDEN, "An Operon preview cannot publish an effect.");
+    }
     if (plan.status === "planned") {
       assertCurrentWritePolicy("apply", plan.path, plan.nextContent);
       if (this.backend.filesystem) await this.backend.filesystem.status();
@@ -1232,13 +1254,14 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
     reference: string,
     idempotencyKey: string,
     completionMode: SettlementCompletionMode = "verified",
+    validateReplay?: () => Promise<void>,
   ): Promise<OperationReceipt> {
     const plan = this.required(reference);
     if (plan.status === "outcome_unknown" || (plan.filesystem && plan.status === "applying")) {
       assertCurrentWritePolicy("recover", plan.path, plan.nextContent);
     }
     const operation = this.backend.withContext({ kind: "recover", path: plan.path, requireNativeFormat: !!plan.frontmatterFormat }, () =>
-      this.adapter.recover(reference, idempotencyKey, completionMode),
+      this.adapter.recover(reference, idempotencyKey, completionMode, validateReplay),
     );
     return this.refreshCacheAfterCommit(plan, operation, true);
   }

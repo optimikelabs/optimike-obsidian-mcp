@@ -153,7 +153,7 @@ Sync service per vault. Use pull-only for a read-only replica. Follow the
 
 ## Operon without Desktop
 
-Set `MCP_TOOL_PROFILE=tasks` (or use `operational` or `full`). In all three headless modes, `operon_list_tasks`, `operon_query_tasks`, `operon_get_task`, `operon_find_tasks`, `operon_get_relationships`, `operon_get_configuration`, `operon_status`, and `operon_validate` read the synchronized copy. `operon_query_saved_filter` takes an exact ID from `operon_get_configuration`.
+Set `MCP_TOOL_PROFILE=tasks` (or use `operational` or `full`). In all three headless modes, `operon_list_tasks`, `operon_query_tasks`, `operon_get_task`, `operon_find_tasks`, `operon_get_relationships`, `operon_get_configuration`, `operon_status`, `operon_resolve_task`, and `operon_validate` read the synchronized copy. `operon_query_saved_filter` takes an exact ID from `operon_get_configuration`.
 
 The reader scans cached Markdown for inline checkboxes with an `operonId` and `{{key:: value}}` fields, and file tasks identified by YAML frontmatter. A folder such as `_Operon` is a creation destination. An identified file task can live elsewhere. Task IDs, dates, recurrence rules and occurrence IDs, stored relationships, and managed fields come from those two formats. The reader ignores fenced examples and comments. Indentation alone does not assign a parent.
 
@@ -165,11 +165,64 @@ Every filesystem read reports `source: "filesystem"`, `freshness`, `cacheStatus`
 
 Set `OPERON_TIMEZONE` to the Desktop vault's IANA zone if the server uses a different zone. The reader checks this override and the plugin setting if present. A nonempty invalid `OPERON_TIMEZONE` prevents startup. Process `TZ` affects the server default and still produces a warning. It applies the same zone to file timestamps and relative date filters. Responses include `timeZone` and `timeZoneSource`. They include `timeZoneWarning` when the reader uses the server's default zone or falls back to UTC because that zone is unavailable.
 
-The finder uses local ranking and stored dates. Relationship reads expose stored edges and their derived inverses and hierarchy. Validation, finder scores, revision tokens and configuration metadata can differ from Desktop. The capability doctor reports Operon reads as ready when the cache is ready and `data.json` is valid. Native mutation authority, runtime relationship inference, folder-template discovery and active timers require Desktop. The compatibility timer tool returns `operon_filesystem_live_required`. Saved filters support nested groups, folder trees alongside common checkbox, text, date, list, tag and persisted pin conditions. `thisWeek` follows Operon 4.6's Monday-to-Sunday rule. Ascending date sorts put empty values first. Empty statuses come last in either direction. A folder sort leaves the order to the next criterion or the input order. Runtime-dependent fields and unsupported operators or sorts return `operon_filesystem_filter_unsupported`. Operon writes continue to require the live Bridge.
+The finder uses local ranking and stored dates. Relationship reads expose stored edges and their derived inverses and hierarchy. Validation, finder scores, revision tokens and configuration metadata can differ from Desktop. The capability doctor reports Operon reads as ready when the cache is ready and `data.json` is valid. Native mutation authority, runtime relationship inference, folder-template discovery and active timers require Desktop. The compatibility timer tool returns `operon_filesystem_live_required`. Saved filters support nested groups, folder trees alongside common checkbox, text, date, list, tag and persisted pin conditions. `thisWeek` follows Operon 4.6's Monday-to-Sunday rule. Ascending date sorts put empty values first. Empty statuses come last in either direction. A folder sort leaves the order to the next criterion or the input order. Runtime-dependent fields and unsupported operators or sorts return `operon_filesystem_filter_unsupported`.
 
 The task list uses the Developer API V1 Bridge's `warm` tier and canonical priority IDs, and omits native checklist progress. File-task creation falls back to filesystem birthtime when available. A limitation warns that this can reflect the arrival of a synchronized file. A file task uses the later of its stored modification time and its file mtime in the configured zone, as Operon 4.6 does. An inline task uses its own stored modification time. The index skips dot paths and applies Operon exclusions over the available shared-cache files. A configured cache exclusion produces a warning that the two scopes may differ. Grouped and dynamic saved filters return an explicit unsupported error, and continuation cursors bind to the generation that produced them.
 
 Headless `operon_get_configuration` reports known differences and their reasons in `configurationDifferences`. It adds the seven fixed Developer API fields and derives minimal file templates from the pipelines. The response marks Desktop's folder-template candidates as `unknown`. It retains stored sync directions, language, parent targets, index settings, and documentation settings. Headless reads saved filters directly from disk, including when Bridge 0.9.9 reads the catalog's top-level `filters` while Operon 4.6 publishes its definitions under `policies.filters`.
+
+### Governed Operon mutations
+
+`headless-filesystem` supports the existing `operon_create_task`,
+`operon_update_task`, `operon_transition_task`, `operon_list_pending_recoveries`
+and `operon_recover_mutation` schemas. Use Operon 4.6.0, canonical scalar
+field names, a complete shared-cache view and the governed Markdown date
+policy. Operon writes require an atomic exchange even when the transient-absence
+fallback for other notes is configured. Apply requires
+`OPERON_MUTATIONS_ENABLED=true` and a writable MCP policy.
+
+| Tool | Accepted filesystem scope |
+| --- | --- |
+| `operon_create_task` | Append a standalone inline task to an existing note named by `task.targetPath` |
+| `operon_update_task` | Inline description or tags. Priority, due date and earliest start date on canonical inline or simple scalar file tasks. Clear a supported scalar with an empty string |
+| `operon_transition_task` | Configured status, stable status ID or intent from the task's pipeline. A terminal status sets the matching checkbox and local completion or cancellation date |
+| `operon_resolve_task` | Filesystem ID, exact locator, path or name and local text match. Ambiguity is reported explicitly |
+| `operon_list_pending_recoveries` / `operon_recover_mutation` | Same-plan reconciliation of the filesystem journal. Recovery uses `recovery.kind="developer-api"` and requires full write policy. Both calls require an empty Operon mutation path allowlist |
+
+Run a dry-run first and use a different idempotency key for apply. A dry-run
+can seal a preview under `MCP_WRITE_MODE=readonly` without changing the vault.
+A same-status transition or a clear on an absent field returns `noChange` with
+empty `fieldValues`. For an update or transition, pass the filesystem revision
+from the current task read.
+It binds the note bytes and settings. A concurrent edit causes `CONFLICT`.
+The writer seals the exact bytes in the shared note journal and writes task
+timestamps in `OPTIMIKE_VAULT_TIMEZONE`. Set it to the timezone of the devices
+running Obsidian, where Operon uses the process's local time. The note's own modification stamp
+follows the governed date policy. Receipts use `source: "filesystem"`.
+If the acknowledgement is lost, repeat the identical request with its apply
+key to read the established result or reconcile the returned recovery reference.
+If another device edits the note after an interruption before staging, recovery
+records a terminal `CONFLICT` and preserves the edit.
+
+The filesystem writer refuses repeating, tracked or related tasks and
+transitions that can unpin, move or archive a task or update project serials. File creation, automatic inline
+routing, templates, rich fields and unmanaged properties require Desktop.
+Start/end datetimes, estimates and any update to a task with stored start or end
+times require Desktop because Operon can derive scheduled dates, end times and
+additional workflow effects. See the [Operon 4.6.0 scheduling rules](https://github.com/hasanyilmaz/operon/blob/4.6.0/src/core/scheduling-rules.ts).
+Compatibility profiles retain explicit Desktop-required refusals for adoption
+(Tasks metadata conversion), periodic creation and scheduling (Daily/Weekly
+routes), batch updates (multiple sources), pinning (plugin data), relationships
+(reciprocal edges and aggregates), recurrence (series state and next
+instances), relocation and conversion (multiple sources).
+
+Run `node scripts/test-operon-headless-writes.mjs` after the build to compare
+the produced bytes with synthetic captures of the Operon 4.6.0 source writer
+and inline serializer. The file-task captures use the upstream test adapter's
+YAML stub. Obsidian's `stringifyYaml` and end-to-end Desktop/Bridge writes remain
+unverified. Like Operon, headless refuses a BOM before file-task frontmatter
+with `malformed-frontmatter`. Headless preserves inline BOM and original line
+endings. Desktop can rewrite edited lines or frontmatter with LF.
 
 ### Operon parity harness
 

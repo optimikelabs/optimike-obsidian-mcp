@@ -1632,6 +1632,18 @@ export const OperonMutationResultSchema = z.union([
   OperonMutationFailureReceiptSchema,
 ]);
 
+/** The filesystem authority keeps the receipt envelope without claiming a
+ * native Bridge proof. The Bridge decoder continues to require operon-live. */
+export const OperonFilesystemMutationResultSchema = z.union([
+  OperonMutationSuccessSchema.extend({ source: z.literal("filesystem"), nativeProof: z.never().optional(),
+    noChange: z.literal(true).optional(), fieldValues: z.object({}).strict().optional() }),
+  OperonMutationFailureReceiptSchema.extend({ source: z.literal("filesystem") }),
+]);
+
+export const OperonFilesystemPendingRecoveriesSchema = OperonPendingRecoveriesSchema.extend({
+  source: z.literal("filesystem"),
+});
+
 export type OperonCreateTask = z.infer<typeof OperonCreateTaskSchema>;
 export type OperonTaskFinder = z.infer<typeof OperonTaskFinderSchema>;
 export type OperonResolveTask = z.infer<typeof OperonResolveTaskSchema>;

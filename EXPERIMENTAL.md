@@ -35,6 +35,7 @@ This branch leaves `main` and the individual pull requests unaffected.
 | [#247](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/247) | `9cdf0af6e82f56373c88e66f7d7c8c682f90c43e` | Retries Operon `GET /status` once after a socket reset, with fixture connection cleanup |
 | [#248](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/248) | `4c39df5bc0d2f2448439916ad3c35327133038e6` | Bounded link parsing, persisted retries, limited-source diagnostics and bounded smoke waits |
 | [#249](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/249) | `7ea61ba7dd822910de67187f533c1fdbe2460e70` | Explicit tool profile registration modes, reversible displaced-edit restoration, and retryable vault-lock contention |
+| [#250](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/250) | `97dd384ce59d2d8025adb457136ba73fbf27601b` | Headless Operon create, update, transition and durable recovery with an atomic filesystem exchange |
 | [#251](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/251) | `73ec792eb15652a66cefbe109cee6653b2566c7a` | Explicit global search page-size errors, bounded reuse of full live exact results, and invalidation across tool calls |
 
 Run the read-only profile first. Test filesystem writes on a separate,
@@ -149,6 +150,22 @@ where live REST search reuse is unavailable.
 The changelog keeps the prior fixes, and the SDK boundary tests keep
 both caller-input redaction and the specific page-size message.
 
+### Résolution d'intégration #249 × #250
+
+The profile runtime retains the optional `operonFilesystem` read selector and
+its headless default. The profile compiler keeps #250's separate filesystem
+mutation gate, driven by the explicit `headless-filesystem` registration mode.
+That explicit mode still governs the complete move and trash tool families.
+The existing #251 pagination and mutation invalidation remain intact.
+`EXPERIMENTAL.md` retains the prior integration resolutions.
+
+Headless Operon create, update, and transition use the governed filesystem
+journal. They require full write mode, the Operon mutation opt-in, and
+native atomic exchange when replacing an existing note. Windows refuses
+this exchange. An interrupted write can be recovered by its original
+reference. A source conflict settles the plan and preserves the newer edit.
+Timers and the other Desktop-only mutation families still require Desktop.
+
 The #244 merge keeps the exact tool sets from the shared catalogue in the
 HTTP, stdio proxy, and static profile tests. The `tasks` catalogue includes
 both the new Operon reads and #240's frontmatter and note links. The
@@ -157,7 +174,7 @@ generations alongside the new Operon entries.
 
 Headless Operon can decode canonical Markdown fields without the plugin
 settings. Configuration and saved filters require a synchronized
-`.obsidian/plugins/operon/data.json`. Active timers and writes require
+`.obsidian/plugins/operon/data.json`. Active timers require
 Desktop. See the [headless profile](docs/headless-server-profile.md#operon-without-desktop).
 
 On this branch the proposal HTTP test from #220 uses #219's shared startup

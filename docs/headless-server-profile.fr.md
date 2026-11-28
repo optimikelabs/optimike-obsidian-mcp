@@ -162,11 +162,69 @@ Chaque lecture indique `source: "filesystem"`, `freshness`, `cacheStatus`, `last
 
 Les anciens réglages sans liste de pipelines permettent la lecture des tâches et signalent que la résolution des statuts de workflow est indisponible. Si le serveur utilise un autre fuseau que Desktop, renseignez le fuseau IANA du coffre dans `OPERON_TIMEZONE`. Le lecteur consulte cette variable puis le réglage du plugin s’il existe. Une valeur non vide et invalide de `OPERON_TIMEZONE` empêche le démarrage. La variable `TZ` influe sur le fuseau serveur et déclenche toujours l’avertissement en l’absence de fuseau Operon configuré. Il applique le même fuseau aux horodatages des fichiers et aux dates relatives. Les réponses indiquent `timeZone` et `timeZoneSource`. Elles contiennent aussi `timeZoneWarning` si le lecteur utilise le fuseau par défaut du serveur ou se replie sur UTC quand ce fuseau est indisponible.
 
-Le finder classe les résultats localement en s’appuyant sur les dates stockées. Les relations lues comprennent les liens stockés, leurs inverses et la hiérarchie qui en découle. La validation, les scores du finder, les révisions et les métadonnées de configuration peuvent différer de Desktop. Le diagnostic des capacités indique que la lecture Operon est prête lorsque le cache est prêt et que `data.json` est valide. Les mutations, les relations inférées par le moteur, la découverte des modèles de dossier et les minuteurs exigent Desktop. L’outil de compatibilité pour les minuteurs renvoie `operon_filesystem_live_required`. Les filtres enregistrés prennent en charge les groupes imbriqués, les arborescences de dossiers ainsi que les conditions usuelles sur les cases, textes, dates, listes, tags et épingles persistées. Comme dans Operon 4.6, `thisWeek` couvre du lundi au dimanche. En tri croissant, les dates vides passent en premier. Les statuts vides passent en dernier dans les deux sens. Le tri par dossier laisse la main au critère suivant ou conserve l’ordre d’entrée. Les champs, opérateurs ou tris non pris en charge renvoient `operon_filesystem_filter_unsupported`.
+Le finder classe les résultats localement en s’appuyant sur les dates stockées. Les relations lues comprennent les liens stockés, leurs inverses et la hiérarchie qui en découle. La validation, les scores du finder, les révisions et les métadonnées de configuration peuvent différer de Desktop. Le diagnostic des capacités indique que la lecture Operon est prête lorsque le cache est prêt et que `data.json` est valide. Les relations inférées par le moteur, la découverte des modèles de dossier et les minuteurs exigent Desktop. L’outil de compatibilité pour les minuteurs renvoie `operon_filesystem_live_required`. Les filtres enregistrés prennent en charge les groupes imbriqués, les arborescences de dossiers ainsi que les conditions usuelles sur les cases, textes, dates, listes, tags et épingles persistées. Comme dans Operon 4.6, `thisWeek` couvre du lundi au dimanche. En tri croissant, les dates vides passent en premier. Les statuts vides passent en dernier dans les deux sens. Le tri par dossier laisse la main au critère suivant ou conserve l’ordre d’entrée. Les champs, opérateurs ou tris non pris en charge renvoient `operon_filesystem_filter_unsupported`.
 
 La liste utilise le niveau `warm` du Bridge Developer API V1 et les identifiants canoniques de priorité. Elle omet la progression native des cases. Pour une tâche fichier, le lecteur peut utiliser la date de création du fichier. Il signale alors qu’elle peut correspondre à l’arrivée de la copie synchronisée. Comme Operon 4.6, le lecteur retient la plus récente entre la date de modification stockée et le `mtime` converti dans le fuseau retenu. Une tâche inline utilise sa propre date de modification stockée. L’index ignore les chemins masqués et applique les exclusions Operon aux fichiers disponibles dans le cache partagé. Les exclusions du cache peuvent réduire ce périmètre, ce que signale la réponse. Les filtres groupés et dynamiques renvoient une erreur explicite, et les curseurs sont liés à la génération qui les a produits.
 
 En headless, `operon_get_configuration` explique les écarts connus dans `configurationDifferences`. Le lecteur ajoute les sept champs fixes du catalogue Developer API et dérive les modèles de tâche fichier minimaux à partir des pipelines. Il signale les modèles de dossier de Desktop comme `unknown`. Il conserve le sens de synchronisation des champs ainsi que la langue, les cibles des tâches parentes et les réglages d’index et de documentation stockés. Il lit les filtres sur disque, y compris lorsque le Bridge 0.9.9 lit `filters` au premier niveau du catalogue et qu’Operon 4.6 publie les définitions dans `policies.filters`.
+
+### Mutations Operon gouvernées
+
+`headless-filesystem` reprend les schémas de `operon_create_task`,
+`operon_update_task`, `operon_transition_task`, `operon_list_pending_recoveries`
+et `operon_recover_mutation`. Il exige Operon 4.6.0, les noms canoniques des
+champs scalaires, un cache complet et la politique de dates des écritures
+Markdown gouvernées. L’échange atomique est obligatoire, même si le repli
+avec absence transitoire est activé pour d’autres outils. L’application exige
+`OPERON_MUTATIONS_ENABLED=true` et une politique MCP autorisant l’écriture.
+
+| Outil | Périmètre sur disque |
+| --- | --- |
+| `operon_create_task` | Ajout d’une tâche inline indépendante à la fin d’une note existante passée dans `task.targetPath` |
+| `operon_update_task` | Description ou tags inline. Priorité, échéance et date de démarrage sur une tâche inline canonique ou une tâche-fichier à propriétés scalaires simples. Une chaîne vide efface un champ scalaire pris en charge |
+| `operon_transition_task` | Statut configuré, identifiant stable ou intention du pipeline de la tâche. Un statut terminal règle la case et la date locale de fin ou d’annulation |
+| `operon_resolve_task` | Identifiant, emplacement exact, chemin, nom ou recherche textuelle locale. Les ambiguïtés sont signalées |
+| `operon_list_pending_recoveries` / `operon_recover_mutation` | Réconciliation du même plan dans le journal. La récupération accepte `recovery.kind="developer-api"` en politique d’écriture complète. Les deux appels exigent une liste de préfixes Operon vide |
+
+Lancer une simulation et utiliser une autre clé d’idempotence pour
+l’application. La simulation peut sceller un aperçu sous `MCP_WRITE_MODE=readonly`
+sans modifier le coffre. Une transition vers le statut courant ou l’effacement
+d’un champ absent renvoie `noChange` et un objet `fieldValues` vide. En cas de
+perte de réponse, relire le résultat avec la même requête et sa clé d’application,
+ou réconcilier la référence renvoyée. Si un autre appareil modifie la note
+après une interruption avant la mise en place des octets à publier, la reprise
+enregistre un `CONFLICT` définitif et préserve la modification. La
+révision issue de la lecture lie les octets de la note et la configuration.
+Une modification concurrente déclenche `CONFLICT`. Les reçus indiquent
+`source: "filesystem"`. Les dates de la tâche utilisent
+`OPTIMIKE_VAULT_TIMEZONE`. Régler cette valeur sur le fuseau des appareils qui
+exécutent Obsidian. Operon utilise l’heure locale du processus Desktop. La date de modification de la note suit la
+politique de dates des écritures gouvernées.
+
+Le mode sur disque refuse les tâches récurrentes, suivies par un minuteur ou
+reliées à d’autres tâches, ainsi que les transitions susceptibles de déclencher
+un déplacement, un archivage, un désépinglage ou une mise à jour de la
+numérotation des projets. La création de tâches-fichiers, le routage
+automatique, les modèles, les champs complexes et les propriétés non gérées
+exigent Desktop. Les dates-heures de début et de fin, l’estimation et toute
+mise à jour d’une tâche avec un début ou une fin de créneau enregistrés
+exigent aussi Desktop. Operon peut en déduire une date planifiée, une heure de
+fin et d’autres effets de workflow. Voir les [règles de planification d’Operon 4.6.0](https://github.com/hasanyilmaz/operon/blob/4.6.0/src/core/scheduling-rules.ts).
+Les profils de compatibilité signalent aussi cette exigence
+pour l’adoption (conversion des métadonnées Tasks), les notes quotidiennes ou
+hebdomadaires (routage et réalignement), les mises à jour par lot (plusieurs
+sources), les épingles (état du plugin), les relations (liens réciproques et
+agrégats), la récurrence (séries et occurrences suivantes), les déplacements et
+les conversions (plusieurs sources).
+
+Après le build, `node scripts/test-operon-headless-writes.mjs` compare les
+octets produits aux captures synthétiques du moteur d’écriture et du
+sérialiseur inline d’Operon 4.6.0. Les captures de tâches-fichiers utilisent le
+substitut YAML des tests amont. `stringifyYaml` d’Obsidian et la parité de bout
+en bout avec Desktop et le Bridge restent à vérifier. Comme Operon, le mode
+headless refuse un BOM avant le frontmatter d’une tâche-fichier avec
+`malformed-frontmatter`. Il conserve le BOM inline et les fins de ligne
+d’origine. Desktop peut réécrire des lignes modifiées ou du frontmatter en LF.
 
 ### Banc de parité Operon
 

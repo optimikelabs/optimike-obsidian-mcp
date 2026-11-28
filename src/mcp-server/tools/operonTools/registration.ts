@@ -30,10 +30,14 @@ import {
 } from "../../../services/operon/contract.js";
 import { config } from "../../../config/index.js";
 import { filesystemOperonService, type FilesystemOperonService } from "../../../services/operon/filesystemService.js";
+import { FilesystemOperonMutations } from "../../../services/operon/filesystemMutations.js";
+import { unsupportedFilesystemMutation } from "../../../services/operon/filesystemMutationFormat.js";
+import type { GovernedNoteReplaceRuntime } from "../governedNoteReplaceTools/runtime.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { OperonService } from "../../../services/operon/service.js";
+import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
-import { mcpSchema } from "../../mcpSchema.js";
+import { mcpSchema, mcpSchemaWithPublicValidation } from "../../mcpSchema.js";
 
 const ForceRefreshSchema = z.object({
   forceRefresh: z.boolean().optional().default(false),
@@ -112,12 +116,26 @@ const RECOVERY_BLOCKED_NOTICE =
   "UNAVAILABLE in this runtime: OPERON_MUTATION_ALLOWED_PATH_PREFIXES is set, so every call is refused with reasonCode operon_recovery_blocked_by_path_scope (a refusal, not an empty list; retrying cannot succeed). Do not call it; ask the vault owner to review uncertain Operon mutations. ";
 
 export async function registerOperonTools(
-  server: McpServer, headless = false, cache?: VaultCacheService,
+  server: McpServer, headless = false, cache?: VaultCacheService, notes?: GovernedNoteReplaceRuntime,
 ): Promise<void> {
   const filesystem = headless ? filesystemOperonService(cache) : undefined;
   const runRead: typeof runTool = (name, params, operation) => runTool(name, params, operation, filesystem);
   const service = new OperonService();
   const reader = filesystem ?? service;
+  const filesystemWriteMode = headless && config.obsidianRuntimeMode === "headless-filesystem";
+  const runMutation = filesystemWriteMode ? runRead : runTool;
+  const writer = filesystem && cache && notes?.isFilesystem && filesystemWriteMode
+    ? new FilesystemOperonMutations(filesystem, notes) : undefined;
+  const mutations = writer ?? service;
+  const liveOnly = (reason: string, action: () => Promise<unknown>) => async () => {
+    if (!headless) return action();
+    if (filesystemWriteMode) return unsupportedFilesystemMutation(reason);
+    throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "The Operon mutation requires the live Desktop Bridge.");
+  };
+  const availableMutation = (operation: () => Promise<unknown>) => writer ? operation : liveOnly(
+    "This operation requires the governed headless-filesystem mode with a shared vault cache, or the live Desktop Bridge.",
+    operation,
+  );
   const recoveryNotice =
     config.operonMutationAllowedPathPrefixes.length > 0
       ? RECOVERY_BLOCKED_NOTICE
@@ -133,7 +151,7 @@ export async function registerOperonTools(
     },
     async (params: z.infer<typeof ForceRefreshSchema>) =>
       runRead("operon_status", params, () =>
-        reader.status(params.forceRefresh),
+        (writer ?? reader).status(params.forceRefresh),
       ),
   );
   server.registerTool(
@@ -256,13 +274,15 @@ export async function registerOperonTools(
   server.registerTool(
     "operon_resolve_task",
     {
-      description:
+      description: filesystem
+        ? "Resolve a filesystem Operon task selector by ID, exact locator, path, note name or local text. Returns resolved, ambiguous or not-found with bounded candidates."
+        :
         "Resolve an Operon task selector through the native entity resolver and return resolved, ambiguous, or not-found with bounded candidates. Use before acting when you have a path, note name, locator, search phrase, or uncertain identity instead of guessing an operonId.",
       inputSchema: mcpSchema(OperonResolveTaskSchema.shape),
       annotations: READ_ONLY_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonResolveTaskSchema>) =>
-      runTool("operon_resolve_task", params, () => service.resolveTask(params)),
+      runRead("operon_resolve_task", params, () => reader.resolveTask(params)),
   );
   server.registerTool(
     "operon_get_relationships",
@@ -310,7 +330,7 @@ export async function registerOperonTools(
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonAdoptTaskSchema>) =>
-      runTool("operon_adopt_task", params, () => service.adoptTask(params)),
+      runMutation("operon_adopt_task", params, liveOnly("Adoption needs the native Tasks metadata conversion and sealed workflow.", () => service.adoptTask(params))),
   );
   server.registerTool(
     "operon_create_periodic_task",
@@ -321,9 +341,9 @@ export async function registerOperonTools(
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonCreatePeriodicTaskSchema>) =>
-      runTool("operon_create_periodic_task", params, () =>
+      runMutation("operon_create_periodic_task", params, liveOnly("Periodic creation needs native Daily/Weekly routing and container verification.", () =>
         service.createPeriodicTask(params),
-      ),
+      )),
   );
   server.registerTool(
     "operon_update_periodic_scheduling",
@@ -334,22 +354,24 @@ export async function registerOperonTools(
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonUpdatePeriodicSchedulingSchema>) =>
-      runTool("operon_update_periodic_scheduling", params, () =>
+      runMutation("operon_update_periodic_scheduling", params, liveOnly("Scheduled-date changes can realign Daily/Weekly parent notes and need the native workflow.", () =>
         service.updatePeriodicScheduling(params),
-      ),
+      )),
   );
   server.registerTool(
     "operon_create_task",
     {
-      description:
+      description: writer
+        ? "Create a standalone inline Operon 4.6.0 task in an explicit existing task.targetPath. Supported scalar fields and portable tags only. dryRun defaults to true; use a new idempotencyKey for apply. Apply requires an atomic exchange backend and OPERON_MUTATIONS_ENABLED=true."
+        :
         "Create an Operon inline or file task through the loaded engine's supported official API. task.targetPath is the destination Markdown note of an inline task. A file task always goes to Operon's configured file-task folder: do not pass targetPath or targetFolder. targetFolder is legacy-only and rejected by official Developer API V1. fields.related takes Operon task ids; note links go in fields.links. taskFolder is not a supported argument. dateScheduled is reserved for operon_update_periodic_scheduling. dryRun defaults to true. Use one idempotencyKey for the dry-run and a new one for the apply; reusing the dry-run key returns idempotency_key_reused. Apply requires the live Bridge and an idempotencyKey; no raw Markdown fallback exists.",
       // Keep business refinements in the service, so their safe diagnostics
       // reach the application boundary instead of an opaque SDK refusal.
-      inputSchema: mcpSchema(OperonCreateTaskInputSchema.shape),
+      inputSchema: mcpSchemaWithPublicValidation(OperonCreateTaskInputSchema.shape),
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonCreateTaskSchema>) =>
-      runTool("operon_create_task", params, () => service.createTask(params)),
+      runMutation("operon_create_task", params, availableMutation(() => mutations.createTask(params))),
   );
   server.registerTool(
     "operon_set_pinned",
@@ -360,7 +382,7 @@ export async function registerOperonTools(
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonSetPinnedSchema>) =>
-      runTool("operon_set_pinned", params, () => service.setPinned(params)),
+      runMutation("operon_set_pinned", params, liveOnly("Pins require Operon's sealed plugin-data transaction.", () => service.setPinned(params))),
   );
   server.registerTool(
     "operon_update_tasks",
@@ -371,31 +393,33 @@ export async function registerOperonTools(
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonUpdateTasksSchema>) =>
-      runTool("operon_update_tasks", params, () => service.updateTasks(params)),
+      runMutation("operon_update_tasks", params, liveOnly("Batch updates require a native batch proof across all sources.", () => service.updateTasks(params))),
   );
   server.registerTool(
     "operon_update_task",
     {
-      description:
+      description: writer
+        ? "Update one standalone canonical Operon 4.6.0 task in a sealed filesystem plan. Supports inline description or tags, and scalar priority, dateDue or dateStarted. An empty string clears a supported scalar. Datetime scheduling and estimates require Desktop. Use the current filesystem expectedRevision. dryRun defaults to true; use a new idempotencyKey for apply."
+        :
         "Change the due date (dateDue, deadline) or other fields of an existing Operon task. Update exactly one ordinary Operon mutation group: description, managed fields/tags, or one unmanaged file property. Do not use this tool for dateScheduled (use operon_update_periodic_scheduling), relationships (use operon_set_relationships), or recurrence fields (use operon_update_recurrence). expectedRevision and idempotencyKey are mandatory; dryRun defaults to true. Use one idempotencyKey for the dry-run and a new one for the apply; reusing the dry-run key returns idempotency_key_reused.",
-      inputSchema: mcpSchema(OperonUpdateTaskSchema.shape),
+      inputSchema: mcpSchemaWithPublicValidation(OperonUpdateTaskSchema.shape),
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonUpdateTaskSchema>) =>
-      runTool("operon_update_task", params, () => service.updateTask(params)),
+      runMutation("operon_update_task", params, availableMutation(() => mutations.updateTask(params))),
   );
   server.registerTool(
     "operon_transition_task",
     {
-      description:
+      description: writer
+        ? "Transition one standalone canonical Operon 4.6.0 task. Provide one configured statusId, exact status or semantic intent (complete | cancel | reopen) and the current filesystem expectedRevision. Recurrence, dependency and side-effecting transitions require Desktop. dryRun defaults to true; use a new idempotencyKey for apply."
+        :
         "Transition an Operon task through Operon's dependency, recurrence, aggregate, and workflow guards. Prefer stable statusId from operon_get_configuration; exact configured status remains supported. To complete, cancel or reopen without naming a status, pass intent (complete | cancel | reopen): it resolves to the matching status of the task's own pipeline. expectedRevision and idempotencyKey are mandatory; dryRun defaults to true. Use one idempotencyKey for the dry-run and a new one for the apply; reusing the dry-run key returns idempotency_key_reused.",
-      inputSchema: mcpSchema(OperonTransitionTaskInputSchema.shape),
+      inputSchema: mcpSchemaWithPublicValidation(OperonTransitionTaskInputSchema.shape),
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonTransitionTaskSchema>) =>
-      runTool("operon_transition_task", params, () =>
-        service.transitionTask(params),
-      ),
+      runMutation("operon_transition_task", params, availableMutation(() => mutations.transitionTask(params))),
   );
   server.registerTool(
     "operon_convert_task",
@@ -406,7 +430,7 @@ export async function registerOperonTools(
       annotations: DESTRUCTIVE_MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonConvertTaskSchema>) =>
-      runTool("operon_convert_task", params, () => service.convertTask(params)),
+      runMutation("operon_convert_task", params, liveOnly("Conversion requires native source removal, target publication and postflight.", () => service.convertTask(params))),
   );
   server.registerTool(
     "operon_relocate_task",
@@ -417,9 +441,9 @@ export async function registerOperonTools(
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonRelocateTaskSchema>) =>
-      runTool("operon_relocate_task", params, () =>
+      runMutation("operon_relocate_task", params, liveOnly("Relocation requires a native transaction over source and destination notes.", () =>
         service.relocateTask(params),
-      ),
+      )),
   );
   server.registerTool(
     "operon_set_relationships",
@@ -430,9 +454,9 @@ export async function registerOperonTools(
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonSetRelationshipsSchema>) =>
-      runTool("operon_set_relationships", params, () =>
+      runMutation("operon_set_relationships", params, liveOnly("Relationships require reciprocal edge and aggregate updates across affected tasks.", () =>
         service.setRelationships(params),
-      ),
+      )),
   );
   server.registerTool(
     "operon_update_recurrence",
@@ -443,36 +467,34 @@ export async function registerOperonTools(
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonUpdateRecurrenceSchema>) =>
-      runTool("operon_update_recurrence", params, () =>
+      runMutation("operon_update_recurrence", params, liveOnly("Recurrence requires native series state and next-occurrence planning.", () =>
         service.updateRecurrence(params),
-      ),
+      )),
   );
   server.registerTool(
     "operon_list_pending_recoveries",
     {
-      description:
+      description: writer ? recoveryNotice + "List uncertain sealed filesystem Operon plans. This read does not dispatch a mutation. Use the returned recoveryRef with operon_recover_mutation."
+        :
         recoveryNotice +
         "List durable official Operon Developer API mutation recoveries. Read-only: it does not retry or apply anything. Blocked when OPERON_MUTATION_ALLOWED_PATH_PREFIXES is nonempty because recovery records lack canonical route evidence; a refusal is not an empty recovery list. Preserve any known recoveryRef, inspect the affected task with authorized reads, and do not replay the original mutation or relax the allowlist to bypass this gate. When permitted, use the returned recoveryRef only with operon_recover_mutation after inspecting the uncertain outcome.",
       inputSchema: mcpSchema(OperonPendingRecoveriesInputSchema.shape),
       annotations: READ_ONLY_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonPendingRecoveriesInputSchema>) =>
-      runTool("operon_list_pending_recoveries", params, () =>
-        service.pendingRecoveries(params),
-      ),
+      runMutation("operon_list_pending_recoveries", params, availableMutation(() => mutations.pendingRecoveries(params))),
   );
   server.registerTool(
     "operon_recover_mutation",
     {
-      description:
+      description: writer ? recoveryNotice + "Reconcile one uncertain filesystem Operon plan by recoveryRef. Use recovery.kind=developer-api and a new idempotencyKey. Requires OPERON_MUTATIONS_ENABLED=true, MCP_WRITE_MODE=full and an empty Operon path allowlist."
+        :
         recoveryNotice +
         "Recover exactly one uncertain official Operon mutation by recoveryRef. Set recovery.kind=developer-api for legacy official recovery, or use the exact task-workflow kind returned by pending state and optionally echo its planDigest. This replays the same durable plan only; it never constructs a new mutation. Requires idempotencyKey, OPERON_MUTATIONS_ENABLED=true, MCP_WRITE_MODE=full, and an empty OPERON_MUTATION_ALLOWED_PATH_PREFIXES because current recovery records do not prove their route.",
       inputSchema: mcpSchema(OperonRecoverMutationInputSchema.shape),
       annotations: MUTATION_ANNOTATIONS,
     },
     async (params: z.infer<typeof OperonRecoverMutationSchema>) =>
-      runTool("operon_recover_mutation", params, () =>
-        service.recoverMutation(params),
-      ),
+      runMutation("operon_recover_mutation", params, availableMutation(() => mutations.recoverMutation(params))),
   );
 }

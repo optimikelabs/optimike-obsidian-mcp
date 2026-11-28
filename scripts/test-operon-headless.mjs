@@ -193,15 +193,20 @@ try {
       const processTimeZone = mode === "headless-readonly" ? "" : "UTC";
       await withOperonClient({ ...options, mode, timeZone, processTimeZone }, async fs => {
         const catalog = await fs.listTools();
-        const names = [
+        const readNames = [
           "operon_find_tasks", "operon_get_configuration", "operon_get_relationships", "operon_get_task",
-          "operon_list_tasks", "operon_query_saved_filter", "operon_query_tasks", "operon_status", "operon_validate",
+          "operon_list_tasks", "operon_query_saved_filter", "operon_query_tasks", "operon_resolve_task", "operon_status", "operon_validate",
         ];
+        const mutationNames = mode === "headless-filesystem" ? [
+          "operon_create_task", "operon_update_task", "operon_transition_task",
+          "operon_list_pending_recoveries", "operon_recover_mutation",
+        ] : [];
+        const names = [...readNames, ...mutationNames].sort();
         assert.deepEqual(catalog.tools.filter(item => item.name.startsWith("operon_")).map(item => item.name).sort(), names);
         for (const name of names) {
           const tool = catalog.tools.find(tool => tool.name === name);
           assert.deepEqual(tool.inputSchema, base.tools.find(tool => tool.name === name).inputSchema);
-          assert.equal(tool.annotations.readOnlyHint, true);
+          assert.deepEqual(tool.annotations, base.tools.find(tool => tool.name === name).annotations);
         }
         const parity = await runParity(liveClient, fs);
         assert.equal(parity.liveCount, 5);
@@ -377,6 +382,7 @@ try {
   const building = new FilesystemOperonService({
     getStats: () => ({ status: "building", freshness: "uncertain" }),
     isReady: () => false,
+    getMetadataGeneration: () => 0,
     getEntriesByPrefix: () => [],
   });
   const partial = await building.query({});
@@ -391,6 +397,7 @@ try {
   const sample = { path: "Synced.md", content: "---\noperonId: time003\nstatus: CN.Open\n---", mtime: recentMtime, hash: "sample" };
   const synchronized = new FilesystemOperonService({
     getStats: () => ({ status: "ready" }),
+    getMetadataGeneration: () => 0,
     isReady: () => true, getEntriesByPrefix: () => [sample], getEntry: () => sample,
   });
   const readBirthtime = VaultFileService.prototype.readBirthtime;
