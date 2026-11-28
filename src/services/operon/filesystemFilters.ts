@@ -138,27 +138,43 @@ export function compileSavedFilter(
   }, pinned, localDate(now, timeZone));
   const specs = Array.isArray(definition.sorts) ? definition.sorts :
     definition.sortBy ? [{ field: definition.sortBy, order: definition.sortOrder }] : [];
-  const ranks = (items: (string | null)[][]) => new Map(items.flatMap((keys, index) =>
-    keys.flatMap(key => key === null ? [] : [[key, index] as const])));
-  const priorityRanks = ranks(configuration.priorities.items.map(item => [item.id, item.label]));
-  const statusRanks = ranks(configuration.workflow.pipelines.flatMap(p => p.statuses.map(s => [s.id, s.value])));
-  const checkboxRanks = ranks([["open"], ["done"], ["cancelled"]]);
+  const normalizePriority = (value: string) => value.trim().toLowerCase();
+  const priorityRanks = new Map(configuration.priorities.items.flatMap(({ id, label }, index) =>
+    (id ? [id, label] : [label]).map(key => [normalizePriority(key), index] as const)));
+  const statusRanks = new Map<string, number>();
+  for (const status of configuration.workflow.pipelines.flatMap(pipeline => pipeline.statuses)) {
+    if (!statusRanks.has(status.value)) statusRanks.set(status.value, statusRanks.size);
+  }
+  const checkboxRanks = { open: 0, done: 1, cancelled: 2 };
   const comparators = specs.map(raw => {
     const spec = object(raw);
     const field = spec.field;
     if (typeof field !== "string" || !sortFields.has(field) ||
         (spec.order !== "asc" && spec.order !== "desc")) throw new Error("unsupported sorting");
-    const ranking = field === "checkbox" ? checkboxRanks : field === "priority" ? priorityRanks :
-      field === "status" ? statusRanks : undefined;
-    const value = (task: OperonTask) => field === "description" ? task.description :
-      field === "checkbox" ? task.checkbox : field === "folders" ? folderPath(task.path) : String(task.fields[field] ?? "");
     const order = spec.order === "desc" ? -1 : 1;
+    // Folder conditions use the path. Operon 4.6 has no directory sort value.
+    if (field === "folders") return () => 0;
+    if (field === "checkbox") return (left: OperonTask, right: OperonTask) =>
+      order * (checkboxRanks[left.checkbox] - checkboxRanks[right.checkbox]);
+    if (field === "description") return (left: OperonTask, right: OperonTask) =>
+      order * left.description.localeCompare(right.description, undefined, { sensitivity: "base" });
+    const value = (task: OperonTask) => String(task.fields[field] ?? "");
+    if (field === "status") return (left: OperonTask, right: OperonTask) => {
+      const a = value(left).trim();
+      const b = value(right).trim();
+      const aRank = statusRanks.get(a);
+      const bRank = statusRanks.get(b);
+      const aBucket = !a ? 2 : aRank === undefined ? 1 : 0;
+      const bBucket = !b ? 2 : bRank === undefined ? 1 : 0;
+      if (aBucket !== bBucket) return aBucket - bBucket;
+      return order * (aRank !== undefined && bRank !== undefined ? aRank - bRank :
+        a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }) || a.localeCompare(b));
+    };
+    if (field === "priority" && priorityRanks.size) return (left: OperonTask, right: OperonTask) =>
+      order * ((priorityRanks.get(normalizePriority(value(left))) ?? 999) -
+        (priorityRanks.get(normalizePriority(value(right))) ?? 999));
     return (left: OperonTask, right: OperonTask) => {
-      const a = value(left);
-      const b = value(right);
-      const missing = Number.MAX_SAFE_INTEGER;
-      if (order === 1 && /^(?:date|datetime)/u.test(field) && Boolean(a) !== Boolean(b)) return a ? -1 : 1;
-      return order * (ranking ? (ranking.get(a) ?? missing) - (ranking.get(b) ?? missing) : a.localeCompare(b));
+      return order * value(left).localeCompare(value(right));
     };
   });
   return { predicate, compare: (a: OperonTask, b: OperonTask) => {
@@ -166,6 +182,6 @@ export function compileSavedFilter(
       const result = compare(a, b);
       if (result) return result;
     }
-    return a.path.localeCompare(b.path) || (a.line ?? 0) - (b.line ?? 0);
+    return 0;
   } };
 }

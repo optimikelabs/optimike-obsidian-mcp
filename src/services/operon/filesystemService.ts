@@ -47,10 +47,11 @@ function validTimeZone(value: unknown): string | undefined {
 }
 
 function resolveTimeZone(pluginZone?: unknown) {
-  const zone = validTimeZone(config.operonTimeZone) ?? validTimeZone(pluginZone) ?? validTimeZone(process.env.TZ);
+  const zone = validTimeZone(config.operonTimeZone) ?? validTimeZone(pluginZone);
   // ICU may report Etc/Unknown when TZ is empty or invalid. It rejects that
   // identifier when passed back to a formatter as an explicit time zone.
-  const serverZone = zone ? undefined : validTimeZone(new Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const serverZone = zone ? undefined :
+    validTimeZone(process.env.TZ) ?? validTimeZone(new Intl.DateTimeFormat().resolvedOptions().timeZone);
   return {
     timeZone: zone ?? serverZone ?? "UTC",
     timeZoneSource: zone ? "configured" as const : "server" as const,

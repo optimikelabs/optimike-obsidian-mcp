@@ -120,7 +120,7 @@ const live = createServer(async (req, res) => {
   const edge = (sourceOperonId, kind, targetOperonId) => ({ sourceOperonId, kind, targetOperonId });
   const rows = expected.map(task => ({ task: { identity: { operonId: task.operonId } } }));
   const native = (operation, result) => ({ ...envelope, source: "operon-live", operation, result });
-  const filtered = expected.filter(task => ["child01", "root001"].includes(task.operonId));
+  const filtered = [expected.find(task => task.operonId === "root001"), expected.find(task => task.operonId === "child01")];
   const data = req.url.endsWith("/tasks/query") ? {
     ...envelope, source: "operon-live", cursor: "0", hasMore: false, tasks: expected,
     count: expected.length, total: expected.length,
@@ -184,11 +184,14 @@ try {
   const url = "http://127.0.0.1:" + live.address().port;
   // An empty TZ exercises the unavailable server zone on Linux with Node 22.
   const options = { vault, cache: root, timeZone: "", processTimeZone: "" };
+  await assert.rejects(withOperonClient({ ...options, mode: "headless-readonly", timeZone: "Invalid/Zone" },
+    async () => assert.fail("An invalid OPERON_TIMEZONE must prevent startup")), /connection closed/iu);
   await withOperonClient({ ...options, mode: "live", url, token: "synthetic-fixture" }, async liveClient => {
     const base = await liveClient.listTools();
     for (const mode of ["headless-readonly", "headless-guarded", "headless-filesystem"]) {
       const timeZone = mode === "headless-guarded" ? "Europe/Paris" : "";
-      await withOperonClient({ ...options, mode, timeZone, processTimeZone: timeZone ? "UTC" : "" }, async fs => {
+      const processTimeZone = mode === "headless-readonly" ? "" : "UTC";
+      await withOperonClient({ ...options, mode, timeZone, processTimeZone }, async fs => {
         const catalog = await fs.listTools();
         const names = [
           "operon_find_tasks", "operon_get_configuration", "operon_get_relationships", "operon_get_task",
@@ -217,6 +220,7 @@ try {
         assert.equal(health.timeZoneSource, timeZone ? "configured" : "server");
         if (timeZone) assert.equal(health.timeZone, timeZone);
         else assert.match(health.timeZoneWarning, /server's time zone/u);
+        if (!timeZone && processTimeZone) assert.equal(health.timeZone, "UTC");
         if (mode !== "headless-readonly") return;
         const read = (name, args, allowError) => callOperon(fs, "operon_" + name, args, allowError);
         const config = await read("get_configuration");
@@ -244,9 +248,9 @@ try {
         const saved = await read("query_saved_filter", { filterSetId: dueFilter.id, scopePath: notesPath });
         assert.deepEqual(saved.tasks.map(task => task.operonId), ["child01"]);
         const firstSaved = await read("query_saved_filter", { filterSetId: dueFilter.id, limit: 1 });
-        assert.deepEqual(firstSaved.tasks.map(task => task.operonId), ["child01"]);
+        assert.deepEqual(firstSaved.tasks.map(task => task.operonId), ["root001"]);
         const lastSaved = await read("query_saved_filter", { filterSetId: dueFilter.id, limit: 1, cursor: firstSaved.nextCursor });
-        assert.deepEqual(lastSaved.tasks.map(task => task.operonId), ["root001"]);
+        assert.deepEqual(lastSaved.tasks.map(task => task.operonId), ["child01"]);
         for (const filter of [dynamicFilter, groupedFilter]) {
           const refusedFilter = await read("query_saved_filter", { filterSetId: filter.id }, true);
           assert.equal(refusedFilter.error.details.reasonCode, "operon_filesystem_filter_unsupported");
@@ -337,11 +341,28 @@ try {
   const filterSpec = (condition, sorts = []) => ({ rootGroup: { logic: "all", children: [condition] }, sorts });
   const folders = compileSavedFilter(filterSpec(
     { fieldType: "folders", field: "folders", operator: "isInFolderTree", value: "\\Program\\ACTIVE\\" },
-    [{ field: "folders", order: "desc" }]), null, cfg, new Date());
-  const alpha = { ...clock, path: "Team/Program/Active/Alpha/Task.md" };
-  const beta = { ...clock, path: "Team/Program/Active/Beta/Task.md" };
+    [{ field: "folders", order: "asc" }, { field: "description", order: "asc" }]), null, cfg, new Date());
+  const alpha = { ...clock, description: "Zulu", path: "Team/Program/Active/Alpha/Task.md" };
+  const beta = { ...clock, description: "Alpha", path: "Team/Program/Active/Beta/Task.md" };
   assert.deepEqual([alpha, { ...clock, path: "Team/Program/Inactive/Task.md" }, beta]
     .filter(folders.predicate).sort(folders.compare), [beta, alpha]);
+  const noFolderOrder = compileSavedFilter(filterSpec(
+    { fieldType: "folders", field: "folders", operator: "isInFolderTree", value: "Active" },
+    [{ field: "folders", order: "asc" }]), null, cfg, new Date());
+  assert.deepEqual([beta, alpha].sort(noFolderOrder.compare), [beta, alpha]);
+
+  const statusTask = status => ({ ...clock, fields: { status } });
+  const emptyStatus = statusTask(" ");
+  const unconfigured10 = statusTask("Other.10");
+  const unconfigured2 = statusTask("Other.2");
+  const openStatus = statusTask("CN.Open");
+  const activeStatus = statusTask("CN.Active");
+  const statusTasks = [emptyStatus, unconfigured10, activeStatus, unconfigured2, openStatus];
+  const byStatus = order => compileSavedFilter({
+    rootGroup: { logic: "all", children: [] }, sorts: [{ field: "status", order }],
+  }, null, cfg, new Date()).compare;
+  assert.deepEqual([...statusTasks].sort(byStatus("asc")), [openStatus, activeStatus, unconfigured2, unconfigured10, emptyStatus]);
+  assert.deepEqual([...statusTasks].sort(byStatus("desc")), [activeStatus, openStatus, unconfigured10, unconfigured2, emptyStatus]);
   const week = filterSpec({ fieldType: "date", field: "dateDue", operator: "thisWeek" });
   const midnight = new Date("2026-01-04T23:30:00Z");
   const monday = { ...clock, fields: { dateDue: "2026-01-05" } };
