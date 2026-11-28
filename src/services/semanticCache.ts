@@ -35,6 +35,7 @@ type SemanticVectorRow = {
   note_path: string;
   title: string | null;
   tags_json: string | null;
+  read_hash: string | null;
   model: string | null;
   dim: number;
   vec_json: string;
@@ -140,6 +141,10 @@ CREATE TABLE IF NOT EXISTS semantic_section_tags (
   note_path TEXT PRIMARY KEY,
   tags_json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS semantic_note_hashes (
+  note_path TEXT PRIMARY KEY,
+  read_hash TEXT NOT NULL
+);
 `;
 
 let semanticCacheServiceSingleton: SemanticCacheService | null = null;
@@ -217,7 +222,7 @@ function makeSourceSignature(
     createHash("sha1")
       // A reader-contract change must invalidate persisted snapshots even when
       // the vault files themselves have not changed.
-      .update("smart-env-v3:last-read-v1:float64le-base64-v1\n")
+      .update("smart-env-v3:last-read-v2:float64le-base64-v1\n")
       .update(JSON.stringify(entries))
       .digest("hex")
   );
@@ -1016,8 +1021,8 @@ export class SemanticCacheService {
     manifest: SemanticManifestRow,
   ): SemanticCacheSnapshot {
     const stmt = this.db.prepare(`
-      SELECT note_path, title, tags_json, model, dim, vec_json, source_id
-      FROM semantic_vectors
+      SELECT note_path, title, tags_json, model, dim, vec_json, source_id, read_hash
+      FROM semantic_vectors LEFT JOIN semantic_note_hashes USING (note_path)
       ORDER BY note_path ASC
     `);
     const rows = stmt.all() as unknown as SemanticVectorRow[];
@@ -1027,6 +1032,7 @@ export class SemanticCacheService {
       title: row.title ?? undefined,
       tags: row.tags_json ? (JSON.parse(row.tags_json) as string[]) : undefined,
       model: row.model ?? undefined,
+      readHash: row.read_hash ?? undefined,
       vec: decodeCachedVector(row.vec_json, row.dim),
     }));
     const external = this.external?.manifest;
@@ -1059,6 +1065,8 @@ export class SemanticCacheService {
     this.db.exec("BEGIN");
     try {
       this.db.prepare("DELETE FROM semantic_vectors").run();
+      this.db.prepare("DELETE FROM semantic_note_hashes").run();
+      const insertHash = this.db.prepare("INSERT INTO semantic_note_hashes (note_path, read_hash) VALUES (?, ?)");
       const insertStmt = this.db.prepare(`
         INSERT INTO semantic_vectors (
           note_path, title, tags_json, model, dim, vec_json, source_id, updated_at
@@ -1077,6 +1085,7 @@ export class SemanticCacheService {
           item.id,
           refreshedAt,
         );
+        if (item.readHash) insertHash.run(item.notePath, item.readHash);
       }
 
       this.db

@@ -149,6 +149,7 @@ async function mapWithConcurrency<T, R>(
  */
 export class VaultCacheService {
   private readonly metadataCache = new Map<string, CacheIndexEntry>();
+  private metadataGeneration = 0;
   private readonly contentHotCache = new Map<string, CacheEntry>();
   private readonly hotCacheLimit = config.obsidianContentHotCacheLimit;
   private readonly obsidianService: ObsidianRestApiService | undefined;
@@ -388,6 +389,11 @@ export class VaultCacheService {
       }
     }
     return undefined;
+  }
+
+  /** Revision of the metadata visible to this process, independent of SQLite writers. */
+  public getMetadataGeneration(): number {
+    return this.metadataGeneration;
   }
 
   public getEntriesByPrefix(prefix?: string): CacheIndexEntry[] {
@@ -930,6 +936,7 @@ export class VaultCacheService {
       "SELECT path, ctime, mtime, size, hash FROM file_cache ORDER BY path ASC",
     );
     const rows = stmt.all() as unknown as CacheIndexEntry[];
+    this.metadataGeneration++;
     this.metadataCache.clear();
     for (const row of rows) {
       if (
@@ -996,7 +1003,12 @@ export class VaultCacheService {
       size: row.size,
       hash: row.hash,
     };
-    this.metadataCache.set(row.path, indexEntry);
+    const previous = this.metadataCache.get(row.path);
+    if (!previous || previous.hash !== row.hash || previous.mtime !== row.mtime ||
+        previous.ctime !== row.ctime || previous.size !== row.size) {
+      this.metadataCache.set(row.path, indexEntry);
+      this.metadataGeneration++;
+    }
     this.touchHotCache(row.path, {
       content: row.content,
       ctime: row.ctime,
@@ -1037,7 +1049,7 @@ export class VaultCacheService {
   private deleteRow(filePath: string): void {
     const stmt = this.db.prepare("DELETE FROM file_cache WHERE path = ?");
     stmt.run(filePath);
-    this.metadataCache.delete(filePath);
+    if (this.metadataCache.delete(filePath)) this.metadataGeneration++;
     this.contentHotCache.delete(filePath);
   }
 

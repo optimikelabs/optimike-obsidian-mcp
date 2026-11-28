@@ -56,7 +56,7 @@ export async function registerObsidianGlobalSearchTool(
       server.registerTool(
         toolName,
         {
-          description: toolDescription,
+          description: toolDescription + ' Set mode to "ranked" for BM25 relevance on cached Markdown, with title, alias and heading boosts.',
           inputSchema: mcpSchema(ObsidianGlobalSearchInputSchemaShape),
           annotations: READ_ONLY_TOOL_ANNOTATIONS,
         },

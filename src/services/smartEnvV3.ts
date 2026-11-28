@@ -463,6 +463,7 @@ async function readNoteVectors(
       title: path.basename(notePath, path.extname(notePath)),
       tags: source.tags,
       model: modelKey,
+      readHash: reference.read_hash,
       vec,
     });
   }

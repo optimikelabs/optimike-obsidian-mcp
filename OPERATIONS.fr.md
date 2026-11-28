@@ -6,6 +6,52 @@ Version anglaise : [OPERATIONS.md](OPERATIONS.md)
 
 Ce guide explique comment le serveur tourne réellement, de quoi il dépend, comment Tasks et la recherche sémantique fonctionnent, et ce qui permet de garder une faible empreinte mémoire.
 
+## Recherche classée et hybride
+
+`obsidian_global_search` cherche par défaut une chaîne ou une expression
+régulière et trie les résultats du plus récent au plus ancien. Avec
+`mode: "ranked"`, BM25 classe le Markdown en cache par pertinence. Ce mode
+ignore la casse et les accents, prend en compte les pluriels courants en
+français et en anglais, et donne plus de poids aux titres, aux alias YAML et
+aux intertitres. Les filtres de dossier et de date s'appliquent.
+
+`hybrid: true` dans `smart_semantic_search` fusionne les rangs BM25, les
+vecteurs de note et le meilleur vecteur de section par note. Chaque chemin
+apparaît une fois avec les rangs et scores des `signals` et la
+`best_section` disponible. Une note sans intertitre peut renvoyer tout son
+corps Markdown comme section lexicale. Le serveur vérifie les signaux
+sémantiques contre le cache du coffre. Si l'index ou l'encodeur est
+indisponible, ou si aucun vecteur éligible n'est à jour, BM25 prend le relais
+et `provenance` en donne la raison. Le mode hybride utilise les deux
+granularités et prime sur `granularity`. Une section vérifiée peut contribuer
+quand le vecteur de la note entière manque ou est périmé. Le serveur réutilise
+les plages vérifiées tant que l'index sémantique et l'empreinte de la note en
+cache correspondent. Il lit les extraits des seuls résultats renvoyés, dans le
+texte qui porte cette empreinte.
+
+`rrf_k` vaut 20 par défaut. `short_note_floor` réduit le poids du vecteur
+de note sous le nombre de caractères de prose choisi. Le seuil vaut 0 par
+défaut (désactivé), car les seuils positifs ont dégradé le classement sur
+la réplique. Une section vérifiée garde son propre score. BM25 indexe aussi
+le code et les liens.
+Le seuil compte les libellés visibles des liens et exclut les blocs de code
+délimités, le code en ligne et les destinations des liens.
+
+Chaque classement fournit au moins 60 candidats à la fusion quand ils
+sont disponibles. Au-delà de 20 résultats demandés, le budget croît avec
+`top_k` jusqu'à 100 candidats par classement.
+
+Le serveur prépare l'index BM25 en mémoire une fois le cache du coffre prêt.
+Un appel précoce rejoint la construction déjà lancée. Le serveur laisse les
+autres outils fonctionner entre les lots. Les recherches suivantes
+reconstruisent les partitions dont les métadonnées des notes en cache ont
+changé. Sur une réplique locale en lecture seule de 8 818 notes, la
+construction à froid a pris 15,8 s sous charge, contre 21,7 s auparavant.
+Après le passage du ramasse-miettes, le heap retenu a augmenté de 56 Mo,
+contre 217 Mo. Les tableaux typés représentaient 25 Mo supplémentaires.
+La mémoire résidente du processus a augmenté de 177 Mo pendant la mesure,
+contre 260 Mo auparavant. Ces chiffres proviennent d'une seule réplique.
+
 ## Modèle runtime
 
 Le runtime final repose sur deux couches :
