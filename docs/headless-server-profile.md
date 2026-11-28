@@ -127,6 +127,10 @@ Only after the `headless-guarded` step, switch a copied or dedicated vault to `O
 2. For tags, limit the contract to Markdown text: YAML frontmatter `tags`, inline `#tags`, and cache-backed local index.
 3. For batch frontmatter, keep dry-run as the default and allow only `set`.
 4. For Bases, limit the contract to `.base` YAML files and Markdown frontmatter properties.
+   `bases_query.filter` accepts property tables such as `{"status":"open"}`,
+   and `and`, `or`, and `not` groups with nested tables or simple expressions.
+   An unsupported node or a bare string returns `VALIDATION_ERROR`.
+   [See the filter syntax](obsidian_mcp_tools_spec.md#bases).
 5. For Canvas, limit the contract to JSON Canvas structure: create, add text node, connect nodes, validate.
 6. Validate with `npm run smoke:headless-filesystem`.
 

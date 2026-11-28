@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `obsidian_read_note` accepts existing paths containing U+00A0, U+202F or decomposed Unicode. `obsidian_list_notes` accepts these folder spellings, and filesystem-backed reads and compact listings include `diskPath` when the physical spelling differs from the returned vault path (#231).
 
+- `bases_query` rejects unsupported request filter nodes before selecting rows and reports their position. A bare string yields `VALIDATION_ERROR`. Bases Bridge 1.3.1 applies property tables with the same operators as the headless scanner. Upgrade the Bridge to use property tables over REST. (#211)
+- Request filter expressions now reject unquoted comparison values with spaces, slashes or brackets, property names with spaces, and empty expression leaves. Quote string values and use a property table for names with spaces. Empty value arrays, `in` lists, and `and`/`or` groups are also rejected. Live property tables can compare rendered formula text against numeric or boolean operands. (#211)
+
 ### Added
 
 - Headless note reads, listings, and global search report cache provenance and flag requests that overlap a refresh. Runtime status reports the newest indexed Markdown modification time and explicitly marks upstream synchronization as unknown.

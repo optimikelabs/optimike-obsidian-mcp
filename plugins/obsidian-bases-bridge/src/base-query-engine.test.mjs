@@ -60,7 +60,10 @@ const TABLE = {
 
 async function queryRoute({
   baseText = JSON.stringify(BASE), engine = true, notes = NOTES, table = TABLE,
-  frontmatter = Object.fromEntries(notes.map((path) => [path, { status: "open" }])),
+  frontmatter = Object.fromEntries(notes.map((path) => [path, {
+    status: path.endsWith("/b.md") ? "closed" : "open",
+    priority: path.endsWith("/c.md") ? 1 : 2,
+  }])),
 } = {}) {
   const { Bridge, TFile } = await loadBridge();
   const files = new Map();
@@ -126,18 +129,19 @@ async function queryRoute({
   const post = routes.get("/extensions/obsidian-bases-bridge/bases/:id(*)/query").post;
   return async (body) => {
     let payload;
-    await post({ params: { id: BASE_PATH }, body }, { json: (value) => (payload = value) });
-    return { payload, calls, sha256: createHash("sha256").update(baseText, "utf8").digest("hex") };
+    const response = { statusCode: 200, json: (value) => (payload = value) };
+    await post({ params: { id: BASE_PATH }, body }, response);
+    return { payload, status: response.statusCode, calls, sha256: createHash("sha256").update(baseText, "utf8").digest("hex") };
   };
 }
 
 test("the local scan matches the Bridge for supported expression trees", async () => {
   const { outputFiles: [local] } = await build({
-    entryPoints: [fileURLToPath(new URL("../../../src/services/localBaseFilter.ts", import.meta.url))],
+    entryPoints: [fileURLToPath(new URL("../../../src/services/baseQueryFilter.ts", import.meta.url))],
     format: "esm",
     write: false,
   });
-  const { compileLocalBaseFilter } = await import(
+  const { compileBaseQueryFilter } = await import(
     `data:text/javascript;base64,${Buffer.from(local.text).toString("base64")}`
   );
   const frontmatter = {
@@ -159,22 +163,59 @@ test("the local scan matches the Bridge for supported expression trees", async (
       ["Notes/a.md", "Notes/b.md"],
     ],
     [{ not: 'type == "a && b" or priority >= 5' }, ["Notes/b.md"]],
-    [{ and: ["closed = null", { or: [] }] }, []],
-    [{ and: ["closed = null", { and: [] }] }, ["Notes/a.md", "Notes/b.md", "Other/z.md"]],
     [{ and: ['due == "2026-11-28"'] }, ["Notes/a.md"]],
     [{ and: ['due >= "2026-12-01"'] }, ["Notes/b.md"]],
     [{ and: ['started > "2026-11-28T10:00:00Z"'] }, ["Notes/b.md"]],
   ]) {
     const { payload } = await query({ filter, evaluate: false });
-    const compiled = compileLocalBaseFilter(filter);
+    const compiled = compileBaseQueryFilter(filter, false);
     assert.ok(compiled);
-    const matches = NOTES.filter((path) => compiled.matches(
-      (key) => key === "file.path" ? `/${path}` : frontmatter[path][key],
-    ));
+    const matches = NOTES.filter((path) => compiled.matches({
+      read: (key) => key === "file.path" ? "/" + path : frontmatter[path][key],
+    }));
     const bridgePaths = payload.rows.map((row) => row.file.path);
     assert.deepEqual(payload.warnings, []);
     assert.deepEqual(bridgePaths, expected);
     assert.deepEqual(matches, bridgePaths);
+  }
+});
+
+test("a request property table narrows the rows selected by either source", async () => {
+  const query = await queryRoute({
+    baseText: JSON.stringify({ views: [{ type: "table", name: "All" }] }),
+  });
+  for (const evaluate of [false, true]) {
+    const { payload, status } = await query({
+      evaluate,
+      filter: { and: [{ status: "open", priority: { gte: 2 } }, 'file.inFolder("Notes")'] },
+    });
+    assert.equal(status, 200);
+    assert.equal(payload.source, evaluate ? "engine" : "fallback");
+    assert.deepEqual(payload.rows.map((row) => row.file.path), ["Notes/a.md"]);
+    assert.equal(payload.total, 1);
+    assert.equal(payload.filterVersion, 1);
+    assert.deepEqual(payload.warnings, []);
+  }
+});
+
+test("invalid request filters are refused before row selection, including nested leaves", async () => {
+  const query = await queryRoute({ notes: [] });
+  for (const [filter, node] of [
+    ['status == "open"', "filter"],
+    [{ and: ["status", { priority: { gtt: 1 } }] }, "filter.and[1].property[0]"],
+    [{ or: ["status", "unsupported()"] }, "filter.or[1]"],
+    [{ or: [], status: "open" }, "filter"],
+    [{ status: [] }, "filter.property[0]"],
+    [{ status: { in: [] } }, "filter.property[0]"],
+    [{ and: [] }, "filter.and"],
+    [{ or: [] }, "filter.or"],
+  ]) {
+    const { payload, status, calls } = await query({ evaluate: true, filter });
+    assert.equal(status, 400, JSON.stringify(payload));
+    assert.equal(payload.error.code, "INVALID_PARAMS");
+    assert.equal(payload.error.node, node);
+    assert.equal(calls.length, 0);
+    assert.equal(payload.rows, undefined);
   }
 });
 
@@ -247,6 +288,29 @@ test("request filters and formula column settings use the engine's formula value
   );
   assert.equal(payload.rows[0].props["formula.label"], nativeCapture.label.Label);
   assert.ok(!payload.warnings.some((warning) => warning.startsWith("Filtre sur formule")));
+});
+
+test("property tables compare formula text to numeric and boolean operands", async () => {
+  const query = await queryRoute({
+    baseText: JSON.stringify({
+      formulas: { done: 'file.name != "b.md"', count: 'if(file.name == "c.md", 7, 5)' },
+      views: [{ type: "table", name: "All" }],
+    }),
+    notes: NOTES.slice(0, 3),
+    table: {
+      'file.name != "b.md"': (row) => row.name === "b.md" ? "false" : "true",
+      'if(file.name == "c.md", 7, 5)': (row) => row.name === "c.md" ? "7" : "5",
+    },
+  });
+  for (const [filter, path, rendered] of [
+    [{ "formula.done": true, "formula.count": 5 }, "Notes/a.md", "true"],
+    [{ "formula.done": { eq: false }, "formula.count": { in: [5] } }, "Notes/b.md", "false"],
+  ]) {
+    const { payload } = await query({ evaluate: true, filter });
+    assert.equal(payload.source, "engine");
+    assert.deepEqual(payload.rows.map((row) => row.file.path), [path]);
+    assert.deepEqual(payload.rows[0].computed, { done: rendered, count: "5" });
+  }
 });
 
 // Simulated-only call counts measure the Bridge's batching and page selection.
@@ -328,7 +392,7 @@ test("past the cap, formula predicates are skipped, not run on missing values", 
     view: "All",
     evaluate: true,
     limit: 5,
-    filter: { and: ['file.name == "m0007"', "formula.shout == null"] },
+    filter: { "file.name": "m0007", "formula.shout": null },
   });
   assert.equal(payload.total, 1);
   assert.equal(payload.rows[0].file.path, "Notes/m0007.md");

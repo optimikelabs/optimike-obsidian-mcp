@@ -898,6 +898,7 @@ async function main() {
         ["unquoted YAML timestamps preserve the time in comparisons", { and: ['started > "2026-11-28T10:00:00Z"'] }, ["/Projects/Headless.md"]],
         ["property-map paths match a vault-relative path", { or: [{ "file.path": "Root.md" }] }, ["/Root.md"]],
         ["slash-prefixed path operands still match cached rows", { "file.path": { in: ["/Root.md"] } }, ["/Root.md"]],
+        ["property table and expression nodes can select one row together", { and: [{ type: { eq: "root" } }, 'file.name == "Root"'] }, ["/Root.md"]],
       ]) {
         const result = await withTimeout(
           client.callTool({
@@ -910,16 +911,16 @@ async function main() {
         assert.deepEqual(jsonOf(result, regression).rows.map((row) => row.file.path), expected, regression);
       }
 
-      for (const [regression, args, hint] of [
-        ["oversized expressions are refused before parsing", { filter: { and: [`type ==${" ".repeat(20_000)}"root"`] } }, /1,024 characters/u],
-        ["logical groups reject invalid leaves even in an unused branch", { filter: { or: ["type", "unrecognized()"] } }, /and, or, not/u],
-        ["a property array of operators cannot silently match nothing", { filter: { type: [{ eq: "root" }] } }, /direct equality/u],
-        ["an empty operator object cannot silently match everything", { filter: { type: {} } }, /direct equality/u],
-        ["an opted-in scan cannot filter against an unevaluated formula", { property_only: true, filter: { not: "formula.score == 2" } }, /formula/u],
-        ["an opted-in scan cannot silently sort on an unevaluated formula", { property_only: true, sort: [{ prop: "formula.score" }] }, /formula/u],
-        ["an unknown filter operator must not match every note", { filter: { type: { exists: true } } }, /eq, ne, in, contains/u],
-        ["an unsupported file property must not filter against missing values", { filter: { "file.folder": "Projects" } }, /file\.path, file\.name, file\.ctime, file\.mtime, file\.size/u],
-        ["an opted-in scan must not sort on a note namespace it cannot resolve", { property_only: true, sort: [{ prop: "note.type" }] }, /unprefixed frontmatter/u],
+      for (const [regression, args, expectedNode] of [
+        ["oversized expressions are refused before parsing", { filter: { and: [`type ==${" ".repeat(20_000)}"root"`] } }, "filter.and[0]"],
+        ["logical groups reject invalid leaves even in an unused branch", { filter: { or: ["type", "unrecognized()"] }, property_only: false }, "filter.or[1]"],
+        ["a property array of operators cannot silently match nothing", { filter: { type: [{ eq: "root" }] } }, "filter.property[0]"],
+        ["an empty operator object cannot silently match everything", { filter: { type: {} } }, "filter.property[0]"],
+        ["an opted-in scan cannot filter against an unevaluated formula", { filter: { not: "formula.score == 2" } }, "filter.not"],
+        ["an opted-in scan cannot silently sort on an unevaluated formula", { sort: [{ prop: "formula.score" }] }, null],
+        ["an unknown filter operator must not match every note", { filter: { type: { exists: true } } }, "filter.property[0]"],
+        ["an unsupported file property must not filter against missing values", { filter: { "file.folder": "Projects" } }, "filter.property[0]"],
+        ["an opted-in scan must not sort on a note namespace it cannot resolve", { sort: [{ prop: "note.type" }] }, null],
       ]) {
         const result = await withTimeout(
           client.callTool({
@@ -931,7 +932,9 @@ async function main() {
         assert.equal(result.isError, true, regression);
         const payload = jsonOf(result, regression);
         assert.equal(payload.error.code, "VALIDATION_ERROR", regression);
-        assert.match(payload.error.message, hint, regression);
+        assert.equal(payload.error.details.reasonCode,
+          expectedNode === null ? "base_query_unsupported_local_input" : "base_query_invalid_filter", regression);
+        assert.equal(payload.error.details.filterNode, expectedNode ?? undefined, regression);
         assert.equal(payload.rows, undefined, regression);
       }
 

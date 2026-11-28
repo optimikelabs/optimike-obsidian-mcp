@@ -2,6 +2,7 @@ import path from "node:path";
 import { readdir, readFile } from "node:fs/promises";
 import { load } from "js-yaml";
 import { config } from "./../config/index.js";
+import { compileBaseQueryFilter } from "./baseQueryFilter.js";
 import type { VaultCacheService } from "./obsidianRestAPI/vaultCache/index.js";
 import type {
   BaseQueryRequest,
@@ -13,7 +14,7 @@ import type {
 } from "./obsidianRestAPI/types.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import type { RequestContext } from "../utils/index.js";
-import { compileLocalBaseFilter, isLocalBaseProperty } from "./localBaseFilter.js";
+import { isLocalBaseProperty } from "./localBaseFilter.js";
 import { readMarkdownFrontmatter } from "./readMarkdownFrontmatter.js";
 import {
   createVaultExclusionMatcher,
@@ -222,6 +223,7 @@ export class LocalBasesService {
       limitations: string[];
     }
   > {
+    const filter = compileBaseQueryFilter(request.filter, false);
     if (request.property_only !== true) {
       throw new McpError(
         BaseErrorCode.SERVICE_UNAVAILABLE,
@@ -231,16 +233,11 @@ export class LocalBasesService {
     }
 
     await this.getParsedBase(baseId, context);
-    const filter = compileLocalBaseFilter(request.filter);
     const sort = request.sort ?? [];
-    if (
-      !filter ||
-      filter.usesFormula ||
-      sort.some(({ prop }) => !isLocalBaseProperty(prop) || prop.startsWith("formula."))
-    ) {
+    if (sort.some(({ prop }) => !isLocalBaseProperty(prop) || prop.startsWith("formula."))) {
       throw new McpError(
         BaseErrorCode.VALIDATION_ERROR,
-        "Unsupported local Base query filter or sort.",
+        "Unsupported local Base query sort.",
         { ...context, reasonCode: "base_query_unsupported_local_input" },
       );
     }
@@ -268,7 +265,9 @@ export class LocalBasesService {
       });
     }
 
-    const filtered = rows.filter((row) => filter.matches((key) => readProperty(row, key)));
+    const filtered = rows.filter((row) =>
+      filter.matches({ read: (key) => readProperty(row, key) }),
+    );
     const sorted = [...filtered].sort((a, b) => {
       for (const item of sort) {
         const direction = item.dir === "desc" ? -1 : 1;
@@ -296,7 +295,7 @@ export class LocalBasesService {
       limitations: [
         "Rows and total describe cached Markdown notes matched by the request's property filter.",
         "Non-Markdown files are not listed.",
-        "Local fallback supports property filters and and/or/not trees with simple comparison and truthy expressions.",
+        "Local fallback supports property tables, logical groups, simple comparisons, and truthy property filters.",
         "Base filters, view rules (filters, grouping, order and limits), formulas and calculated properties are ignored.",
       ],
     };

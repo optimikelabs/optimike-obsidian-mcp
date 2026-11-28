@@ -134,6 +134,10 @@ Seulement après le palier `headless-guarded`, passer une copie ou un vault déd
 2. Pour tags, limiter le contrat au texte Markdown : `tags` dans le frontmatter YAML, `#tags` inline et index local depuis le cache.
 3. Pour batch frontmatter, garder le dry-run par défaut et n’autoriser que `set`.
 4. Pour Bases, limiter le contrat aux fichiers `.base` YAML et aux propriétés frontmatter des notes.
+   `bases_query.filter` accepte les tables de propriétés comme `{"status":"open"}`
+   et les groupes `and`, `or` et `not` contenant des tables ou des expressions
+   simples. Un nœud non pris en charge ou une chaîne à la racine renvoie
+   `VALIDATION_ERROR`. [Voir la syntaxe du filtre](../plugins/obsidian-bases-bridge/README.md#requêtes-query).
 5. Pour Canvas, limiter le contrat à la structure JSON Canvas : create, ajout de nœud texte, connexion de nœuds, validation.
 6. Valider avec `npm run smoke:headless-filesystem`.
 

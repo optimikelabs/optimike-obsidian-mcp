@@ -10,6 +10,7 @@ import { generateUUID, sanitizeInputForLogging } from "../index.js"; // Import f
 import { logger } from "./logger.js";
 import { isPublicToolInputIssues, type PublicToolInputIssues } from "./toolInputValidation.js";
 import { BASE_FORMULA_ENGINE_REFUSAL, isPublicFormulaCheck, type PublicFormulaCheck } from "../../services/basesEngineContract.js";
+import { BASE_QUERY_FILTER_ERROR, isBaseQueryFilterNode } from "../../services/baseQueryFilter.js";
 import {
   NOTE_NAME_REASON_CODES, checkNoteName, isNoteNameHint, isNoteNameReasonCode,
 } from "../../services/noteNameRules.js";
@@ -228,6 +229,7 @@ const SAFE_ERROR_DETAIL_FIELDS = new Set([
   "recoveryRef",
   "reasonCode",
   "validationIssues",
+  "filterNode",
   // Bases engine refusal: bounded, schema-checked formula diagnosis.
   "formulaCheck",
   // Note-name refusal (shared rule): closed hint and a validated suggestion.
@@ -254,6 +256,8 @@ const CALLER_DERIVED_PUBLIC_FIELDS = new Set(["suggestedPath", "suggestedName"])
 const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "invalid_tool_arguments",
   "vault_path_alias_ambiguous",
+  "base_query_invalid_filter",
+  "base_query_filter_bridge_upgrade_required",
   BASE_FORMULA_ENGINE_REFUSAL,
   "base_query_requires_obsidian",
   "base_query_unsupported_local_input",
@@ -633,6 +637,7 @@ function isSafeDiagnosticString(field: string, value: string): boolean {
   if (field === "planDigest" || field === "observedSha256") return /^[a-f0-9]{64}$/u.test(value);
   if (field === "preparationCheck") return isDatePreparationCheck(value);
   if (field === "reasonCode") return SAFE_PUBLIC_REASON_CODES.has(value);
+  if (field === "filterNode") return isBaseQueryFilterNode(value);
   if (field === "hint") return isNoteNameHint(value) || isNativeMoveHint(value);
   // A suggestion is only released if it satisfies the shared name rule itself.
   if (CALLER_DERIVED_PUBLIC_FIELDS.has(field)) return checkNoteName(value, { extensions: null }).ok;
@@ -715,12 +720,16 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
     code === BaseErrorCode.SERVICE_UNAVAILABLE &&
     reasonCode === "base_query_requires_obsidian"
   )
-    return "Base rows require Obsidian and the Bases Bridge, including for Bases without filters. Set property_only: true to scan cached Markdown properties independently of the Base and its views.";
+    return "Base rows require Obsidian and the Bases Bridge, including for Bases without filters. Set property_only: true to scan cached Markdown properties independently of the Base and its views. Filters using file.ext, note.*, formula.* or file.hasTag(...) require Obsidian.";
   if (
     code === BaseErrorCode.VALIDATION_ERROR &&
     reasonCode === "base_query_unsupported_local_input"
   )
-    return "Unsupported local Base query filter or sort. Use unprefixed frontmatter keys or file.path, file.name, file.ctime, file.mtime, file.size. Property filters accept direct equality, scalar arrays, and non-empty operator objects with eq, ne, in, contains, gt, gte, lt, lte. Use and, or, not to combine property filters and simple comparison or truthy expressions of up to 1,024 characters each. Filter and sort references to formula values require Obsidian and the Bases Bridge.";
+    return "Unsupported local Base query sort. Use unprefixed frontmatter keys or file.path, file.name, file.ctime, file.mtime, file.size. Sorting on evaluated formulas requires Obsidian and the Bases Bridge.";
+  if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "base_query_invalid_filter")
+    return BASE_QUERY_FILTER_ERROR;
+  if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "base_query_filter_bridge_upgrade_required")
+    return "Property-table filters require Bases Bridge 1.3.1 or later. Update the Bridge bundle and retry.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_tool_arguments")
     return "Invalid tool arguments. See validationIssues for the field and reason.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === BASE_FORMULA_ENGINE_REFUSAL)
