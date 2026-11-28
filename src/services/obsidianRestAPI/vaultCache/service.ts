@@ -26,6 +26,7 @@ import {
 import { NoteJson, ObsidianRestApiService } from "../index.js";
 import { normalizeVaultSlashes, toVaultPath } from "../../../utils/obsidian/obsidianApiUtils.js";
 import { CacheEventSupervisor } from "./eventSupervisor.js";
+import { LiveSearchMemo } from "./liveSearchMemo.js";
 import {
   applyWalSizeLimit,
   checkpointWal,
@@ -175,6 +176,8 @@ export class VaultCacheService {
   private incrementalFailures = 0;
   private uncertaintyGeneration = 0;
   private liveSearchRevision = 0;
+  private pendingVaultMutations = 0;
+  readonly liveSearchMemo = new LiveSearchMemo();
   private eventWorkPending = false;
   private lastRefreshFailedFiles = 0;
   private eventSupervisor: CacheEventSupervisor | null = null;
@@ -246,6 +249,7 @@ export class VaultCacheService {
   }
 
   public stopPeriodicRefresh(): void {
+    this.liveSearchMemo.clear();
     this.eventStop = this.eventSupervisor?.stop() ?? Promise.resolve();
     const context = requestContextService.createRequestContext({
       operation: "stopPeriodicRefresh",
@@ -274,10 +278,21 @@ export class VaultCacheService {
 
   public getLiveSearchGeneration(service: ObsidianRestApiService): string | undefined {
     if (service !== this.obsidianService || this.closing || this.closed ||
-        this.queuedCacheWrites || !this.isPubliclyReady()) return undefined;
+        this.pendingVaultMutations || this.queuedCacheWrites || !this.isPubliclyReady()) return undefined;
     const generation = this.eventSupervisor?.getVaultGeneration();
     if (generation !== undefined) return `${generation}:${this.liveSearchRevision}`;
     return undefined;
+  }
+
+  public beginVaultMutation(): () => void {
+    this.pendingVaultMutations++;
+    this.liveSearchRevision++;
+    this.liveSearchMemo.clear();
+    return () => {
+      this.pendingVaultMutations--;
+      this.liveSearchRevision++;
+      this.liveSearchMemo.clear();
+    };
   }
 
   public getIsBuilding(): boolean {

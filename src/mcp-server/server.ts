@@ -1889,7 +1889,10 @@ async function createMcpServerInstance(
   installLegacyToolCatalog(server.server);
   installToolSearchHints(server);
   installMcpSdkToolErrorPrivacyBoundary(server);
-  installMcpToolPublicErrorBoundary(server);
+  installMcpToolPublicErrorBoundary(
+    server,
+    vaultCacheService && (() => vaultCacheService.beginVaultMutation()),
+  );
   installVaultInstructionsGate(server, vaultInstructions);
 
   try {

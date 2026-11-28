@@ -139,7 +139,13 @@ export interface CompactGlobalSearchResult {
 }
 
 // Added alsoFoundInFiles
+function compactSearchResult(result: GlobalSearchResult | CompactGlobalSearchResult): CompactGlobalSearchResult {
+  const { path, filename, matchCount, modifiedTime, createdTime, diskPath } = result;
+  return { path, filename, matchCount, modifiedTime, createdTime, ...(diskPath === undefined ? {} : { diskPath }) };
+}
+
 export interface ObsidianGlobalSearchResponse {
+  liveSearchReuse: { reused: true; ageMs: number } | { reused: false };
   success: boolean;
   message: string;
   results: Array<GlobalSearchResult | CompactGlobalSearchResult>;
@@ -214,48 +220,178 @@ function findMatchesInContent(
 // Core Logic Function (API-First with Cache Fallback)
 // ====================================================================================
 const API_SEARCH_TIMEOUT_MS = config.obsidianApiSearchTimeoutMs;
-const LIVE_SEARCH_TTL_MS = 30_000;
-const LIVE_SEARCH_MAX_ENTRIES = 4;
-const LIVE_SEARCH_MAX_RESULT_BYTES = 4 * 1024 * 1024;
-
-interface CachedLiveSearch {
-  resultsJson: string;
+export interface LiveSearchScan {
+  results: GlobalSearchResult[];
   totalMatches: number;
-  expiresAt: number;
+  complete: boolean;
+  message: string;
 }
 
-const liveSearchResults = new WeakMap<VaultCacheService, {
-  generation: string;
-  entries: Map<string, CachedLiveSearch>;
-}>();
-
-function resultsForGeneration(cache: VaultCacheService, generation: string | undefined) {
-  if (generation === undefined) {
-    liveSearchResults.delete(cache);
-    return undefined;
-  }
-  let current = liveSearchResults.get(cache);
-  if (current?.generation !== generation) {
-    current = { generation, entries: new Map() };
-    liveSearchResults.set(cache, current);
-  }
-  for (const [key, entry] of current.entries) {
-    if (entry.expiresAt <= performance.now()) current.entries.delete(key);
-  }
-  return current.entries;
+function compareSearchResults(a: GlobalSearchResult, b: GlobalSearchResult): number {
+  return b.numericMtime - a.numericMtime || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
 }
 
-function serializeLiveResults(results: GlobalSearchResult[]): string | undefined {
-  const encoded: string[] = [];
-  let bytes = 2; // Array brackets
-  for (const result of results) {
-    const json = JSON.stringify(result);
-    bytes += Buffer.byteLength(json) + 1;
-    if (bytes > LIVE_SEARCH_MAX_RESULT_BYTES) return undefined;
-    encoded.push(json);
+// Free-form dates depend on the time of each call. Cache only explicit ISO dates.
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?)?$/u;
+
+async function scanLiveSearch(
+  params: ObsidianGlobalSearchInput,
+  opContext: RequestContext,
+  obsidianService: ObsidianRestApiService,
+  searchPathPrefix: string,
+  sinceDate: Date | null,
+  untilDate: Date | null,
+): Promise<LiveSearchScan> {
+  const allFilteredResults: GlobalSearchResult[] = [];
+  let totalMatchesCount = 0;
+  let incompleteLiveSearch = false;
+  let strategyMessage = `Attempting live API search with retries (timeout: ${API_SEARCH_TIMEOUT_MS / 1000}s per attempt). `;
+  const apiSearchContext = {
+    ...opContext,
+    subOperation: "searchApiSimpleWithRetry",
+  };
+
+  const apiResults: SimpleSearchResult[] = await retryWithDelay(
+    async () => {
+      logger.info("Searching live content candidates.", apiSearchContext);
+      let expired = false;
+      const searchAttempt = async (): Promise<SimpleSearchResult[]> => {
+        // The simple-search endpoint does not implement JavaScript regex/case
+        // semantics. Enumerate live Markdown candidates for those modes instead.
+        if (params.useRegex || params.caseSensitive) {
+          const candidates: SimpleSearchResult[] = [];
+          const visit = async (directory: string): Promise<void> => {
+            if (expired) return;
+            const names = await obsidianService.listFiles(directory, apiSearchContext);
+            for (const name of names) {
+              // A delayed read may finish after the timeout/cache fallback.
+              // Do not let an expired attempt dispatch more directory reads.
+              if (expired) return;
+              const filename = path.join(directory === "/" ? "" : directory, name);
+              if (name.endsWith("/")) await visit(filename);
+              else if (name.toLowerCase().endsWith(".md")) candidates.push({ filename, matches: [], score: 0 });
+            }
+          };
+          await visit(searchPathPrefix || "/");
+          return candidates;
+        }
+        return obsidianService.searchSimple(params.query, params.contextLength, apiSearchContext);
+      };
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          searchAttempt(),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error("API search timed out")), API_SEARCH_TIMEOUT_MS);
+          }),
+        ]);
+      } finally {
+        expired = true;
+        if (timer) clearTimeout(timer);
+      }
+    },
+    {
+      operationName: "obsidianService.searchSimple",
+      context: apiSearchContext,
+      maxRetries: 2, // The shared retry helper counts total attempts.
+      delayMs: 500,
+      shouldRetry: (err: unknown) => {
+        // Retry on any error during the API call phase
+        logger.warning("API search attempt failed. Retrying...", {
+          ...apiSearchContext,
+          failureCategory: err instanceof McpError ? err.code : "unknown",
+        });
+        return true;
+      },
+    },
+  );
+
+  strategyMessage += `API search successful, returned ${apiResults.length} potential files. `;
+  logger.info(
+    `API searchSimple returned ${apiResults.length} files with potential matches.`,
+    apiSearchContext,
+  );
+
+  // Process API results (fetch stats for date filtering and inclusion)
+  const fetchStatsContext = {
+    ...opContext,
+    subOperation: "fetchStatsForApiResults",
+  };
+  let processedCount = 0;
+  for (const apiResult of apiResults) {
+    const filePathFromApi = apiResult.filename; // API uses 'filename' for the full path
+
+    // Apply path filter
+    if (searchPathPrefix && !filePathFromApi.startsWith(searchPathPrefix)) {
+      continue; // Skip if file is not in the specified path
+    }
+
+    let mtime: number;
+    let ctime: number;
+    let content: string;
+
+    // Fetch stats regardless of date filtering to include in results
+    try {
+      const noteJson = (await obsidianService.getFileContent(
+        filePathFromApi,
+        "json",
+        fetchStatsContext,
+      )) as NoteJson;
+      content = noteJson.content;
+      mtime = noteJson.stat.mtime;
+      ctime = noteJson.stat.ctime; // Get ctime
+
+      // Apply date filtering if needed
+      if (
+        (sinceDate && mtime < sinceDate.getTime()) ||
+        (untilDate && mtime > untilDate.getTime())
+      ) {
+        continue; // Skip due to date filter
+      }
+    } catch (statError) {
+      incompleteLiveSearch = true;
+      logger.warning("Failed to fetch file stats. Skipping file.", {
+        ...fetchStatsContext,
+        failureCategory:
+          statError instanceof McpError ? statError.code : "unknown",
+      });
+      continue; // Skip if stats cannot be fetched
+    }
+
+    const transformedMatches = findMatchesInContent(content, params.query,
+      params.useRegex, params.caseSensitive, params.contextLength, fetchStatsContext);
+
+    // Apply match limit per file
+    const limitedMatches = transformedMatches.slice(
+      0,
+      params.maxMatchesPerFile,
+    );
+
+    // Only add if we actually found matches after transformation/filtering
+    if (limitedMatches.length > 0) {
+      allFilteredResults.push({
+        // Add to the unfiltered list first
+        path: filePathFromApi,
+        filename: path.basename(filePathFromApi),
+        matches: limitedMatches, // Use limited matches
+        matchCount: transformedMatches.length,
+        returnedMatchCount: limitedMatches.length,
+        modifiedTime: formatTimestamp(mtime, fetchStatsContext), // Format mtime
+        createdTime: formatTimestamp(ctime, fetchStatsContext), // Format ctime
+        numericMtime: mtime, // Store numeric mtime
+      });
+      totalMatchesCount += transformedMatches.length; // Count *all* matches before limiting for total count
+      processedCount++;
+    }
   }
-  // Store detached JSON so match snippets cannot retain the original note body.
-  return "[" + encoded.join(",") + "]";
+  strategyMessage += `Processed ${processedCount} files matching all filters. `;
+  allFilteredResults.sort(compareSearchResults);
+  return {
+    results: allFilteredResults,
+    totalMatches: totalMatchesCount,
+    complete: !incompleteLiveSearch,
+    message: strategyMessage,
+  };
 }
 
 export const processObsidianGlobalSearch = async (
@@ -277,6 +413,7 @@ export const processObsidianGlobalSearch = async (
   let untilDate: Date | null = null;
   let strategyMessage = "";
   let allFilteredResults: GlobalSearchResult[] = []; // Store all results matching filters before pagination
+  let cachedCompactResults: CompactGlobalSearchResult[] | undefined;
   let totalMatchesCount = 0; // Total matches across all files before limiting per file
 
   // Normalize searchInPath: remove leading/trailing slashes and ensure it ends with a slash if not empty
@@ -312,21 +449,26 @@ export const processObsidianGlobalSearch = async (
   const generation = obsidianService
     ? vaultCacheService?.getLiveSearchGeneration?.(obsidianService)
     : undefined;
-  const liveResults = vaultCacheService && resultsForGeneration(vaultCacheService, generation);
-  // Pagination and projection happen after matching. Parsed dates are included
-  // so relative date filters cannot reuse results for a different time window.
-  const cacheKey = liveResults && JSON.stringify([
+  const memo = vaultCacheService?.liveSearchMemo;
+  memo?.useGeneration(generation);
+  const stableDates = [params.modified_since, params.modified_until]
+    .every(value => value === undefined || ISO_DATE.test(value));
+  const searchKey = generation !== undefined && stableDates ? JSON.stringify([
     params.query, searchPathPrefix, params.useRegex, params.caseSensitive,
     params.contextLength, params.maxMatchesPerFile, sinceDate?.getTime(), untilDate?.getTime(),
-  ]);
-  const cachedResult = cacheKey ? liveResults?.get(cacheKey) : undefined;
-  let incompleteLiveSearch = false;
+  ]) : undefined;
+  const cacheKey = searchKey && searchKey.length <= 4096 ? searchKey : undefined;
+  const compactKey = cacheKey && JSON.stringify([cacheKey, "compact"]);
+  const fullSnapshot = cacheKey ? memo?.get(cacheKey) : undefined;
+  const compactSnapshot = !fullSnapshot && params.responseMode === "compact" && compactKey
+    ? memo?.get(compactKey)
+    : undefined;
+  const cachedResult = fullSnapshot ?? compactSnapshot;
+  const liveSearchReuse: ObsidianGlobalSearchResponse["liveSearchReuse"] = cachedResult
+    ? { reused: true, ageMs: Math.floor(performance.now() - cachedResult.createdAt) }
+    : { reused: false };
   let apiFailedOrTimedOut = false;
-  if (cachedResult) {
-    allFilteredResults = JSON.parse(cachedResult.resultsJson) as GlobalSearchResult[];
-    totalMatchesCount = cachedResult.totalMatches;
-    strategyMessage = "Reused the live search for the current vault generation. ";
-  } else try {
+  try {
     if (!obsidianService) {
       throw new McpError(
         BaseErrorCode.SERVICE_UNAVAILABLE,
@@ -334,149 +476,47 @@ export const processObsidianGlobalSearch = async (
         opContext,
       );
     }
-
-    strategyMessage = `Attempting live API search with retries (timeout: ${API_SEARCH_TIMEOUT_MS / 1000}s per attempt). `;
-    const apiSearchContext = {
-      ...opContext,
-      subOperation: "searchApiSimpleWithRetry",
-    };
-
-    const apiResults: SimpleSearchResult[] = await retryWithDelay(
-      async () => {
-        logger.info("Searching live content candidates.", apiSearchContext);
-        let expired = false;
-        const searchAttempt = async (): Promise<SimpleSearchResult[]> => {
-          // The simple-search endpoint does not implement JavaScript regex/case
-          // semantics. Enumerate live Markdown candidates for those modes instead.
-          if (params.useRegex || params.caseSensitive) {
-            const candidates: SimpleSearchResult[] = [];
-            const visit = async (directory: string): Promise<void> => {
-              if (expired) return;
-              const names = await obsidianService.listFiles(directory, apiSearchContext);
-              for (const name of names) {
-                // A delayed read may finish after the timeout/cache fallback.
-                // Do not let an expired attempt dispatch more directory reads.
-                if (expired) return;
-                const filename = path.join(directory === "/" ? "" : directory, name);
-                if (name.endsWith("/")) await visit(filename);
-                else if (name.toLowerCase().endsWith(".md")) candidates.push({ filename, matches: [], score: 0 });
-              }
-            };
-            await visit(searchPathPrefix || "/");
-            return candidates;
-          }
-          return obsidianService.searchSimple(params.query, params.contextLength, apiSearchContext);
-        };
-        let timer: ReturnType<typeof setTimeout> | undefined;
+    if (cachedResult) {
+      if (fullSnapshot) {
+        allFilteredResults = JSON.parse(fullSnapshot.resultsJson) as GlobalSearchResult[];
+      } else {
+        cachedCompactResults = JSON.parse(cachedResult.resultsJson) as CompactGlobalSearchResult[];
+      }
+      totalMatchesCount = cachedResult.totalMatches;
+      strategyMessage = "Reused the live search for the current vault generation. ";
+    } else {
+      const scan = () => scanLiveSearch(params, opContext, obsidianService, searchPathPrefix, sinceDate, untilDate);
+      const stillCurrent = () => vaultCacheService?.getLiveSearchGeneration(obsidianService) === generation;
+      const pending = cacheKey ? memo?.inFlight.get(cacheKey) : undefined;
+      let result: LiveSearchScan;
+      if (pending) {
+        result = await pending;
+        if (!result.complete || !stillCurrent()) result = await scan();
+      } else if (cacheKey && memo && memo.inFlight.size < 4) {
+        const work = scan();
+        memo.inFlight.set(cacheKey, work);
         try {
-          return await Promise.race([
-            searchAttempt(),
-            new Promise<never>((_, reject) => {
-              timer = setTimeout(() => reject(new Error("API search timed out")), API_SEARCH_TIMEOUT_MS);
-            }),
-          ]);
+          result = await work;
         } finally {
-          expired = true;
-          if (timer) clearTimeout(timer);
+          if (memo.inFlight.get(cacheKey) === work) memo.inFlight.delete(cacheKey);
         }
-      },
-      {
-        operationName: "obsidianService.searchSimple",
-        context: apiSearchContext,
-        maxRetries: 2, // The shared retry helper counts total attempts.
-        delayMs: 500,
-        shouldRetry: (err: unknown) => {
-          // Retry on any error during the API call phase
-          logger.warning("API search attempt failed. Retrying...", {
-            ...apiSearchContext,
-            failureCategory: err instanceof McpError ? err.code : "unknown",
-          });
-          return true;
-        },
-      },
-    );
-
-    strategyMessage += `API search successful, returned ${apiResults.length} potential files. `;
-    logger.info(
-      `API searchSimple returned ${apiResults.length} files with potential matches.`,
-      apiSearchContext,
-    );
-
-    // Process API results (fetch stats for date filtering and inclusion)
-    const fetchStatsContext = {
-      ...opContext,
-      subOperation: "fetchStatsForApiResults",
-    };
-    let processedCount = 0;
-    for (const apiResult of apiResults) {
-      const filePathFromApi = apiResult.filename; // API uses 'filename' for the full path
-
-      // Apply path filter
-      if (searchPathPrefix && !filePathFromApi.startsWith(searchPathPrefix)) {
-        continue; // Skip if file is not in the specified path
+      } else {
+        result = await scan();
       }
-
-      let mtime: number;
-      let ctime: number;
-      let content: string;
-
-      // Fetch stats regardless of date filtering to include in results
-      try {
-        const noteJson = (await obsidianService.getFileContent(
-          filePathFromApi,
-          "json",
-          fetchStatsContext,
-        )) as NoteJson;
-        content = noteJson.content;
-        mtime = noteJson.stat.mtime;
-        ctime = noteJson.stat.ctime; // Get ctime
-
-        // Apply date filtering if needed
-        if (
-          (sinceDate && mtime < sinceDate.getTime()) ||
-          (untilDate && mtime > untilDate.getTime())
-        ) {
-          continue; // Skip due to date filter
+      if (cacheKey && memo && result.complete && stillCurrent() && !memo.get(cacheKey)) {
+        const compactFallback = params.responseMode === "compact" ? compactKey : undefined;
+        if (!(compactFallback && memo.get(compactFallback))) {
+          const saved = memo.save(cacheKey, result.results, result.totalMatches);
+          if (!saved && compactFallback) {
+            memo.save(compactFallback, result.results.map(compactSearchResult), result.totalMatches);
+          }
         }
-      } catch (statError) {
-        incompleteLiveSearch = true;
-        logger.warning("Failed to fetch file stats. Skipping file.", {
-          ...fetchStatsContext,
-          failureCategory:
-            statError instanceof McpError ? statError.code : "unknown",
-        });
-        continue; // Skip if stats cannot be fetched
       }
-
-      const transformedMatches = findMatchesInContent(content, params.query,
-        params.useRegex, params.caseSensitive, params.contextLength, fetchStatsContext);
-
-      // Apply match limit per file
-      const limitedMatches = transformedMatches.slice(
-        0,
-        params.maxMatchesPerFile,
-      );
-
-      // Only add if we actually found matches after transformation/filtering
-      if (limitedMatches.length > 0) {
-        allFilteredResults.push({
-          // Add to the unfiltered list first
-          path: filePathFromApi,
-          filename: path.basename(filePathFromApi),
-          matches: limitedMatches, // Use limited matches
-          matchCount: transformedMatches.length,
-          returnedMatchCount: limitedMatches.length,
-          modifiedTime: formatTimestamp(mtime, fetchStatsContext), // Format mtime
-          createdTime: formatTimestamp(ctime, fetchStatsContext), // Format ctime
-          numericMtime: mtime, // Store numeric mtime
-        });
-        totalMatchesCount += transformedMatches.length; // Count *all* matches before limiting for total count
-        processedCount++;
-      }
+      allFilteredResults = result.results;
+      totalMatchesCount = result.totalMatches;
+      strategyMessage = result.message;
     }
-    strategyMessage += `Processed ${processedCount} files matching all filters. `;
   } catch (apiError) {
-    // API call failed or timed out internally
     apiFailedOrTimedOut = true;
     strategyMessage += "API search failed or timed out. ";
     logger.warning("API search failed or timed out.", {
@@ -583,51 +623,23 @@ export const processObsidianGlobalSearch = async (
   }
 
   // 4. Apply Pagination and Sorting
-  const totalFilesFound = allFilteredResults.length;
+  const orderedResults = cachedCompactResults ?? allFilteredResults;
+  const totalFilesFound = orderedResults.length;
   const pageSize = params.pageSize!;
   const currentPage = params.page!;
   const totalPages = Math.ceil(totalFilesFound / pageSize);
   const startIndex = (currentPage - 1) * pageSize;
   const endIndex = startIndex + pageSize;
 
-  // Cache only complete live results collected across the same generation.
-  if (!cachedResult) {
-    allFilteredResults.sort((a, b) =>
-      b.numericMtime - a.numericMtime || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0),
-    );
-    if (liveResults && cacheKey && cacheKey.length <= 4096 && obsidianService &&
-        !apiFailedOrTimedOut && !incompleteLiveSearch &&
-        vaultCacheService?.getLiveSearchGeneration(obsidianService) === generation) {
-      const resultsJson = serializeLiveResults(allFilteredResults);
-      if (resultsJson !== undefined) {
-        liveResults.delete(cacheKey);
-        if (liveResults.size >= LIVE_SEARCH_MAX_ENTRIES) {
-          liveResults.delete(liveResults.keys().next().value!);
-        }
-        liveResults.set(cacheKey, {
-          resultsJson,
-          totalMatches: totalMatchesCount,
-          expiresAt: performance.now() + LIVE_SEARCH_TTL_MS,
-        });
-      }
-    }
-  }
+  if (apiFailedOrTimedOut) allFilteredResults.sort(compareSearchResults);
 
-  const paginatedResults = allFilteredResults.slice(startIndex, endIndex);
+  const paginatedResults = orderedResults.slice(startIndex, endIndex).map(result => ({ ...result }));
   if (!apiFailedOrTimedOut) {
     await addLiveDiskPaths(config.obsidianVaultPath, paginatedResults);
   }
-  const responseResults =
-    params.responseMode === "compact"
-      ? paginatedResults.map((result) => ({
-          path: result.path,
-          ...(result.diskPath !== undefined ? { diskPath: result.diskPath } : {}),
-          filename: result.filename,
-          matchCount: result.matchCount,
-          modifiedTime: result.modifiedTime,
-          createdTime: result.createdTime,
-        }))
-      : paginatedResults;
+  const responseResults = params.responseMode === "compact"
+    ? paginatedResults.map(compactSearchResult)
+    : paginatedResults;
 
   // 5. Determine alsoFoundInFiles
   let alsoFoundInFiles: string[] | undefined = undefined;
@@ -643,6 +655,7 @@ export const processObsidianGlobalSearch = async (
   const finalMessage = `${strategyMessage}Found ${totalMatchesCount} matches across ${totalFilesFound} files matching all criteria. Returning page ${currentPage} of ${totalPages} (${paginatedResults.length} files on this page, page size ${pageSize}, max matches per file ${params.maxMatchesPerFile}). Results sorted by modification date (newest first).`;
 
   const response: ObsidianGlobalSearchResponse = {
+    liveSearchReuse,
     success: true, // Indicate overall tool success, even if fallback was used or results are empty
     message: finalMessage,
     results: responseResults,

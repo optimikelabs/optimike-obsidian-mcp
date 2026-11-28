@@ -107,7 +107,9 @@ if it differs. Use it for filesystem access.
 Global search rejects `pageSize` above 500 with `VALIDATION_ERROR` and a
 `pageSize` field diagnostic. Live pages can reuse a complete result for up to
 30 seconds with reconciled Local REST vault events. A vault change or loss of
-coverage bypasses reuse. See [Event-assisted vault cache](cache-events.md).
+coverage bypasses reuse. `liveSearchReuse.reused` reports whether the result came
+from the live search cache. On a cache hit, `liveSearchReuse.ageMs` reports its
+age in milliseconds. See [Event-assisted vault cache](cache-events.md).
 
 ## Governed Atomic Note Replacement
 

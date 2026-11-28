@@ -63,10 +63,15 @@ reçus de mutations gouvernées restent indépendants.
 La recherche globale en mode live réutilise un résultat complet pendant
 30 secondes au plus si les quatre flux restent réconciliés et si la génération
 observée du coffre reste stable. Le serveur conserve jusqu’à quatre résultats de
-4 Mio chacun après sérialisation. Une modification touchant un chemin exclu du
-cache de notes invalide aussi la réutilisation. Si les flux sont désactivés,
-si la couverture manque ou si le résultat est incomplet, chaque page relance
-une recherche.
+4 Mio chacun après sérialisation, à raison de deux octets par unité UTF-16.
+Si le résultat détaillé dépasse cette borne, les requêtes compactes peuvent
+réutiliser une copie sans extraits. Les appels simultanés avec les mêmes options
+peuvent partager une recherche en cours. Les événements du coffre, y compris
+ceux des chemins exclus, et les outils locaux sans annotation de lecture seule
+invalident la réutilisation. Le serveur relance la recherche pendant l’exécution
+de ces outils, en cas de couverture incertaine ou quand un filtre de date en
+langage naturel dépend de l’heure de l’appel. Les résultats expirés sont purgés
+par temporisation et le cache est vidé à l’arrêt.
 
 ## Tests et retour arrière
 
