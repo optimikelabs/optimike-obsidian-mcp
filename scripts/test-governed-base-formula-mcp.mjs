@@ -26,9 +26,9 @@ let engineEnabled = false;
 let basesListStatus = 200;
 const ENGINE_RESULTS = new Map([
   ...Object.entries(nativeCapture.formulaChecks),
+  // The casing regressions combine calls beyond the captured expressions.
   ["file.name.LOWER() + fooBar(1)", ["runtime_error", 'Error: Cannot find function "fooBar"']],
   ["NUMBER(1) + file.name.ROUND()", ["runtime_error", 'Error: Cannot find function "ROUND" on type String']],
-  ["file.name.LOWER()", ["ok"]],
 ]);
 // Registry as the Bridge sends it: generic value methods on `Any`, and
 // `doc: null` for functions without a description.
