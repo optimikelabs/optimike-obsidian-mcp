@@ -64,6 +64,18 @@ never dropped an event. `freshness: observed` describes the last observation, no
 continuous or linearizable freshness. The semantic embedding index and governed
 operation receipts are independent and unchanged.
 
+Live global search reuses complete results for up to 30 seconds while all four
+streams remain reconciled and the observed vault generation is unchanged.
+The backend keeps up to four serialized results of at most 4 MiB each, using
+two bytes per UTF-16 code unit for the budget. If the detailed result exceeds
+that budget, compact requests can reuse a copy without match snippets.
+Concurrent calls with the same search options can share an in-flight scan.
+Vault events, including changes to excluded paths, and local tools without a
+read-only annotation invalidate reuse. The backend bypasses reuse while those
+tools run, if event coverage is uncertain, or when a free-form date filter
+depends on the time of the call. Timers remove expired results and shutdown
+purges the cache.
+
 ## Validation and rollback
 
     npm ci

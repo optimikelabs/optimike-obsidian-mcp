@@ -23,6 +23,9 @@ const {
   installMcpToolPublicErrorBoundary,
   reportOpaqueServerFailure,
 } = await import("../dist/mcp-server/server.js");
+const { registerObsidianGlobalSearchTool } = await import(
+  "../dist/mcp-server/tools/obsidianGlobalSearchTool/registration.js"
+);
 
 // Startup/background reporting must not inspect `instanceof`, `.message`, or
 // `.stack` itself. A revoked Proxy and throwing Error accessors are therefore
@@ -81,6 +84,7 @@ const backendMarker = "P0-SDK-BACKEND-MARKER-7a92";
 const server = new McpServer({ name: "mcp-sdk-privacy-test", version: "1" });
 installMcpSdkToolErrorPrivacyBoundary(server);
 installMcpToolPublicErrorBoundary(server);
+await registerObsidianGlobalSearchTool(server, undefined);
 
 server.registerTool(
   "throws_raw_error",
@@ -257,6 +261,22 @@ try {
   assert.deepEqual(publicError.details.validationIssues, [
     { path: "expected", message: "Invalid value for this field." },
   ]);
+
+  const { tools } = await client.listTools();
+  const search = tools.find((tool) => tool.name === "obsidian_global_search");
+  assert.equal(search.inputSchema.properties.pageSize.maximum, 500);
+  const oversizedSearch = await client.callTool({
+    name: search.name,
+    arguments: { query: callerMarker, pageSize: 501 },
+  });
+  assert.equal(oversizedSearch.isError, true);
+  assert.equal(text(oversizedSearch).includes(callerMarker), false);
+  const { error } = JSON.parse(text(oversizedSearch));
+  assert.equal(error.code, "VALIDATION_ERROR");
+  assert.deepEqual(error.details.validationIssues, [
+    { path: "pageSize", message: "Use at most 500 result files per page." },
+  ]);
+
   assertBoundaryResult(
     await client.callTool({ name: `unknown_${callerMarker}`, arguments: {} }),
     "unknown tool error",

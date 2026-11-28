@@ -123,19 +123,25 @@ export function installMcpSdkToolErrorPrivacyBoundary(server: McpServer): void {
 }
 
 /** Preserve the established application error envelope before SDK handling. */
-export function installMcpToolPublicErrorBoundary(server: McpServer): void {
+export function installMcpToolPublicErrorBoundary(
+  server: McpServer,
+  beginVaultMutation?: () => () => void,
+): void {
   if (applicationBoundaries.has(server)) return;
   installMcpSdkToolErrorPrivacyBoundary(server);
   const register = server.registerTool.bind(server) as Registrar;
   server.registerTool = ((
     name: string,
-    configuration: unknown,
+    configuration: { annotations?: { readOnlyHint?: boolean } },
     callback: Callback,
   ) => {
     if (typeof callback !== "function")
       throw new Error("Invalid MCP tool callback.");
     return register(name, configuration, async (...args: any[]) => {
       let result: any;
+      const endVaultMutation = configuration?.annotations?.readOnlyHint === true
+        ? undefined
+        : beginVaultMutation?.();
       try {
         result = await withActiveToolName(name, () => callback(...args));
       } catch (error) {
@@ -155,6 +161,8 @@ export function installMcpToolPublicErrorBoundary(server: McpServer): void {
           ],
           isError: true,
         };
+      } finally {
+        endVaultMutation?.();
       }
       const state = toolInvocation.getStore();
       if (state) state.applicationError = result?.isError === true;

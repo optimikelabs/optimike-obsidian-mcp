@@ -8,6 +8,7 @@ import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js"; // Import VaultCacheService type
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
+import { parseToolInput } from "../../../utils/internal/toolInputValidation.js";
 import {
   ErrorHandler,
   logger,
@@ -15,13 +16,15 @@ import {
   requestContextService,
 } from "../../../utils/index.js";
 // Import types, schema shape, and the core processing logic from logic.ts
-import type { ObsidianGlobalSearchInput } from "./logic.js";
 import {
-  ObsidianGlobalSearchInputSchemaShape,
+  ObsidianGlobalSearchInputSchema,
+  PAGE_SIZE_LIMIT_MESSAGE,
   processObsidianGlobalSearch,
 } from "./logic.js";
 import { mcpSchema } from "../../mcpSchema.js";
 import { noteReadResult } from "../noteReadResult.js";
+
+const publicInputMessages = new Set([PAGE_SIZE_LIMIT_MESSAGE]);
 
 /**
  * Registers the 'obsidian_global_search' tool with the MCP server instance.
@@ -35,7 +38,7 @@ import { noteReadResult } from "../noteReadResult.js";
 export async function registerObsidianGlobalSearchTool(
   server: McpServer,
   obsidianService: ObsidianRestApiService | undefined,
-  vaultCacheService: VaultCacheService, // Now required
+  vaultCacheService?: VaultCacheService,
 ): Promise<void> {
   const toolName = "obsidian_global_search";
   const toolDescription = `Performs search across the Obsidian vault using text or regex, using live Markdown content with a shared-cache fallback. Regex anchors ^ and $ match the start and end of each line, respectively. Supports filtering by modification date, optionally restricting search to a specific directory path (recursively), pagination (page, pageSize up to 500), and limiting matches shown per file (maxMatchesPerFile). Returns a JSON object containing success status, a message, pagination details (currentPage, pageSize, totalPages), total file/match counts (before pagination), and an array of results. Each result includes the file path, filename, creation timestamp (ctime), modification timestamp (mtime), and an array of match context snippets (limited by maxMatchesPerFile). Live results retain the Obsidian path and include a vault-relative diskPath when a unique local spelling containing U+00A0 or U+202F differs. Use diskPath for filesystem access when present. matchCount reports all content occurrences per file independently of the snippet limit; returnedMatchCount reports detailed snippets. hasMore/nextPage provide pagination. Compact mode omits off-page identities. Detailed mode includes at most 20 off-page vault-relative paths in alsoFoundInFiles, with alsoFoundInFilesTotal.`;
@@ -51,17 +54,23 @@ export async function registerObsidianGlobalSearchTool(
 
   await ErrorHandler.tryCatch(
     async () => {
+      const publishedSchema = mcpSchema(ObsidianGlobalSearchInputSchema);
       server.registerTool(
         toolName,
         {
           description: toolDescription + ' Set mode to "ranked" for BM25 relevance on cached Markdown, with title, alias and heading boosts.',
-          inputSchema: mcpSchema(ObsidianGlobalSearchInputSchemaShape),
+          inputSchema: {
+            "~standard": {
+              ...publishedSchema["~standard"],
+              // The handler validates before execution so the privacy boundary
+              // can return authored field diagnostics instead of SDK error text.
+              validate: (value: unknown) => ({ value }),
+            },
+          },
           annotations: READ_ONLY_TOOL_ANNOTATIONS,
         },
-        async (
-          params: ObsidianGlobalSearchInput,
-          handlerInvocationContext: any,
-        ): Promise<any> => {
+        async (input: unknown) => {
+          const params = parseToolInput(ObsidianGlobalSearchInputSchema, input, publicInputMessages);
           const handlerContext: RequestContext =
             requestContextService.createRequestContext({
               operation: "HandleObsidianGlobalSearchRequest",

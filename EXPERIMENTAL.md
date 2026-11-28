@@ -35,6 +35,7 @@ This branch leaves `main` and the individual pull requests unaffected.
 | [#247](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/247) | `9cdf0af6e82f56373c88e66f7d7c8c682f90c43e` | Retries Operon `GET /status` once after a socket reset, with fixture connection cleanup |
 | [#248](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/248) | `4c39df5bc0d2f2448439916ad3c35327133038e6` | Bounded link parsing, persisted retries, limited-source diagnostics and bounded smoke waits |
 | [#249](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/249) | `7ea61ba7dd822910de67187f533c1fdbe2460e70` | Explicit tool profile registration modes, reversible displaced-edit restoration, and retryable vault-lock contention |
+| [#251](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/251) | `73ec792eb15652a66cefbe109cee6653b2566c7a` | Explicit global search page-size errors, bounded reuse of full live exact results, and invalidation across tool calls |
 
 Run the read-only profile first. Test filesystem writes on a separate,
 disposable copy using synthetic notes. Write serialization is process-local.
@@ -126,6 +127,27 @@ Operon's local dates. Set each to match the vault when using both features.
 Windows refuses existing-note replacement by default. The explicit
 `MCP_HEADLESS_ALLOW_TRANSIENT_ABSENCE=true` fallback can temporarily hide
 the note path and is for a copy without bidirectional Sync.
+
+### Résolution d'intégration #246 × #251
+
+The merged global search keeps #246's BM25 ordering, compact scores and
+detailed snippets alongside #251's field-level page-size diagnostics.
+The live memo key includes the search mode. Only exact search enters
+the live REST reuse branch; ranked and hybrid search use the separate
+lexical index. The exact search keeps multiline regex and live
+`diskPath`, including on reused and compact pages. The cache service
+retains #248's link index alongside the live search memo.
+
+The common tool boundary is installed before registration in every
+runtime mode. Its mutation hook clears live search reuse before and
+after any invocation without a read-only annotation. The write plans,
+applies and recoveries in the integrated families advertise
+`readOnlyHint: false`. Some filesystem status calls can reconcile
+interrupted effects. Those calls run in the filesystem authority,
+where live REST search reuse is unavailable.
+
+The changelog keeps the prior fixes, and the SDK boundary tests keep
+both caller-input redaction and the specific page-size message.
 
 The #244 merge keeps the exact tool sets from the shared catalogue in the
 HTTP, stdio proxy, and static profile tests. The `tasks` catalogue includes

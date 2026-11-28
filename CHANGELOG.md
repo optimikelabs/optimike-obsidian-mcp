@@ -53,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Live JSON note reads and frontmatter key reads use the YAML from the same Local REST response when cached properties disagree. They signal affected keys with `metadataCacheStale` and require no additional REST request (#230).
 
+- Global search reports a field-level validation error for page sizes over 500. With reconciled Local REST vault events, successive live pages reuse a complete result while the vault generation stays current.
 - Live compact listings and global search results include a vault-relative `diskPath` when a single local spelling with U+00A0 or U+202F differs from the Obsidian path.
 
 - `obsidian_read_note` accepts existing paths containing U+00A0, U+202F or decomposed Unicode. `obsidian_list_notes` accepts these folder spellings, and filesystem-backed reads and compact listings include `diskPath` when the physical spelling differs from the returned vault path (#231).
