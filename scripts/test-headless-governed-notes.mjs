@@ -159,6 +159,11 @@ async function injectAfterFilesystemEffect() {
       journal.commitAfterVerifiedProof = (...args) => {
         if (attempted) return commit(...args);
         attempted = true;
+        const row = journal.get(args[0]);
+        if (row.status === "applying") {
+          journal.transition(row.operationId, ["applying"], "outcome_unknown",
+            "Fixture lease expired", row.executionOwner.attemptId);
+        }
         assert.equal(journal.get(args[0]).status, "outcome_unknown");
         throw new ObsidianNoteReplaceConcurrencyError();
       };
