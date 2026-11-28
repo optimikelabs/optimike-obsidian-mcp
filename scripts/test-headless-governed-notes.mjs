@@ -2,7 +2,7 @@ import { isolatedStateDirectory } from "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
 import { fork } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, realpathSync, renameSync, watch, writeFileSync } from "node:fs";
+import { existsSync, realpathSync, renameSync, rmSync, watch, writeFileSync } from "node:fs";
 import fsp, { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
@@ -180,6 +180,9 @@ async function checkDates() {
   assert.equal(sealFilesystemDates(noDrawings, "Drawing.md", drawing, time), drawing);
   assert.match(sealFilesystemDates(noDrawings, "Drawing.md", drawing.replace("parsed", '"false"'), time), /updated_at:/u);
   assert.match(sealFilesystemDates(noDrawings, "Drawing.md", drawing.replace("parsed", "\nlabel: first"), time), /updated_at:/u);
+  assert.equal(sealFilesystemDates(noDrawings, "Drawing.md", drawing.replace("excalidraw-plugin", '"excalidraw-plugin"'), time),
+    drawing.replace("excalidraw-plugin", '"excalidraw-plugin"'));
+  assert.match(sealFilesystemDates(noDrawings, "Drawing.md", drawing.replace("excalidraw-plugin", "nested:\n  excalidraw-plugin"), time), /updated_at:/u);
   await assert.rejects(loadPolicy({ timezone: "Europe/Paris" }), { code: "SERVICE_UNAVAILABLE" });
   await assert.rejects(loadPolicy({ hashTrackingMode: "unknown" }), { code: "SERVICE_UNAVAILABLE" });
   const timezone = process.env.OPTIMIKE_VAULT_TIMEZONE;
@@ -241,6 +244,7 @@ async function checkAtomicExchange() {
   const { ObsidianNoteReplaceJournal } = await import("../dist/services/operations/obsidianNoteReplaceJournal.js");
   const { ObsidianNoteReplaceOperationAdapter } = await import("../dist/services/operations/obsidianNoteReplaceOperationAdapter.js");
   const { atomicExchangeUnavailable, nativeFilesystemExchange } = await import("../dist/services/operations/filesystemAtomicExchange.js");
+  const { FilesystemRevert } = await import("../dist/services/operations/filesystemRevert.js");
   const exchange = nativeFilesystemExchange();
   assert.equal(typeof exchange, "function", "The CI filesystem needs a native exchange on this platform");
   const journal = new ObsidianNoteReplaceJournal(state);
@@ -255,11 +259,12 @@ async function checkAtomicExchange() {
     const exit = once(reader, "exit");
     const [ready] = await once(reader, "message");
     assert.equal(ready, "ready");
-    const makeAdapter = (getExchange, afterPublish) => {
-      const backend = new FilesystemNoteBackend(vault, state, journal, () => time, afterPublish, getExchange);
-      return new ObsidianNoteReplaceOperationAdapter(backend, journal, undefined, { filesystem: backend });
+    const backend = new FilesystemNoteBackend(vault, state, journal, () => time);
+    const makeAdapter = filesystem => new ObsidianNoteReplaceOperationAdapter(filesystem, journal, undefined, { filesystem });
+    const injected = (getExchange, getProbeExchange) => {
+      return makeAdapter(new FilesystemNoteBackend(vault, state, journal, () => time, undefined, getExchange, getProbeExchange));
     };
-    const plain = makeAdapter();
+    const plain = makeAdapter(backend);
     let content;
     for (let i = 0; i < 20; i += 1) {
       content = initial.replace("Original body.", `Replacement ${i}.`);
@@ -277,30 +282,75 @@ async function checkAtomicExchange() {
     assert.equal(watcherAbsences, 0);
     console.log(`p9: 20 replacements, ${samples} concurrent samples, ${absent} absent, ${watcherAbsences} watcher absences`);
 
-    const unavailable = makeAdapter(() => () => { throw atomicExchangeUnavailable(); });
+    const refuseVolume = () => () => { throw atomicExchangeUnavailable(); };
+    await assert.rejects(injected(undefined, refuseVolume).plan({ path: raced, idempotencyKey: "probe-volume", nextContent: published }), {
+      code: "SERVICE_UNAVAILABLE", details: { reasonCode: "headless_atomic_exchange_unavailable" },
+    });
+    assert.equal((await readdir(path.dirname(filename))).some(name => name.startsWith(".mcp-exchange-")), false);
+    const unavailable = injected(refuseVolume);
     const refused = await unavailable.plan({ path: raced, idempotencyKey: "unsupported-volume", nextContent: published });
     const failure = await unavailable.apply(refused.planRef, "unsupported-volume");
     assert.equal(failure.outcome, "failed");
     assert.equal(failure.postflight.reason, "headless_atomic_exchange_unavailable");
     assert.equal(await readFile(filename, "utf8"), content);
 
-    const racing = makeAdapter(() => (target, stage) => {
+    for (const [key, write] of [
+      ["in-place", target => writeFileSync(target, interference)],
+      ["replace", target => { writeFileSync(target + ".sync", interference); renameSync(target + ".sync", target); }],
+    ]) {
+      await writeFile(filename, initial);
+      let beforeFirstExchange = true;
+      const racing = injected(() => (target, stage) => {
+        if (beforeFirstExchange) { beforeFirstExchange = false; write(target); }
+        exchange(target, stage);
+      });
+      const planned = await racing.plan({ path: raced, idempotencyKey: key, nextContent: published });
+      const applied = await racing.apply(planned.planRef, key);
+      assert.equal(applied.outcome, "conflict", key);
+      assert.equal((await racing.status(planned.planRef)).outcome, "conflict");
+      assert.equal(await readFile(filename, "utf8"), interference, key);
+      assert.equal(journal.get(applied.operationId).filesystem.stagedContent, published);
+    }
+
+    await writeFile(filename, initial);
+    let attempts = 0;
+    const blockedRollback = injected(() => (target, stage) => {
+      if (++attempts > 1) throw atomicExchangeUnavailable();
       writeFileSync(target, interference);
       exchange(target, stage);
     });
-    const planned = await racing.plan({ path: raced, idempotencyKey: "at-exchange", nextContent: published });
-    const applied = await racing.apply(planned.planRef, "at-exchange");
+    const plan = await blockedRollback.plan({ path: raced, idempotencyKey: "blocked-rollback", nextContent: published });
+    const applied = await blockedRollback.apply(plan.planRef, "blocked-rollback");
     assert.equal(applied.outcome, "outcome_unknown");
+    assert.equal(applied.postflight.reason, "headless_displaced_edit");
     assert.equal(await readFile(filename, "utf8"), published);
-    const privateProof = journal.get(applied.operationId).filesystem;
-    assert.equal(privateProof.stagedContent, published);
-    assert.equal(Buffer.from(privateProof.displacedObservation.bytesBase64, "base64").toString(), interference);
+    const reverts = new FilesystemRevert(backend, journal);
+    const revert = await reverts.plan({ path: raced, operationRef: plan.planRef, idempotencyKey: "restore-phone" });
+    assert.equal((await reverts.apply(revert.planRef, "restore-phone")).outcome, "committed");
+    assert.equal(await readFile(filename, "utf8"), interference);
 
-    const crashed = await plain.plan({ path: raced, idempotencyKey: "crash-exchange", nextContent: interference });
+    await writeFile(filename, initial);
+    const deletedAfterExchange = injected(() => (target, stage) => {
+      writeFileSync(target, interference);
+      exchange(target, stage);
+      rmSync(target);
+    });
+    const deletion = await deletedAfterExchange.plan({ path: raced, idempotencyKey: "removed-after-exchange", nextContent: published });
+    assert.equal((await deletedAfterExchange.apply(deletion.planRef, "removed-after-exchange")).postflight.reason, "headless_displaced_edit");
+    assert.equal(existsSync(filename), false);
+    const restore = await reverts.plan({ path: raced, operationRef: deletion.planRef, idempotencyKey: "restore-absent" });
+    assert.equal(restore.beforeProof.kind, "observed-path-absence");
+    assert.equal((await reverts.apply(restore.planRef, "restore-absent")).outcome, "committed");
+    assert.equal(await readFile(filename, "utf8"), interference);
+
+    const crashed = await plain.plan({ path: raced, idempotencyKey: "crash-exchange", nextContent: published });
     const worker = fork(new URL(import.meta.url), ["crash-after-exchange", vault, state, crashed.planRef, "crash-exchange"],
       { stdio: ["ignore", "ignore", "inherit", "ipc"] });
     assert.deepEqual(await once(worker, "exit"), [91, null]);
-    assert.equal(await readFile(filename, "utf8"), interference, "Native crash leaves the path present before journal confirmation");
+    assert.equal(await readFile(filename, "utf8"), published, "Native crash leaves the path present before journal confirmation");
+    assert.equal((await readdir(path.dirname(filename))).some(name => name.startsWith(".mcp-write-")), true);
+    await backend.restoreInterruptedReplacements();
+    assert.equal(journal.get(crashed.operationId).status, "committed");
     assert.equal((await plain.status(crashed.planRef)).outcome, "committed");
     assert.equal((await readdir(path.dirname(filename))).some(name => name.startsWith(".mcp-write-")), false);
   } finally {
@@ -387,10 +437,14 @@ async function integration() {
     };
     for (const client of [guarded, first]) {
       const tools = (await client.listTools()).tools.map(tool => tool.name);
-      for (const hidden of ["obsidian_search_replace", "obsidian_manage_frontmatter", "obsidian_update_note", "obsidian_manage_tags", "obsidian_batch_frontmatter"]) {
+      for (const hidden of ["obsidian_search_replace", "obsidian_manage_frontmatter", "obsidian_update_note", "obsidian_manage_tags", "obsidian_batch_frontmatter", "bases_upsert_rows"]) {
         assert.ok(!tools.includes(hidden), `${hidden} must be hidden in writable headless modes`);
       }
     }
+    const bypass = await first.callTool({ name: "bases_upsert_rows", arguments: { base_id: "Records.base",
+      operations: [{ file: "Note.md", set: { created_at: "1999-01-01T00:00:00", updated_at: "1999-01-01T00:00:00" } }] } });
+    assert.equal(bypass.isError, true);
+    assert.equal(await read("Note.md"), initial, "The retired direct Base row write cannot forge managed dates");
     const unread = await call(guarded, "text_patch_plan", patch(raced, "instructions-unread"), true);
     assert.match(unread.error.details.reasonCode, /^vault_instructions_/u);
     for (const client of [guarded, first, second]) {

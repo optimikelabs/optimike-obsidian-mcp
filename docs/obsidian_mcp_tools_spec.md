@@ -338,8 +338,8 @@ semantic manifest/vector metadata are cached locally for faster warm refreshes.
   `headless-filesystem`.
 - `bases_upsert_config`: live REST config upsert, or guarded YAML config update
   in `headless-filesystem`.
-- `bases_upsert_rows`: live REST row upsert, or guarded Markdown frontmatter
-  `set` operations in `headless-filesystem`.
+- `bases_upsert_rows`: live REST row upsert. In headless, edit note properties
+  through `obsidian_frontmatter_patch_plan/apply`.
 
 Local/headless Bases support does not evaluate Obsidian formulas, calculated
 properties, plugin-specific filters, or exact UI view semantics.

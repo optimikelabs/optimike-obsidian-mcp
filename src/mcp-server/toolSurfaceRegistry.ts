@@ -519,7 +519,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "bases_upsert_rows",
     "bases.direct",
     "bases",
-    LIVE_OR_FILESYSTEM_MODES,
+    LIVE_MODES,
     { surfaceClass: "direct", annotationClass: "destructive" },
   ),
 

@@ -74,7 +74,8 @@ const source = readFileSync(
   "utf8",
 );
 assert.doesNotMatch(source, /"obsidian_batch_frontmatter"/u, "The retired direct batch editor must stay unregistered");
-for (const { toolName, operation } of cases) {
+assert.doesNotMatch(source, /"bases_upsert_rows"/u, "Base row upsert must stay unregistered in headless");
+for (const { toolName, operation } of cases.filter(({ toolName }) => toolName === "obsidian_admin_filesystem")) {
   const toolOffset = source.indexOf(`\"${toolName}\"`);
   assert.ok(toolOffset >= 0, `${toolName} must remain registered`);
   const nextToolOffset = source.indexOf("server.registerTool(", toolOffset + 1);

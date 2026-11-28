@@ -86,6 +86,7 @@ export type ObsidianNoteReplacePlan = {
     localStageMode?: "exchange" | "legacy";
     backupVerified?: true;
     witnessesCleaned?: true;
+    exchangeRollback?: { identity: string; sha256: string; bytesBase64: string };
     displacedObservation?: { sha256: string; bytesBase64: string };
     // Private evidence. null means publication was followed by absence.
     divergentObservation?: { sha256: string; bytesBase64: string } | null;
@@ -118,6 +119,13 @@ export class ObsidianNoteReplaceConcurrencyError extends Error {
   constructor() {
     super("The note replacement state changed concurrently.");
   }
+}
+
+export function displacedFilesystemEdit(plan: ObsidianNoteReplacePlan) {
+  const proof = plan.filesystem;
+  const displaced = proof?.displacedObservation;
+  return plan.status === "outcome_unknown" && proof?.divergentObservation !== undefined &&
+    proof.localStageMode === "exchange" && displaced?.sha256 !== plan.beforeSha256 ? displaced : undefined;
 }
 
 export function noteReplaceIdempotencyConflict(): McpError {
@@ -741,13 +749,21 @@ export class ObsidianNoteReplaceJournal {
       reason, undefined, true, undefined);
   }
 
+  recordFilesystemExchangeRollback(operationId: string, displaced: NonNullable<NonNullable<ObsidianNoteReplacePlan["filesystem"]>["exchangeRollback"]>): void {
+    const row = this.get(operationId);
+    if (!row?.filesystem || !["applying", "outcome_unknown"].includes(row.status)) throw new ObsidianNoteReplaceConcurrencyError();
+    const updated = { ...row, filesystem: { ...row.filesystem, exchangeRollback: displaced } };
+    const result = this.db.prepare("UPDATE obsidian_note_replace_plans SET payload_json = ? WHERE operation_id = ? AND payload_json = ?")
+      .run(JSON.stringify(updated), operationId, JSON.stringify(row));
+    if (Number(result.changes) !== 1) throw new ObsidianNoteReplaceConcurrencyError();
+  }
+
   interruptedFilesystemReplacements(): string[] {
     const rows = this.db.prepare(`SELECT operation_id FROM obsidian_note_replace_plans
       WHERE status IN ('applying', 'outcome_unknown')
         AND json_extract(payload_json, '$.filesystem.localStage') = 1
-        AND COALESCE(json_extract(payload_json, '$.filesystem.localStageMode'), 'legacy') = 'legacy'
         AND COALESCE(json_extract(payload_json, '$.projection.kind'), '') <> 'obsidian.note.create'
-        AND json_type(payload_json, '$.filesystem.divergentObservation') IS NULL`).all();
+        AND json_type(payload_json, '$.filesystem.witnessesCleaned') IS NULL`).all();
     return rows.map(row => String(row.operation_id));
   }
 
@@ -1035,7 +1051,8 @@ export class ObsidianNoteReplaceJournal {
         : {}),
       ...(effectProof ? { effectProof } : {}),
       ...(current.filesystem ? { filesystem: { ...current.filesystem, ...filesystemUpdate,
-        ...(STABLE_TERMINAL.has(next) && current.filesystem.divergentObservation === undefined ? { stagedContent: undefined } : {}) } } : {}),
+        ...(STABLE_TERMINAL.has(next) && current.filesystem.divergentObservation === undefined && !current.filesystem.exchangeRollback
+          ? { stagedContent: undefined } : {}) } } : {}),
       ...(STABLE_TERMINAL.has(next) ? { nextContent: "" } : {}),
       ...(failure ? { failure } : { failure: undefined }),
     };

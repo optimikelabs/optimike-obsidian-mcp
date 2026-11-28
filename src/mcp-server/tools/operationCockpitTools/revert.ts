@@ -24,11 +24,11 @@ async function respond(toolName: string, operation: () => Promise<unknown>) {
 export function registerFilesystemRevertTools(server: McpServer, runtime: FilesystemRevert | undefined) {
   if (!runtime) return;
   server.registerTool("obsidian_operation_revert_plan", {
-    description: "Seal restoration at the original path from a committed headless note operation or a published operation with a recorded divergent re-read. Pass the original planRef as operationRef. Supply no note content. A divergent re-read requires full write mode and its exact observed hash. Reverting creation removes the note if its bytes still match.",
+    description: "Seal restoration at the original path from a committed headless note operation or a recorded divergent write. Pass the original planRef as operationRef. Supply no note content. If a concurrent edit was displaced, restore those bytes. Divergence requires full write mode and the recorded on-disk hash or absence. Reverting creation removes the note if its bytes still match.",
     inputSchema: mcpSchema(Plan.shape), annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,
   }, params => respond("obsidian_operation_revert_plan", () => runtime.plan(Plan.parse(params))));
   server.registerTool("obsidian_operation_revert_status", {
-    description: "Reconcile the same sealed headless revert without writing a note.",
+    description: "Reconcile the same sealed headless revert. An interrupted exchange may restore an edit it displaced.",
     inputSchema: mcpSchema(Status.shape), annotations: READ_ONLY_TOOL_ANNOTATIONS,
   }, params => respond("obsidian_operation_revert_status", () => runtime.status(Status.parse(params).planRef)));
   for (const name of ["obsidian_operation_revert_apply", "obsidian_operation_revert_recover"] as const) {

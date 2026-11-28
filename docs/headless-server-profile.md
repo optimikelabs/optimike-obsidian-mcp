@@ -85,7 +85,7 @@ The snapshot is not a full backup strategy, but it gives a fast local rollback p
 Only after the `headless-guarded` step, switch a copied or dedicated vault to `OBSIDIAN_RUNTIME_MODE=headless-filesystem`.
 
 1. For move/delete, require `expectedHash` or `expectedMtime`.
-2. For Bases, limit the contract to `.base` YAML files and Markdown frontmatter properties.
+2. For Bases, the filesystem tools create and configure `.base` YAML files. Edit row properties with governed frontmatter patches. `bases_upsert_rows` requires live mode.
 3. For Canvas, limit the contract to JSON Canvas structure: create, add text node, connect nodes, validate.
 4. Validate with `npm run smoke:headless-filesystem`.
 
@@ -114,8 +114,9 @@ filesystems and `renamex_np(RENAME_SWAP)` on supported macOS filesystems. Reader
 always have a path to open during that exchange. Creation uses an exclusive
 hard link and never replaces an existing note.
 
-If the host or filesystem cannot exchange names atomically, replacement is
-refused by default. Windows `ReplaceFileW` with a backup exposed a missing
+The plan probes atomic exchange with two empty temporary files in the target
+directory and removes them before returning. If the host or filesystem cannot
+exchange names atomically, replacement is refused by default. Windows `ReplaceFileW` with a backup exposed a missing
 path to a concurrent reader, so Windows also defaults to refusal. For a vault
 without active bidirectional synchronization, you can explicitly set
 `MCP_HEADLESS_ALLOW_TRANSIENT_ABSENCE=true` to allow the legacy move-aside and
@@ -124,12 +125,16 @@ synchronization.** That sequence has an observable absent path. Its Windows
 sharing-violation retries take about three seconds and recheck the sealed hash.
 
 Postflight verifies the displaced bytes against the sealed hash and re-reads the published file. Receipts
-identify `headless-filesystem`. When postflight detects a divergent version,
-the operation stays `outcome_unknown` and the journal retains the staged,
-displaced and observed versions available at verification. A process that
-keeps an open handle to the old file can still modify that inode after the
-final backup check. In full write mode, a separate revert compares the current
-note against the recorded observed hash. Review the recorded state first.
+identify `headless-filesystem`. If an external edit was displaced and the target
+still contains the unchanged staged inode, a second atomic exchange restores the
+edit and ends in `conflict`. The journal retains the staged version. If the
+second exchange cannot be verified, the operation stays `outcome_unknown` and
+retains the available versions. `headless_displaced_edit` signals a retained edit.
+In full write mode, use
+`obsidian_operation_revert_plan/apply` with the original plan reference to
+restore the displaced edit byte-for-byte. The revert is sealed against the
+recorded target hash or absence and refuses if the target has since changed.
+A process holding an old file open can still write to it after its final check.
 
 Put the shared cache outside the vault. The default governed journal is next
 to it and uses the vault identity across writable modes. It falls back to local
@@ -159,6 +164,7 @@ Desktop provides native YAML serialization and metadata types in live mode.
 After an interrupted apply, call status on the original reference. It can
 settle a write that never published, or reclaim the staged hard link after
 creation. An interrupted native exchange leaves a complete file at the target.
+Startup also reconciles its journaled temporary witness before serving tools.
 For the opt-in legacy sequence, startup and the first status restore a missing
 original through an exclusive link and report a conflict. A staged write never replays.
 To undo a committed write, plan a revert using its original plan reference

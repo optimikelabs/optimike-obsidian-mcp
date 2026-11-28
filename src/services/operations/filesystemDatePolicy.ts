@@ -105,9 +105,8 @@ function managedNote(policy: FilesystemDatePolicy, path: string, content: string
 }
 
 function isDrawing(content: string) {
-  const marker = /^excalidraw-plugin[ \t]*:[ \t]*([^\r\n]*)/mu.exec(frontmatterEnvelope(content)?.yaml ?? "")?.[1];
-  const value = marker?.trim().replace(/^["']|["']$/gu, "");
-  return Boolean(value && value !== "false" && value !== "null");
+  const marker = properties(content)["excalidraw-plugin"];
+  return marker !== undefined && marker !== null && marker !== false && marker !== "" && marker !== "false" && marker !== "null";
 }
 
 function changesModification(policy: FilesystemDatePolicy, before: string | undefined, after: string) {

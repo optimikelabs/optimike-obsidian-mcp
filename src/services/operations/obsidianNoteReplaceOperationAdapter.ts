@@ -23,6 +23,7 @@ import {
 import {
   ObsidianNoteReplaceConcurrencyError,
   ObsidianNoteReplaceJournal,
+  displacedFilesystemEdit,
   noteReplaceIdempotencyConflict,
   type ObsidianNoteReplacePlan,
   type ObsidianNoteReplaceProjection,
@@ -625,6 +626,7 @@ function receipt(
     postflight: {
       ...(plan.filesystem && plan.status === "committed" ? { source: "filesystem-reread" as const } : {}),
       ...(plan.filesystem && plan.failure === "headless_atomic_exchange_unavailable" ? { reason: plan.failure } : {}),
+      ...(displacedFilesystemEdit(plan) ? { reason: "headless_displaced_edit" as const } : {}),
       ...(settlementCheckAt !== undefined
         ? {
             reason: "modified_time_settlement" as const,

@@ -544,7 +544,6 @@ async function main() {
             "obsidian_manage_canvas",
             "bases_create",
             "bases_upsert_config",
-            "bases_upsert_rows",
           ].includes(name))
       ) {
         if (!toolNames.includes(name)) {
@@ -1052,27 +1051,6 @@ async function main() {
           baseConfig,
           "filesystem-guarded",
           "guarded bases config",
-        );
-
-        const rowUpsert = await withTimeout(
-          client.callTool({
-            name: "bases_upsert_rows",
-            arguments: {
-              base_id: "GuardedSmoke.base",
-              operations: [
-                {
-                  file: "Projects/Headless.md",
-                  set: { headless_guarded_smoke_row: "ok" },
-                },
-              ],
-            },
-          }),
-          "guarded bases rows",
-        );
-        assertTextIncludes(
-          rowUpsert,
-          "filesystem-guarded",
-          "guarded bases rows",
         );
 
         const deleteHash = await createFixture("Projects/DeleteMe.md", "Delete me.\n");

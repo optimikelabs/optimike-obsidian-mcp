@@ -87,7 +87,7 @@ Le snapshot ne remplace pas une vraie sauvegarde, mais donne un rollback local r
 Seulement après le palier `headless-guarded`, passer une copie ou un vault dédié en `OBSIDIAN_RUNTIME_MODE=headless-filesystem`.
 
 1. Pour move/delete, exiger `expectedHash` ou `expectedMtime`.
-2. Pour Bases, limiter le contrat aux fichiers `.base` YAML et aux propriétés frontmatter des notes.
+2. Les outils filesystem Bases créent et configurent les fichiers `.base` YAML. Pour éditer les propriétés d’une ligne, utilisez le patch frontmatter gouverné. `bases_upsert_rows` exige le mode live.
 3. Pour Canvas, limiter le contrat à la structure JSON Canvas : create, ajout de nœud texte, connexion de nœuds, validation.
 4. Valider avec `npm run smoke:headless-filesystem`.
 
@@ -118,8 +118,9 @@ utilise `renameat2(RENAME_EXCHANGE)` et la voie macOS `renamex_np(RENAME_SWAP)`
 sur les volumes compatibles. Le chemin reste présent pendant l’échange.
 Une création utilise un lien physique exclusif et préserve une cible existante.
 
-Si la plateforme ou le volume ne permet pas l’échange atomique, le remplacement
-est refusé par défaut. Sous Windows, une lecture concurrente a observé une
+Le plan vérifie l’échange atomique avec deux fichiers temporaires vides dans le
+dossier cible et les retire avant de rendre la main. Si la plateforme ou le volume
+ne permet pas l’échange atomique, le remplacement est refusé par défaut. Sous Windows, une lecture concurrente a observé une
 absence pendant un appel `ReplaceFileW` réussi avec sauvegarde. Windows refuse
 donc aussi le remplacement par défaut. Sur un coffre sans synchronisation
 bidirectionnelle active, l’option `MCP_HEADLESS_ALLOW_TRANSIENT_ABSENCE=true`
@@ -129,12 +130,16 @@ Cette séquence expose une absence. Sous Windows, elle réessaie les erreurs de
 partage pendant environ trois secondes et revérifie le hash à chaque tentative.
 
 Le contrôle final compare les octets déplacés au hash scellé et relit le fichier publié. Le reçu
-identifie `headless-filesystem`. En cas de divergence observée, l’opération
-reste `outcome_unknown` et le journal conserve les versions disponibles lors
-de la vérification. Un programme qui garde l’ancien fichier ouvert peut
-encore le modifier après le dernier contrôle de la sauvegarde. En mode
-d’écriture `full`, un retour arrière séparé compare le hash courant à celui
-observé et enregistré. Relisez l’état enregistré avant de l’appliquer.
+identifie `headless-filesystem`. Si une édition externe a été déplacée et que la
+cible contient encore le fichier temporaire inchangé, un second échange atomique
+rétablit l’édition et clôt l’opération en `conflict`. Le journal conserve la
+version préparée. Si le second échange ne peut être vérifié, l’opération reste
+`outcome_unknown` et le journal garde les versions disponibles. Le motif
+`headless_displaced_edit` signale une édition conservée. En mode `full`,
+utilisez `obsidian_operation_revert_plan/apply` avec la référence du plan initial
+pour rétablir l’édition déplacée octet pour octet. Le retour arrière lie le hash
+ou l’absence observée et refuse si la cible a changé depuis. Un programme qui
+garde l’ancien fichier ouvert peut encore l’écrire après son dernier contrôle.
 
 Placez le cache partagé hors du coffre. Le journal est créé à côté du cache
 par défaut, d’après l’identité du coffre quel que soit le mode headless, ou
@@ -166,7 +171,8 @@ de ligne. En live, Desktop fournit la sérialisation YAML et les types natifs.
 Après une interruption, appelez status avec la référence d’origine. Il peut
 clore une écriture jamais publiée ou nettoyer le lien temporaire après une
 création. Une interruption pendant l’échange natif laisse un fichier complet
-à la cible. Avec l’ancienne séquence activée, le démarrage et le premier statut
+à la cible. Le démarrage réconcilie aussi son fichier temporaire journalisé avant
+de servir les outils. Avec l’ancienne séquence activée, le démarrage et le premier statut
 rétablissent un original absent depuis sa sauvegarde par un lien exclusif et
 signalent un conflit. Une écriture déjà
 préparée ne se rejoue pas. Pour annuler une écriture terminée, planifiez un

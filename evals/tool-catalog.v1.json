@@ -409,7 +409,6 @@
       "bases_list",
       "bases_query",
       "bases_upsert_config",
-      "bases_upsert_rows",
       "external_handoff",
       "external_list",
       "external_move_apply",
@@ -796,7 +795,6 @@
           "bases_get_schema",
           "bases_list",
           "bases_query",
-          "bases_upsert_rows",
           "obsidian_frontmatter_patch_apply",
           "obsidian_frontmatter_patch_plan",
           "obsidian_frontmatter_patch_recover",
@@ -1374,7 +1372,6 @@
           "bases_list",
           "bases_query",
           "bases_upsert_config",
-          "bases_upsert_rows",
           "external_handoff",
           "external_list",
           "external_move_apply",
@@ -1834,7 +1831,6 @@
           "bases_get_schema",
           "bases_list",
           "bases_query",
-          "bases_upsert_rows",
           "external_handoff",
           "external_list",
           "external_move_apply",
@@ -2825,8 +2821,7 @@
       "annotationClass": "destructive",
       "registrationModes": [
         "live",
-        "hybrid-live",
-        "headless-filesystem"
+        "hybrid-live"
       ],
       "profiles": [
         "authoring",
@@ -2836,18 +2831,15 @@
       "profileModes": {
         "authoring": [
           "live",
-          "hybrid-live",
-          "headless-filesystem"
+          "hybrid-live"
         ],
         "full": [
           "live",
-          "hybrid-live",
-          "headless-filesystem"
+          "hybrid-live"
         ],
         "operational": [
           "live",
-          "hybrid-live",
-          "headless-filesystem"
+          "hybrid-live"
         ]
       }
     },

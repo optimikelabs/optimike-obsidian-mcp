@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { lstatSync, mkdirSync, realpathSync, statSync, type BigIntStats } from "node:fs";
 import { link, lstat, open, readFile, readdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
@@ -24,6 +24,7 @@ import type { ObsidianNoteReplacePlan, ObsidianNoteReplaceJournal } from "./obsi
 export const FILESYSTEM_AUTHORITY = "headless-filesystem" as const;
 const absent = (error: unknown) => (error as NodeJS.ErrnoException)?.code === "ENOENT";
 const occupied = (error: unknown) => (error as NodeJS.ErrnoException)?.code === "EEXIST";
+const isExchangeUnavailable = (error: unknown) => error instanceof McpError && error.details?.reasonCode === ATOMIC_EXCHANGE_UNAVAILABLE;
 const hash = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
 // NTFS may preserve a replaced entry's creation time (file name tunneling).
 const identity = (s: BigIntStats) => process.platform === "win32" ?
@@ -131,7 +132,8 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
 
   constructor(vaultRoot: string, journalPath: string, private readonly journal: ObsidianNoteReplaceJournal,
     private readonly now = Date.now, private readonly afterPublish?: () => void,
-    private readonly getExchange = nativeFilesystemExchange) {
+    private readonly getExchange = nativeFilesystemExchange,
+    private readonly getProbeExchange = nativeFilesystemExchange) {
     this.root = realpathSync.native(vaultRoot);
     this.bindingFingerprint = vaultIdentity(this.root);
     this.writer = new VaultFileService(this.root);
@@ -251,7 +253,6 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
   }
 
   async seal(relative: string, proposed: string, source: AtomicWriteReadResponse) {
-    this.requireReplacement();
     const policy = await this.policy();
     const snapshot = await this.snapshot(relative);
     if (snapshot.sha256 !== source.sha256) throw conflict("The note changed during plan preparation.");
@@ -266,6 +267,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
     const content = sealFilesystemDates(policy, relative, proposed, this.now(),
       { content: source.content, birthtimeMs: Number(snapshot.stat.birthtimeMs) });
     if (Buffer.byteLength(content, "utf8") > 5 * 1024 * 1024) throw conflict("The sealed note is too large.");
+    await this.probeReplacement(relative);
     return { content, policyDigest: policy.digest };
   }
 
@@ -282,7 +284,11 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
       const plan = this.journal.get(operationId);
       if (!plan || plan.bindingFingerprint !== this.bindingFingerprint) continue;
       // A currently unavailable path can be reconciled when status is next called.
-      await this.matchesEffect(plan).catch(() => false);
+      await this.locks.run(this.pathLock(plan.path), async () => {
+        if (await this.verifyPublication(plan) && this.journal.get(operationId)?.status !== "committed") {
+          this.journal.commitAfterVerifiedProof(plan.operationId, ["applying", "outcome_unknown"]);
+        }
+      }).catch(() => {});
     }
   }
 
@@ -315,10 +321,29 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
     return { temp: prefix + ".tmp", backup: prefix + ".bak" };
   }
 
-  private requireReplacement() {
-    const exchange = this.getExchange();
-    if (!exchange && !config.headlessAllowTransientAbsence) throw atomicExchangeUnavailable();
-    return exchange;
+  private async probeReplacement(relative: string) {
+    const exchange = this.getExchange() && this.getProbeExchange();
+    if (!exchange) {
+      if (!config.headlessAllowTransientAbsence) throw atomicExchangeUnavailable();
+      return;
+    }
+    const dir = path.dirname(await this.target(relative));
+    const prefix = path.join(dir, `.mcp-exchange-${randomUUID()}`);
+    const probes: string[] = [];
+    try {
+      for (const suffix of ["-a.tmp", "-b.tmp"]) {
+        const filename = prefix + suffix;
+        const handle = await open(filename, "wx", 0o600);
+        probes.push(filename);
+        await handle.close();
+      }
+      try { exchange(probes[0]!, probes[1]!); }
+      catch (error) {
+        if (!isExchangeUnavailable(error) || !config.headlessAllowTransientAbsence) throw error;
+      }
+    } finally {
+      await Promise.all(probes.map(filename => rm(filename, { force: true })));
+    }
   }
 
   private async readWitnesses(target: string, plan: ObsidianNoteReplacePlan) {
@@ -349,6 +374,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
     const target = await this.target(plan.path, true, true);
     const witnesses = await this.readWitnesses(target, plan);
     const { temp, displacedPath, stage } = witnesses;
+    if (proof.exchangeRollback) return this.reconcileExchangeRollback(plan, target, temp);
     if (stage && identity(stage.stat) !== proof.stagedIdentity) throw conflict("The stage witness changed identity.");
     let displaced = witnesses.displaced;
     let observed = await this.observe(target);
@@ -369,10 +395,19 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
       const links = observed!.stat.nlink;
       const ownsLinks = links === (stage ? 2n : 1n);
       const backupMatches = displaced ? displaced.sha256 === plan.beforeSha256 :
-        proof.backupVerified || plan.projection?.kind === "obsidian.note.create";
+        proof.backupVerified || plan.projection?.kind === "obsidian.note.create" || plan.projection?.proof.restoreIntoAbsence === true;
+      if (proof.localStageMode === "exchange" && displaced && !backupMatches && ownsLinks && observed!.sha256 === proof.stagedSha256) {
+        return this.rollbackExchange(plan, target, temp, displaced);
+      }
       if (!ownsLinks || observed!.sha256 !== proof.stagedSha256 || !backupMatches) return recordDivergence();
       if (displaced && !proof.backupVerified) this.journal.verifyFilesystemBackup(plan.operationId);
-      if (displaced && (await this.observe(displacedPath))?.sha256 !== plan.beforeSha256) return recordDivergence();
+      if (displaced) {
+        const latest = await this.observe(displacedPath);
+        if (latest?.sha256 !== plan.beforeSha256) {
+          if (latest && proof.localStageMode === "exchange") return this.rollbackExchange(plan, target, temp, latest);
+          return recordDivergence();
+        }
+      }
       await cleanup();
       // Re-read after detaching our aliases. A new external file wins.
       observed = await this.observe(target);
@@ -393,7 +428,64 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
     return false;
   }
 
-  async sealRevert(relative: string, source: string | undefined, expectedHash: string) {
+  private async rollbackExchange(plan: ObsidianNoteReplacePlan, target: string, temp: string, displaced: DiskSnapshot) {
+    this.journal.recordFilesystemExchangeRollback(plan.operationId, { ...evidence(displaced), identity: identity(displaced.stat) });
+    return this.reconcileExchangeRollback(this.journal.get(plan.operationId)!, target, temp);
+  }
+
+  private async reconcileExchangeRollback(plan: ObsidianNoteReplacePlan, target: string, temp: string) {
+    const proof = plan.filesystem!;
+    let saved = proof.exchangeRollback!;
+    const ownStage = (file?: DiskSnapshot) => file?.stat.nlink === 1n &&
+      identity(file.stat) === proof.stagedIdentity && file.sha256 === proof.stagedSha256;
+    const original = (file?: DiskSnapshot) => file !== undefined && identity(file.stat) === saved.identity;
+    let backup = await this.observe(temp);
+    let current = await this.observe(target);
+    const exchange = this.getExchange();
+    if (backup && original(backup) && backup.stat.nlink === 1n && ownStage(current) && exchange) {
+      if (backup.sha256 !== saved.sha256) {
+        saved = { ...evidence(backup), identity: saved.identity };
+        this.journal.recordFilesystemExchangeRollback(plan.operationId, saved);
+      }
+      // Check again after the durable intent. Neither a newer target nor a
+      // shared stage is eligible. Verify what the second exchange displaced too.
+      if (ownStage(await this.observe(target))) {
+        try { exchange(target, temp); }
+        catch { /* Keep the displaced bytes available to the governed revert. */ }
+      }
+      backup = await this.observe(temp);
+      current = await this.observe(target);
+    }
+    if (original(current) && current?.sha256 === saved.sha256 && (!backup || ownStage(backup))) {
+      if (backup) await rm(temp);
+      await syncDirectory(path.dirname(target));
+      backup = undefined;
+      current = await this.observe(target);
+      if (original(current) && current?.sha256 === saved.sha256) {
+        this.journal.settleUnpublishedFilesystem(plan.operationId, "conflict", "headless_exchange_rolled_back");
+        return false;
+      }
+    }
+    // A writer can also race the second exchange. Keep its displaced bytes
+    // alongside the first edit and bind any explicit restoration to this target.
+    const displaced = backup && !ownStage(backup) ? evidence(backup) : { sha256: saved.sha256, bytesBase64: saved.bytesBase64 };
+    this.journal.recordFilesystemDivergence(plan.operationId, current ? evidence(current) : null, displaced);
+    await this.cleanupDivergence(this.journal.get(plan.operationId)!);
+    return false;
+  }
+
+  async sealRevert(relative: string, source: string | undefined, expectedHash: string,
+    { restoreDisplaced, restoreIntoAbsence }: { restoreDisplaced: boolean; restoreIntoAbsence: boolean }) {
+    if (restoreIntoAbsence) {
+      if (source === undefined || expectedHash !== operationDigest({ absent: relative, binding: this.bindingFingerprint })) {
+        throw conflict("The displaced edit does not match the sealed absent path.");
+      }
+      const target = await this.target(relative, true);
+      if (await this.observe(target)) throw conflict("The note was recreated after the displaced edit was recorded.");
+      await this.writer.assertNewFileName(relative, target);
+      return { policyDigest: (await this.policy()).digest, before: undefined, content: source,
+        afterSha256: hash(source), bindingFingerprint: this.bindingFingerprint };
+    }
     const current = await this.snapshot(relative).catch(error => {
       if (absent(error)) throw new McpError(BaseErrorCode.CONFLICT, "The note no longer exists.", {
         reasonCode: "headless_revert_target_missing",
@@ -402,7 +494,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
     });
     if (current.sha256 !== expectedHash) throw conflict("The note no longer matches the original operation's after proof.");
     const policy = await this.policy();
-    if (source !== undefined) this.requireReplacement();
+    if (source !== undefined) await this.probeReplacement(relative);
     if (source === undefined) {
       const directory = filesystemJournalPath(this.root, this.removedDirectory);
       mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -411,7 +503,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
       }
     }
     let content = source ?? "";
-    if (source !== undefined) {
+    if (source !== undefined && !restoreDisplaced) {
       const original = frontmatter(source);
       const dates = frontmatter(current.content);
       // A prior write may have initialized creation. Keep that date when
@@ -466,7 +558,9 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
   }
 
   async applyRevert(plan: ObsidianNoteReplacePlan) {
-    if (plan.projection?.proof.restoreAbsence !== true) return this.publish(plan, plan.beforeSha256);
+    if (plan.projection?.proof.restoreAbsence !== true) {
+      return this.publish(plan, plan.projection?.proof.restoreIntoAbsence === true ? undefined : plan.beforeSha256);
+    }
     return this.locks.run(this.pathLock(plan.path), async () => {
       const target = await this.target(plan.path, true);
       const observed = await this.snapshot(plan.path).catch(error => {
@@ -508,7 +602,8 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
           hash(plan.nextContent) !== plan.afterSha256) throw conflict("The headless filesystem seal is invalid.");
       const policy = await this.policy();
       if (policy.digest !== plan.filesystem.policyDigest) throw conflict("The date policy changed after planning.");
-      const content = materializeFilesystemDates(policy, relative, plan.nextContent, this.now(), plan.filesystem.beforeContent);
+      const content = plan.projection?.proof.restoreDisplaced === true ? plan.nextContent :
+        materializeFilesystemDates(policy, relative, plan.nextContent, this.now(), plan.filesystem.beforeContent);
       const sha256 = hash(content);
       if (sha256 === expectedHash) throw conflict("The sealed write would leave the note unchanged.");
       const before = await this.observe(target);
@@ -550,7 +645,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
           exchange(target, temp);
           exchanged = true;
         } catch (error) {
-          const unavailable = error instanceof McpError && error.details?.reasonCode === ATOMIC_EXCHANGE_UNAVAILABLE;
+          const unavailable = isExchangeUnavailable(error);
           if (!unavailable || !config.headlessAllowTransientAbsence) {
             await rm(temp, { force: true });
             this.journal.settleUnpublishedFilesystem(plan.operationId,
