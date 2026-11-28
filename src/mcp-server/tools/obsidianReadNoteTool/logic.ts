@@ -6,6 +6,10 @@ import {
   ObsidianRestApiService,
 } from "../../../services/obsidianRestAPI/index.js";
 import { extractInlineTags } from "../../../services/markdownTags.js";
+import {
+  type FrontmatterReadSignal,
+  resolveReadFrontmatter,
+} from "../../../services/obsidianRestAPI/readFrontmatter.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
@@ -107,7 +111,7 @@ export interface ObsidianReadNoteResponse {
    * If format='markdown', this is a string.
    * If format='json', this is a NoteJson object (which also contains the content string and stats).
    */
-  content: string | NoteJson;
+  content: string | (NoteJson & FrontmatterReadSignal);
   /**
    * Optional formatted file statistics.
    * Included if format='json', or if format='markdown' and includeStat=true.
@@ -412,8 +416,14 @@ export const processObsidianReadNote = async (
       // Local REST's native tag list can include numeric PR references. Recompute
       // from the returned text using the same rules as the shared-cache path.
       const normalizedContent = (noteJson.content ?? "").replace(/\r\n/g, "\n");
-      const { body } = extractFrontmatter(normalizedContent);
-      response.content = { ...noteJson, tags: extractTags(noteJson.frontmatter ?? {}, body) };
+      const header = FRONTMATTER_BLOCK.exec(normalizedContent);
+      const body = header ? normalizedContent.slice(header[0].length) : normalizedContent;
+      const resolved = resolveReadFrontmatter(noteJson);
+      response.content = {
+        ...noteJson,
+        ...resolved,
+        tags: extractTags(resolved.frontmatter ?? {}, body),
+      };
       response.stats = formattedStat; // Always include formatted stat at top level for JSON format
       logger.debug(
         `Response format set to JSON, including full NoteJson (with original numeric stat) and top-level formatted stat.`,
@@ -491,11 +501,13 @@ function buildNoteJsonFromCache(
   };
 }
 
+const FRONTMATTER_BLOCK = /^---\n([\s\S]*?)\n---\n?/u;
+
 function extractFrontmatter(content: string): {
   frontmatter: Record<string, any>;
   body: string;
 } {
-  const match = content.match(/^---\n([\s\S]*?)\n---\n?/u);
+  const match = FRONTMATTER_BLOCK.exec(content);
   if (!match) {
     return { frontmatter: {}, body: content };
   }
