@@ -9,6 +9,8 @@ import type {
   ModifiedTimeSettlementPolicy,
 } from "./modifiedTimeSettlement.js";
 
+export const FILESYSTEM_OPERON_PROJECTION = "operon.filesystem.mutation";
+
 export type ObsidianNoteReplaceStatus =
   | "planned"
   | "applying"
@@ -174,7 +176,7 @@ export type ObsidianNoteReplaceJournalOptions = {
 
 export type PendingOperationKind =
   | "obsidian.operation.revert"
-  | "operon.filesystem.mutation"
+  | typeof FILESYSTEM_OPERON_PROJECTION
   | "obsidian.note.replace"
   | "obsidian.frontmatter.patch"
   | "obsidian.base.formula.patch"
@@ -631,7 +633,7 @@ export class ObsidianNoteReplaceJournal {
       updatedAt: now,
       effectTracking: { contractVersion: 1, untracked: false, attempts: [] },
     };
-    const operon = input.projection?.kind === "operon.filesystem.mutation";
+    const operon = input.projection?.kind === FILESYSTEM_OPERON_PROJECTION;
     const insertValues = maximumActiveProjectionRows === undefined
       ? operon ? "SELECT ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM operon_filesystem_recovery_keys WHERE idempotency_key = ?)"
         : "VALUES (?, ?, ?, ?, ?, ?)"

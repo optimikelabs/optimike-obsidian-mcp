@@ -5,6 +5,7 @@ import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { parseToolInput } from "../../utils/internal/toolInputValidation.js";
 import { operationDigest, type OperationReceipt } from "../operations/contract.js";
 import { atomicExchangeUnavailable } from "../operations/filesystemAtomicExchange.js";
+import { FILESYSTEM_OPERON_PROJECTION } from "../operations/obsidianNoteReplaceJournal.js";
 import { assertWriteAllowed } from "../writePolicy.js";
 import { createVaultExclusionMatcher, isVaultPathExcluded } from "../vaultExclusions.js";
 import {
@@ -16,7 +17,6 @@ import { formatOperonLocalTime, parseOperonMarkdown, type FilesystemConfiguratio
 import { editTaskSource, renderInlineTask, supportsFilesystemMutationFormat, unsupportedFilesystemMutation, type SimpleTaskEdit } from "./filesystemMutationFormat.js";
 import type { FilesystemOperonService } from "./filesystemService.js";
 
-export const FILESYSTEM_OPERON_PROJECTION = "operon.filesystem.mutation";
 const NOTE_REF = "obsidian-note-replace:v1:";
 const RECOVERY_REF = "operon-filesystem:v1:";
 const journalKey = (key: string) => "optimike:projection:v1:operon:" + operationDigest(key);
@@ -316,6 +316,7 @@ export class FilesystemOperonMutations {
       source: "filesystem", stale: false, planDigest: receipt.planDigest };
     const projection = this.requirePlan(receipt.planRef).projection!;
     if (receipt.outcome === "conflict") conflict("The note changed before the sealed Operon write could commit.");
+    if (receipt.postflight.reason === "headless_atomic_exchange_unavailable") throw atomicExchangeUnavailable();
     if (receipt.phase === "planned") return { ...base, ok: true, status: "planned", requested, before: projection.proof.before,
       plan: { path: receipt.target.logicalRef, beforeSha256: receipt.beforeProof.details?.sha256, operonId: projection.proof.operonId }, ...(replayed ? { replayed } : {}) };
     if (receipt.outcome === "committed" && receipt.postflight.status === "verified") {

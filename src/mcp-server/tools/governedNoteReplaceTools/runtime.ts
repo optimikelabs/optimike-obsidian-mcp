@@ -52,6 +52,7 @@ import {
   type ObsidianNoteReplacePlanInput,
 } from "../../../services/operations/obsidianNoteReplaceOperationAdapter.js";
 import {
+  FILESYSTEM_OPERON_PROJECTION,
   ObsidianNoteReplaceJournal,
   type ObsidianNoteReplacePlan,
   type PendingOperationRowsInput,
@@ -1091,8 +1092,8 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
   }
 
   listPendingOperonPlans() {
-    const input = { fallbackOperationKind: "operon.filesystem.mutation" as const,
-      admittedProjectionKinds: ["operon.filesystem.mutation" as const], allowUnprojectedFallback: false, limit: 100 };
+    const input: PendingOperationRowsInput = { fallbackOperationKind: FILESYSTEM_OPERON_PROJECTION,
+      admittedProjectionKinds: [FILESYSTEM_OPERON_PROJECTION], allowUnprojectedFallback: false, limit: 100 };
     return (["applying", "outcome_unknown"] as const).flatMap(status => {
       const page = this.journal.listPendingOperationRows({ ...input, status });
       if (page.hasMore) throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "The pending filesystem Operon recovery list exceeds its bound.");

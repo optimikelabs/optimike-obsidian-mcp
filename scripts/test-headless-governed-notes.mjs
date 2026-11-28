@@ -328,6 +328,25 @@ async function checkAtomicExchange() {
     assert.equal(failure.postflight.reason, "headless_atomic_exchange_unavailable");
     assert.equal(await readFile(filename, "utf8"), content);
 
+    const { config } = await import("../dist/config/index.js");
+    const { FILESYSTEM_OPERON_PROJECTION } = await import("../dist/services/operations/obsidianNoteReplaceJournal.js");
+    const originalFallback = config.headlessAllowTransientAbsence;
+    const key = "operon-strict-exchange";
+    const digest = "a".repeat(64);
+    const operon = { path: raced, nextContent: published, idempotencyKey: key, idempotencyIdentity: digest,
+      projection: { contractVersion: 1, kind: FILESYSTEM_OPERON_PROJECTION, publicIdempotencyKey: key, intentDigest: digest, proof: {} } };
+    try {
+      config.headlessAllowTransientAbsence = true;
+      await assert.rejects(injected(undefined, refuseVolume).plan(operon), {
+        code: "SERVICE_UNAVAILABLE", details: { reasonCode: "headless_atomic_exchange_unavailable" },
+      });
+      const sealed = await unavailable.plan(operon);
+      const apply = await unavailable.apply(sealed.planRef, key);
+      assert.equal(apply.outcome, "failed");
+      assert.equal(apply.postflight.reason, "headless_atomic_exchange_unavailable");
+      assert.equal(await readFile(filename, "utf8"), content);
+    } finally { config.headlessAllowTransientAbsence = originalFallback; }
+
     for (const [key, write] of [
       ["in-place", target => writeFileSync(target, interference)],
       ["replace", target => { writeFileSync(target + ".sync", interference); renameSync(target + ".sync", target); }],
@@ -728,6 +747,12 @@ async function integration() {
 }
 
 if (process.argv[2] === "observe-exchange") observePath(process.argv[3]);
+else if (process.argv[2] === "check-atomic-exchange") {
+  process.env.TZ = "UTC";
+  process.env.OPTIMIKE_VAULT_TIMEZONE = "UTC";
+  await checkAtomicExchange();
+  console.log("PASS: native atomic exchange, conflict and recovery contracts");
+}
 else if (process.argv[2]) await injectAfterFilesystemEffect();
 else {
   process.env.TZ = "UTC";

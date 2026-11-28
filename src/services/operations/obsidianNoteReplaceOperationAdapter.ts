@@ -22,6 +22,7 @@ import {
 } from "./contract.js";
 import {
   ObsidianNoteReplaceConcurrencyError,
+  FILESYSTEM_OPERON_PROJECTION,
   ObsidianNoteReplaceJournal,
   displacedFilesystemEdit,
   noteReplaceIdempotencyConflict,
@@ -254,7 +255,7 @@ export type ObsidianNoteReplaceAdapterOptions = {
   now?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
   filesystem?: {
-    seal(path: string, content: string, source: AtomicWriteReadResponse): Promise<{ content: string; policyDigest: string }>;
+    seal(path: string, content: string, source: AtomicWriteReadResponse, requireAtomicExchange?: boolean): Promise<{ content: string; policyDigest: string }>;
     matchesEffect(plan: ObsidianNoteReplacePlan): Promise<boolean>;
   };
 };
@@ -821,7 +822,8 @@ export class ObsidianNoteReplaceOperationAdapter
     let filesystem: ObsidianNoteReplacePlan["filesystem"];
     let nextContent = input.nextContent;
     if (this.options.filesystem) {
-      const sealed = await this.options.filesystem.seal(input.path, nextContent, read);
+      const sealed = await this.options.filesystem.seal(input.path, nextContent, read,
+        input.projection?.kind === FILESYSTEM_OPERON_PROJECTION);
       filesystem = { policyDigest: sealed.policyDigest, beforeContent: read.content, projectedSha256: afterSha256 };
       nextContent = sealed.content;
       afterSha256 = createHash("sha256").update(nextContent, "utf8").digest("hex");

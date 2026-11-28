@@ -155,10 +155,12 @@ export class FilesystemOperonService {
 
   async configurationReadiness(): Promise<Record<string, unknown>> {
     const { data, configuration, legacyWithoutPipelines } = await this.readSettings();
-    const manifest = config.obsidianRuntimeMode === "headless-filesystem" ? await this.pluginData("manifest.json") : null;
-    return { configured: Boolean(data) && !legacyWithoutPipelines, ...(legacyWithoutPipelines ? { degraded: true } : {}),
-      writableFormat: Boolean(data) && !legacyWithoutPipelines && !customCacheExclusions &&
-        supportsFilesystemMutationFormat(String(manifest?.version ?? ""), configuration) };
+    const configured = Boolean(data) && !legacyWithoutPipelines;
+    const readiness = { configured, ...(legacyWithoutPipelines ? { degraded: true } : {}) };
+    if (config.obsidianRuntimeMode !== "headless-filesystem") return readiness;
+    const manifest = await this.pluginData("manifest.json");
+    return { ...readiness, writableFormat: configured && !customCacheExclusions &&
+      supportsFilesystemMutationFormat(String(manifest?.version ?? ""), configuration) };
   }
 
   private async read(forceRefresh: boolean) {

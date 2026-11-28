@@ -19,7 +19,7 @@ import { ATOMIC_EXCHANGE_UNAVAILABLE, atomicExchangeUnavailable, nativeFilesyste
 import { materializeFilesystemDates, normalizeDateKey, readFilesystemDatePolicy, renderFilesystemDates, sealFilesystemDates } from "./filesystemDatePolicy.js";
 import type { AtomicWriteBackend } from "./obsidianNoteReplaceOperationAdapter.js";
 import type { NoteCreateBackend } from "./noteCreateOperationAdapter.js";
-import type { ObsidianNoteReplacePlan, ObsidianNoteReplaceJournal } from "./obsidianNoteReplaceJournal.js";
+import { FILESYSTEM_OPERON_PROJECTION, type ObsidianNoteReplacePlan, type ObsidianNoteReplaceJournal } from "./obsidianNoteReplaceJournal.js";
 
 export const FILESYSTEM_AUTHORITY = "headless-filesystem" as const;
 const absent = (error: unknown) => (error as NodeJS.ErrnoException)?.code === "ENOENT";
@@ -258,7 +258,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
       content, size, sha256 };
   }
 
-  async seal(relative: string, proposed: string, source: AtomicWriteReadResponse) {
+  async seal(relative: string, proposed: string, source: AtomicWriteReadResponse, requireAtomicExchange = false) {
     const policy = await this.policy();
     const snapshot = await this.snapshot(relative);
     if (snapshot.sha256 !== source.sha256) throw conflict("The note changed during plan preparation.");
@@ -273,7 +273,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
     const content = sealFilesystemDates(policy, relative, proposed, this.now(),
       { content: source.content, birthtimeMs: Number(snapshot.stat.birthtimeMs) });
     if (Buffer.byteLength(content, "utf8") > 5 * 1024 * 1024) throw conflict("The sealed note is too large.");
-    await this.probeReplacement(relative);
+    await this.probeReplacement(relative, requireAtomicExchange);
     return { content, policyDigest: policy.digest };
   }
 
@@ -353,10 +353,11 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
     }
   }
 
-  private async probeReplacement(relative: string) {
+  private async probeReplacement(relative: string, requireAtomicExchange = false) {
+    const allowLegacy = config.headlessAllowTransientAbsence && !requireAtomicExchange;
     const exchange = this.getExchange() && this.getProbeExchange();
     if (!exchange) {
-      if (!config.headlessAllowTransientAbsence) throw atomicExchangeUnavailable();
+      if (!allowLegacy) throw atomicExchangeUnavailable();
       return;
     }
     const dir = path.dirname(await this.target(relative));
@@ -373,7 +374,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
         }
         try { exchange(probes[0]!, probes[1]!); }
         catch (error) {
-          if (!isExchangeUnavailable(error) || !config.headlessAllowTransientAbsence) throw error;
+          if (!isExchangeUnavailable(error) || !allowLegacy) throw error;
         }
       } catch (error) {
         probeFailed = true;
@@ -652,7 +653,8 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
       if (before?.sha256 !== expectedHash) throw conflict("The note changed since planning.");
       if (!before) await this.writer.assertNewFileName(relative, target);
       const exchange = before ? this.getExchange() : undefined;
-      if (before && !exchange && !config.headlessAllowTransientAbsence) {
+      const allowLegacy = config.headlessAllowTransientAbsence && plan.projection?.kind !== FILESYSTEM_OPERON_PROJECTION;
+      if (before && !exchange && !allowLegacy) {
         this.journal.settleUnpublishedFilesystem(plan.operationId, "failed", ATOMIC_EXCHANGE_UNAVAILABLE);
         throw atomicExchangeUnavailable();
       }
@@ -688,7 +690,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
           exchanged = true;
         } catch (error) {
           const unavailable = isExchangeUnavailable(error);
-          if (!unavailable || !config.headlessAllowTransientAbsence) {
+          if (!unavailable || !allowLegacy) {
             await rm(temp, { force: true });
             this.journal.settleUnpublishedFilesystem(plan.operationId,
               error instanceof McpError && error.code === BaseErrorCode.CONFLICT ? "conflict" : "failed",
