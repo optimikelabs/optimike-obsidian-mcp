@@ -400,6 +400,58 @@ export class VaultCacheService {
     });
   }
 
+  /** Read one exact Markdown path while the filesystem cache is being built. */
+  public async readExactFilesystemNote(
+    filePath: string,
+    context: RequestContext,
+  ): Promise<CacheRow | undefined> {
+    if (
+      config.obsidianRuntimeMode !== "headless-readonly" ||
+      config.obsidianCacheSource === "rest" ||
+      this.isCacheReady ||
+      this.lastRefreshError ||
+      this.closing ||
+      filePath.includes("\\")
+    ) {
+      return undefined;
+    }
+
+    const root = getVaultRoot();
+    const normalized = normalizedCacheFilePath(filePath);
+    if (
+      !root ||
+      !normalized ||
+      isVaultPathExcluded(normalized, this.vaultExclusionMatcher)
+    ) {
+      return undefined;
+    }
+
+    // Match actual directory entries so case-insensitive filesystems, aliases,
+    // and alternate data streams cannot invent a match outside the inventory.
+    const segments = normalized.slice(1).split("/");
+    let directory = root;
+    let prefix = "";
+    try {
+      for (const [index, segment] of segments.entries()) {
+        prefix += "/" + segment;
+        if (isVaultPathExcluded(prefix, this.vaultExclusionMatcher)) {
+          return undefined;
+        }
+        const entry = (await fs.readdir(directory, { withFileTypes: true }))
+          .find((candidate) => candidate.name === segment);
+        const final = index === segments.length - 1;
+        if (!entry || (final ? !entry.isFile() : !entry.isDirectory())) {
+          return undefined;
+        }
+        directory = path.join(directory, segment);
+      }
+      return await this.readCacheRow(normalized, "filesystem", context);
+    } catch {
+      // The normal cache path owns fallback matching and the public refusal.
+      return undefined;
+    }
+  }
+
   public async getEntry(filePath: string): Promise<CacheEntry | undefined> {
     if (
       !normalizedCacheFilePath(filePath) ||

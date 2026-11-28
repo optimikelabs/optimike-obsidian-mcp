@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { test, after } from "node:test";
@@ -91,6 +92,83 @@ test("auto incremental reads select the same filesystem source as a full scan", 
     assert.equal(fetches, before);
   } finally {
     config.obsidianCacheSource = "rest";
+  }
+});
+
+test("an exact headless note read completes while unrelated inventory is blocked", async () => {
+  const { processObsidianReadNote } = await import(
+    "../dist/mcp-server/tools/obsidianReadNoteTool/logic.js"
+  );
+  const vault = path.join(root, "startup-vault");
+  const blockedDir = path.join(vault, "Blocked");
+  const saved = {
+    obsidianVaultPath: config.obsidianVaultPath,
+    obsidianSharedCacheDbPath: config.obsidianSharedCacheDbPath,
+    obsidianCacheSource: config.obsidianCacheSource,
+  };
+  Object.assign(config, {
+    obsidianVaultPath: vault,
+    obsidianSharedCacheDbPath: path.join(root, "startup.sqlite"),
+    obsidianCacheSource: "filesystem",
+  });
+  mkdirSync(blockedDir, { recursive: true });
+  const notesDir = path.join(vault, "Notes");
+  const privateDir = path.join(vault, "Private");
+  mkdirSync(notesDir);
+  mkdirSync(privateDir);
+  const expected = "# Current content\n";
+  writeFileSync(path.join(notesDir, "Target.md"), expected);
+  writeFileSync(path.join(privateDir, "Excluded.md"), "excluded content");
+  symlinkSync(notesDir, path.join(vault, "Linked"), "junction");
+  const startupCache = new VaultCacheService();
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const originalReadDir = fs.readdir;
+  fs.readdir = async (directory, options) => {
+    if (directory === blockedDir) {
+      entered.resolve();
+      await release.promise;
+    }
+    return originalReadDir(directory, options);
+  };
+  const build = startupCache.buildVaultCache();
+  let watchdog;
+  let read;
+  try {
+    await entered.promise;
+    const readNote = (filePath) => processObsidianReadNote(
+      { filePath, format: "markdown", includeStat: false },
+      context,
+      undefined,
+      startupCache,
+    );
+    read = readNote("Notes/Target.md");
+    const response = await Promise.race([
+      read,
+      new Promise((_, reject) => {
+        watchdog = setTimeout(
+          () => reject(new Error("note read waited for the unrelated inventory")),
+          5000,
+        );
+      }),
+    ]);
+    assert.equal(response.content, expected);
+    assert.equal(startupCache.isReady(), false);
+    assert.equal(startupCache.getCachedFileCount(), 0);
+    const refusals = Promise.all([
+      assert.rejects(readNote("Private/Excluded.md"), { code: "SERVICE_UNAVAILABLE" }),
+      assert.rejects(readNote("Linked/Target.md"), { code: "SERVICE_UNAVAILABLE" }),
+    ]);
+    release.resolve();
+    await refusals;
+  } finally {
+    clearTimeout(watchdog);
+    release.resolve();
+    await build;
+    await read?.catch(() => undefined);
+    await startupCache.close();
+    fs.readdir = originalReadDir;
+    Object.assign(config, saved);
   }
 });
 test("reconciliation really re-reads same-size same-mtime files", async () => {
