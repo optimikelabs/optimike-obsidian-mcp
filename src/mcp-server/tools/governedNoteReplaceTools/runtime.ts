@@ -50,6 +50,7 @@ import {
   effectiveAtomicWriteProtectedFrontmatterKeys,
   ObsidianNoteReplaceOperationAdapter,
   type ObsidianNoteReplacePlanInput,
+  type ValidateNoteReplay,
 } from "../../../services/operations/obsidianNoteReplaceOperationAdapter.js";
 import {
   FILESYSTEM_OPERON_PROJECTION,
@@ -1254,7 +1255,7 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
     reference: string,
     idempotencyKey: string,
     completionMode: SettlementCompletionMode = "verified",
-    validateReplay?: () => Promise<void>,
+    validateReplay?: ValidateNoteReplay,
   ): Promise<OperationReceipt> {
     const plan = this.required(reference);
     if (plan.status === "outcome_unknown" || (plan.filesystem && plan.status === "applying")) {

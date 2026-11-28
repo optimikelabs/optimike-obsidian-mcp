@@ -12,6 +12,7 @@ import type {
 } from "../obsidianRestAPI/types.js";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { supportedAtomicBridgeVersion } from "../atomicBridgeVersion.js";
+import { OPERON_FILESYSTEM_RECOVERY_BINDING_CHANGED } from "../operon/refusalCodes.js";
 import {
   OPERATION_RUNTIME_CONTRACT_VERSION,
   HEADLESS_VAULT_LOCK_BUSY,
@@ -39,6 +40,7 @@ import {
 } from "./modifiedTimeSettlement.js";
 
 const SHA256 = /^[a-f0-9]{64}$/u;
+export type ValidateNoteReplay = () => Promise<typeof OPERON_FILESYSTEM_RECOVERY_BINDING_CHANGED | undefined>;
 const DatePluginIdSchema = z.enum([
   "update-time-on-edit",
   "frontmatter-date-manager",
@@ -635,6 +637,7 @@ function receipt(
     postflight: {
       ...(plan.filesystem && plan.status === "committed" ? { source: "filesystem-reread" as const } : {}),
       ...(plan.filesystem && plan.failure === "headless_atomic_exchange_unavailable" ? { reason: plan.failure } : {}),
+      ...(plan.projection?.kind === FILESYSTEM_OPERON_PROJECTION && plan.failure === OPERON_FILESYSTEM_RECOVERY_BINDING_CHANGED ? { reason: plan.failure } : {}),
       ...(displacedFilesystemEdit(plan) ? { reason: "headless_displaced_edit" as const } : {}),
       ...(plan.failure === HEADLESS_VAULT_LOCK_BUSY ? { reason: HEADLESS_VAULT_LOCK_BUSY, retryable: true as const } : {}),
       ...(settlementCheckAt !== undefined
@@ -959,7 +962,7 @@ export class ObsidianNoteReplaceOperationAdapter
     reference: string,
     idempotencyKey: string,
     completionMode: SettlementCompletionMode = "verified",
-    validateReplay?: () => Promise<void>,
+    validateReplay?: ValidateNoteReplay,
   ): Promise<OperationReceipt> {
     let plan = this.required(reference, idempotencyKey);
     if (plan.status === "committed") return receipt(this.profile, plan);
@@ -1032,12 +1035,15 @@ export class ObsidianNoteReplaceOperationAdapter
         this.commitWithModifiedTimeSettlementOrReload(plan, settlement),
       );
     }
-    if (read.sha256 !== plan.beforeSha256) {
-      if (this.options.filesystem && plan.projection?.kind === FILESYSTEM_OPERON_PROJECTION) {
+    const sourceChanged = read.sha256 !== plan.beforeSha256;
+    const filesystemOperon = this.options.filesystem && plan.projection?.kind === FILESYSTEM_OPERON_PROJECTION;
+    const replayConflict = !sourceChanged && filesystemOperon ? await validateReplay?.() : undefined;
+    if (sourceChanged || replayConflict) {
+      if (filesystemOperon) {
         // Operon publication requires a durable staging witness. Without one,
         // different bytes prove a pre-publication conflict, not an uncertain write.
         try {
-          const conflict = this.journal.settleUnstagedFilesystemRecovery(plan.operationId);
+          const conflict = this.journal.settleUnstagedFilesystemRecovery(plan.operationId, replayConflict);
           return receipt(this.profile, conflict);
         } catch (error) {
           if (!(error instanceof ObsidianNoteReplaceConcurrencyError)) throw error;
@@ -1052,7 +1058,6 @@ export class ObsidianNoteReplaceOperationAdapter
         ),
       );
     }
-    await validateReplay?.();
     let applying: ObsidianNoteReplacePlan;
     try {
       applying = this.journal.transition(

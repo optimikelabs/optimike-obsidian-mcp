@@ -199,6 +199,7 @@ If the acknowledgement is lost, repeat the identical request with its apply
 key to read the established result or reconcile the returned recovery reference.
 If another device edits the note after an interruption before staging, recovery
 records a terminal `CONFLICT` and preserves the edit.
+Before staging, a change to Operon settings or runtime state also closes recovery with `CONFLICT`, while an unavailable atomic exchange leaves it pending.
 
 The filesystem writer refuses repeating, tracked or related tasks and
 transitions that can unpin, move or archive a task or update project serials. File creation, automatic inline

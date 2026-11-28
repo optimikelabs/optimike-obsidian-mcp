@@ -924,9 +924,9 @@ export class ObsidianNoteReplaceJournal {
       reason, undefined, true, undefined);
   }
 
-  settleUnstagedFilesystemRecovery(operationId: string): ObsidianNoteReplacePlan {
+  settleUnstagedFilesystemRecovery(operationId: string, reason = "The note changed before the interrupted operation reached publication."): ObsidianNoteReplacePlan {
     return this.transitionInternal(operationId, ["outcome_unknown"], "conflict",
-      "The note changed before the interrupted operation reached publication.", undefined, false, undefined,
+      reason, undefined, false, undefined,
       undefined, undefined, true);
   }
 
