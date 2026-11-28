@@ -2,10 +2,9 @@
 
 import "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { createServer } from "node:net";
 import path from "node:path";
+import { startHttpTestBackend } from "./test-support/http-backend.mjs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
@@ -14,31 +13,6 @@ import {
 } from "./fixtures/governed-base-atomic-server.mjs";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-
-async function unusedPort() {
-  const server = createServer();
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const address = server.address();
-  assert.ok(address && typeof address === "object");
-  await new Promise((resolve) => server.close(resolve));
-  return address.port;
-}
-
-async function waitForHealth(url, child) {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null)
-      throw new Error(`HTTP MCP exited: ${child.exitCode}`);
-    try {
-      if ((await fetch(url, { signal: AbortSignal.timeout(1000) })).ok) return;
-    } catch {}
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error("Timed out waiting for HTTP MCP health.");
-}
 
 async function session(url, name) {
   const client = new Client({ name, version: "1.0.0" }, { capabilities: {} });
@@ -70,20 +44,12 @@ const root = mkdtempSync(path.join(parent, "governed-base-http-"));
 const logs = path.join(root, "logs");
 mkdirSync(logs);
 const fake = new GovernedBaseAtomicServer();
-await fake.listen();
-const port = await unusedPort();
-let stdout = "";
-let stderr = "";
-const backend = spawn(process.execPath, ["dist/index.js"], {
-  cwd: process.cwd(),
-  env: {
-    ...process.env,
-    NODE_ENV: "test",
-    MCP_TRANSPORT_TYPE: "http",
-    MCP_HTTP_HOST: "127.0.0.1",
-    MCP_HTTP_PORT: String(port),
-    MCP_HTTP_PORT_RETRIES: "0",
-    MCP_LOG_LEVEL: "error",
+let backend;
+let first;
+let second;
+try {
+  await fake.listen();
+  backend = await startHttpTestBackend({
     MCP_WRITE_MODE: "full",
     MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH: path.join(root, "notes.sqlite"),
     MCP_OBSIDIAN_BASE_FORMULA_JOURNAL_PATH: path.join(root, "bases.sqlite"),
@@ -98,20 +64,8 @@ const backend = spawn(process.execPath, ["dist/index.js"], {
     SEMANTIC_SEARCH_PREWARM: "false",
     ENABLE_QUERY_EMBEDDING: "false",
     OPERON_MUTATIONS_ENABLED: "false",
-  },
-  stdio: ["ignore", "pipe", "pipe"],
-});
-backend.stdout.on("data", (chunk) => {
-  stdout += chunk.toString("utf8");
-});
-backend.stderr.on("data", (chunk) => {
-  stderr += chunk.toString("utf8");
-});
-let first;
-let second;
-try {
-  await waitForHealth(`http://127.0.0.1:${port}/healthz`, backend);
-  const mcp = `http://127.0.0.1:${port}/mcp/authoring`;
+  });
+  const mcp = `${await backend.ready()}/mcp/authoring`;
   first = await session(mcp, "base-http-plan");
   second = await session(mcp, "base-http-apply");
   const plannedResult = await first.callTool({
@@ -154,13 +108,12 @@ try {
   assertPublicError(parsed(blocked), "FORBIDDEN", "legacy_base_config_writes_enabled", "legacy write policy");
 } catch (error) {
   throw new Error(
-    `${error instanceof Error ? error.stack : String(error)}\nstdout:\n${stdout}\nstderr:\n${stderr}`,
+    `${error instanceof Error ? error.stack : String(error)}\n${backend?.diagnostics() ?? ""}`,
   );
 } finally {
   await first?.close().catch(() => undefined);
   await second?.close().catch(() => undefined);
-  backend.kill("SIGTERM");
-  await new Promise((resolve) => backend.once("exit", resolve));
+  await backend?.stop();
   await fake.close();
   rmSync(root, { recursive: true, force: true });
 }
