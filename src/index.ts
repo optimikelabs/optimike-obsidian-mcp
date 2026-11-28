@@ -4,6 +4,7 @@
 import { ServerType } from "@hono/node-server";
 import { McpServer } from "@modelcontextprotocol/server";
 import type { StdioServerHandle } from "@modelcontextprotocol/server/stdio";
+import { once } from "node:events";
 import { config, environment } from "./config/index.js"; // This loads .env via dotenv.config()
 import { initializeAndStartServer } from "./mcp-server/server.js";
 import { requestContextService, retryWithDelay } from "./utils/index.js";
@@ -157,6 +158,16 @@ const shutdown = async (signal: string) => {
  * and registers signal handlers for graceful shutdown and error handling.
  */
 const start = async () => {
+  // A forked HTTP fixture can distinguish module loading from startup and
+  // wait for this process's listener before sending its first request.
+  const reportHttpStartup =
+    environment === "test" &&
+    config.mcpTransportType === "http" &&
+    process.connected;
+  if (reportHttpStartup) {
+    process.send?.({ httpStartup: "initializing" }, () => {});
+  }
+
   // --- Logger Initialization (Moved here AFTER config/dotenv is loaded) ---
   const validMcpLogLevels: McpLogLevel[] = [
     "debug",
@@ -508,6 +519,14 @@ const start = async () => {
       await shutdown("unhandledRejection");
       // Similar logic as uncaughtException: shutdown handles its exit codes.
     });
+    if (reportHttpStartup && httpServerInstance) {
+      if (!httpServerInstance.listening) {
+        await once(httpServerInstance, "listening");
+      }
+      if (process.connected) {
+        process.send?.({ httpStartup: "listening" }, () => {});
+      }
+    }
   } catch (error) {
     // Handle critical startup errors (already logged by ErrorHandler or caught above)
     // Log the final failure context, including error details, before exiting

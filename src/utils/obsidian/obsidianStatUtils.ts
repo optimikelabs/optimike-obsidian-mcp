@@ -4,7 +4,7 @@
  * @module src/utils/obsidian/obsidianStatUtils
  */
 
-import { format } from "date-fns";
+import { format } from "date-fns/format";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { logger, RequestContext } from "../internal/index.js";
 import { countTokens } from "../metrics/index.js";
