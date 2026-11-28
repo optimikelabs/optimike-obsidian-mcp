@@ -67,8 +67,7 @@ in the provenance. The full inventory may still be refreshing. Cached reads
 keep the successful scan's start and refresh timestamps. The regression test
 exercises both responses on the same note.
 Carry commit `1d52fc50fb1b5a1d96e08a7ac4851ba25fb83b86` into `main` when integrating #218 and #242. It updates the exact cache freshness test to require the three null Sync evidence fields when upstream Sync is unknown.
-The same test's cached-read assertion still expects the older provenance
-shape and fails on the three Sync fields.
+Also carry commit `a249eabee7dbcb2a3954e2e702f6406d01879e32`, which applies the same exact Sync provenance expectation to the cached read.
 
 The headless Bases scan validates request filters with #234's shared compiler
 before enforcing #204's explicit opt-in. It reads note properties with #228's
