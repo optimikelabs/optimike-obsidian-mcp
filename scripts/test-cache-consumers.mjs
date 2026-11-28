@@ -46,6 +46,55 @@ test('wikilink aliases keep square brackets and triples resolve the inner target
  ]);
  assert.deepEqual(linkTexts('<span>[[Hidden|</span> [[Visible]]'),['Visible']);
 });
+test('a rejected alias spanning code or HTML does not consume the next wikilink',()=>{
+ for (const source of ['[[A|b `x` [[C]]','[[A|b <i>x</i> [[C]]']) {
+  assert.deepEqual(linkTexts(source),['C']);
+ }
+});
+test('a double bracket opens a new wikilink inside an unfinished alias',()=>{
+ assert.deepEqual(linkTexts('[[A|b [[C]]'),['C']);
+});
+test('wikilink targets and aliases skip comments and retain their original source span',()=>{
+ const source='[[A %% x %% B#Heading|a[b] %% hide %% c]]';
+ const [link]=extractMarkdownLinkReferences(source);
+ assert.deepEqual([link.linkPath,link.subpath,link.displayText,link.original],['A  B','#Heading','a[b]  c',source]);
+ assert.equal(link.position.end.offset,source.length);
+ assert.deepEqual(linkTexts('[[A %% x %% B]] [[%% only a comment %%]]'),['A  B']);
+});
+test('the wikilink shortcut agrees with the Markdown tree on a fixed and generated corpus',()=>{
+ const corpus=[
+  '---\r\nrelated: "[[One|a[b]]"\r\n---\r\n[[One]] and ![[Two#Heading]]',
+  '[[Visible]] (ordinary parentheses) [spaced] : [[Also visible]]',
+  '[ref][id]\n\n[id]: Target.md\n\n[id] : [[Visible]]',
+  '[[A|b `x` [[C]] and [[Open|alias [[Next]]',
+  '[[A %% x %% B|a[b] %% hide %% c]] and %% [[Hide]] %% [[Keep]]',
+  'https://example.test/$part [[Keep]] $[[Math]]$ <i>[[HTML]]</i>',
+  '    [[Indented]]\n\n~~~\n[[Fenced]]\n~~~\n\n[[Visible]]',
+  '[[Note|a\\[[literal]] [[[Triple]]] and \\[[Escaped]]',
+ ];
+ const fragments=[
+  '[[One]]','![[Two#^block]]','[[Folder/Three|a[b]]','[[Open|label [[Inner]]',
+  '[[A %% ignored %% B]]','%% [[Hidden]] %%','[[C|left]right]]','(prose)','[loose] :',
+  '`[[Code]]`','~~~','<i>[[HTML]]</i>','$[[Math]]$','    [[Indent]]','\t[[Tab]]',
+  '[label](Other.md)','[ref][id]','[id]: Target.md','https://example.test/[[URL]]','www.example.test/$x',
+  '\\[[Escaped]]','[[[Triple]]]','**[[Bold]]**','[nested [label]]','%% unclosed',
+ ];
+ let seed=0x2401;
+ const pick=items=>{
+  seed=(Math.imul(seed,1664525)+1013904223)>>>0;
+  return items[(seed>>>16)%items.length];
+ };
+ for (let i=0;i<320;i++) {
+  const choices=i%2===0 ? fragments.slice(0,9) : fragments;
+  const separator=pick([' ','\n','\n\n','\r\n']);
+  const body=Array.from({length:3+(i%9)},()=>pick(choices)).join(separator);
+  corpus.push(i%5===0 ? '---\nrelated: "[[Meta]]"\n---\n'+body : body);
+ }
+ for (const [index,source] of corpus.entries()) {
+  assert.deepEqual(extractMarkdownLinkReferences(source),
+   extractMarkdownLinkReferences(source,{forceMarkdownTree:true}),`corpus case ${index}: ${JSON.stringify(source)}`);
+ }
+});
 test('unpaired inline HTML is scoped to its paragraph',()=>{
  assert.deepEqual(linkTexts('a <span>x\n\n[[P2]]\n\n</span> [[V]]'),['P2','V']);
 });
@@ -302,6 +351,21 @@ test('restart resumes a committed partial link index without exposing it',()=>li
  assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Z.md',count:1}]);
 }));
 
+test('restart rebuilds a stale v7 link projection from unchanged note content',()=>linkFixture(async f=>{
+ await f.cache.buildVaultCache();
+ await f.cache.linkIndexRun;
+ f.cache.db.exec(`
+  UPDATE markdown_link_files
+  SET hash = 'v7:' || (SELECT hash FROM file_cache WHERE path = '/A.md')
+  WHERE path = '/A.md';
+  DELETE FROM markdown_link_refs WHERE source = '/A.md';
+ `);
+ await f.reopen();
+ await assert.rejects(f.read(),isIndexPending);
+ await f.cache.linkIndexRun;
+ assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1}]);
+}));
+
 test('an indexing error rolls back the batch and a later link request retries it',()=>linkFixture(async f=>{
  const index=f.cache.markdownLinks;
  const reconcile=index.reconcileBatch.bind(index);
@@ -334,9 +398,26 @@ async function fixture(body){
   getFileContent:async p=>{if(fail)throw new Error('offline');return {path:p,content:files[p.replace(/^\//,'')],stat:{ctime:1,mtime:2,size:14}};}};
  let cache=new VaultCacheService(rest);
  try{await cache.refreshCache(true);await body({get cache(){return cache;},fail:()=>{fail=true;},
-  restart:async()=>{await cache.close();cache=new VaultCacheService(rest);},set:v=>{files=v;}});}
+  restart:async()=>{await cache.close();cache=new VaultCacheService(rest);},
+  openReader:()=>new VaultCacheService(rest),set:v=>{files=v;}});}
  finally{await cache.close();}
 }
+
+test('hybrid cache readers see a newer note committed by a separate REST connection',async()=>{
+ const previous=config.obsidianRuntimeMode;
+ config.obsidianRuntimeMode='hybrid';
+ try {
+  await fixture(async f=>{
+   const reader=f.openReader();
+   try {
+    assert.equal((await reader.getEntry('/One.md')).content,'- [ ] task-one');
+    f.set({'One.md':'- [ ] task-two'});
+    assert.deepEqual(await f.cache.updateFileVerified('One.md',context),{ok:true,disposition:'updated'});
+    assert.equal((await reader.getEntry('/One.md')).content,'- [ ] task-two');
+   } finally { await reader.close(); }
+  });
+ } finally { config.obsidianRuntimeMode=previous; }
+});
 
 for(const kind of ['tasks','bases','tasks-without-service'])test(kind+' refuses durable incomplete cache after failed reconciliation',()=>fixture(async f=>{
  f.cache.markEventWorkPending();await f.restart();f.fail();

@@ -12,6 +12,7 @@ This profile is for a dedicated server or copied Sync vault. It keeps the stable
 - Keep Obsidian Headless Sync in `pull-only` for the first server validation.
 - Keep Optimike MCP in `headless-readonly` until list/read/search/tasks/Bases/status are green.
 - With the shared cache enabled, `obsidian_get_frontmatter` reads one YAML key and `obsidian_note_links` reads outgoing references, unresolved counts, and backlinks. The index covers wikilinks, local Markdown links and embeds, and quoted YAML wikilinks. It skips links inside code, comments, inline or block math, and HTML elements. Desktop metadata behavior inside inline HTML is unverified.
+- In headless wikilinks, an unescaped `[[` starts a new link if the current alias is unfinished. Single square brackets may appear in aliases. In the body of a note, comments are stripped from targets and aliases. Source spans still refer to the original note.
 - The link index builds in the background after the text cache is ready. Note reads, listings, search, and frontmatter are available while it builds. During that time `obsidian_note_links` returns `SERVICE_UNAVAILABLE` with `reasonCode: headless_link_index_building` and `retryable: true`. A successful response uses the complete index.
 - When a process sharing the text cache is reconciling it, the link tool returns a retryable reason for the cache itself. `headless_link_cache_refreshing` means a full or periodic refresh is running. `headless_link_cache_events_pending` means file events are still being processed. `headless_link_cache_uncertain` means the cache needs a successful refresh.
 - When several Markdown paths match, the filesystem resolver prefers the source folder, then the shortest path, then alphabetical order. It sets `resolution.ambiguous: true` when it chooses among several candidates. The tie-break remains unverified against Desktop. Explicit relative and vault-root paths select that location. The scanner resolves attachment names and user-excluded paths without caching their contents. Technical exclusions such as `node_modules`, `dist`, `build`, `tmp`, and `coverage` stay outside the inventory. Dot-prefixed paths require an explicit gitignore-style reinclusion.
@@ -107,8 +108,11 @@ The plan inspects indexed Markdown links and attachment embeds. It preserves
 the syntax and labels of existing links, including YAML scalars, and adjusts
 resolved links in a moved note when they would otherwise lose their target.
 It refuses a move that would retarget another note's resolved link. The preview
-is capped, and operations with more than 100 potential backlink sources return
-`headless_backlink_limit`. The plan probes exclusive hard-link publication
+is capped. More than 100 notes requiring rewrites or 100 backlink sources for
+a deletion return `headless_backlink_limit`. The separate safety scan can
+inspect up to 1,000 candidate notes, including links to the destination name.
+Above that, it returns `headless_backlink_inspection_limit`.
+The plan probes exclusive hard-link publication
 before admission. Apply with the original key. A stale plan returns
 `headless_plan_stale`.
 
@@ -122,20 +126,27 @@ with `acknowledgeBacklinks: true` after examining nonempty backlinks.
 The original file moves to a free path under `.trash` by default. The MCP also
 accepts `trashFolder` or `trashFolderPath` as local folder overrides.
 Explicit `trashOption: "system"` and `trashOption: "none"` are refused.
-When the setting is absent, the MCP uses its local-trash default.
+When the setting is absent, the MCP uses vault trash to provide a restorable
+destination inside the vault without a Desktop system-trash adapter.
+[Obsidian Desktop defaults to system trash](https://obsidian.md/help/manage-notes).
 
 Both operations update the affected cache and index paths and re-read the
-filesystem for the postflight receipt. After interruption, call `*_status`.
+filesystem for the postflight receipt. Later status calls return that recorded
+completion evidence. After interruption, call `*_status`.
 Use `*_recover` with the same reference and key when `recoveryAllowed` is true.
 If an external edit prevents recovery, `abandonAllowed` permits
 `*_recover` with `action: "abandon"`. This releases the reservation for manual
-repair and retains exact before text and hashes in the private journal
-(`headless_file_operations.payload.rewrites`). An operator should compare the
-current hashes with the receipt's repair proofs before restoring anything.
+repair. The receipt retains `nextAction: "manual_repair"` and includes
+`repairProofs` with paths, SHA-256 hashes and inverse edits. The inverse ranges
+are UTF-16 offsets into the rewritten file and are ordered from the end to the
+start of the file. Compare the current hash with `afterSha256` before using
+the inverse edits. The private journal retains the original text
+(`headless_file_operations.payload.rewrites`).
 An attempt with no published file effect releases the reservation and reports
 a conflict. Recovery or abandonment cleans the operation's addressable staging files.
 
-The same-filesystem hard-link probe can return `hard_links_unsupported`.
+The same-filesystem hard-link probe uses its own temporary files and can return
+`hard_links_unsupported`. Startup and recovery remove leftover probes.
 Each replacement is atomic. Other file writers remain outside these locks, and
 several replacements can be visible partway through. The workflow is scoped to
 a copied or dedicated vault. See the [ADR](adr/ADR-External-Reference-Integrity.md#vault-only-moves)

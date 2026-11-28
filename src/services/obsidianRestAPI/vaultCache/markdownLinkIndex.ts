@@ -9,7 +9,7 @@ function coverage(total: number, returned: number) {
 }
 
 type LinkCount = { link_path: string; count: number };
-const INDEX_REVISION = "v7:";
+const INDEX_REVISION = "v8:";
 
 /** Store unresolved spellings on disk; resolve against the current file set at read time.
  * Adding/removing an ambiguous destination can then affect unchanged sources. */

@@ -90,7 +90,7 @@ export function applyLinkEdits(content: string, edits: readonly LinkEdit[]) {
 export function rewriteIncoming(content: string, note: string, source: string, destination: string,
   before: MarkdownLinkResolver, after: MarkdownLinkResolver, settings: Settings) {
   const nextNote = note === source ? destination : note;
-  const original = extractMarkdownLinkReferences(content, true);
+  const original = extractMarkdownLinkReferences(content, { editable: true });
   const edits = new Map<number, LinkEdit>();
   const expected = new Map<string, number>();
   for (const ref of original) {

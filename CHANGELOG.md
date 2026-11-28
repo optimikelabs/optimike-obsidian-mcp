@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Governed move and trash in `headless-filesystem` with full write mode. Move plans seal indexed backlink rewrites for notes and attachments. Trash plans report backlinks and require acknowledgement when links exist. Both support exact-plan recovery and refresh the shared filesystem link index.
+- Governed move and trash in `headless-filesystem` with full write mode. Move plans seal indexed backlink rewrites for notes and attachments. Trash plans report backlinks and require acknowledgement when links exist. Both support exact-plan recovery, refresh the shared filesystem link index and retain completion evidence. An abandoned move provides inverse edits for manual repair.
 
 ## [3.23.1] - 2026-11-26
 

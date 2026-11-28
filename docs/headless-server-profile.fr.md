@@ -14,6 +14,7 @@ Ce profil sert à valider un serveur dédié ou une copie Sync. Il garde une pos
 - Garder Obsidian Headless Sync en `pull-only` pour la première validation serveur.
 - Garder Optimike MCP en `headless-readonly` tant que list/read/search/tasks/Bases/status ne sont pas verts.
 - Avec le cache partagé actif, `obsidian_get_frontmatter` lit une clé YAML et `obsidian_note_links` renvoie les liens sortants, les liens non résolus et les backlinks. L’index couvre les wikilinks, les liens et intégrations Markdown locaux et les wikilinks YAML entre guillemets. Il ignore les liens dans le code, les commentaires, les formules en ligne ou en bloc et les éléments HTML. Le comportement des métadonnées Desktop dans le HTML en ligne reste à vérifier.
+- Dans un wikilink headless, `[[` non échappé ouvre un nouveau lien si l’alias courant est inachevé. Les crochets simples sont admis dans les alias. Dans le corps d’une note, les commentaires sont retirés des cibles et des alias. Les positions renvoyées restent celles de la note d’origine.
 - L’index des liens se construit en arrière-plan après la mise à disposition du cache texte. La lecture, les listes, la recherche et le frontmatter restent disponibles pendant la construction. Durant cette période, `obsidian_note_links` renvoie `SERVICE_UNAVAILABLE` avec `reasonCode: headless_link_index_building` et `retryable: true`. Une réponse réussie utilise l’index complet.
 - Lorsqu’un processus réconcilie le cache texte partagé, l’outil de liens renvoie un motif réessayable qui précise l’état du cache. `headless_link_cache_refreshing` indique un rafraîchissement complet ou périodique en cours. `headless_link_cache_events_pending` indique des événements de fichiers en cours de traitement. `headless_link_cache_uncertain` indique que le cache attend un rafraîchissement réussi.
 - Quand plusieurs chemins Markdown correspondent, la résolution sur disque privilégie le dossier de la note source, puis le chemin le plus court, puis l’ordre alphabétique. Elle indique `resolution.ambiguous: true` lorsqu’elle départage plusieurs candidats. Ce départage reste à confirmer dans Desktop. Les chemins explicites relatifs ou depuis la racine ciblent l’emplacement indiqué. Le scan résout les noms des pièces jointes et les chemins exclus par l’utilisateur sans mettre leur contenu en cache. Les exclusions techniques comme `node_modules`, `dist`, `build`, `tmp` et `coverage` restent hors de l’inventaire. Les chemins commençant par un point exigent une réinclusion explicite de type gitignore.
@@ -109,9 +110,12 @@ et une clé d’idempotence. Il inspecte les liens Markdown indexés et les embe
 de pièces jointes. Il préserve la syntaxe et les libellés déjà présents, y
 compris dans les scalaires YAML. Il ajuste les liens sortants de la note
 déplacée si leur cible change, et refuse une opération qui détournerait un
-lien résolu depuis une autre note. L’aperçu est plafonné. Au-delà de 100 sources
-potentielles de backlinks, le plan renvoie `headless_backlink_limit`. Il sonde
-la création exclusive de liens physiques avant de sceller le plan. Appliquer
+lien résolu depuis une autre note. L’aperçu est plafonné. Au-delà de 100 notes
+à réécrire ou de 100 sources de backlinks pour une suppression, le plan renvoie
+`headless_backlink_limit`. La vérification de sécurité examine séparément
+jusqu’à 1 000 notes candidates, y compris les liens vers le nom de destination.
+Au-delà, elle renvoie `headless_backlink_inspection_limit`. Le plan sonde la
+création exclusive de liens physiques avant de sceller l’opération. Appliquer
 avec la clé d’origine. Un plan périmé renvoie `headless_plan_stale`.
 
 `app.json` pilote l’actualisation via `alwaysUpdateLinks` et la forme des chemins
@@ -125,21 +129,26 @@ avoir examinés. L’application déplace le fichier dans un emplacement libre
 sous `.trash` par défaut. Le MCP accepte aussi `trashFolder` ou `trashFolderPath`
 comme chemin local de remplacement. Il refuse les valeurs explicites
 `trashOption: "system"` et `trashOption: "none"`. Sans ce réglage, le MCP choisit
-la corbeille du coffre.
+la corbeille du coffre pour fournir une destination restaurable sans accès à
+la corbeille système. [Obsidian Desktop utilise par défaut la corbeille système](https://obsidian.md/help/manage-notes).
 
 Les deux opérations actualisent les chemins touchés dans le cache et l’index.
-Le reçu de vérification s’appuie sur une relecture. Après une interruption,
+Le reçu de vérification s’appuie sur une relecture. Les appels de statut
+suivants rendent la preuve enregistrée à la fin de l’opération. Après une interruption,
 appeler `*_status` puis `*_recover` avec la même référence et clé si
 `recoveryAllowed` est vrai. Si une édition externe empêche la reprise,
 `abandonAllowed` permet d’appeler `*_recover` avec `action: "abandon"`.
-Le verrou est libéré pour une réparation manuelle. Le journal privé conserve
-le texte d’avant et les empreintes dans `headless_file_operations.payload.rewrites`.
-Comparer les empreintes courantes aux preuves du reçu avant toute restauration.
+Le verrou est libéré pour une réparation manuelle. Le reçu conserve
+`nextAction: "manual_repair"` et fournit dans `repairProofs` les chemins,
+empreintes SHA-256 et éditions inverses. Les plages UTF-16 visent le fichier
+réécrit, de la fin vers le début. Vérifier `afterSha256` avant de les appliquer.
+Le journal privé conserve le texte d’avant dans `headless_file_operations.payload.rewrites`.
 Sans effet publié, l’opération se règle en conflit et libère son verrou. La
 reprise ou l’abandon supprime les fichiers de préparation encore accessibles.
 
-La sonde des liens physiques, sur le même système de fichiers, peut renvoyer
-`hard_links_unsupported`. Chaque remplacement est atomique. Les autres
+La sonde des liens physiques utilise ses propres fichiers temporaires sur le
+même système de fichiers et peut renvoyer `hard_links_unsupported`. Le démarrage
+et la reprise nettoient les sondes restantes. Chaque remplacement est atomique. Les autres
 processus ne partagent pas les verrous, et plusieurs remplacements peuvent
 être visibles en cours d’opération. Ce parcours s’applique à un coffre copié
 ou dédié. L’[ADR](adr/ADR-External-Reference-Integrity.md#vault-only-moves)

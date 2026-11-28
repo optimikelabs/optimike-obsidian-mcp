@@ -256,6 +256,9 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "headless_manual_repair_required",
   "hard_links_unsupported",
   "headless_backlink_limit",
+  "headless_backlink_inspection_limit",
+  "headless_parent_missing",
+  "headless_plan_ref_invalid",
   "headless_link_target_changed",
   "headless_trash_preference_unsupported",
   "invalid_tool_arguments",
@@ -725,6 +728,10 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
     return "The shared note cache needs a successful refresh. Retry obsidian_note_links after it completes.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_tool_arguments")
     return "Invalid tool arguments. See validationIssues for the field and reason.";
+  if (reasonCode === "headless_parent_missing")
+    return "The destination parent folder must already exist.";
+  if (reasonCode === "headless_plan_ref_invalid")
+    return "Use the planRef returned by the matching plan tool.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === BASE_FORMULA_ENGINE_REFUSAL)
     return "Obsidian's Bases engine reports that this plan would add a formula error. Nothing was sealed or written. See formulaCheck for the engine messages, unknown functions and suggestions, then fix the formula using https://help.obsidian.md/bases/functions and https://help.obsidian.md/bases/syntax.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_frontmatter")

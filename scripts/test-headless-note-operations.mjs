@@ -1,6 +1,6 @@
 import { isolatedStateEnv, isolatedStateDirectory } from "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { link, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
@@ -11,6 +11,7 @@ const put = (name, content) => writeFile(at(name), content);
 const read = name => readFile(at(name), "utf8");
 const missing = name => assert.rejects(stat(at(name)), { code: "ENOENT" });
 const settings = options => put(".obsidian/app.json", JSON.stringify(options));
+const probeFiles = dir => readdir(at(dir)).then(files => files.filter(name => name.startsWith(".optimike-probe-")));
 await Promise.all([".obsidian", "New", "Reader", "Twin", "Trash/Reader"].map(dir => mkdir(at(dir), { recursive: true })));
 let client;
 const start = async (entry, fault = false, overrides = {}) => {
@@ -28,7 +29,17 @@ const start = async (entry, fault = false, overrides = {}) => {
         throw Object.assign(new Error('fixture hard link unavailable'), { code: 'EXDEV' });
       }
       link(source, destination);
+      if (fault === 'probe-crash' && destination.includes('.optimike-probe-')) process.exit(76);
       if (fault === true && destination.endsWith('Crash moved.md')) process.exit(73);
+    };
+    const unlink = fs.unlinkSync;
+    let probeBusy = false;
+    fs.unlinkSync = file => {
+      if (fault === 'probe-busy' && !probeBusy && file.includes('.optimike-probe-') && file.endsWith('-link.tmp')) {
+        probeBusy = true;
+        throw Object.assign(new Error('fixture busy probe'), { code: 'EBUSY' });
+      }
+      unlink(file);
     };
     const rename = fs.renameSync;
     fs.renameSync = (source, destination) => {
@@ -36,6 +47,9 @@ const start = async (entry, fault = false, overrides = {}) => {
       rename(source, destination);
       if (source.includes('.optimike-') && destination.endsWith('First sync.md') && fault === 'sync') {
         fs.writeFileSync(destination.replace('First sync.md', 'Second sync.md'), 'new external contents');
+      }
+      if (source.includes('.optimike-') && destination.endsWith('Proof link.md') && fault === 'postflight') {
+        fs.writeFileSync(destination.replace('Proof link.md', 'Proof moved.md'), 'shadow added before postflight');
       }
     };
     syncBuiltinESMExports();
@@ -104,8 +118,8 @@ try {
     const planned = performance.now();
     console.log(JSON.stringify({ phase: "plan", backlinks, planMs: Math.round(planned - started) }));
     if (plan.result.isError) {
-      assert.equal(plan.body.error.details.reasonCode, "headless_backlink_limit");
-      console.log(JSON.stringify({ planMs: Math.round(planned - started), outcome: "headless_backlink_limit" }));
+      assert.equal(plan.body.error.details.reasonCode, "headless_backlink_inspection_limit");
+      console.log(JSON.stringify({ planMs: Math.round(planned - started), outcome: "headless_backlink_inspection_limit" }));
     } else {
       const applied = await lifecycle("move", "apply", plan.body, "bench");
       assert.equal(applied.outcome, "committed");
@@ -198,7 +212,7 @@ try {
     assert.equal(await read("Trash/Reader/Crash link.md"), "existing trash");
     assert.equal(await read(deletion.trash.path), "[[Crash moved]]");
     await put(deletion.trash.path, "externally changed trash contents");
-    assert.equal((await lifecycle("delete", "status", deletion)).postflight.status, "indeterminate");
+    assert.deepEqual(await lifecycle("delete", "status", deletion), trashed);
     assert.equal((await linkQuery("Reader/Trash backlink.md")).outgoing[0].resolution.status, "unresolved");
 
     await settings({});
@@ -225,15 +239,26 @@ try {
     await put("Reader/Sib.md", "sibling");
     await put("Reader/Mover.md", "[label](./Sib.md) [[./Sib]] [[Mover#^b1]] [[#^b1]]");
     await put("Reader/Mover references.md",
-      "---\nrelated: |\n  text [[Mover#^b1]]\n---\n\n| A | B |\n| --- | --- |\n| [[Mover\\|alias]] | y |\n");
+      "---\nrelated: |\n  text [[Mover#^b1]]\n---\n\n| A | B |\n| --- | --- |\n| [[Mover\\|alias]] | y |\n\n[[Mover|keep %% private %% label]]\n");
     const relatives = await movePlan("Reader/Mover.md", "New/Moved.md", "relative-links");
     const relocated = await lifecycle("move", "apply", relatives, "relative-links");
     assert.equal(relocated.graph_postflight, "verified");
     assert.equal(await read("New/Moved.md"), "[label](../Reader/Sib.md) [[../Reader/Sib]] [[Moved#^b1]] [[#^b1]]");
     assert.match(await read("Reader/Mover references.md"), /text \[\[Moved#\^b1\]\]/);
     assert((await read("Reader/Mover references.md")).includes("| [[Moved\\|alias]] | y |"));
+    assert((await read("Reader/Mover references.md")).includes("[[Moved|keep %% private %% label]]"));
     await put("Reader/Moved.md", "new candidate introduced outside the journal");
-    assert.equal((await lifecycle("move", "status", relatives)).graph_postflight, "indeterminate");
+    await start("dist/index.js");
+    assert.deepEqual(await lifecycle("move", "status", relatives), relocated);
+
+    await put("Proof.md", "file for postflight");
+    await put("Reader/Proof link.md", "[[Proof]]");
+    const postflight = await movePlan("Proof.md", "New/Proof moved.md", "verify-postflight");
+    await start("dist/index.js", "postflight");
+    const firstProof = await lifecycle("move", "apply", postflight, "verify-postflight");
+    assert.equal(firstProof.outcome, "committed");
+    assert.equal(firstProof.graph_postflight, "indeterminate");
+    assert.deepEqual(await lifecycle("move", "status", postflight), firstProof);
 
     await mkdir(at("A"));
     await mkdir(at("C"));
@@ -246,6 +271,22 @@ try {
     });
     assert.equal(retargeted.body.error.details.reasonCode, "headless_link_target_changed");
     await missing("A/Target.md");
+    const noParent = await rawCall("obsidian_note_move_plan", {
+      sourcePath: "Doomed.md", destinationPath: "Missing folder/Target.md", idempotencyKey: "missing-parent",
+    });
+    assert.equal(noParent.body.error.code, "NOT_FOUND");
+    assert.equal(noParent.body.error.details.reasonCode, "headless_parent_missing");
+    for (const kind of ["move", "delete"]) {
+      for (const role of ["apply", "status", "recover"]) {
+        const tool = `obsidian_note_${kind}_${role}`;
+        const badRef = await rawCall(tool, role === "status" ? {} : { idempotencyKey: "missing-ref" });
+        assert.equal(badRef.body.error.code, "VALIDATION_ERROR");
+        assert.equal(badRef.body.error.details.reasonCode, "invalid_tool_arguments");
+        assert.equal(badRef.body.error.details.validationIssues[0].path, "planRef");
+      }
+    }
+    const malformedRef = await rawCall("obsidian_note_move_status", { planRef: "malformed" });
+    assert.equal(malformedRef.body.error.details.reasonCode, "headless_plan_ref_invalid");
 
     for (const option of ["system", "none"]) {
       await settings({ trashOption: option });
@@ -256,11 +297,27 @@ try {
 
     // Fault at the probe and during dispatch after a successful plan.
     await put("Unavailable.md", "link fixture");
+    await start("dist/index.js", "probe-crash");
+    await assert.rejects(movePlan("Unavailable.md", "New/Unavailable moved.md", "probe-crash"), /closed|disconnect/i);
+    const crashedProbe = await probeFiles("New");
+    assert.equal(crashedProbe.length, 2);
+    for (const file of crashedProbe) assert.equal(await read("New/" + file), "hard link probe\n");
+    const legacyProbe = "Reader/.optimike-probe-01234567-0123-0123-0123-0123456789ab.tmp";
+    await link(at("Unavailable.md"), at(legacyProbe));
     await start("dist/index.js", "probe");
     const unavailable = await rawCall("obsidian_note_move_plan", {
       sourcePath: "Unavailable.md", destinationPath: "New/Unavailable moved.md", idempotencyKey: "probe",
     });
     assert.equal(unavailable.body.error.details.reasonCode, "hard_links_unsupported");
+    assert.deepEqual(await probeFiles("New"), []);
+    await missing(legacyProbe);
+    await start("dist/index.js", "probe-busy");
+    const busyProbePlan = await movePlan("Unavailable.md", "New/Unavailable moved.md", "probe-busy");
+    const busyFiles = await probeFiles("New");
+    assert.equal(busyFiles.length, 1);
+    assert.equal(await read("New/" + busyFiles[0]), "hard link probe\n");
+    await lifecycle("move", "recover", busyProbePlan, "probe-busy");
+    assert.deepEqual(await probeFiles("New"), []);
     await start("dist/index.js");
     const linkFailure = await movePlan("Unavailable.md", "New/Unavailable moved.md", "unavailable");
     await start("dist/index.js", "link");
@@ -281,12 +338,14 @@ try {
     await missing("New/Pre-effect moved.md");
 
     await put("Partial.md", "partial version");
-    await put("Reader/First partial.md", "[[Partial]]");
+    const originalPartial = "[[Partial]] and [[Partial#Section]]";
+    await put("Reader/First partial.md", originalPartial);
     await put("Reader/Second partial.md", "[[Partial]]");
     const partial = await movePlan("Partial.md", "New/Partial moved.md", "partial");
     await start("dist/index.js", "rewrite");
     await assert.rejects(lifecycle("move", "apply", partial, "partial"), /closed|disconnect/i);
-    assert.equal(await read("Reader/First partial.md"), "[[Partial moved]]");
+    const rewrittenPartial = await read("Reader/First partial.md");
+    assert.equal(rewrittenPartial, "[[Partial moved]] and [[Partial moved#Section]]");
     await put("Reader/Second partial.md", "changed by Sync");
     await start("dist/index.js");
     const manual = await lifecycle("move", "status", partial);
@@ -301,16 +360,23 @@ try {
       planRef: partial.planRef, idempotencyKey: "partial", action: "abandon",
     });
     assert.equal(abandoned.outcome, "abandoned");
+    assert.equal(abandoned.nextAction, "manual_repair");
+    const repair = abandoned.repairProofs.find(item => item.path === "Reader/First partial.md");
+    assert.equal(repair.inverseEdits.length, 2);
+    assert.equal(repair.inverseEdits.reduce((text, { start, end, before }) =>
+      text.slice(0, start) + before + text.slice(end), rewrittenPartial), originalPartial);
+    const abandonedStatus = await lifecycle("move", "status", partial);
+    assert.equal(abandonedStatus.nextAction, "manual_repair");
+    assert.deepEqual(abandonedStatus.repairProofs, abandoned.repairProofs);
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(path.join(isolatedStateDirectory, "operations.sqlite"), { readOnly: true });
     try {
       const saved = db.prepare("SELECT payload FROM headless_file_operations WHERE id = ?").get(partial.operationId);
-      assert.equal(JSON.parse(saved.payload).rewrites.find(item => item.path === "Reader/First partial.md").beforeText, "[[Partial]]");
+      assert.equal(JSON.parse(saved.payload).rewrites.find(item => item.path === "Reader/First partial.md").beforeText, originalPartial);
     } finally {
       db.close();
     }
     assert.equal(await read("Reader/Second partial.md"), "changed by Sync");
-    const { readdir } = await import("node:fs/promises");
     assert(!(await readdir(at("Reader"))).some(file => file.startsWith(".optimike-")));
     assert.equal((await lifecycle("move", "apply", disjoint, "after-abandon")).outcome, "committed");
 
@@ -330,6 +396,14 @@ try {
       sourcePath: "Many.md", destinationPath: "New/Many moved.md", idempotencyKey: "many",
     });
     assert.equal(tooMany.body.error.details.reasonCode, "headless_backlink_limit");
+
+    await put("A/Readme.md", "existing target");
+    await put("No links to me.md", "new target with no backlinks");
+    await Promise.all(Array.from({ length: 120 }, (_, i) => put(`Reader/Readme ${i}.md`, "[[Readme]]")));
+    const manyUnchanged = await movePlan("No links to me.md", "New/Readme.md", "many-unchanged");
+    assert.equal(manyUnchanged.preview.noteCount, 0);
+    assert.equal((await lifecycle("move", "apply", manyUnchanged, "many-unchanged")).graph_postflight, "verified");
+    assert.equal((await linkQuery("Reader/Readme 0.md")).outgoing[0].resolution.targetPath, "A/Readme.md");
 
     await start("dist/index.js", false, { MCP_WRITE_MODE: "guarded" });
     const { result, body: refused } = await rawCall("obsidian_note_move_plan", {

@@ -7,6 +7,7 @@ import { foldedPath } from "./headlessVaultFiles.js";
 export type HeadlessPhase = "planned" | "applying" | "committed" | "conflict" | "rejected" | "abandoned";
 export type HeadlessRow<T> = {
   id: string; key: string; phase: HeadlessPhase; payload: T; reason?: string; createdAt: string; updatedAt: string;
+  postflightVerified?: boolean;
 };
 
 /** Durable admission and per-path reservations shared by local filesystem operations. */
@@ -37,6 +38,9 @@ export class HeadlessOperationJournal<T> {
         CREATE TABLE IF NOT EXISTS headless_file_reasons (
           id TEXT PRIMARY KEY, reason TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS headless_file_postflight (
+          id TEXT PRIMARY KEY, verified INTEGER NOT NULL
+        );
         CREATE INDEX IF NOT EXISTS idx_headless_file_phase ON headless_file_operations(binding, phase);
         BEGIN IMMEDIATE;
       `);
@@ -64,14 +68,17 @@ class HeadlessJournalTransaction<T> {
 
   read(value: string, byKey = false): HeadlessRow<T> | undefined {
     const row = this.db.prepare(`
-      SELECT id, operation_key, phase, payload, created_at, updated_at, reason FROM headless_file_operations
+      SELECT id, operation_key, phase, payload, created_at, updated_at, reason, verified FROM headless_file_operations
       LEFT JOIN headless_file_reasons USING(id)
+      LEFT JOIN headless_file_postflight USING(id)
       WHERE binding = ? AND ${byKey ? "operation_key" : "id"} = ?
     `).get(this.binding, value);
     if (!row) return undefined;
     return {
       id: row.id as string, key: row.operation_key as string, phase: row.phase as HeadlessPhase,
-      payload: JSON.parse(row.payload as string) as T, reason: row.reason as string | undefined, createdAt: row.created_at as string, updatedAt: row.updated_at as string,
+      payload: JSON.parse(row.payload as string) as T, reason: row.reason as string | undefined,
+      createdAt: row.created_at as string, updatedAt: row.updated_at as string,
+      postflightVerified: row.verified === null ? undefined : row.verified === 1,
     };
   }
 
@@ -87,6 +94,11 @@ class HeadlessJournalTransaction<T> {
 
   markPublished(id: string): void {
     this.db.prepare("INSERT OR IGNORE INTO headless_file_publications VALUES (?)").run(id);
+  }
+
+  recordPostflight(id: string, verified: boolean): boolean {
+    this.db.prepare("INSERT OR IGNORE INTO headless_file_postflight VALUES (?, ?)").run(id, Number(verified));
+    return this.db.prepare("SELECT verified FROM headless_file_postflight WHERE id = ?").get(id)?.verified === 1;
   }
 
   active(id: string): boolean {

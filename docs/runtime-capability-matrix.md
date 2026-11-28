@@ -180,7 +180,9 @@ Handoff delivery is a transport contract, not a runtime-mode write capability:
 
 ## Native note move M3
 
-`obsidian_note_move_plan/apply/status` is live-only, requires an independent native-move Bridge grant and full write mode, and reuses the process-owned journal. The native outcome and bounded semantic postflight are separate. No recover, no undo, no global graph transaction. [Contract and remaining Pilot2 gate](native-note-move-m3.md).
+In live and hybrid-live, `obsidian_note_move_plan/apply/status` requires an independent native-move Bridge grant and full write mode, and reuses the process-owned journal. The native outcome and bounded semantic postflight are separate. No recover, no undo, no global graph transaction. [Contract and remaining Pilot2 gate](native-note-move-m3.md).
+
+In `headless-filesystem` with the filesystem cache and full write mode, governed move and delete have their own journal, recovery tools and recorded completion evidence. [Headless move and trash contract](headless-server-profile.md#governed-move-and-trash).
 
 ## Note links and frontmatter reads
 

@@ -14,11 +14,12 @@ import {
   applyLinkEdits, rewriteIncoming,
 } from "./headlessMoveLinks.js";
 import {
-  HeadlessVaultFiles, filesystemConflict, foldedPath, readVaultAppSettings, safeRelativePath, vaultBinding,
+  HeadlessVaultFiles, filesystemConflict, foldedPath, readVaultAppSettings, safeRelativePath, startProbeCleanup, vaultBinding,
 } from "./headlessVaultFiles.js";
 
 const PREVIEW_LIMIT = 12;
 const BACKLINK_LIMIT = 100;
+const BACKLINK_INSPECTION_LIMIT = 1000;
 type RecoveryAction = "resume" | "abandon";
 const PREFIX = { move: NATIVE_MOVE_PREFIX, delete: NOTE_DELETE_PREFIX };
 const WRITE_OPERATIONS = {
@@ -40,8 +41,21 @@ function graphProof(content: string, note: string, resolver: MarkdownLinkResolve
     [resolver.resolve(note, ref.linkPath)?.path ?? null, ref.subpath, ref.kind]));
 }
 
+function inverseEdits(rewrite: Rewrite) {
+  let shift = 0;
+  return [...rewrite.edits].reverse().map(edit => {
+    const start = edit.start + shift;
+    shift += edit.after.length - (edit.end - edit.start);
+    return { start, end: start + edit.after.length, before: rewrite.beforeText.slice(edit.start, edit.end) };
+  }).reverse();
+}
+
 export class HeadlessNoteOperations {
-  constructor(private readonly root: string, private readonly journalPath: string, private readonly cache: VaultCacheService) {}
+  private readonly probeCleanup: Promise<void>;
+
+  constructor(private readonly root: string, private readonly journalPath: string, private readonly cache: VaultCacheService) {
+    this.probeCleanup = startProbeCleanup(root);
+  }
 
   private bound() {
     const binding = vaultBinding(this.root);
@@ -59,10 +73,12 @@ export class HeadlessNoteOperations {
 
   private async capture(intent: Intent, files: HeadlessVaultFiles): Promise<Snapshot> {
     const settings = readVaultAppSettings(files.root);
-    const inventory = await this.cache.readFilesystemMoveInventory(intent.source, intent.kind === "move" ? intent.destination : undefined, BACKLINK_LIMIT);
-    if (inventory.sources.length > BACKLINK_LIMIT) {
-      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Too many potential backlink sources for a bounded operation.",
-        { reasonCode: "headless_backlink_limit" });
+    const inspectLinks = intent.kind === "delete" || settings.updateLinks;
+    const inventory = await this.cache.readFilesystemMoveInventory(intent.source, intent.kind === "move" ? intent.destination : undefined,
+      inspectLinks ? BACKLINK_INSPECTION_LIMIT : 0);
+    if (inspectLinks && inventory.sources.length > BACKLINK_INSPECTION_LIMIT) {
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Too many candidate notes for bounded link inspection.",
+        { reasonCode: "headless_backlink_inspection_limit" });
     }
     if (intent.kind === "delete" && settings.trashPreference !== "local") {
       throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Select Obsidian's vault trash before planning headless deletion.",
@@ -89,7 +105,7 @@ export class HeadlessNoteOperations {
     const scoped = new Set(inventory.sources);
     if (intent.kind === "move" && intent.source.toLowerCase().endsWith(".md")) scoped.add(source);
     for (const indexedPath of scoped) {
-      if ((intent.kind === "move" && !settings.updateLinks) || (intent.kind === "delete" && indexedPath === source)) continue;
+      if (!inspectLinks || (intent.kind === "delete" && indexedPath === source)) continue;
       await yieldToEventLoop();
       const note = indexedPath.slice(1);
       const state = note === intent.source ? original : files.state(note, { readBytes: true });
@@ -98,7 +114,7 @@ export class HeadlessNoteOperations {
       if (intent.kind === "delete") {
         const count = extractMarkdownLinkReferences(content).filter(ref => before.resolve(indexedPath, ref.linkPath)?.path === source).length;
         if (count) snapshot.backlinks.push({ sourcePath: note, count });
-      } else if (settings.updateLinks) {
+      } else {
         const rewrite = rewriteIncoming(content, indexedPath, source, "/" + destination, before, after, settings);
         const next = rewrite ? applyLinkEdits(content, rewrite.edits) : content;
         const resultPath = indexedPath === source ? "/" + destination : indexedPath;
@@ -108,6 +124,10 @@ export class HeadlessNoteOperations {
           throw new McpError(BaseErrorCode.VALIDATION_ERROR, "A backlink source is not valid UTF-8.");
         }
         snapshot.rewrites.push({ path: note, beforeHash: state.hash, ...rewrite });
+      }
+      if (snapshot.rewrites.length > BACKLINK_LIMIT || snapshot.backlinks.length > BACKLINK_LIMIT) {
+        throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Too many notes to rewrite or report as backlinks.",
+          { reasonCode: "headless_backlink_limit" });
       }
     }
     if (Buffer.byteLength(JSON.stringify(snapshot)) > 4 * 1024 * 1024) {
@@ -151,6 +171,7 @@ export class HeadlessNoteOperations {
 
   private async plan(intent: Intent, key: string) {
     this.authorize(intent.kind, "plan", intent.source);
+    await this.probeCleanup;
     const { files, journal } = this.bound();
     const internalKey = this.key(intent.kind, key);
     const replay = (existing: HeadlessRow<Snapshot>) => {
@@ -176,10 +197,12 @@ export class HeadlessNoteOperations {
   }
 
   private get(kind: Intent["kind"], ref: string, journal: HeadlessOperationJournal<Snapshot>, key?: string) {
-    const id = ref.slice(PREFIX[kind].length);
-    if (!ref.startsWith(PREFIX[kind]) || !/^[a-f0-9-]{36}$/u.test(id)) {
-      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Invalid plan reference.");
+    const prefix = PREFIX[kind];
+    if (typeof ref !== "string" || !ref.startsWith(prefix) || !/^[a-f0-9-]{36}$/u.test(ref.slice(prefix.length))) {
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Invalid plan reference.",
+        { reasonCode: "headless_plan_ref_invalid" });
     }
+    const id = ref.slice(prefix.length);
     const row = journal.transaction(tx => tx.read(id));
     if (!row || row.payload.intent.kind !== kind) throw new McpError(BaseErrorCode.NOT_FOUND, "Plan unavailable.");
     if (key !== undefined && row.key !== this.key(kind, key)) filesystemConflict("The idempotency key does not match.");
@@ -219,13 +242,14 @@ export class HeadlessNoteOperations {
     const { files, journal } = this.bound();
     const row = this.get(kind, ref, journal);
     if (row.phase === "applying") return this.runPending(files, journal, row, "status");
-    return this.withCache(row, files);
+    return this.withCache(row, files, journal);
   }
 
   async recover(kind: Intent["kind"], ref: string, key: string, action: RecoveryAction = "resume") {
     const { files, journal } = this.bound();
     const row = this.get(kind, ref, journal, key);
-    if (row.phase !== "applying") return this.withCache(row, files);
+    await files.cleanProbes();
+    if (row.phase !== "applying") return this.withCache(row, files, journal);
     this.authorize(kind, "apply", row.payload.intent.source);
     return this.runPending(files, journal, row, action);
   }
@@ -267,7 +291,7 @@ export class HeadlessNoteOperations {
     if (!attempt) {
       const current = journal.transaction(tx => tx.read(row.id))!;
       return current.phase === "applying" ? this.receipt(current, false, false, "headless_operation_pending")
-        : this.withCache(current, files);
+        : this.withCache(current, files, journal);
     }
     const plan = row.payload;
     let published = attempt.published;
@@ -276,14 +300,14 @@ export class HeadlessNoteOperations {
       journal.transaction(tx => tx.settle(row, phase, reason));
     try {
       let observed = this.tryObserve(files, plan);
-      if (observed.complete) return await this.withCache(settle("committed"), files);
+      if (observed.complete) return await this.withCache(settle("committed"), files, journal);
       if (action === "abandon") {
         if (observed.safe) filesystemConflict("The sealed operation can still be recovered.", "headless_operation_pending");
         for (const item of plan.rewrites) {
           try { files.cleanStage(item.path === plan.intent.source ? plan.destination : item.path, row.id); }
           catch { /* Manual repair also covers inaccessible staging paths. */ }
         }
-        return await this.withCache(settle("abandoned", "headless_manual_repair_required"), files);
+        return await this.withCache(settle("abandoned", "headless_manual_repair_required"), files, journal);
       }
       if (!observed.safe || action === "status") {
         if (noEffect()) {
@@ -327,7 +351,7 @@ export class HeadlessNoteOperations {
         }
       }
       observed = this.tryObserve(files, plan);
-      return observed.complete ? await this.withCache(settle("committed"), files)
+      return observed.complete ? await this.withCache(settle("committed"), files, journal)
         : this.receipt(row, false, observed.safe, observed.safe ? undefined : "headless_manual_repair_required");
     } finally {
       journal.transaction(tx => tx.endAttempt(row.id, token));
@@ -350,8 +374,11 @@ export class HeadlessNoteOperations {
     catch { return { safe: false, complete: false }; }
   }
 
-  private async withCache(row: HeadlessRow<Snapshot>, files: HeadlessVaultFiles) {
+  private async withCache(row: HeadlessRow<Snapshot>, files: HeadlessVaultFiles, journal: HeadlessOperationJournal<Snapshot>) {
     if (row.phase !== "committed" && row.phase !== "abandoned") return this.receipt(row);
+    if (row.postflightVerified !== undefined) {
+      return { ...this.receipt(row, row.postflightVerified), cache: "refreshed" };
+    }
     const plan = row.payload;
     const complete = row.phase === "committed" && this.tryObserve(files, plan).complete;
     let verified = complete && plan.intent.kind === "delete";
@@ -370,16 +397,18 @@ export class HeadlessNoteOperations {
         }
         verified = graphMatches;
       }
+      if (row.phase === "committed") verified = journal.transaction(tx => tx.recordPostflight(row.id, verified));
       return { ...this.receipt(row, verified), cache: "refreshed" };
     } catch {
       return { ...this.receipt(row, verified), cache: "unavailable" };
     }
   }
 
-  private receipt(row: HeadlessRow<Snapshot>, verified = false, recoverable = false, reason = row.reason) {
+  private receipt(row: HeadlessRow<Snapshot>, verified = row.postflightVerified ?? false, recoverable = false, reason = row.reason) {
     const { intent, destination, beforeHash, size, settings, rewrites, backlinks } = row.payload;
     const digest = nativeDigest(row.payload);
     const pending = row.phase === "applying";
+    const needsRepair = reason === "headless_manual_repair_required";
     const affectedPaths = [...new Set(this.paths(row.payload))];
     const common = {
       contractVersion: 1, operationKind: `obsidian.note.${intent.kind}`, operationId: row.id,
@@ -388,14 +417,18 @@ export class HeadlessNoteOperations {
       outcome: row.phase === "planned" ? null : pending ? "outcome_unknown" : row.phase,
       ...(reason ? { reasonCode: reason } : {}),
       applyAllowed: row.phase === "planned", recoveryAllowed: pending && recoverable,
-      abandonAllowed: pending && reason === "headless_manual_repair_required",
-      nextAction: row.phase === "planned" ? "apply" : pending ? recoverable ? "recover" : reason === "headless_manual_repair_required" ? "manual_repair" : "status" : "none",
+      abandonAllowed: pending && needsRepair,
+      nextAction: row.phase === "planned" ? "apply" : needsRepair ? "manual_repair" : pending ? recoverable ? "recover" : "status" : "none",
       admittedAt: row.createdAt, updatedAt: row.updatedAt,
     };
     if (intent.kind === "move") {
-      const needsRepair = reason === "headless_manual_repair_required";
       return { ...common,
-        ...(needsRepair ? { repairProofs: rewrites.map(item => ({ path: item.path, beforeSha256: item.beforeHash, afterSha256: item.afterHash })) } : {}), target: { sourcePath: intent.source, destinationPath: destination },
+        ...(needsRepair ? { repairProofs: rewrites.map(item => ({
+          path: item.path === intent.source ? destination : item.path,
+          ...(item.path === intent.source ? { originalPath: item.path } : {}),
+          beforeSha256: item.beforeHash, afterSha256: item.afterHash,
+          ...(row.phase === "abandoned" && typeof item.beforeText === "string" ? { inverseEdits: inverseEdits(item) } : {}),
+        })) } : {}), target: { sourcePath: intent.source, destinationPath: destination },
         beforeProof: { sourceSha256: beforeHash, neighborhoodDigest: digest },
         expectedGraphDigest: nativeDigest(row.payload.graphProofs ?? rewrites.map(rewrite => [rewrite.path, rewrite.afterHash])),
         graph_postflight: verified ? "verified" : "indeterminate",

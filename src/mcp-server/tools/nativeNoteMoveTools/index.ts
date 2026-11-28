@@ -6,13 +6,13 @@ import {
   GOVERNED_MUTATION_TOOL_ANNOTATIONS,
   READ_ONLY_TOOL_ANNOTATIONS,
 } from "../../toolAnnotations.js";
-import { mcpSchema } from "../../mcpSchema.js";
+import { mcpSchema, mcpSchemaWithPublicValidation } from "../../mcpSchema.js";
 import { NOTE_NAME_RULES_DESCRIPTION } from "../../../services/noteNameRules.js";
 
 const HEADLESS_DESCRIPTIONS = {
   plan: "Seal a headless file move and its indexed backlink rewrites without writing to the vault. Inspect the capped preview before applying. Requires MCP_WRITE_MODE=full.",
   apply: "Apply the sealed move only after rechecking the graph and every affected file. Reuse the plan key. After a lost reply, inspect status and recover the same plan if requested.",
-  status: "Reconcile the sealed headless move against the filesystem without rewriting or moving a file.",
+  status: "Read the recorded headless move and its completion evidence. If interrupted, reconcile it against the filesystem.",
 };
 
 const Plan = z
@@ -91,7 +91,7 @@ export function registerNativeNoteMoveTools(
     {
       description: runtime.recover ? HEADLESS_DESCRIPTIONS.apply :
         "Dispatch only the exact sealed native rename once. Native completion does not mean graph verification. Inspect graph_postflight with status after a lost reply; never manufacture a new move request to retry an uncertain effect.",
-      inputSchema: mcpSchema(Apply.shape),
+      inputSchema: runtime.recover ? mcpSchemaWithPublicValidation(Apply.shape) : mcpSchema(Apply.shape),
       annotations: GOVERNED_MUTATION_TOOL_ANNOTATIONS,
     },
     (params) =>
@@ -105,7 +105,7 @@ export function registerNativeNoteMoveTools(
     {
       description: runtime.recover ? HEADLESS_DESCRIPTIONS.status :
         "Read/reconcile the durable move outcome and separately observe graph_postflight without executing a rename. Backend restart can leave an unacknowledged move indeterminate; no recover/undo tool exists for this V1.",
-      inputSchema: mcpSchema(Status.shape),
+      inputSchema: runtime.recover ? mcpSchemaWithPublicValidation(Status.shape) : mcpSchema(Status.shape),
       annotations: READ_ONLY_TOOL_ANNOTATIONS,
     },
     (params) =>
@@ -120,7 +120,7 @@ export function registerNativeNoteMoveTools(
       "obsidian_note_move_recover",
       {
         description: "Resume the same headless plan when recoveryAllowed, or use action=abandon when abandonAllowed to release the reservation for manual repair. Reuse the original idempotency key.",
-        inputSchema: mcpSchema(Recovery.shape),
+        inputSchema: mcpSchemaWithPublicValidation(Recovery.shape),
         annotations: GOVERNED_MUTATION_TOOL_ANNOTATIONS,
       },
       (params) => run("obsidian_note_move_recover", () => {

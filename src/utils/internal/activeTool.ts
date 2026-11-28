@@ -6,8 +6,12 @@
  * @module src/utils/internal/activeTool
  */
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { McpError } from "../../types-global/errors.js";
 
 const activeTool = new AsyncLocalStorage<string>();
+
+// Request-local provenance for the SDK and application error boundary.
+export const toolInvocation = new AsyncLocalStorage<{ applicationError: boolean; inputError?: McpError }>();
 
 export function withActiveToolName<T>(name: string, operation: () => T): T {
   return activeTool.run(name, operation);

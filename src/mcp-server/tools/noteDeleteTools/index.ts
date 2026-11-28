@@ -6,12 +6,12 @@ import {
   GOVERNED_MUTATION_TOOL_ANNOTATIONS,
   READ_ONLY_TOOL_ANNOTATIONS,
 } from "../../toolAnnotations.js";
-import { mcpSchema } from "../../mcpSchema.js";
+import { mcpSchema, mcpSchemaWithPublicValidation } from "../../mcpSchema.js";
 
 const HEADLESS_DESCRIPTIONS = {
   plan: "Seal deletion to the vault trash. Inspect incomingLinks and explicitly acknowledge backlinks with a new plan if required. Requires MCP_WRITE_MODE=full.",
   apply: "Move the exact sealed file into the vault trash only after rechecking its content and backlinks. Reuse the plan key.",
-  status: "Reconcile the sealed headless deletion against the original path and its exact trash destination.",
+  status: "Read the recorded headless deletion and its completion evidence. If interrupted, check the original path and the exact trash destination.",
 };
 
 const Plan = z
@@ -89,7 +89,7 @@ export function registerNoteDeleteTools(
     {
       description: runtime.recover ? HEADLESS_DESCRIPTIONS.apply :
         "Dispatch only the exact sealed deletion once, after the Bridge re-reads the note and refuses if its content or incoming links changed since the plan. Reuse the idempotencyKey of the plan. After a lost reply call obsidian_note_delete_status; never replan to retry an uncertain effect. committed means the note left its path through the trash call; postflight.status verified means an exact new copy was observed in the vault trash.",
-      inputSchema: mcpSchema(Apply.shape),
+      inputSchema: runtime.recover ? mcpSchemaWithPublicValidation(Apply.shape) : mcpSchema(Apply.shape),
       annotations: GOVERNED_MUTATION_TOOL_ANNOTATIONS,
     },
     (params) =>
@@ -103,7 +103,7 @@ export function registerNoteDeleteTools(
     {
       description: runtime.recover ? HEADLESS_DESCRIPTIONS.status :
         "Read and reconcile the durable deletion outcome and observe postflight without deleting anything. postflight.status: verified (absent from its path and an exact new copy in the vault trash), path_absent_only (absent; a system trash cannot be observed), pending, failed or indeterminate. A backend restart can leave an unacknowledged deletion unknown; no recover or undo tool exists, restore from the trash in Obsidian.",
-      inputSchema: mcpSchema(Status.shape),
+      inputSchema: runtime.recover ? mcpSchemaWithPublicValidation(Status.shape) : mcpSchema(Status.shape),
       annotations: READ_ONLY_TOOL_ANNOTATIONS,
     },
     (params) =>
@@ -118,7 +118,7 @@ export function registerNoteDeleteTools(
       "obsidian_note_delete_recover",
       {
         description: "Resume the same headless plan when recoveryAllowed, or use action=abandon when abandonAllowed to release the reservation for manual repair. Reuse the original idempotency key.",
-        inputSchema: mcpSchema(Recovery.shape),
+        inputSchema: mcpSchemaWithPublicValidation(Recovery.shape),
         annotations: GOVERNED_MUTATION_TOOL_ANNOTATIONS,
       },
       (params) => run("obsidian_note_delete_recover", () => {

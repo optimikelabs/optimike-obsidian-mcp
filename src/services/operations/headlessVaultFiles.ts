@@ -2,6 +2,7 @@ import {
   closeSync, constants, fstatSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync,
   readSync, readdirSync, realpathSync, renameSync, unlinkSync, writeFileSync,
 } from "node:fs";
+import { readdir } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
@@ -89,6 +90,57 @@ function hardLinksUnsupported(): never {
     { reasonCode: "hard_links_unsupported" });
 }
 
+const probeName = /^\.optimike-probe-(?:(\d+)-)?[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}(-(source|link))?\.tmp$/u;
+const activeProbes = new Set<string>();
+const startupSweeps = new Map<string, Promise<void>>();
+
+function probeOwnerActive(pid: string | undefined): boolean {
+  if (!pid || Number(pid) === process.pid) return false;
+  try { process.kill(Number(pid), 0); return true; }
+  catch (error) { return (error as NodeJS.ErrnoException)?.code !== "ESRCH"; }
+}
+
+function removeProbe(file: string): void {
+  try {
+    if (realpathSync(path.dirname(file)) === path.dirname(file) && lstatSync(file).isFile()) unlinkSync(file);
+  } catch { /* A busy probe remains eligible for the next sweep. */ }
+}
+
+async function sweepProbes(root: string): Promise<void> {
+  const pending = [root];
+  while (pending.length) {
+    const directory = pending.pop()!;
+    let entries;
+    try {
+      if (realpathSync(directory) !== directory) continue;
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch { continue; }
+    for (const entry of entries) {
+      const file = path.join(directory, entry.name);
+      if (entry.isDirectory() && !entry.isSymbolicLink() && foldedPath(entry.name) !== ".obsidian") {
+        pending.push(file);
+      } else if (entry.isFile()) {
+        const match = probeName.exec(entry.name);
+        if (match && Boolean(match[1]) === Boolean(match[2]) && !activeProbes.has(file) && !probeOwnerActive(match[1])) {
+          removeProbe(file);
+        }
+      }
+    }
+  }
+}
+
+export function startProbeCleanup(root: string): Promise<void> {
+  let canonical: string;
+  try { canonical = realpathSync(root); }
+  catch { return Promise.resolve(); }
+  let cleanup = startupSweeps.get(canonical);
+  if (!cleanup) {
+    cleanup = sweepProbes(canonical);
+    startupSweeps.set(canonical, cleanup);
+  }
+  return cleanup;
+}
+
 export class HeadlessVaultFiles {
   private directories = new Map<string, { signature: string; entries: Map<string, string[]> }>();
   constructor(readonly root: string) {}
@@ -122,13 +174,35 @@ export class HeadlessVaultFiles {
         parent = path.dirname(parent);
       }
     }
-    const temporary = path.join(parent, `.optimike-probe-${randomUUID()}.tmp`);
-    try { linkSync(original, temporary); }
-    catch (error) {
+    if (lstatSync(original, { bigint: true }).dev !== lstatSync(parent, { bigint: true }).dev) hardLinksUnsupported();
+    const probe = path.join(parent, `.optimike-probe-${process.pid}-${randomUUID()}`);
+    const probeSource = probe + "-source.tmp";
+    const probeLink = probe + "-link.tmp";
+    activeProbes.add(probeSource);
+    activeProbes.add(probeLink);
+    let created = false;
+    let linked = false;
+    try {
+      const fd = openSync(probeSource, "wx", 0o600);
+      created = true;
+      try { writeFileSync(fd, "hard link probe\n"); }
+      finally { closeSync(fd); }
+      linkSync(probeSource, probeLink);
+      linked = true;
+    } catch (error) {
       if (hardLinkUnavailable(error)) hardLinksUnsupported();
       throw error;
+    } finally {
+      if (linked) removeProbe(probeLink);
+      if (created) removeProbe(probeSource);
+      activeProbes.delete(probeLink);
+      activeProbes.delete(probeSource);
     }
-    unlinkSync(temporary);
+  }
+
+  async cleanProbes(): Promise<void> {
+    await startProbeCleanup(this.root);
+    await sweepProbes(this.root);
   }
 
   private staging(relative: string, operationId: string): string {
@@ -159,7 +233,8 @@ export class HeadlessVaultFiles {
       current = path.join(current, name);
       if (!variants.length) {
         if (index === parts.length - 1 || allowMissingParents) return path.join(current, ...parts.slice(index + 1));
-        throw new McpError(BaseErrorCode.NOT_FOUND, "The parent folder must already exist.");
+        throw new McpError(BaseErrorCode.NOT_FOUND, "The parent folder must already exist.",
+          { reasonCode: "headless_parent_missing" });
       }
       if (variants.length !== 1 || variants[0] !== name) filesystemConflict("The vault path has a case or Unicode collision.");
       const stat = lstatSync(current);
