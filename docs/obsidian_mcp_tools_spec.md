@@ -323,10 +323,11 @@ semantic manifest/vector metadata are cached locally for faster warm refreshes.
 
 - `bases_list`: list `.base` definitions via Bases Bridge REST or local fallback.
 - `bases_get_schema`: inspect a `.base` schema via REST or local fallback.
-- `bases_query`: query Bases via REST. Through the Bases Bridge, `evaluate`
-  defaults to `true` and lets Obsidian's engine select the view's rows
-  (filters, sort, limit) and compute
-  formulas for the rows of the requested page only (`source: "engine"`, values
+- `bases_query`: query Bases via REST, or simple local fallback filters in
+  headless modes. Through the Bases Bridge, `evaluate` (default) lets
+  Obsidian's engine select the view's rows (filters, limit; view sort: see the
+  [Bridge README](../plugins/obsidian-bases-bridge/README.md#requêtes-query))
+  and compute formulas for the rows of the requested page only (`source: "engine"`, values
   as the engine's text); request filters and sorts on `formula.*` use these
   values and compute every row, in chunks of 100, up to 1,000 rows (past it, formula predicates and sorts are skipped:
   `formula_filter_not_evaluated:too_many_rows:<rows>:1000`). Without it, or when the engine is

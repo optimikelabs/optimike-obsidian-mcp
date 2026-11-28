@@ -5,6 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { fakeBaseQueryHandler } from "./bases-engine-fixture.mjs";
+import nativeCapture from "./fixtures/bases-native-1.15.1.json" with { type: "json" };
 
 // Runs the real query route of the Bridge plugin against a synthetic vault and
 // a synthetic `base:query` handler (the Obsidian Desktop boundary).
@@ -53,7 +54,7 @@ const BASE = {
 };
 const NOTES = ["Notes/a.md", "Notes/b.md", "Notes/c.md", "Other/z.md"];
 const TABLE = {
-  "link(file, file.name)": (row) => `[[${row.name}]]`,
+  "link(file, file.name)": (row) => `[[${row.path}|${row.name}]]`,
   'file.name + "!"': (row) => `${row.name}!`,
 };
 
@@ -83,7 +84,7 @@ async function queryRoute({
     on: () => ({}),
   });
   const calls = [];
-  const rows = notes.map((path) => ({ path, name: path.split("/").pop() }));
+  const rows = notes.map((path) => ({ path, name: files.get(path).basename }));
   const handler = fakeBaseQueryHandler(vault, { rows, table, calls });
   const routes = new Map();
   const api = {
@@ -174,7 +175,7 @@ test("the local scan matches the Bridge for supported expression trees", async (
   }
 });
 
-test("evaluate returns the engine's rows, view limit and formula values", async () => {
+test("Top preserves native row order, basename concatenation and aliased wikilinks", async () => {
   const query = await queryRoute();
   const { payload, calls, sha256 } = await query({ view: "Top", evaluate: true, limit: 50 });
 
@@ -182,12 +183,9 @@ test("evaluate returns the engine's rows, view limit and formula values", async 
   assert.equal(payload.total, 2);
   assert.deepEqual(
     payload.rows.map((row) => [row.file.path, row.computed]),
-    [
-      ["Notes/a.md", { label: "[[a.md]]", shout: "a.md!" }],
-      ["Notes/b.md", { label: "[[b.md]]", shout: "b.md!" }],
-    ],
+    nativeCapture.top.map(({ path, ...computed }) => [path, computed]),
   );
-  assert.equal(payload.rows[0].props.label, "[[a.md]]");
+  assert.equal(payload.rows[0].props.label, nativeCapture.top[0].label);
   assert.deepEqual(payload.warnings, []);
   // The engine evaluated the exact bytes the snapshot proves.
   assert.equal(payload.baseSnapshot.sha256, sha256);
@@ -236,27 +234,32 @@ test("request filters and formula column settings use the engine's formula value
   const { payload } = await query({
     view: "Top",
     evaluate: true,
-    filter: { and: ['formula.shout == "a.md!"'] },
+    filter: { and: ['formula.shout == "a!"'] },
   });
 
   assert.equal(payload.source, "engine");
   assert.deepEqual(
     payload.rows.map((row) => row.file.path),
-    ["Notes/a.md"],
+    [nativeCapture.label.path],
   );
-  assert.equal(payload.rows[0].props["formula.label"], "[[a.md]]");
+  assert.equal(payload.rows[0].props["formula.label"], nativeCapture.label.Label);
   assert.ok(!payload.warnings.some((warning) => warning.startsWith("Filtre sur formule")));
 });
 
-// 250 notes and a counting formula table: the engine computes a formula only
-// for the rows its view keeps, like Obsidian.
+// Simulated-only call counts measure the Bridge's batching and page selection.
 function countingTable() {
   const counts = { label: 0, shout: 0 };
   return {
     counts,
     table: {
-      "link(file, file.name)": (row) => (counts.label++, `[[${row.name}]]`),
-      'file.name + "!"': (row) => (counts.shout++, `${row.name}!`),
+      "link(file, file.name)": (row) => {
+        counts.label++;
+        return TABLE["link(file, file.name)"](row);
+      },
+      'file.name + "!"': (row) => {
+        counts.shout++;
+        return TABLE['file.name + "!"'](row);
+      },
     },
   };
 }
@@ -271,7 +274,7 @@ test("formulas are computed for the requested page only", async () => {
   assert.equal(payload.source, "engine");
   assert.equal(payload.total, 250);
   assert.deepEqual(payload.rows.map((row) => row.file.path), MANY.slice(20, 40));
-  assert.deepEqual(payload.rows[0].computed, { label: "[[n020.md]]", shout: "n020.md!" });
+  assert.deepEqual(payload.rows[0].computed, { label: "[[Notes/n020.md|n020]]", shout: "n020!" });
   assert.deepEqual(counts, { label: 20, shout: 20 }, "only the 20 rows of the page are computed");
   assert.equal(calls.length, 2);
 });
@@ -282,7 +285,7 @@ test("a request filter on a formula computes every row in chunks of 100", async 
   const { payload, calls } = await query({
     view: "All",
     evaluate: true,
-    filter: { and: ['formula.shout == "n123.md!"'] },
+    filter: { and: ['formula.shout == "n123!"'] },
   });
 
   assert.equal(payload.source, "engine");
@@ -312,7 +315,7 @@ test("past 1,000 rows a formula filter is not evaluated, and says so", async () 
 test("past the cap, formula predicates are skipped, not run on missing values", async () => {
   const notes = Array.from({ length: 1001 }, (_, i) => `Notes/m${String(i).padStart(4, "0")}.md`);
   const query = await queryRoute({ baseText: JSON.stringify(UNLIMITED), notes, table: countingTable().table });
-  for (const predicate of ['formula.shout == "m0000.md!"', "formula.shout == null"]) {
+  for (const predicate of ['formula.shout == "m0000!"', "formula.shout == null"]) {
     const { payload } = await query({ view: "All", evaluate: true, limit: 5, filter: { and: [predicate] } });
     assert.equal(payload.total, 1001, `${predicate} keeps every row`);
     assert.ok(payload.warnings.includes("formula_filter_not_evaluated:too_many_rows:1001:1000"));

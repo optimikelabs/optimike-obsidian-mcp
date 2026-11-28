@@ -8,6 +8,7 @@ import {
   withOneShotCachedRead,
 } from "./engine-evaluate.mjs";
 import { fakeBaseQueryHandler } from "./bases-engine-fixture.mjs";
+import nativeCapture from "./fixtures/bases-native-1.15.1.json" with { type: "json" };
 
 function syntheticApp({ rows, files, table = {}, handlerError, rejectBase } = {}) {
   const store = new Map(Object.entries(files));
@@ -37,7 +38,7 @@ const ROWS = ["a", "b", "c", "d"].map((name) => ({ name, path: `Notes/${name}.md
 
 test("classifies each formula on every row with syntax > runtime > all_null > ok", async () => {
   const base = {
-    filters: 'file.inFolder("Notes")',
+    filters: 'file.inFolder("Data/Diag")',
     formulas: {
       fine: "file.name",
       sparse: "note.sparse",
@@ -55,7 +56,7 @@ test("classifies each formula on every row with syntax > runtime > all_null > ok
     "note.failing": (row) => (row.name === "d" ? "ok" : `Error: boom ${row.name}`),
   };
   const { app, store } = syntheticApp({
-    rows: ROWS,
+    rows: ROWS.map(({ name }) => ({ name, path: `Data/Diag/${name}.md` })),
     files: { "B/X.base": JSON.stringify(base) },
     table,
   });
@@ -66,24 +67,8 @@ test("classifies each formula on every row with syntax > runtime > all_null > ok
   assert.equal(result.engine, "obsidian");
   assert.equal(result.obsidianVersion, "1.15.1");
   assert.deepEqual(result.canary, { ok: true });
-  assert.deepEqual(result.formulas.fine, { status: "ok", rows: 4, errorRows: 0, nullRows: 0, samples: [] });
-  assert.equal(result.formulas.sparse.status, "ok");
-  assert.equal(result.formulas.sparse.nullRows, 3);
-  assert.equal(result.formulas.broken.status, "syntax_error");
-  assert.equal(result.formulas.empty.status, "all_null");
-  // An empty formula parses in Obsidian: empty, not a syntax error.
-  assert.equal(result.formulas.blank.status, "all_null");
-  assert.deepEqual(result.formulas.failing, {
-    status: "runtime_error",
-    rows: 4,
-    errorRows: 3,
-    nullRows: 0,
-    samples: [
-      { path: "Notes/a.md", message: "Error: boom a" },
-      { path: "Notes/b.md", message: "Error: boom b" },
-      { path: "Notes/c.md", message: "Error: boom c" },
-    ],
-  });
+  // Includes the native distinction between a syntax error and a blank formula.
+  assert.deepEqual(result.formulas, nativeCapture.diagnostics);
   // Only the in-memory candidate carried the probes; the stored Base is untouched.
   assert.deepEqual(JSON.parse(store.get("B/X.base")), base);
 });
@@ -137,7 +122,7 @@ test("a failing canary makes the answer unavailable, never ok", async () => {
   }
 });
 
-test("maps each unavailable engine state to its public reason", async () => {
+test("maps simulated-only engine failures to their public reasons", async () => {
   const files = { "X.base": JSON.stringify({ formulas: { f: "file.name" } }) };
   const cases = [
     ["unsupported_obsidian", () => deps(syntheticApp({ rows: ROWS, files }).app, "1.14.4"), "X.base"],

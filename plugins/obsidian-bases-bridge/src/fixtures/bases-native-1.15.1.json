@@ -1,0 +1,117 @@
+{
+  "obsidianVersion": "1.15.1",
+  "installerVersion": "1.14.5",
+  "archiveSha256": "42bf7f34782752f159d63c17ac6bac4ad01dd55709578f9879f76f8295abb2eb",
+  "timezone": "Europe/Paris",
+  "frozenClock": "2026-03-29T00:30:00.000Z",
+  "top": [
+    {
+      "path": "Notes/a.md",
+      "label": "[[Notes/a.md|a]]",
+      "shout": "a!"
+    },
+    {
+      "path": "Notes/b.md",
+      "label": "[[Notes/b.md|b]]",
+      "shout": "b!"
+    }
+  ],
+  "label": {
+    "path": "Notes/a.md",
+    "Label": "[[Notes/a.md|a]]",
+    "shout": "a!"
+  },
+  "diagnostics": {
+    "fine": {
+      "status": "ok",
+      "rows": 4,
+      "errorRows": 0,
+      "nullRows": 0,
+      "samples": []
+    },
+    "sparse": {
+      "status": "ok",
+      "rows": 4,
+      "errorRows": 0,
+      "nullRows": 3,
+      "samples": []
+    },
+    "broken": {
+      "status": "syntax_error",
+      "rows": 4,
+      "errorRows": 0,
+      "nullRows": 4,
+      "samples": []
+    },
+    "failing": {
+      "status": "runtime_error",
+      "rows": 4,
+      "errorRows": 3,
+      "nullRows": 0,
+      "samples": [
+        {
+          "path": "Data/Diag/a.md",
+          "message": "Error: boom a"
+        },
+        {
+          "path": "Data/Diag/b.md",
+          "message": "Error: boom b"
+        },
+        {
+          "path": "Data/Diag/c.md",
+          "message": "Error: boom c"
+        }
+      ]
+    },
+    "empty": {
+      "status": "all_null",
+      "rows": 4,
+      "errorRows": 0,
+      "nullRows": 4,
+      "samples": []
+    },
+    "blank": {
+      "status": "all_null",
+      "rows": 4,
+      "errorRows": 0,
+      "nullRows": 4,
+      "samples": []
+    }
+  },
+  "unknownFunction": "Error: Cannot find function \"oobbCanaryMissingFunction\"",
+  "formulaChecks": {
+    "fooBar(file.name)": [
+      "runtime_error",
+      "Error: Cannot find function \"fooBar\""
+    ],
+    "fooBar(1)": [
+      "runtime_error",
+      "Error: Cannot find function \"fooBar\""
+    ],
+    "if(file.name == \"x\", 1": [
+      "syntax_error"
+    ],
+    "formula.inexistante + 1": [
+      "runtime_error",
+      "Error: Cannot find \"inexistante\" on type Formulas"
+    ],
+    "file.name.round()": [
+      "runtime_error",
+      "Error: Cannot find function \"round\" on type String"
+    ],
+    "file.name.lowr()": [
+      "runtime_error",
+      "Error: Cannot find function \"lowr\" on type String"
+    ],
+    "file.name.LOWER()": [
+      "ok"
+    ],
+    "file.toString.foo()": [
+      "runtime_error",
+      "Error: Cannot find \"toString\" on type File"
+    ],
+    "note.champ_inexistant_zz": [
+      "all_null"
+    ]
+  }
+}
