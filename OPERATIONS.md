@@ -481,7 +481,7 @@ If Obsidian REST is unavailable but the shared cache is warm, the backend can st
 
 This is meant to keep the MCP useful when Obsidian is temporarily down, while still making the failure mode explicit.
 
-In `headless-readonly`, `obsidian_read_note` can verify and serve an exact, case-sensitive Markdown path from disk while the filesystem cache is building. Exclusions and link checks still apply. Listings, searches, and case-insensitive note lookup wait for the cache. Cache readiness continues to describe the full inventory. Use `obsidian_runtime_maintenance` with `refresh_all` as a manual readiness gate on large vaults.
+In `headless-readonly`, `obsidian_read_note` can verify and serve an exact, case-sensitive Markdown path from disk during the initial cache build or a forced rebuild. Responses from disk include `readPath: "direct-filesystem"` and the `observedAt` timestamp for that note. Exclusions and link checks still apply. During periodic refresh, note reads wait for the cache, as do listings, searches, and case-insensitive lookups. Cache readiness describes the full inventory. Use `obsidian_runtime_maintenance` with `refresh_all` as a manual readiness gate on large vaults.
 
 ## Health and Maintenance
 

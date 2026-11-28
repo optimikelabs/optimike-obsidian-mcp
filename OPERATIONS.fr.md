@@ -497,7 +497,7 @@ Si Obsidian REST n’est plus joignable mais que le cache partagé est chaud, le
 
 Le but est de garder le MCP utile quand Obsidian tombe temporairement, tout en rendant l’état explicite.
 
-En mode `headless-readonly`, `obsidian_read_note` peut vérifier et lire sur disque un chemin Markdown exact, casse comprise, pendant la construction du cache. Les exclusions et les contrôles des liens s’appliquent toujours. Les listes, les recherches et la recherche d’une note sans tenir compte de la casse attendent le cache. L’état du cache décrit toujours l’inventaire complet. Sur un gros coffre, utiliser `obsidian_runtime_maintenance` avec `refresh_all` pour attendre manuellement que le cache soit prêt.
+En mode `headless-readonly`, `obsidian_read_note` peut vérifier et lire sur disque un chemin Markdown exact, casse comprise, pendant la construction initiale du cache ou une reconstruction forcée. Les réponses issues de cette lecture contiennent `readPath: "direct-filesystem"` et l’horodatage `observedAt` de la note. Les exclusions et les contrôles des liens s’appliquent toujours. Pendant un rafraîchissement périodique, les lectures attendent le cache, comme les listes, les recherches et les lectures par chemin sans distinction de casse. L’état du cache décrit l’inventaire complet. Sur un gros coffre, utiliser `obsidian_runtime_maintenance` avec `refresh_all` pour attendre manuellement que le cache soit prêt.
 
 ## Santé et maintenance
 

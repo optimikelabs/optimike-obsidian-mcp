@@ -113,6 +113,8 @@ export interface ObsidianReadNoteResponse {
    * Included if format='json', or if format='markdown' and includeStat=true.
    */
   stats?: FormattedStat; // Renamed from stat
+  readPath?: "direct-filesystem";
+  observedAt?: string;
 }
 
 // ====================================================================================
@@ -198,16 +200,13 @@ export const processObsidianReadNote = async (
       fallbackMode: source,
     });
 
-    if (requestedFormat === "json") {
-      return {
-        content: noteJson,
-        stats: formattedStat ?? undefined,
-      };
-    }
-
     return {
-      content: noteJson.content ?? "",
-      stats: includeStat ? formattedStat ?? undefined : undefined,
+      content: requestedFormat === "json" ? noteJson : (noteJson.content ?? ""),
+      stats: formattedStat ?? undefined,
+      ...(direct && {
+        readPath: "direct-filesystem" as const,
+        observedAt: direct.observedAt,
+      }),
     };
   };
 
