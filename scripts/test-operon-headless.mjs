@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { withOperonClient, callOperon, runParity, compareTasks } from "./operon-headless-parity.mjs";
+import { withOperonClient, callOperon, runParity, compareTasks, compareConfigurations, parityHasUnexpectedDifferences } from "./operon-headless-parity.mjs";
 import { OperonCapabilitiesSchema } from "../dist/services/operon/contract.js";
 
 const root = await mkdtemp(path.join(tmpdir(), "test-operon-headless-"));
@@ -53,6 +53,12 @@ const groupedFilter = { ...dueFilter, id: "fixture-grouped", name: "Grouped filt
 const filters = [dueFilter, runtimeFilter, dynamicFilter, groupedFilter];
 const priority = { id: "pr_a", label: "A", color: null, description: null };
 const mapping = { canonicalKey: "status", visiblePropertyName: "État", type: "text", sync: "yes", enabled: true, isSystem: true, isInternal: false };
+const virtualMappings = [
+  ["description", "Description", "text"], ["checkbox", "Checkbox", "checkbox"], ["tags", "Tags", "list"],
+  ["representation", "Representation", "text"], ["locator", "Source locator", "text"],
+  ["pinned", "Pinned", "checkbox"], ["related", "Related", "list"],
+].map(([canonicalKey, visiblePropertyName, type]) =>
+  ({ canonicalKey, visiblePropertyName, type, sync: null, enabled: true, isSystem: true, isInternal: false }));
 const pluginData = {
   schemaVersion: 3, settings: { language: "fr", excludedFolders: ["Unindexed", "Excluded"] },
   taxonomy: {
@@ -138,13 +144,14 @@ const live = createServer(async (req, res) => {
   } : req.url.endsWith("/configuration") ? {
     ...envelope, source: "operon-runtime", operonVersion: "4.6.0", bridgeVersion: "0.9.9",
     configuration: {
-      language: "fr", workflow: { language: "fr", defaultPipelineName: "CN",
+      language: "auto", workflow: { language: "auto", defaultPipelineName: "CN",
         pipelines: [{ ...pipeline, statuses: statuses.map(s => ({ ...s, value: "CN." + s.label })) }] },
-      priorities: { defaultPriority: "pr_a", items: [priority] }, keys: [mapping],
+      priorities: { defaultPriority: "pr_a", items: [priority] }, keys: [...virtualMappings, { ...mapping, sync: null }],
       creation: { fileTasksFolder: "_Operon", inlineTaskSaveMode: "", inlineTaskUseDailyNote: false, inlineTaskTargetFile: "", inlineTaskHeading: "",
         inlineTaskDailyNoteAddStartDate: false, inlineTaskDailyNoteAddScheduledDate: false, taskCreatorDefaultToFileTask: false,
         taskCreatorDefaultFileTemplateId: null, fileTaskTemplateFolder: "", fileTaskParentInlineTargetMode: "", fileTaskParentFileTargetMode: "",
-        availableFileTaskTemplates: [] },
+        availableFileTaskTemplates: [{ id: "builtin-minimal-file-task-template:pipeline_cn", name: "Minimal File Task — CN",
+          path: null, kind: "builtin-pipeline-minimal", pipelineId: "pipeline_cn", description: null }] },
       automation: { autoCompleteParentWhenAllChildrenTerminal: false, cascadeCancelToDescendants: false,
         fileTaskAutoArchiveEnabled: false, fileTaskArchiveFolder: "", fileTaskArchiveDelaySeconds: 0,
         fileTaskArchiveOnlyFromFileTasksFolder: false, fileRepeatDestination: "", fileRepeatCustomFolder: "" },
@@ -175,11 +182,12 @@ try {
   ]);
   await new Promise((resolve, reject) => live.listen(0, "127.0.0.1", resolve).once("error", reject));
   const url = "http://127.0.0.1:" + live.address().port;
-  const options = { vault, cache: root };
+  const options = { vault, cache: root, timeZone: "", processTimeZone: "" };
   await withOperonClient({ ...options, mode: "live", url, token: "synthetic-fixture" }, async liveClient => {
     const base = await liveClient.listTools();
     for (const mode of ["headless-readonly", "headless-guarded", "headless-filesystem"]) {
-      await withOperonClient({ ...options, mode }, async fs => {
+      const timeZone = mode === "headless-guarded" ? "Europe/Paris" : "";
+      await withOperonClient({ ...options, mode, timeZone, processTimeZone: timeZone ? "UTC" : "" }, async fs => {
         const catalog = await fs.listTools();
         const names = [
           "operon_find_tasks", "operon_get_configuration", "operon_get_relationships", "operon_get_task",
@@ -195,17 +203,29 @@ try {
         assert.equal(parity.liveCount, 5);
         assert.equal(parity.filesystemCount, 5);
         assert.deepEqual(parity.differences, []);
+        assert.equal(parityHasUnexpectedDifferences(parity), false);
         assert.deepEqual(parity.surfaces, {
-          operon_get_configuration: { equal: 1, different: 0, unavailable: 0 },
+          operon_get_configuration: { equal: 0, different: 0, unavailable: 0, known: 1 },
           operon_validate: { equal: 1, different: 0, unavailable: 0 },
           operon_find_tasks: { equal: 1, different: 0, unavailable: 0 },
           operon_get_relationships: { equal: 2, different: 0, unavailable: 0 },
           operon_query_saved_filter: { equal: 1, different: 0, unavailable: 3 },
         });
+        const health = await callOperon(fs, "operon_status");
+        assert.equal(health.timeZoneSource, timeZone ? "configured" : "server");
+        if (timeZone) assert.equal(health.timeZone, timeZone);
+        else assert.match(health.timeZoneWarning, /server's time zone/u);
         if (mode !== "headless-readonly") return;
         const read = (name, args, allowError) => callOperon(fs, "operon_" + name, args, allowError);
         const config = await read("get_configuration");
         assert.equal(config.configuration.creation.fileTasksFolder, "_Operon");
+        assert.deepEqual(config.configuration.keys.slice(0, 7), virtualMappings);
+        assert.equal(config.configuration.creation.availableFileTaskTemplates[0].id, "builtin-minimal-file-task-template:pipeline_cn");
+        assert.equal(config.configurationDifferences.find(row => row.field === "creation.availableFileTaskTemplates.folder").status, "unknown");
+        assert.equal(config.configurationDifferences.find(row => row.field === "keys.sync").status, "disk");
+        const changedPriority = structuredClone(config);
+        changedPriority.configuration.priorities.defaultPriority = "other_priority";
+        assert.equal(compareConfigurations(changedPriority, config), "different");
         assert.equal(config.configuration.priorities.defaultPriority, "pr_a");
         assert.equal(config.source, "filesystem");
         assert.equal(config.partial, false);
@@ -274,11 +294,16 @@ try {
   const { parseOperonMarkdown, projectFilesystemConfiguration, projectFilesystemTask } =
     await import("../dist/services/operon/filesystemFormat.js");
   const cfg = projectFilesystemConfiguration(pluginData);
+  const reserved = projectFilesystemConfiguration({ keyMappings: [
+    { ...mapping, isInternal: true },
+    { ...mapping, canonicalKey: "reminderRules", visiblePropertyName: "Rules", isSystem: false },
+  ] }).keys.slice(7);
+  assert.deepEqual(reserved.map(key => key.isInternal), [false, true]);
   const source = [
     "Text with " + String.fromCharCode(96) + "%% <!--" + String.fromCharCode(96),
     "> ~~~", "> - [ ] Quoted placeholder {{operonId:: hide002}}",
     "- [ ] Retained {{operonId:: kept001}} {{priority:: pr_a}} {{progress:: 50}} {{directSubtaskCount:: 2}}" +
-      " {{note:: first\\nsecond \\}}} {{contexts:: Alpha\\; Beta; Gamma}} {{datetimeStart:: 2099-01-01T12:00}} {{datetimeEnd:: invalid}}",
+      " {{note:: first\\nsecond \\}}} {{contexts:: Alpha\\; Beta; Gamma}} {{tags:: x\\;y; other}} {{datetimeStart:: 2099-01-01T12:00}} {{datetimeEnd:: invalid}}",
     "- [x] Same level checkbox", "- Bullet", "  - [x] Nested checklist",
   ].join("\n");
   const decoded = parseOperonMarkdown(source, "Retained.md", cfg).tasks;
@@ -286,8 +311,9 @@ try {
   const projection = projectFilesystemTask(decoded[0], "Retained.md", { mtime: 1 }, cfg);
   assert.deepEqual(projection.fields, {
     description: "Retained", priority: "pr_a", note: "first\nsecond }", contexts: ["Alpha; Beta", "Gamma"],
-    datetimeStart: "2099-01-01T12:00",
+    datetimeStart: "2099-01-01T12:00", tags: ["x;y", "other"],
   });
+  assert.deepEqual(projection.tags, ["other", "x;y"]);
   assert.equal(projection.tier, "warm");
   assert.equal(projection.plainCheckboxProgress, undefined);
   const [rawFile] = parseOperonMarkdown("---\noperonId: time001\ndatetimeModified: 2020-01-02T08:00:00\n---\n- [x] Sidebar", "Clock.md", cfg).tasks;
@@ -305,6 +331,22 @@ try {
   assert.equal(projectFilesystemTask(decoded[0], "Retained.md", { mtime: recentMtime }, cfg, "Europe/Paris").dates.modified, null);
   assert.equal(projectFilesystemTask(rawFile, "Clock.md", { mtime: 1 }, cfg).dates.created, null);
   assert.equal(clock.plainCheckboxProgress, undefined);
+  const { compileSavedFilter } = await import("../dist/services/operon/filesystemFilters.js");
+  const filterSpec = (condition, sorts = []) => ({ rootGroup: { logic: "all", children: [condition] }, sorts });
+  const folders = compileSavedFilter(filterSpec(
+    { fieldType: "folders", field: "folders", operator: "isInFolderTree", value: "\\Program\\ACTIVE\\" },
+    [{ field: "folders", order: "desc" }]), null, cfg, new Date());
+  const alpha = { ...clock, path: "Team/Program/Active/Alpha/Task.md" };
+  const beta = { ...clock, path: "Team/Program/Active/Beta/Task.md" };
+  assert.deepEqual([alpha, { ...clock, path: "Team/Program/Inactive/Task.md" }, beta]
+    .filter(folders.predicate).sort(folders.compare), [beta, alpha]);
+  const week = filterSpec({ fieldType: "date", field: "dateDue", operator: "thisWeek" });
+  const midnight = new Date("2026-01-04T23:30:00Z");
+  const monday = { ...clock, fields: { dateDue: "2026-01-05" } };
+  const sunday = { ...clock, fields: { dateDue: "2026-01-04" } };
+  const inWeek = zone => compileSavedFilter(week, null, cfg, midnight, zone).predicate;
+  assert.deepEqual([sunday, monday].map(inWeek("Europe/Paris")), [false, true]);
+  assert.deepEqual([sunday, monday].map(inWeek("UTC")), [true, false]);
 
   process.env.OBSIDIAN_VAULT = vault;
   process.env.OBSIDIAN_RUNTIME_MODE = "headless-readonly";
@@ -320,6 +362,26 @@ try {
   await assert.rejects(building.getTask({ operonId: "child01" }), error =>
     error.details.reasonCode === "operon_filesystem_cache_partial");
   assert.deepEqual(await building.configurationReadiness(), { configured: true });
+  await writeFile(configurationFile, JSON.stringify({ language: "en" }), "utf8");
+  assert.deepEqual(await building.configurationReadiness(), { configured: false, degraded: true });
+  const { VaultFileService } = await import("../dist/services/vaultFileService.js");
+  const sample = { path: "Synced.md", content: "---\noperonId: time003\nstatus: CN.Open\n---", mtime: recentMtime, hash: "sample" };
+  const synchronized = new FilesystemOperonService({
+    getStats: () => ({ status: "ready" }),
+    isReady: () => true, getEntriesByPrefix: () => [sample], getEntry: () => sample,
+  });
+  const readBirthtime = VaultFileService.prototype.readBirthtime;
+  VaultFileService.prototype.readBirthtime = async () => oldMtime;
+  try {
+    const degraded = await synchronized.query({});
+    assert.equal(degraded.tasks[0].status, "CN.Open");
+    assert.equal(degraded.tasks[0].statusId, null);
+    assert.match(degraded.limitations.join("\n"), /Legacy Operon data has no pipeline list/u);
+    assert.match(degraded.limitations.join("\n"), /synchronization created the local copy/u);
+    assert.deepEqual((await synchronized.validate()).violations, []);
+  } finally {
+    VaultFileService.prototype.readBirthtime = readBirthtime;
+  }
   await writeFile(configurationFile, JSON.stringify({ taxonomy: {}, schemaVersion: 3 }), "utf8");
   await assert.rejects(building.configurationReadiness(), error =>
     error.details.reasonCode === "operon_filesystem_configuration_invalid");

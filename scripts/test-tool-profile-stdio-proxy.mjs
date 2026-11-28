@@ -65,6 +65,11 @@ async function waitForHealth(port, child) {
 
 async function openProxy(vault, port, profile) {
   const args = ["dist/stdio-proxy.js"];
+  if (profile === "tasks") {
+    const configUrl = new URL("../dist/config/index.js", import.meta.url).href;
+    const preload = "await import(" + JSON.stringify(configUrl) + "); delete process.env.OBSIDIAN_RUNTIME_MODE;";
+    args.unshift("--import", "data:text/javascript," + encodeURIComponent(preload));
+  }
   if (profile) args.push("--tool-profile", profile);
   const env = sharedEnv(vault, port, {
     MCP_TRANSPORT_TYPE: "stdio",

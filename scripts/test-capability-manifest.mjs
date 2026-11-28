@@ -693,6 +693,7 @@ assert.equal(capability(headlessOperon, "operon-read").state, "ready");
 assert.equal(capability(headlessOperon, "operon-write").available, false);
 for (const [operon, reasonCode] of [
   [{ state: "ready", value: { configured: false } }, "operon_not_present"],
+  [{ state: "ready", value: { configured: false, degraded: true } }, "operon_incompatible"],
   [{ state: "unavailable" }, "operon_incompatible"],
 ]) {
   const manifest = projectCapabilityManifest(input({

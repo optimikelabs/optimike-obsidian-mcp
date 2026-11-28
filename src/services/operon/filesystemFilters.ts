@@ -1,6 +1,6 @@
 
 import type { OperonTask } from "./contract.js";
-import { object, splitOperonList, type FilesystemConfiguration } from "./filesystemFormat.js";
+import { formatOperonLocalTime, object, splitOperonList, type FilesystemConfiguration } from "./filesystemFormat.js";
 
 type Predicate = (task: OperonTask) => boolean;
 const logic = {
@@ -36,9 +36,15 @@ const numberOperators: Record<string, (actual: number, target: number) => boolea
   lte: (a, b) => a <= b, gte: (a, b) => a >= b,
   divisible: (a, b) => b !== 0 && a % b === 0, notDivisible: (a, b) => b !== 0 && a % b !== 0,
 };
-const sortFields = new Set(["description", "status", "priority", "checkbox", "dateDue", "dateScheduled", "datetimeModified"]);
-export function localDate(now: Date): string {
-  return [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
+const sortFields = new Set(["description", "status", "priority", "checkbox", "dateDue", "dateScheduled", "datetimeModified", "folders"]);
+export function localDate(now: Date, timeZone?: string): string {
+  return formatOperonLocalTime(now, timeZone).slice(0, 10);
+}
+
+function folderPath(path: string): string {
+  const normalized = path.replace(/\\/gu, "/").replace(/^\/+|\/+$/gu, "");
+  const index = normalized.lastIndexOf("/");
+  return index < 0 ? "" : normalized.slice(0, index).toLowerCase();
 }
 
 function compileNode(input: unknown, pinned: ReadonlySet<string> | null, today: string, depth = 0): Predicate {
@@ -57,6 +63,10 @@ function compileNode(input: unknown, pinned: ReadonlySet<string> | null, today: 
   if (typeof field !== "string" || typeof operator !== "string") throw new Error("filter condition");
   if (field.startsWith("file.property:") || field.startsWith("__")) throw new Error("unsupported property projection");
   const target = typeof value === "string" ? value : "";
+  if (fieldType === "folders" && operator === "isInFolderTree") {
+    const folder = target.replace(/\\/gu, "/").trim().replace(/^\/+|\/+$/gu, "").toLowerCase();
+    return task => Boolean(folder) && ("/" + folderPath(task.path) + "/").includes("/" + folder + "/");
+  }
   const read = (task: OperonTask) => field === "description" ? task.description :
     field === "tags" ? task.tags : (Object.hasOwn(task.fields, field) ? task.fields[field] :
     task.properties && Object.hasOwn(task.properties, field) ? task.properties[field] : undefined);
@@ -93,6 +103,15 @@ function compileNode(input: unknown, pinned: ReadonlySet<string> | null, today: 
     if (operator === "notToday") return task => !!date(task) && date(task) !== today;
     if (operator === "beforeToday") return task => !!date(task) && date(task) < today;
     if (operator === "afterToday") return task => date(task) > today;
+    if (operator === "thisWeek") {
+      // Operon 4.6 starts weeks on Monday. UTC arithmetic here steps through calendar dates only.
+      const monday = new Date(today + "T00:00:00Z");
+      monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+      const start = monday.toISOString().slice(0, 10);
+      monday.setUTCDate(monday.getUTCDate() + 6);
+      const end = monday.toISOString().slice(0, 10);
+      return task => date(task) >= start && date(task) <= end;
+    }
     if (operator === "underDaysAgo" || operator === "underDaysAway") {
       const days = Number(target);
       if (!Number.isInteger(days) || days < 0) throw new Error("invalid day count");
@@ -111,12 +130,12 @@ function compileNode(input: unknown, pinned: ReadonlySet<string> | null, today: 
 
 export function compileSavedFilter(
   definition: Record<string, unknown>, pinned: ReadonlySet<string> | null,
-  configuration: FilesystemConfiguration, now: Date,
+  configuration: FilesystemConfiguration, now: Date, timeZone?: string,
 ) {
   if (definition.groupBy || definition.subgroupBy) throw new Error("grouped filter");
   const predicate = compileNode(definition.rootGroup ?? {
     logic: definition.matchLogic, children: definition.conditions,
-  }, pinned, localDate(now));
+  }, pinned, localDate(now, timeZone));
   const specs = Array.isArray(definition.sorts) ? definition.sorts :
     definition.sortBy ? [{ field: definition.sortBy, order: definition.sortOrder }] : [];
   const ranks = (items: (string | null)[][]) => new Map(items.flatMap((keys, index) =>
@@ -132,7 +151,7 @@ export function compileSavedFilter(
     const ranking = field === "checkbox" ? checkboxRanks : field === "priority" ? priorityRanks :
       field === "status" ? statusRanks : undefined;
     const value = (task: OperonTask) => field === "description" ? task.description :
-      field === "checkbox" ? task.checkbox : String(task.fields[field] ?? "");
+      field === "checkbox" ? task.checkbox : field === "folders" ? folderPath(task.path) : String(task.fields[field] ?? "");
     const order = spec.order === "desc" ? -1 : 1;
     return (left: OperonTask, right: OperonTask) => {
       const a = value(left);

@@ -1249,7 +1249,7 @@ async function filteredBackendTools(
     selectAvailableToolProfileNames({
       profile: toolProfile,
       availableNames: result.tools.map((tool) => tool.name),
-      operonFilesystem: /^headless-(?:readonly|guarded|filesystem)$/u.test(process.env.OBSIDIAN_RUNTIME_MODE?.trim() ?? ""),
+      operonFilesystem: config.obsidianRuntimeMode.startsWith("headless-"),
     }),
   );
   allowedToolNames = selected;

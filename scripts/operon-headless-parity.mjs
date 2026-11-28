@@ -8,7 +8,8 @@ import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 const server = fileURLToPath(new URL("../dist/index.js", import.meta.url));
-export async function withOperonClient({ vault, cache, mode, url, token, profile = "tasks" }, run) {
+export async function withOperonClient({ vault, cache, mode, url, token, profile = "tasks",
+  timeZone = process.env.OPERON_TIMEZONE, processTimeZone = process.env.TZ }, run) {
   const client = new Client({ name: "operon-headless-parity", version: "1" });
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -27,6 +28,8 @@ export async function withOperonClient({ vault, cache, mode, url, token, profile
       MCP_TOOL_PROFILE: profile,
       MCP_WRITE_MODE: "readonly",
       OPERON_MUTATIONS_ENABLED: "false",
+      OPERON_TIMEZONE: timeZone ?? "",
+      TZ: processTimeZone ?? "",
       SEMANTIC_SEARCH_PREWARM: "false",
       MCP_LOG_LEVEL: "error",
     },
@@ -109,10 +112,56 @@ export async function runParity(liveClient, filesystemClient) {
     differences: compareTasks(live.value, filesystem.value), surfaces };
 }
 
+export function compareConfigurations(live, filesystem) {
+  if (isDeepStrictEqual(live.configuration, filesystem.configuration)) return "equal";
+  const left = structuredClone(live.configuration);
+  const right = structuredClone(filesystem.configuration);
+  const declared = new Map((filesystem.configurationDifferences ?? []).map(row => [row.field, row.status]));
+  const bridgeDefaults = {
+    language: "auto", "workflow.language": "auto", "creation.fileTaskParentInlineTargetMode": "",
+    "creation.fileTaskParentFileTargetMode": "", "indexing.fullReindexOnStartup": false,
+    "indexing.indexEventDebounceMs": 0, "docs.folder": "", "docs.autoUpdateEnabled": false,
+  };
+  for (const [field, fallback] of Object.entries(bridgeDefaults)) {
+    const [section, key] = field.split(".");
+    if (declared.get(field) !== "disk" || (key ? left[section]?.[key] : left[section]) !== fallback) continue;
+    for (const value of [left, right]) {
+      if (key && value[section]) delete value[section][key];
+      else delete value[section];
+    }
+  }
+  for (const value of [left, right]) {
+    if (Array.isArray(value.keys)) {
+      const omitSync = declared.get("keys.sync") === "disk" && live.configuration.keys?.every(row => row.sync === null);
+      value.keys = value.keys.map(({ sync, ...row }) => omitSync ? row : { ...row, sync })
+        .sort((a, b) => a.canonicalKey.localeCompare(b.canonicalKey));
+    }
+    if (Array.isArray(value.creation?.availableFileTaskTemplates)) {
+      const templates = value.creation.availableFileTaskTemplates
+        .filter(template => declared.get("creation.availableFileTaskTemplates.folder") !== "unknown" || template.kind !== "folder");
+      if (declared.get("creation.availableFileTaskTemplates.name") === "derived") {
+        for (const template of templates) if (template.kind === "builtin-pipeline-minimal") delete template.name;
+      }
+      value.creation.availableFileTaskTemplates = templates.sort((a, b) => a.id.localeCompare(b.id));
+    }
+  }
+  // The known Bridge gap has an empty catalog; compare filter definitions if live provides them.
+  if (declared.get("views.filters") === "disk" && left.views?.filters?.length === 0 && right.views) {
+    delete left.views.filters;
+    delete right.views.filters;
+  }
+  return isDeepStrictEqual(left, right) ? "known" : "different";
+}
+
+export function parityHasUnexpectedDifferences(result) {
+  return result.differences.length > 0 || Object.values(result.surfaces).some(surface => surface.different > 0);
+}
+
 export async function compareSurfaces(live, filesystem, tasks) {
   const report = {};
   const record = (name, classify) => {
     const counts = report[name] ??= { equal: 0, different: 0, unavailable: 0 };
+    if (classify === "known") counts.known ??= 0;
     counts[classify]++;
   };
   const pair = (name, args) => Promise.all([
@@ -123,7 +172,9 @@ export async function compareSurfaces(live, filesystem, tasks) {
     if ([a, b].some(result => result.error || result.result?.ok === false ||
         (result.ok === false && (name !== "operon_validate" || !Array.isArray(result.violations))))) {
       record(name, "unavailable");
-    } else record(name, isDeepStrictEqual(project(a), project(b)) ? "equal" : "different");
+    } else record(name, name === "operon_get_configuration"
+      ? compareConfigurations(a, b)
+      : isDeepStrictEqual(project(a), project(b)) ? "equal" : "different");
     return [a, b];
   };
   const identity = task => task.identity?.operonId ?? task.operonId;
@@ -189,7 +240,7 @@ async function main() {
       withOperonClient({ vault, cache, mode: "headless-readonly" }, fs => runParity(live, fs)));
     const { differences, ...counts } = result;
     console.log(JSON.stringify({ ...counts, differingTasks: differences.length }, null, 2));
-    if (differences.length || Object.values(result.surfaces).some(surface => surface.different > 0)) process.exitCode = 1;
+    if (parityHasUnexpectedDifferences(result)) process.exitCode = 1;
   } finally {
     await rm(cache, { recursive: true, force: true });
   }

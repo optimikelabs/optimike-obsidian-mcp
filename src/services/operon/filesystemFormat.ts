@@ -20,6 +20,14 @@ const builtInKeys = ("operonId status taskType priority dateDue dateScheduled da
 const managed = new Set([...builtInKeys, ...listKeys]);
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 
+// Operon 4.6 Developer API V1 virtual fields are emitted before stored mappings.
+const virtualFields = [
+  ["description", "Description", "text"], ["checkbox", "Checkbox", "checkbox"], ["tags", "Tags", "list"],
+  ["representation", "Representation", "text"], ["locator", "Source locator", "text"],
+  ["pinned", "Pinned", "checkbox"], ["related", "Related", "list"],
+] as const;
+const reservedCustomKeys = new Set(["reminderdatetimes", "reminderrules"]);
+
 export function projectFilesystemConfiguration(data: RecordValue): FilesystemConfiguration {
   const packaged = data.schemaVersion === 2 || data.schemaVersion === 3;
   const taxonomy = object(data.taxonomy);
@@ -69,7 +77,8 @@ export function projectFilesystemConfiguration(data: RecordValue): FilesystemCon
       return {
         canonicalKey: k.canonicalKey, visiblePropertyName: k.visiblePropertyName,
         type: str(k.type), sync: str(k.sync), enabled: k.enabled !== false,
-        isSystem: k.isSystem === true, isInternal: k.isInternal === true,
+        isSystem: k.isSystem === true,
+        isInternal: k.isSystem === false && reservedCustomKeys.has(str(k.canonicalKey)?.toLowerCase() ?? ""),
       };
     }),
     creation: {
@@ -111,6 +120,23 @@ export function projectFilesystemConfiguration(data: RecordValue): FilesystemCon
   });
   const { defaultPriority, items } = configuration.priorities;
   configuration.priorities.defaultPriority = resolveOperonPriorityStableId(defaultPriority, items) ?? defaultPriority;
+  for (const [canonicalKey, visiblePropertyName, type] of [...virtualFields].reverse()) {
+    if (configuration.keys.some(key => key.canonicalKey === canonicalKey)) continue;
+    configuration.keys.unshift({ canonicalKey, visiblePropertyName, type, enabled: true, isSystem: true, isInternal: false, sync: null });
+  }
+  const workflows = configuration.workflow.pipelines;
+  const minimalLabel = language === "fr" ? "Tâche-fichier minimale" : "Minimal File Task";
+  configuration.creation.availableFileTaskTemplates = workflows.flatMap(pipeline => {
+    const id = pipeline.id?.trim();
+    const initial = pipeline.statuses[0];
+    if (!id || !initial?.id || !pipeline.name.trim() || pipeline.name.includes(".") || !initial.label.trim() ||
+        workflows.filter(other => other.id?.trim() === id || other.name === pipeline.name).length !== 1 ||
+        pipeline.statuses.filter(status => status.id === initial.id || status.value === initial.value).length !== 1) return [];
+    return [{
+      id: "builtin-minimal-file-task-template:" + id, name: minimalLabel + " — " + pipeline.name,
+      kind: "builtin-pipeline-minimal", pipelineId: id, path: null, description: null,
+    }];
+  });
   return configuration;
 }
 
@@ -141,6 +167,11 @@ function decodeInlineValue(input: string, note: boolean): string {
   });
 }
 
+function splitInlineList(value: string): string[] {
+  return (value.match(/(?:\\.|\[\[[^\]]*\]\]|[^;,\[\\]|\[(?!\[))+/gu) ?? [])
+    .map(item => decodeInlineValue(item, false).trim()).filter(Boolean);
+}
+
 function readFields(entries: [string, unknown][], configuration: FilesystemConfiguration, inline = false) {
   const mappings = new Map(configuration.keys.map(k => [k.visiblePropertyName, k]));
   const types = new Map(configuration.keys.map(k => [k.canonicalKey, k.type]));
@@ -151,8 +182,7 @@ function readFields(entries: [string, unknown][], configuration: FilesystemConfi
     const isList = types.get(canonical) === "list" || listKeys.includes(canonical);
     const parsed = isList
       ? inline && typeof value === "string"
-        ? (value.match(/(?:\\.|\[\[[^\]]*\]\]|[^;,\[\\]|\[(?!\[))+/gu) ?? [])
-          .map(item => decodeInlineValue(item, false).trim()).filter(Boolean)
+        ? splitInlineList(value)
         : splitOperonList(value)
       : scalar(inline && typeof value === "string" ? decodeInlineValue(value, canonical === "note") : value);
     if (typeof parsed === "string" && key === "dateCreated" && /^\d{4}-\d{2}-\d{2}$/u.test(parsed)) {
@@ -261,7 +291,7 @@ export function parseOperonMarkdown(content: string, path: string, configuration
     const fields = readFields(tokens.map(m => [m[1].trim(), m[2].trim()]), configuration, true);
     const id = scalar(fields.operonId);
     if (!id || !validId.test(id)) continue;
-    const tags = tokens.filter(token => token[1].trim() === "tags").flatMap(token => splitOperonList(token[2]));
+    const tags = tokens.filter(token => token[1].trim() === "tags").flatMap(token => splitInlineList(token[2]));
     const description = match[2].replace(fieldToken, "").replace(tagToken, (_, prefix: string, tag: string) => {
       tags.push(tag);
       return prefix;
@@ -269,6 +299,14 @@ export function parseOperonMarkdown(content: string, path: string, configuration
     tasks.push({ id, checkbox, description, line: i + 1, fields, tags });
   }
   return { tasks, invalidFrontmatter };
+}
+
+export function formatOperonLocalTime(time: number | Date, timeZone?: string): string {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+    timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit",
+    minute: "2-digit", second: "2-digit", hourCycle: "h23",
+  }).formatToParts(time).map(({ type, value }) => [type, value]));
+  return [parts.year, parts.month, parts.day].join("-") + "T" + [parts.hour, parts.minute, parts.second].join(":");
 }
 
 export function projectFilesystemTask(
@@ -283,17 +321,12 @@ export function projectFilesystemTask(
   const priority = resolveOperonPriorityStableId(fields.priority, configuration.priorities.items) ?? scalar(fields.priority);
   if (priority) fields.priority = priority;
   if (source === "file") {
-    const format = (time: number) => {
-      const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
-        timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit",
-        minute: "2-digit", second: "2-digit", hourCycle: "h23",
-      }).formatToParts(time).map(({ type, value }) => [type, value]));
-      return [parts.year, parts.month, parts.day].join("-") + "T" + [parts.hour, parts.minute, parts.second].join(":");
-    };
-    if (!fields.datetimeCreated && stat.birthtime && stat.birthtime > 0) fields.datetimeCreated = format(stat.birthtime);
+    if (!fields.datetimeCreated && stat.birthtime && stat.birthtime > 0) {
+      fields.datetimeCreated = formatOperonLocalTime(stat.birthtime, timeZone);
+    }
     // Operon resolves the effective modification timestamp before the Bridge reads it.
     if (Number.isFinite(stat.mtime) && stat.mtime > 0) {
-      const fileModified = format(stat.mtime);
+      const fileModified = formatOperonLocalTime(stat.mtime, timeZone);
       const storedModified = scalar(fields.datetimeModified);
       if (!storedModified || storedModified.localeCompare(fileModified) < 0) {
         fields.datetimeModified = fileModified;

@@ -982,7 +982,7 @@ function operonCapabilities(input: CapabilityManifestProjectionInput): {
     const available = configured && input.cacheReady;
     const reason = available ? "ready" : configured ? "operon_index_not_ready" :
       input.operon.state === "timed_out" ? "bridge_probe_timed_out" :
-      input.operon.state === "ready" ? "operon_not_present" : "operon_incompatible";
+      input.operon.state === "ready" && input.operon.value.degraded !== true ? "operon_not_present" : "operon_incompatible";
     return {
       read: entry(input, "operon-read", available, available, reason,
         available ? "none" : configured ? "refresh_vault_cache" :

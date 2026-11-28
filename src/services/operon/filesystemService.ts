@@ -13,22 +13,53 @@ import {
   type OperonSnapshotEnvelope, type OperonTask, type OperonRelationships,
 } from "./contract.js";
 import {
-  digest, object, parseOperonMarkdown, projectFilesystemConfiguration,
+  digest, formatOperonLocalTime, object, parseOperonMarkdown, projectFilesystemConfiguration,
   projectFilesystemTask, splitOperonList, type FilesystemConfiguration,
 } from "./filesystemFormat.js";
 import { compileSavedFilter, localDate } from "./filesystemFilters.js";
 
 const baseLimitations = [
   "Reads reflect the synchronized copy and the shared cache, not Obsidian Desktop.",
-  "Filesystem revisions cannot authorize native mutations. Templates, active timers, native ranking and inferred runtime relationships are unavailable.",
+  "Filesystem revisions cannot authorize native mutations. Active timers, native ranking and inferred runtime relationships are unavailable.",
 ];
 const matchesPath = (path: string, scope: string) => path === scope || path.startsWith(scope + "/");
+
+const configurationDifferences = [
+  { field: "language", status: "disk", reason: "The settings retain the configured language while the Bridge may default to auto." },
+  { field: "workflow.language", status: "disk", reason: "The workflow uses the stored language rather than the Bridge default." },
+  { field: "keys.sync", status: "disk", reason: "Sync directions are persisted in mappings and omitted by the Developer API catalog." },
+  { field: "keys", status: "disk", reason: "Stored mappings are retained alongside the seven fixed catalog fields. Desktop may validate mappings differently." },
+  { field: "creation.fileTaskParentInlineTargetMode", status: "disk", reason: "The Bridge does not project the stored parent target mode." },
+  { field: "creation.fileTaskParentFileTargetMode", status: "disk", reason: "The Bridge does not project the stored parent target mode." },
+  { field: "creation.availableFileTaskTemplates.folder", status: "unknown", reason: "Desktop resolves eligible folder templates. The array includes the pipeline-derived built-in templates." },
+  { field: "creation.availableFileTaskTemplates.name", status: "derived", reason: "Built-in template labels use the stored language when supported and may differ from the Desktop locale." },
+  { field: "indexing.fullReindexOnStartup", status: "disk", reason: "The Bridge defaults this setting rather than reading its persisted value." },
+  { field: "indexing.indexEventDebounceMs", status: "disk", reason: "The Bridge defaults the debounce rather than reading its persisted value." },
+  { field: "docs.folder", status: "disk", reason: "The Bridge does not project the stored documentation folder." },
+  { field: "docs.autoUpdateEnabled", status: "disk", reason: "The Bridge does not project the stored documentation update setting." },
+  { field: "views.filters", status: "disk", reason: "Filters are reconstructed from synchronized settings. Operon 4.6 publishes policies.filters while Bridge 0.9.9 reads a top-level filters property." },
+] as const;
+
+function validTimeZone(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  try { return new Intl.DateTimeFormat("en", { timeZone: value.trim() }).resolvedOptions().timeZone; }
+  catch { return undefined; }
+}
+
+function resolveTimeZone(pluginZone?: unknown) {
+  const zone = validTimeZone(config.operonTimeZone) ?? validTimeZone(pluginZone) ?? validTimeZone(process.env.TZ);
+  return {
+    timeZone: zone ?? new Intl.DateTimeFormat().resolvedOptions().timeZone,
+    timeZoneSource: zone ? "configured" as const : "server" as const,
+  };
+}
 
 type ParsedFile = {
   hash: string;
   mtime: number;
   ctime: number;
   invalidFrontmatter: boolean;
+  usesBirthtime: boolean;
   sourceDigest: string;
   tasks: OperonTask[];
 };
@@ -54,6 +85,7 @@ export class FilesystemOperonService {
   private sequence = 0;
   private readonly sessionId = randomUUID();
   private pending: ReturnType<FilesystemOperonService["read"]> | undefined;
+  private clock = resolveTimeZone();
 
   constructor(private readonly cache?: VaultCacheService) {}
 
@@ -66,6 +98,8 @@ export class FilesystemOperonService {
       lastRefreshAt: stats?.lastRefreshAt ?? null,
       lastRefreshCompletedAt: stats?.lastRefreshCompletedAt ?? null,
       partial: !this.cache?.isReady(),
+      ...this.clock,
+      ...(this.clock.timeZoneSource === "server" ? { timeZoneWarning: "Operon is using the server's time zone." } : {}),
     };
   }
 
@@ -88,6 +122,7 @@ export class FilesystemOperonService {
   private async readSettings() {
     const data = await this.pluginData("data.json");
     let configuration: FilesystemConfiguration;
+    let legacyWithoutPipelines = false;
     try {
       if (data && "taxonomy" in data && data.schemaVersion !== 2 && data.schemaVersion !== 3) {
         throw new Error("Unsupported package version");
@@ -95,33 +130,30 @@ export class FilesystemOperonService {
       if (data) {
         const packaged = data.schemaVersion === 2 || data.schemaVersion === 3;
         const pipelineList = packaged ? object(object(data.taxonomy).pipelines).pipelines : data.pipelines;
-        if (!Array.isArray(pipelineList)) throw new Error("Missing Operon pipelines");
+        legacyWithoutPipelines = data.schemaVersion !== 3 && pipelineList === undefined;
+        if (!legacyWithoutPipelines && !Array.isArray(pipelineList)) throw new Error("Invalid Operon pipelines");
       }
       configuration = projectFilesystemConfiguration(data ?? {});
     } catch {
       return unavailable("operon_filesystem_configuration_invalid", "The Operon settings package uses an unsupported format.");
     }
     const settings = object(data?.settings ?? data);
-    const zone = settings.timeZone ?? settings.timezone;
-    let timeZone: string | undefined;
-    if (typeof zone === "string") {
-      try { timeZone = new Intl.DateTimeFormat("en", { timeZone: zone }).resolvedOptions().timeZone; }
-      catch { /* The server's zone is the fallback for invalid settings. */ }
-    }
-    return { data, configuration, timeZone };
+    return { data, configuration, clock: resolveTimeZone(settings.timeZone ?? settings.timezone), legacyWithoutPipelines };
   }
 
   async configurationReadiness(): Promise<Record<string, unknown>> {
-    const { data } = await this.readSettings();
-    return { configured: Boolean(data) };
+    const { data, legacyWithoutPipelines } = await this.readSettings();
+    return { configured: Boolean(data) && !legacyWithoutPipelines, ...(legacyWithoutPipelines ? { degraded: true } : {}) };
   }
 
   private async read(forceRefresh: boolean) {
     if (!this.cache) return unavailable("operon_filesystem_cache_unavailable", "Headless Operon reads require the shared vault cache.");
     if (forceRefresh) await this.cache.refreshCache(true);
-    const [{ data, configuration, timeZone }, manifest] = await Promise.all([this.readSettings(), this.pluginData("manifest.json")]);
+    const [{ data, configuration, clock, legacyWithoutPipelines }, manifest] = await Promise.all([this.readSettings(), this.pluginData("manifest.json")]);
+    this.clock = clock;
+    const { timeZone } = clock;
     const version = typeof manifest?.version === "string" ? manifest.version : "unknown";
-    const settingsSignature = "filesystem-sha256:" + digest(JSON.stringify([configuration, version, timeZone]));
+    const settingsSignature = "filesystem-sha256:" + digest(JSON.stringify([configuration, version, clock, legacyWithoutPipelines]));
     const previous = this.configurationSignature === settingsSignature ? this.files : new Map<string, ParsedFile>();
     const next = new Map<string, ParsedFile>();
     const paths = configuration.indexing.excludedFolders.map(p => p.replace(/\\/gu, "/").replace(/^\/+|\/+$/gu, ""));
@@ -129,6 +161,7 @@ export class FilesystemOperonService {
     const tasks: OperonTask[] = [];
     const sourceDigests = new Map<OperonTask, string>();
     const invalidFrontmatter: string[] = [];
+    let usesBirthtime = false;
     let missingEntry = false;
     const start = this.provenance();
     for (const entry of this.cache.getEntriesByPrefix()) {
@@ -151,6 +184,7 @@ export class FilesystemOperonService {
         parsed = {
           hash: entry.hash, mtime: entry.mtime, ctime: entry.ctime,
           invalidFrontmatter: markdown.invalidFrontmatter,
+          usesBirthtime: birthtime !== undefined,
           sourceDigest: markdown.tasks.length ? digest(content.content) : "",
           tasks: markdown.tasks.map(raw => ({
             ...projectFilesystemTask(raw, path, { mtime: entry.mtime, birthtime }, configuration, timeZone), operonVersion: version,
@@ -158,6 +192,7 @@ export class FilesystemOperonService {
         };
       }
       next.set(path, parsed);
+      usesBirthtime ||= parsed.usesBirthtime;
       if (parsed.invalidFrontmatter) invalidFrontmatter.push(path);
       for (const task of parsed.tasks) {
         tasks.push(task);
@@ -177,7 +212,9 @@ export class FilesystemOperonService {
     const limitations = [...baseLimitations];
     if (config.obsidianVaultExcludePatterns.length) limitations.push("Shared-cache exclusions may omit notes within Operon's configured scope.");
     if (tasks.some(task => task.source === "file" && !task.dates.created)) limitations.push("A file task without a stored creation date or filesystem birthtime has dates.created=null.");
+    if (usesBirthtime) limitations.push("A file-task creation time derived from filesystem birthtime may reflect when synchronization created the local copy.");
     if (!data) limitations.push("Operon data.json is absent. Only canonical fields can be decoded; workflow and saved-filter definitions are unavailable.");
+    if (legacyWithoutPipelines) limitations.push("Legacy Operon data has no pipeline list. Workflow status resolution is unavailable.");
     const timestamp = typeof provenance.lastRefreshAt === "number" ? provenance.lastRefreshAt : now;
     const snapshot: OperonSnapshotEnvelope = {
       source: "filesystem", stale: provenance.partial,
@@ -196,7 +233,7 @@ export class FilesystemOperonService {
     const settings = object(data?.settings ?? data);
     const recent = settings.taskFinderRecentModifiedDays ?? object(object(data?.ui).taskUiPreferences).taskFinderRecentModifiedDays;
     const recentDays = typeof recent === "number" && Number.isFinite(recent) ? Math.max(1, Math.min(7, Math.round(recent))) : 3;
-    return { snapshot, configuration, provenance, invalidFrontmatter, sourceDigests, recentDays,
+    return { snapshot, configuration, provenance, invalidFrontmatter, sourceDigests, recentDays, legacyWithoutPipelines,
       pinned: pinItems ? new Set(Object.entries(object(pinItems)).filter(([, item]) => object(item).pinned === true).map(([id]) => id)) : null };
   }
 
@@ -234,10 +271,13 @@ export class FilesystemOperonService {
   }
 
   async configuration(forceRefresh = false) {
-    const { snapshot, configuration, provenance } = await this.view(forceRefresh);
+    const { snapshot, configuration, provenance, legacyWithoutPipelines } = await this.view(forceRefresh);
     if (!snapshot.capabilities.configuration) return unavailable("operon_filesystem_configuration_missing", "Operon data.json is absent from this vault copy.");
     const { contractVersion, stale, operonVersion, bridgeVersion, settingsSignature, limitations } = snapshot;
-    return { ok: true, ...provenance, contractVersion, stale, operonVersion, bridgeVersion, settingsSignature, configuration, limitations };
+    return { ok: true, ...provenance, contractVersion, stale, operonVersion, bridgeVersion, settingsSignature, configuration, limitations,
+      configurationDifferences: legacyWithoutPipelines ? [...configurationDifferences,
+        { field: "workflow.pipelines", status: "unknown", reason: "Legacy Operon settings do not contain pipelines." },
+      ] : configurationDifferences };
   }
 
   async querySavedFilter(input: unknown) {
@@ -248,12 +288,12 @@ export class FilesystemOperonService {
     if (!filter) throw new McpError(BaseErrorCode.NOT_FOUND, "No saved Operon filter has this ID in the synchronized settings.");
     const now = new Date();
     let compiled: ReturnType<typeof compileSavedFilter>;
-    try { compiled = compileSavedFilter(filter.definition, pinned, configuration, now); }
+    try { compiled = compileSavedFilter(filter.definition, pinned, configuration, now, provenance.timeZone); }
     catch { return unavailable("operon_filesystem_filter_unsupported", "This saved filter uses semantics unavailable in headless mode. Query it through the Desktop Bridge."); }
     const scope = query.scopePath;
     const tasks = snapshot.tasks.filter(task => (!scope || matchesPath(task.path, scope)) && compiled.predicate(task)).sort(compiled.compare);
     const binding = digest(JSON.stringify([this.sessionId, snapshot.generation, snapshot.settingsSignature,
-      query.filterSetId, query.scopePath, query.includeProperties, query.limit, localDate(now), [...(pinned ?? [])].sort(),
+      query.filterSetId, query.scopePath, query.includeProperties, query.limit, localDate(now, provenance.timeZone), [...(pinned ?? [])].sort(),
     ])).slice(0, 24);
     const match = query.cursor && /^filesystem:([0-9a-f]{24}):(\d+)$/u.exec(query.cursor);
     if (query.cursor && (!match || match[1] !== binding || !Number.isSafeInteger(Number(match[2])))) {
@@ -269,13 +309,13 @@ export class FilesystemOperonService {
   }
 
   async validate(forceRefresh = false) {
-    const { snapshot, invalidFrontmatter, provenance } = await this.view(forceRefresh);
+    const { snapshot, invalidFrontmatter, provenance, legacyWithoutPipelines } = await this.view(forceRefresh);
     const ids = new Set<string>();
     const violations: { severity: "P0" | "P1" | "P2"; code: string; operonId?: string; path?: string; target?: string }[] = [];
     for (const task of snapshot.tasks) {
       if (ids.has(task.operonId)) violations.push({ severity: "P0", code: "duplicate_operon_id", operonId: task.operonId, path: task.path });
       ids.add(task.operonId);
-      if (snapshot.capabilities.configuration && task.status && !task.pipeline) {
+      if (snapshot.capabilities.configuration && !legacyWithoutPipelines && task.status && !task.pipeline) {
         violations.push({ severity: "P1", code: "unknown_workflow_status", operonId: task.operonId });
       }
     }
@@ -360,7 +400,8 @@ export class FilesystemOperonService {
     const f = q.filters;
     const needle = q.text?.toLowerCase();
     const now = new Date();
-    const today = localDate(now);
+    const today = localDate(now, view.provenance.timeZone);
+    const recentThreshold = formatOperonLocalTime(now.getTime() - view.recentDays * 86_400_000, view.provenance.timeZone);
     const includes = (values: readonly (string | null)[] | undefined, value: string | null) => !values?.length || values.includes(value);
     const candidates = snapshot.tasks.filter(task => {
       if (!includes(q.representations, task.source) || !includes(f?.checkbox, task.checkbox) ||
@@ -371,7 +412,7 @@ export class FilesystemOperonService {
       if (f?.due?.to && (!due || due > f.due.to)) return false;
       if (q.scope === "overdue") return [due, scheduled].some(date => date && /^\d{4}-\d{2}-\d{2}$/u.test(date) && date < today);
       if (q.scope === "happens-today") return [due, scheduled, started].includes(today);
-      if (q.scope === "recent") return Date.parse(modified ?? "") >= now.getTime() - view.recentDays * 86_400_000;
+      if (q.scope === "recent") return !!modified && modified >= recentThreshold;
       return true;
     });
     const visible = new Set(candidates.map(task => task.operonId));
