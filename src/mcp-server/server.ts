@@ -37,6 +37,7 @@ import path from "node:path";
 import { z } from "zod/v3";
 // Import validated configuration and environment details.
 import { config, environment } from "../config/index.js";
+import { BaseErrorCode, McpError } from "../types-global/errors.js";
 // Import core utilities: ErrorHandler, logger, requestContextService.
 import {
   ErrorHandler,
@@ -1305,7 +1306,10 @@ function registerHeadlessGuardedWriteTools(
       try {
         current = await vaultFileService.read(target, context);
       } catch (error) {
-        if (params.operation !== "create") {
+        if (
+          params.operation !== "create" ||
+          (error as NodeJS.ErrnoException)?.code !== "ENOENT"
+        ) {
           throw error;
         }
       }
@@ -1350,8 +1354,10 @@ function registerHeadlessGuardedWriteTools(
           : parseCanvasContent(current?.content ?? "");
 
       if (params.operation === "create" && current && !params.overwrite) {
-        throw new Error(
+        throw new McpError(
+          BaseErrorCode.CONFLICT,
           "Canvas file already exists. Pass overwrite=true to replace it.",
+          { ...context, filePath: target },
         );
       }
 
@@ -1432,52 +1438,40 @@ function registerHeadlessGuardedWriteTools(
         };
       }
 
+      let result: VaultFileReadResult;
       if (current) {
-        const result = await vaultFileService.updateWholeFile(
+        if (params.expectedHash && params.expectedHash !== current.hash) {
+          throw new McpError(
+            BaseErrorCode.CONFLICT,
+            "File changed since the caller-provided expectedHash.",
+            {
+              ...context,
+              expectedHash: params.expectedHash,
+              actualHash: current.hash,
+              path: current.path,
+            },
+          );
+        }
+        result = await vaultFileService.updateWholeFile(
           target,
           "overwrite",
           nextContent,
           context,
           {
-            expectedHash: params.expectedHash,
+            expectedHash: current.hash,
             expectedMtime: params.expectedMtime,
           },
         );
-        await updateCacheAfterGuardedWrite(
-          vaultCacheService,
-          result.path,
+      } else if (params.overwrite) {
+        result = await vaultFileService.writeAtomic(target, nextContent, context);
+      } else {
+        result = await vaultFileService.createIfAbsent(
+          target,
+          nextContent,
           context,
         );
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(
-                {
-                  ok: true,
-                  source: "filesystem-guarded",
-                  filePath: result.path,
-                  stats: {
-                    mtime: result.mtime,
-                    size: result.size,
-                    hash: result.hash,
-                  },
-                  validation,
-                },
-                null,
-                2,
-              ),
-            },
-          ],
-          isError: false,
-        };
       }
 
-      const result = await vaultFileService.writeAtomic(
-        target,
-        nextContent,
-        context,
-      );
       await updateCacheAfterGuardedWrite(
         vaultCacheService,
         result.path,
@@ -1562,18 +1556,18 @@ function registerHeadlessGuardedWriteTools(
           isError: false,
         };
       }
-      const result = await vaultFileService.updateWholeFile(
-        target,
-        "overwrite",
-        yaml,
-        context,
-        params.overwrite
-          ? {
+      const result = params.overwrite
+        ? await vaultFileService.updateWholeFile(
+            target,
+            "overwrite",
+            yaml,
+            context,
+            {
               expectedHash: params.expectedHash,
               expectedMtime: params.expectedMtime,
-            }
-          : undefined,
-      );
+            },
+          )
+        : await vaultFileService.createIfAbsent(target, yaml, context);
       await updateCacheAfterGuardedWrite(
         vaultCacheService,
         result.path,

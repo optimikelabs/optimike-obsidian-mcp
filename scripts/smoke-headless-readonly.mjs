@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import assert from "node:assert/strict";
 import {
   mkdtemp,
   rm,
@@ -1094,6 +1095,49 @@ async function main() {
           "filesystem canvas validate",
         );
 
+        const canvasIds = ["concurrent-a", "concurrent-b"];
+        const canvasEditPath = "Canvases/Generated.canvas";
+        const canvasEdits = await withTimeout(
+          Promise.all(canvasIds.map((nodeId) => client.callTool({
+            name: "obsidian_manage_canvas",
+            arguments: {
+              operation: "add_text_node",
+              filePath: canvasEditPath,
+              dryRun: false,
+              nodeId,
+              text: nodeId,
+            },
+          }))),
+          "concurrent filesystem canvas edits",
+        );
+        const canvasEditState = JSON.parse(
+          await readFile(path.join(vaultRoot, canvasEditPath), "utf8"),
+        );
+        const savedEditIds = canvasEditState.nodes.map(({ id }) => id)
+          .filter((id) => canvasIds.includes(id)).sort();
+        const appliedEditIds = canvasIds.filter((_, index) => !canvasEdits[index].isError);
+        const refusedEdits = canvasEdits.filter((result) => result.isError);
+
+        const canvasCreatePath = "Canvases/Concurrent.canvas";
+        const canvasCreates = await withTimeout(
+          Promise.all(canvasIds.map((id) => client.callTool({
+            name: "obsidian_manage_canvas",
+            arguments: {
+              operation: "create",
+              filePath: canvasCreatePath,
+              dryRun: false,
+              overwrite: false,
+              nodes: [{ id, type: "text", x: 0, y: 0, width: 200, height: 100, text: id }],
+            },
+          }))),
+          "concurrent filesystem canvas creates",
+        );
+        const appliedCreateIds = canvasIds.filter((_, index) => !canvasCreates[index].isError);
+        const refusedCreates = canvasCreates.filter((result) => result.isError);
+        const canvasCreateState = JSON.parse(
+          await readFile(path.join(vaultRoot, canvasCreatePath), "utf8"),
+        );
+
         const baseCreate = await withTimeout(
           client.callTool({
             name: "bases_create",
@@ -1114,6 +1158,49 @@ async function main() {
           baseCreate,
           "filesystem-guarded",
           "guarded bases create",
+        );
+
+        const basePath = path.join(vaultRoot, "GuardedSmoke.base");
+        const originalBase = await readFile(basePath, "utf8");
+        const duplicateBase = await withTimeout(
+          client.callTool({
+            name: "bases_create",
+            arguments: {
+              path: "GuardedSmoke.base",
+              overwrite: false,
+              spec: { views: [{ type: "table", name: "Replacement" }] },
+            },
+          }),
+          "guarded bases create without overwrite",
+        );
+        assert.deepEqual(
+          {
+            successfulCanvasEditCountIsPositive: appliedEditIds.length > 0,
+            savedCanvasEdits: savedEditIds,
+            canvasEditConflictCodes: refusedEdits.map(
+              (result) => jsonOf(result, "canvas edit conflict").error?.code,
+            ),
+            onlyOneCanvasCreateSucceeded: appliedCreateIds.length === 1,
+            canvasCreateConflictCodes: refusedCreates.map(
+              (result) => jsonOf(result, "canvas create conflict").error?.code,
+            ),
+            savedCanvasCreate: canvasCreateState.nodes.map(({ id }) => id),
+            duplicateBaseConflictCode: duplicateBase.isError
+              ? jsonOf(duplicateBase, "base create conflict").error?.code
+              : undefined,
+            duplicateCreatePreservedBase: (await readFile(basePath, "utf8")) === originalBase,
+          },
+          {
+            successfulCanvasEditCountIsPositive: true,
+            savedCanvasEdits: appliedEditIds,
+            canvasEditConflictCodes: refusedEdits.map(() => "CONFLICT"),
+            onlyOneCanvasCreateSucceeded: true,
+            canvasCreateConflictCodes: ["CONFLICT"],
+            savedCanvasCreate: appliedCreateIds,
+            duplicateBaseConflictCode: "CONFLICT",
+            duplicateCreatePreservedBase: true,
+          },
+          "headless Canvas and Base handlers must preserve successful writes and reject conflicting creates",
         );
 
         const baseConfig = await withTimeout(
