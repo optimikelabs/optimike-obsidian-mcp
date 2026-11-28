@@ -159,11 +159,15 @@ est `bases_formula_patch_*`, pas l’envoi de YAML arbitraire.
 `POST /bases/:id/query` accepte `view`, `filter`, `sort`, `limit`, `page` et
 `evaluate`. Le filtre de requête est un objet JSON. Une table de propriétés
 comme `{"status":"open","priority":{"gte":2}}` exige que chaque condition soit
-vraie. Les valeurs acceptées sont les scalaires, les tableaux de scalaires
+vraie. Les valeurs acceptées sont les scalaires, les tableaux non vides de scalaires
 (une valeur suffit) et les objets d’opérateurs `eq`, `ne`, `in`,
 `contains`, `gt`, `gte`, `lt` et `lte`. Les groupes `and` et `or`
-prennent un tableau, et `not` prend un seul nœud. Pour une expression,
-utilisez par exemple `{"and":["status == \"open\""]}`.
+prennent un tableau non vide, et `not` prend un seul nœud. Pour une expression,
+mettez les chaînes entre guillemets, par exemple `{"and":["status == \"open\""]}`.
+Utilisez une table quand le nom de la propriété contient des espaces.
+`in` exige au moins une valeur. Avec le moteur actif, une table peut
+comparer le texte d'un résultat `formula.*` à un nombre ou un booléen.
+Les résultats de formule renvoyés restent au format texte.
 
 Le Bridge valide tout le filtre avant de sélectionner les lignes. Une chaîne
 à la racine ou un nœud non pris en charge renvoie HTTP 400 et

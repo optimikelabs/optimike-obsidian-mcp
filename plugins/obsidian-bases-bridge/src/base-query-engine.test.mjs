@@ -160,6 +160,10 @@ test("invalid request filters are refused before row selection, including nested
     [{ and: ["status", { priority: { gtt: 1 } }] }, "filter.and[1].property[0]"],
     [{ or: ["status", "unsupported()"] }, "filter.or[1]"],
     [{ or: [], status: "open" }, "filter"],
+    [{ status: [] }, "filter.property[0]"],
+    [{ status: { in: [] } }, "filter.property[0]"],
+    [{ and: [] }, "filter.and"],
+    [{ or: [] }, "filter.or"],
   ]) {
     const { payload, status, calls } = await query({ evaluate: true, filter });
     assert.equal(status, 400, JSON.stringify(payload));
@@ -242,6 +246,29 @@ test("request filters and formula column settings use the engine's formula value
   );
   assert.equal(payload.rows[0].props["formula.label"], "[[a.md]]");
   assert.ok(!payload.warnings.some((warning) => warning.startsWith("Filtre sur formule")));
+});
+
+test("property tables compare formula text to numeric and boolean operands", async () => {
+  const query = await queryRoute({
+    baseText: JSON.stringify({
+      formulas: { done: 'file.name != "b.md"', count: 'if(file.name == "c.md", 7, 5)' },
+      views: [{ type: "table", name: "All" }],
+    }),
+    notes: NOTES.slice(0, 3),
+    table: {
+      'file.name != "b.md"': (row) => row.name === "b.md" ? "false" : "true",
+      'if(file.name == "c.md", 7, 5)': (row) => row.name === "c.md" ? "7" : "5",
+    },
+  });
+  for (const [filter, path, rendered] of [
+    [{ "formula.done": true, "formula.count": 5 }, "Notes/a.md", "true"],
+    [{ "formula.done": { eq: false }, "formula.count": { in: [5] } }, "Notes/b.md", "false"],
+  ]) {
+    const { payload } = await query({ evaluate: true, filter });
+    assert.equal(payload.source, "engine");
+    assert.deepEqual(payload.rows.map((row) => row.file.path), [path]);
+    assert.deepEqual(payload.rows[0].computed, { done: rendered, count: "5" });
+  }
 });
 
 // 250 notes and a counting formula table: the engine computes a formula only

@@ -334,14 +334,18 @@ semantic manifest/vector metadata are cached locally for faster warm refreshes.
   was requested and the engine is unavailable, one warning per formula says so.
 - The optional `bases_query.filter` is a JSON object. A property table such as
   `{"status":"open","priority":{"gte":2}}` requires all its conditions.
-  Values can be scalars, scalar arrays (any match), or operator objects with
+  Values can be scalars, non-empty scalar arrays (any match), or operator objects with
   `eq`, `ne`, `in`, `contains`, `gt`, `gte`, `lt` and `lte`.
-  Use `and` and `or` arrays or a single `not` node to combine tables and
+  Use non-empty `and` and `or` arrays or a single `not` node to combine tables and
   expressions, for example `{"and":["status == \"open\""]}`. A bare string
   or unsupported node returns `VALIDATION_ERROR` with its location in
   `error.details.filterNode`. The Bridge REST route returns HTTP 400
   `INVALID_PARAMS` with `error.node`. Property tables use the same comparison
   rules in both modes and require Bases Bridge 1.3.1 or later over REST.
+  Quote string values in expressions and use a property table for property
+  names with spaces. An `in` list must contain at least one value.
+  With the live engine, numeric and boolean operands in a property table can
+  match rendered `formula.*` values. The returned formula values remain text.
 - `bases_functions`: live only; the Bases formula functions of the installed
   Obsidian, grouped by receiver type, or the signatures of one type (`on`).
 - `bases_check`: live only; formula health of one Base or of every Base as

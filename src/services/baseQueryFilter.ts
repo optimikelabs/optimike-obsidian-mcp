@@ -26,7 +26,7 @@ const LIVE_CALLS = [
 
 export const BASE_QUERY_FILTER_VERSION = 1;
 export const BASE_QUERY_FILTER_DESCRIPTION =
-  'Additional JSON object filter. Use property values ({"status":"open"}), scalar arrays, or eq/ne/in/contains/gt/gte/lt/lte operator objects. Combine with and/or arrays or a single not node. Put expression strings inside a group, for example {"and":["status == \\"open\\""]}.';
+  'Additional JSON object filter. Use property values ({"status":"open"}), non-empty scalar arrays, or eq/ne/in/contains/gt/gte/lt/lte operator objects. Combine with non-empty and/or arrays or a single not node. Put expression strings inside a group, for example {"and":["status == \\"open\\""]}. Quote string values in expressions. Use a property table for property names with spaces.';
 export const BASE_QUERY_FILTER_ERROR =
   "Unsupported Base query filter node. " + BASE_QUERY_FILTER_DESCRIPTION;
 
@@ -49,8 +49,8 @@ function isScalar(value: unknown): value is Scalar {
     typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value));
 }
 
-function isScalarList(value: unknown): value is Scalar[] {
-  return Array.isArray(value) && value.every(isScalar);
+function isNonEmptyScalarList(value: unknown): value is Scalar[] {
+  return Array.isArray(value) && value.length > 0 && value.every(isScalar);
 }
 
 function normalizeValue(key: string, value: unknown): unknown {
@@ -58,17 +58,24 @@ function normalizeValue(key: string, value: unknown): unknown {
 }
 
 function compileProperty(key: string, expected: unknown, node: string): (value: unknown) => boolean {
+  const isFormula = key.startsWith("formula.");
   const equals = (actual: unknown, value: Scalar) => {
     const normalized = normalizeValue(key, value);
+    // Obsidian renders formula results as text. Interpret that text according
+    // to a numeric or boolean operand while preserving literal string matches.
+    if (isFormula && typeof actual === "string") {
+      if (typeof normalized === "number") return actual.trim() !== "" && Number(actual) === normalized;
+      if (typeof normalized === "boolean") return actual.trim().toLowerCase() === String(normalized);
+    }
     return Array.isArray(actual)
       ? actual.some((item) => String(item) === String(normalized))
       : actual === normalized;
   };
   if (isScalar(expected)) return (actual) => equals(actual, expected);
-  if (isScalarList(expected)) return (actual) => expected.some((value) => equals(actual, value));
+  if (isNonEmptyScalarList(expected)) return (actual) => expected.some((value) => equals(actual, value));
   if (!isRecord(expected) || Object.keys(expected).length === 0) throw new BaseQueryFilterError(node);
   const conditions = Object.entries(expected).map(([operator, operand]) => {
-    if (operator === "in" && isScalarList(operand)) {
+    if (operator === "in" && isNonEmptyScalarList(operand)) {
       return (actual: unknown) => operand.some((value) => equals(actual, value));
     }
     if (!isScalar(operand)) throw new BaseQueryFilterError(node);
@@ -215,7 +222,9 @@ export function compileBaseQueryFilter(filter: unknown, live: boolean): Predicat
       if (entries.length !== 1) throw new BaseQueryFilterError(node);
       const [operator, parts] = group;
       if (operator === "not") return negate(compile(parts, node + ".not", depth + 1));
-      if (!Array.isArray(parts)) throw new BaseQueryFilterError(node + "." + operator);
+      if (!Array.isArray(parts) || parts.length === 0) {
+        throw new BaseQueryFilterError(node + "." + operator);
+      }
       return combine(operator === "and" ? "and" : "or", parts.map((part, index) =>
         compile(part, node + "." + operator + "[" + index + "]", depth + 1),
       ));
