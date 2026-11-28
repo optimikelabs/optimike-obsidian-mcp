@@ -5,6 +5,7 @@
   "main": "dist/index.js",
   "files": [
     "dist",
+    "scripts/semantic-index",
     "NOTICE",
     "README.md",
     "README.fr.md",
@@ -160,11 +161,14 @@
     "docs/releases/3.23.0.fr.md",
     "docs/releases/3.23.1.md",
     "docs/releases/3.23.1.fr.md",
-    "docs/semantic-vector-cache-encoding.md"
+    "docs/semantic-vector-cache-encoding.md",
+    "docs/semantic-index-producer.md",
+    "docs/semantic-index-producer.fr.md"
   ],
   "bin": {
     "optimike-obsidian-mcp": "dist/index.js",
-    "optimike-obsidian-mcp-proxy": "dist/stdio-proxy.js"
+    "optimike-obsidian-mcp-proxy": "dist/stdio-proxy.js",
+    "optimike-semantic-index": "scripts/semantic-index-producer.mjs"
   },
   "type": "module",
   "repository": {
@@ -194,9 +198,10 @@
     "test:headless-long-run": "node scripts/long-run-headless-server.mjs",
     "snapshot:vault": "node scripts/snapshot-vault.mjs",
     "check:vault-exclusions": "node scripts/check-vault-exclusion-policy.mjs",
-    "test:runtime": "npm run build && npm run test:operon-startup-order-offline && npm run smoke:headless-readonly && npm run smoke:hybrid-unavailable && npm run smoke:hybrid-api-available && npm run smoke:headless-guarded && npm run smoke:headless-filesystem && npm run smoke:headless-status && npm run test:local-rest-api-compat",
+    "test:runtime": "npm run build && npm run test:operon-startup-order-offline && npm run test:operon-headless && npm run smoke:headless-readonly && npm run smoke:hybrid-unavailable && npm run smoke:hybrid-api-available && npm run smoke:headless-guarded && npm run smoke:headless-filesystem && node scripts/test-headless-note-operations.mjs && npm run smoke:headless-status && node scripts/test-headless-governed-notes.mjs && npm run test:local-rest-api-compat",
     "audit:production": "npm audit --omit=dev --audit-level=high",
     "verify:code": "npm run audit:production && npm run build",
+    "test:semantic-index-producer": "node --test scripts/test-semantic-index-producer.mjs",
     "rebuild": "npx ts-node --esm scripts/clean.ts && npm run build",
     "fetch:spec": "npx ts-node --esm scripts/fetch-openapi-spec.ts",
     "docs:generate": "typedoc --tsconfig ./tsconfig.typedoc.json",
@@ -205,6 +210,7 @@
     "inspect:stdio": "mcp-inspector --config mcp.json --server optimike-obsidian-mcp-stdio",
     "inspect:http": "mcp-inspector --config mcp.json --server optimike-obsidian-mcp-http",
     "test:operon-contract": "node scripts/test-operon-contract.mjs",
+    "test:operon-headless": "node scripts/test-operon-headless.mjs",
     "test:operon-service": "node scripts/test-operon-service.mjs",
     "build:bases-bridge": "npm --prefix plugins/obsidian-bases-bridge run build",
     "build:operon-bridge": "npm --prefix plugins/obsidian-operon-bridge run build",
@@ -320,6 +326,7 @@
     "micromark-extension-gfm": "^3.0.0",
     "openai": "^6.49.0",
     "partial-json": "^0.1.7",
+    "picomatch": "4.0.7",
     "sanitize-html": "2.18.1",
     "tiktoken": "^1.0.21",
     "validator": "^13.15.35",
@@ -349,13 +356,14 @@
   "author": "Optimike (Mickael Ahouansou)",
   "license": "Apache-2.0",
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=22.13.0"
   },
   "devDependencies": {
     "@modelcontextprotocol/inspector": "^0.21.2",
     "@modelcontextprotocol/sdk": "1.30.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
+    "@types/picomatch": "4.0.3",
     "ajv": "^8.17.1",
     "prettier": "^3.5.3",
     "ts-node": "^10.9.2",

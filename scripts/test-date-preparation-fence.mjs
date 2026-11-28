@@ -1,6 +1,7 @@
 // Run with: node --experimental-strip-types scripts/test-date-preparation-fence.mjs
 // The FDM preparation lock (date_preparation_unverified) must remain only when
 // the preparation may have acted. The fake Bridge uses the real effect fence.
+import "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -18,6 +19,7 @@ Object.assign(process.env, {
 });
 const { createGovernedNoteReplaceRuntime } = await import("../dist/mcp-server/tools/governedNoteReplaceTools/runtime.js");
 const { McpError, BaseErrorCode } = await import("../dist/types-global/errors.js");
+const { publicMcpToolErrorPayload } = await import("../dist/utils/internal/errorHandler.js");
 
 const hash = (value) => createHash("sha256").update(value, "utf8").digest("hex");
 const binding = hash("date-preparation-fence");
@@ -134,6 +136,29 @@ try {
   assert.equal(reasonOf(await plan()), "date_preparation_unverified");
   assert.equal(locks(), 1);
   resolveAvailable = true;
+  const strictRequest = {
+    path: NOTE,
+    nextContent: undated.replace("corps", "nouveau corps"),
+    idempotencyKey: "strict-after-interrupted-date-preparation",
+    expectedBeforeSha256: hash(undated),
+  };
+  const dispatched = sent.length;
+  await assert.rejects(runtime.planPublicDirect(strictRequest), error => {
+    const { error: refusal } = publicMcpToolErrorPayload(error, {
+      operation: "obsidian_note_replace_plan",
+      toolName: "obsidian_note_replace_plan",
+      params: strictRequest,
+    });
+    assert.equal(refusal.code, "CONFLICT");
+    assert.equal(refusal.details.reasonCode, "note_replace_date_preparation_locked");
+    assert.equal(refusal.details.mutationMayHaveApplied, false);
+    assert.match(refusal.message, /obsidian_operation_close.*datePreparationPaths.*obsidian_read_note/u);
+    return true;
+  }, "strict planning must report no effect from this request when an earlier date preparation left a lock");
+  assert.equal(content, undated);
+  assert.equal(sent.length, dispatched);
+  assert.equal(locks(), 1);
+  assert.equal(runtime.findPlanByIdempotencyKey(strictRequest.idempotencyKey), undefined);
   scenario = "success";
   const resumed = await plan();
   assert.equal(resumed.error, undefined, String(resumed.error));

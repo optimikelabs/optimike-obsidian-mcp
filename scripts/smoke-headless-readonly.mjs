@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 
+import { isolatedStateEnv } from "./test-support/isolated-state.mjs";
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import "./test-support/isolated-state.mjs";
 import {
   mkdtemp,
   rm,
@@ -12,6 +16,7 @@ import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { syncVaultBinding } from "../dist/services/syncVaultBinding.js";
 
 const timeoutMs = Number(process.env.MCP_SMOKE_TIMEOUT_MS ?? "60000");
 const modeArg =
@@ -29,6 +34,8 @@ if (
   throw new Error(`Unsupported smoke mode: ${modeArg}`);
 }
 const runtimeMode = modeArg === "hybrid-live" ? "hybrid" : modeArg;
+const hiddenNotes = [".gemini/Context.md", "notes/.hidden/Context.md", "notes/.draft.md"];
+const explicitlyIncludedNote = "notes/.hidden/Included.md";
 
 async function withTimeout(promise, label) {
   let timer;
@@ -66,6 +73,14 @@ function jsonOf(result, label) {
   }
 }
 
+const unicodeNotes = [
+  ['Wide\u00a0Folder/Wide\u00a0Space.md', 'Wide Folder/Wide Space.md'],
+  ['Wide\u00a0Folder/Narrow\u202fSpace.md', 'Wide Folder/Narrow Space.md'],
+  ['Wide\u00a0Folder/Cafe\u0301.md', 'Wide Folder/Caf\u00e9.md'],
+  ['Wide\u00a0Folder/Ordinary.md', 'Wide Folder/Ordinary.md'],
+];
+const collidingNotes = ['Collision Name.md', 'Collision\u00a0Name.md'];
+
 async function createTempVault() {
   const vaultRoot = await mkdtemp(
     path.join(os.tmpdir(), "optimike-headless-vault-"),
@@ -74,11 +89,34 @@ async function createTempVault() {
   await mkdir(path.join(vaultRoot, "Canvases"), { recursive: true });
   await mkdir(path.join(vaultRoot, "tmp", "reports"), { recursive: true });
   await mkdir(path.join(vaultRoot, ".obsidian"), { recursive: true });
+  for (const file of [...hiddenNotes, explicitlyIncludedNote]) {
+    const target = path.join(vaultRoot, file);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target,
+      "---\nstatus: visible-only-by-policy\n---\nSynthetic note with searchable keyword alphasmoke.\n" +
+      (file === explicitlyIncludedNote ? "[[Root]] [[notes/.hidden/Context]]\n" : ""), "utf8");
+  }
+  await mkdir(path.join(vaultRoot, 'Wide\u00a0Folder'));
+  for (const [diskPath] of unicodeNotes) {
+    await writeFile(path.join(vaultRoot, diskPath), '# ' + diskPath, 'utf8');
+  }
+  for (const diskPath of collidingNotes) {
+    await writeFile(path.join(vaultRoot, diskPath), '# ' + diskPath, 'utf8');
+  }
+  const dateDirectory = path.join(vaultRoot, ".obsidian", "plugins", "frontmatter-date-manager");
+  await mkdir(dateDirectory, { recursive: true });
+  await writeFile(path.join(vaultRoot, ".obsidian", "community-plugins.json"), '["frontmatter-date-manager"]');
+  await writeFile(path.join(dateDirectory, "data.json"), JSON.stringify({
+    enableAutoUpdate: true, enableCreateTime: true, headerCreated: "created_at",
+    headerUpdated: "updated_at", dateFormat: "yyyy-MM-dd'T'HH:mm:ss", filterRules: "",
+  }));
   await writeFile(
     path.join(vaultRoot, "Projects", "Headless.md"),
     [
       "---",
       "type: smoke",
+      "due: 2026-12-01",
+      "started: 2026-11-28T12:30:00Z",
       "tags:",
       "  - headless",
       "---",
@@ -94,11 +132,17 @@ async function createTempVault() {
     ].join("\n"),
     "utf8",
   );
+  if (runtimeMode.startsWith("headless-")) {
+    await writeFile(path.join(vaultRoot, "Projects", "Properties.md"),
+      "\uFEFF---\r\ndate: 2026-11-28\r\nblank: null\r\n---\r\n", "utf8");
+  }
   await writeFile(
     path.join(vaultRoot, "Root.md"),
     [
       "---",
       "type: root",
+      "due: 2026-11-28",
+      "started: 2026-11-28T09:00:00Z",
       "---",
       "",
       "Root smoke note with searchable keyword alphasmoke.",
@@ -132,7 +176,7 @@ async function createTempVault() {
       '  priority_label: \'if(priority, "P" + priority.toString(), "")\'',
       "filters:",
       "  and:",
-      "    - 'file.ext == \"md\"'",
+      "    - 'type == \"project\"'",
       "views:",
       "  - type: table",
       "    name: Active",
@@ -147,6 +191,12 @@ async function createTempVault() {
     ].join("\n"),
     "utf8",
   );
+  for (const [name, yaml] of [
+    ["Plain", "views:\n  - type: table\n    name: Plain\n"],
+    ["Calendar", "views:\n  - type: calendar\n    name: Calendar\n"],
+  ]) {
+    await writeFile(path.join(vaultRoot, `${name}.base`), yaml, "utf8");
+  }
   await writeFile(
     path.join(vaultRoot, "Canvases", "Flow.canvas"),
     JSON.stringify(
@@ -189,6 +239,19 @@ async function createTempVault() {
 
 async function main() {
   const vaultRoot = await createTempVault();
+  const vaultBinding = await syncVaultBinding(vaultRoot);
+  const evidenceDir = await mkdtemp(path.join(os.tmpdir(), "optimike-sync-evidence-"));
+  const receipt = path.join(evidenceDir, "heartbeat.json");
+  const testSyncGuard = modeArg === "headless-filesystem";
+  const writeReceipt = async (state, minutesAgo = 0, heartbeatMinutesAgo = 0) => {
+    const now = Date.now();
+    const pullAt = new Date(now - minutesAgo * 60_000).toISOString();
+    await writeFile(receipt, JSON.stringify({
+      version: 2, vaultBinding, state, heartbeatAt: new Date(now - heartbeatMinutesAgo * 60_000).toISOString(),
+      lastSuccessfulPull: { startedAt: pullAt, completedAt: pullAt },
+    }));
+  };
+  if (testSyncGuard) await writeReceipt("ok");
   const cachePath = path.join(
     vaultRoot,
     ".obsidian",
@@ -219,6 +282,33 @@ async function main() {
       if (request.method === "GET" && request.url === "/vault/Projects/") {
         response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ files: ["Headless.md"] }));
+        return;
+      }
+      if (request.method === "POST" && request.url === "/bases/Smoke.base/query") {
+        const chunks = [];
+        for await (const chunk of request) chunks.push(chunk);
+        const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        response.setHeader("content-type", "application/json");
+        if (
+          payload.view !== "Active" ||
+          payload.evaluate !== true ||
+          "property_only" in payload
+        ) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: "Unexpected Bases query request" }));
+          return;
+        }
+        response.end(JSON.stringify({
+          source: "engine",
+          evaluate: true,
+          total: 1,
+          page: 1,
+          rows: [{
+            file: { path: "Projects/Headless.md", name: "Headless" },
+            props: { type: "project" },
+            computed: { priority_label: "P1" },
+          }],
+        }));
         return;
       }
       if (request.url?.startsWith("/vault/")) {
@@ -308,11 +398,17 @@ async function main() {
     cwd: process.cwd(),
     env: {
       ...process.env,
+      ...isolatedStateEnv(),
       OBSIDIAN_RUNTIME_MODE: runtimeMode,
       OBSIDIAN_VAULT: vaultRoot,
       OBSIDIAN_CACHE_SOURCE: "filesystem",
+      ...(testSyncGuard && {
+        OBSIDIAN_SYNC_HEARTBEAT_FILE: receipt,
+        OBSIDIAN_SYNC_STALL_SECONDS: "60",
+        OBSIDIAN_SYNC_WRITE_MAX_AGE_SECONDS: "300",
+      }),
       OBSIDIAN_SHARED_CACHE_DB_PATH: cachePath,
-      OBSIDIAN_VAULT_EXCLUDE_PATTERNS: "tmp/**,**/tmp/**",
+      OBSIDIAN_VAULT_EXCLUDE_PATTERNS: `tmp/**,**/tmp/**,!${explicitlyIncludedNote}`,
       OBSIDIAN_ENABLE_CACHE: "true",
       MCP_WRITE_MODE:
         modeArg === "headless-guarded" || modeArg === "headless-filesystem"
@@ -326,6 +422,9 @@ async function main() {
       // 3.0 default-standard contract is covered by dedicated profile tests.
       MCP_TOOL_PROFILE: "full",
       MCP_LOG_LEVEL: process.env.MCP_LOG_LEVEL ?? "error",
+      TZ: "UTC",
+      OPTIMIKE_VAULT_TIMEZONE: "UTC",
+      MCP_HEADLESS_ALLOW_TRANSIENT_ABSENCE: "true",
     },
   });
   const client = new Client({
@@ -343,6 +442,28 @@ async function main() {
     const tools = await withTimeout(client.listTools(), "listTools");
     const toolNames = tools.tools.map((tool) => tool.name).sort();
     const toolsByName = new Map(tools.tools.map((tool) => [tool.name, tool]));
+    if (runtimeMode.startsWith("headless-")) {
+      const requiredReads = ["obsidian_get_frontmatter", "obsidian_note_links"];
+      assert.deepEqual(requiredReads.filter((name) => !toolsByName.get(name)?.annotations.readOnlyHint), []);
+      for (const [key, value] of [["date", "2026-11-28"], ["blank", null], ["missing", undefined]]) {
+        const result = await client.callTool({
+          name: "obsidian_get_frontmatter", arguments: { filePath: "Projects/Properties.md", key },
+        });
+        assert.deepEqual(jsonOf(result, key), {
+          success: true,
+          message: `Successfully retrieved key '${key}' from frontmatter.`,
+          ...(value === undefined ? {} : { value }),
+          provenance: { source: "filesystem" },
+        });
+      }
+      const result = await client.callTool({
+        name: "obsidian_note_links", arguments: { filePath: "Projects/Headless.md" },
+      });
+      const links = jsonOf(result, "filesystem note links");
+      assert.equal(links.backend.kind, "filesystem");
+      assert.deepEqual(links.outgoing.find((link) => link.linkText === "Root")?.resolution,
+        { status: "resolved", targetPath: "Root.md" });
+    }
     const unannotatedTools = tools.tools.filter((tool) => {
       const annotations = tool.annotations;
       return (
@@ -365,7 +486,6 @@ async function main() {
       "bases_upsert_config",
       "bases_upsert_rows",
       "obsidian_admin_filesystem",
-      "obsidian_batch_frontmatter",
       "obsidian_delete_note",
       "obsidian_manage_canvas",
       "obsidian_manage_frontmatter",
@@ -499,6 +619,20 @@ async function main() {
       "obsidian_runtime_maintenance",
       "obsidian_validate_format",
     ];
+    if (modeArg === "hybrid-live") {
+      const result = await withTimeout(
+        client.callTool({
+          name: "bases_query",
+          arguments: { base_id: "Smoke.base", view: "Active", property_only: true },
+        }),
+        "live Bases query preserves REST evaluation and does not forward the local opt-in",
+      );
+      assert.equal(result.isError, false);
+      const payload = jsonOf(result, "live Bases query");
+      assert.equal(payload.source, "engine");
+      assert.deepEqual(payload.rows[0].computed, { priority_label: "P1" });
+    }
+
     if (
       ["headless-readonly", "headless-guarded", "headless-filesystem"].includes(
         modeArg,
@@ -524,26 +658,14 @@ async function main() {
     for (const name of liveOnly) {
       if (
         modeArg === "hybrid-live" ||
-        (modeArg === "headless-guarded" &&
-          [
-            "obsidian_update_note",
-            "obsidian_search_replace",
-            "obsidian_manage_frontmatter",
-          ].includes(name)) ||
         (modeArg === "headless-filesystem" &&
           [
-            "obsidian_update_note",
             "obsidian_delete_note",
-            "obsidian_search_replace",
-            "obsidian_manage_frontmatter",
-            "obsidian_manage_tags",
             "obsidian_move_note",
-            "obsidian_batch_frontmatter",
             "obsidian_admin_filesystem",
             "obsidian_manage_canvas",
             "bases_create",
             "bases_upsert_config",
-            "bases_upsert_rows",
           ].includes(name))
       ) {
         if (!toolNames.includes(name)) {
@@ -557,7 +679,6 @@ async function main() {
     }
     const filesystemOnly = [
       "obsidian_move_note",
-      "obsidian_batch_frontmatter",
       "obsidian_admin_filesystem",
       "obsidian_manage_canvas",
     ];
@@ -596,6 +717,47 @@ async function main() {
       "read note",
     );
     assertTextIncludes(read, "Headless runtime smoke note", "read note");
+
+    if (modeArg === 'headless-readonly') {
+      const call = async (name, args) => {
+        const result = await withTimeout(client.callTool({ name, arguments: args }), name);
+        assert.equal(Boolean(result.isError), false, result.content[0].text);
+        return JSON.parse(result.content[0].text);
+      };
+      const listed = await call('obsidian_list_notes', {
+        dirPath: 'Wide Folder', responseMode: 'compact', recursionDepth: 0,
+      });
+      for (const [dirPath, entryPath] of [['/Projects', '/Projects/Headless.md'], ['Projects/', 'Projects/Headless.md']]) {
+        const plain = await call('obsidian_list_notes', { dirPath, responseMode: 'compact' });
+        assert.equal(plain.directoryPath, dirPath);
+        assert.ok(plain.entries.some(entry => entry.path === entryPath));
+      }
+      for (const [diskPath, vaultPath] of unicodeNotes) {
+        const entry = listed.entries?.find(entry => entry.path === vaultPath);
+        assert.ok(entry, `expected a list entry for ${vaultPath}`);
+        assert.equal(entry.diskPath, diskPath);
+        const fromList = await call('obsidian_read_note', { filePath: entry.path, format: 'json' });
+        assert.equal(fromList.content.path, vaultPath);
+        assert.equal(fromList.content.content, '# ' + diskPath);
+        assert.equal(fromList.diskPath, diskPath);
+        const fromDisk = await call('obsidian_read_note', { filePath: diskPath });
+        assert.equal(fromDisk.content, fromList.content.content);
+        assert.equal(fromDisk.diskPath, diskPath);
+      }
+      const ordinary = await call('obsidian_read_note', { filePath: 'Root.md', format: 'json' });
+      assert.equal(Object.hasOwn(ordinary, 'diskPath'), false);
+      const rootEntries = JSON.parse(list.content[0].text).entries;
+      assert.equal(Object.hasOwn(rootEntries.find(entry => entry.path === 'Root.md'), 'diskPath'), false);
+      for (const diskPath of collidingNotes) {
+        const entry = rootEntries.find(entry => entry.path === diskPath);
+        assert.ok(entry, `expected an exact spelling for colliding note ${diskPath}`);
+        assert.equal(Object.hasOwn(entry, 'diskPath'), false);
+        const exact = await call('obsidian_read_note', { filePath: entry.path, format: 'json' });
+        assert.equal(exact.content.path, diskPath);
+        assert.equal(exact.content.content, '# ' + diskPath);
+        assert.equal(Object.hasOwn(exact, 'diskPath'), false);
+      }
+    }
 
     const markdownValidation = await withTimeout(
       client.callTool({
@@ -656,6 +818,45 @@ async function main() {
       "global search",
     );
     assertTextIncludes(search, "Root.md", "global search");
+
+    if (modeArg === "headless-readonly") {
+      assertTextIncludes(list, explicitlyIncludedNote, "list explicitly included note");
+      assertTextIncludes(search, explicitlyIncludedNote, "search explicitly included note");
+      const listText = JSON.stringify(list.content);
+      const searchText = JSON.stringify(search.content);
+      const visibility = {};
+      for (const filePath of [...hiddenNotes, explicitlyIncludedNote]) {
+        const exactRead = await withTimeout(
+          client.callTool({
+            name: "obsidian_read_note",
+            arguments: { filePath, format: "markdown" },
+          }),
+          `read ${filePath}`,
+        );
+        const frontmatter = await withTimeout(client.callTool({
+          name: "obsidian_get_frontmatter", arguments: { filePath, key: "status" },
+        }), `read frontmatter for ${filePath}`);
+        visibility[filePath] = {
+          listed: listText.includes(filePath),
+          found: searchText.includes(filePath),
+          readable: !exactRead.isError,
+          frontmatterReadable: !frontmatter.isError,
+        };
+      }
+      const excluded = { listed: false, found: false, readable: false, frontmatterReadable: false };
+      assert.deepEqual(visibility, {
+        [hiddenNotes[0]]: excluded,
+        [hiddenNotes[1]]: excluded,
+        [hiddenNotes[2]]: excluded,
+        [explicitlyIncludedNote]: { listed: true, found: true, readable: true, frontmatterReadable: true },
+      });
+      const links = await withTimeout(client.callTool({
+        name: "obsidian_note_links", arguments: { filePath: explicitlyIncludedNote },
+      }), "links from the explicitly included hidden note");
+      assert.equal(links.isError, false);
+      assert.deepEqual(jsonOf(links, "reincluded note links").outgoing.map(({ resolution }) =>
+        resolution.targetPath ?? null), ["Root.md", null]);
+    }
 
     const excludedSearch = await withTimeout(
       client.callTool({
@@ -731,21 +932,96 @@ async function main() {
       assertTextIncludes(schema, "local-fallback", "bases schema");
       assertTextIncludes(schema, "file.name", "bases schema");
 
-      const query = await withTimeout(
-        client.callTool({
-          name: "bases_query",
-          arguments: {
-            base_id: "Smoke.base",
-            filter: { type: "root" },
-            sort: [{ prop: "file.name", dir: "asc" }],
-            limit: 10,
-            page: 1,
-          },
-        }),
-        "bases query",
-      );
-      assertTextIncludes(query, "local-fallback", "bases query");
-      assertTextIncludes(query, "Root.md", "bases query");
+      for (const [regression, args] of [
+        ["a filterless calendar cannot silently become a Markdown scan", { base_id: "Calendar.base" }],
+        ["disabling evaluation does not opt into a Markdown scan", { base_id: "Plain.base", evaluate: false, property_only: false }],
+      ]) {
+        const result = await withTimeout(
+          client.callTool({ name: "bases_query", arguments: args }),
+          regression,
+        );
+        assert.equal(result.isError, true, regression);
+        const payload = jsonOf(result, regression);
+        assert.equal(payload.error.code, "SERVICE_UNAVAILABLE", regression);
+        assert.equal(payload.error.details.reasonCode, "base_query_requires_obsidian", regression);
+        assert.match(payload.error.message, /Obsidian.*property_only/u, regression);
+        assert.equal(payload.rows, undefined, regression);
+      }
+
+      for (const [regression, filter, expected] of [
+        ["unquoted YAML dates preserve ISO equality", { and: ['due == "2026-11-28"'] }, ["/Root.md"]],
+        ["unquoted YAML dates sort chronologically in expression comparisons", { and: ['due >= "2026-12-01"'] }, ["/Projects/Headless.md"]],
+        ["unquoted YAML timestamps preserve the time in comparisons", { and: ['started > "2026-11-28T10:00:00Z"'] }, ["/Projects/Headless.md"]],
+        ["property-map paths match a vault-relative path", { or: [{ "file.path": "Root.md" }] }, ["/Root.md"]],
+        ["slash-prefixed path operands still match cached rows", { "file.path": { in: ["/Root.md"] } }, ["/Root.md"]],
+        ["property table and expression nodes can select one row together", { and: [{ type: { eq: "root" } }, 'file.name == "Root"'] }, ["/Root.md"]],
+      ]) {
+        const result = await withTimeout(
+          client.callTool({
+            name: "bases_query",
+            arguments: { base_id: "Plain.base", filter, property_only: true },
+          }),
+          regression,
+        );
+        assert.equal(result.isError, false, regression);
+        assert.deepEqual(jsonOf(result, regression).rows.map((row) => row.file.path), expected, regression);
+      }
+
+      for (const [regression, args, expectedNode] of [
+        ["oversized expressions are refused before parsing", { filter: { and: [`type ==${" ".repeat(20_000)}"root"`] } }, "filter.and[0]"],
+        ["logical groups reject invalid leaves even in an unused branch", { filter: { or: ["type", "unrecognized()"] }, property_only: false }, "filter.or[1]"],
+        ["a property array of operators cannot silently match nothing", { filter: { type: [{ eq: "root" }] } }, "filter.property[0]"],
+        ["an empty operator object cannot silently match everything", { filter: { type: {} } }, "filter.property[0]"],
+        ["an opted-in scan cannot filter against an unevaluated formula", { filter: { not: "formula.score == 2" } }, "filter.not"],
+        ["an opted-in scan cannot silently sort on an unevaluated formula", { sort: [{ prop: "formula.score" }] }, null],
+        ["an unknown filter operator must not match every note", { filter: { type: { exists: true } } }, "filter.property[0]"],
+        ["an unsupported file property must not filter against missing values", { filter: { "file.folder": "Projects" } }, "filter.property[0]"],
+        ["an opted-in scan must not sort on a note namespace it cannot resolve", { sort: [{ prop: "note.type" }] }, null],
+      ]) {
+        const result = await withTimeout(
+          client.callTool({
+            name: "bases_query",
+            arguments: { base_id: "Plain.base", property_only: true, ...args },
+          }),
+          regression,
+        );
+        assert.equal(result.isError, true, regression);
+        const payload = jsonOf(result, regression);
+        assert.equal(payload.error.code, "VALIDATION_ERROR", regression);
+        assert.equal(payload.error.details.reasonCode,
+          expectedNode === null ? "base_query_unsupported_local_input" : "base_query_invalid_filter", regression);
+        assert.equal(payload.error.details.filterNode, expectedNode ?? undefined, regression);
+        assert.equal(payload.rows, undefined, regression);
+      }
+
+      const propertyQuery = {
+        filter: {
+          and: [
+            { or: [{ type: { eq: "root" } }, 'type == "area"'] },
+            { not: 'type == "area"' },
+          ],
+        },
+        limit: 1,
+      };
+      for (const [regression, args] of [
+        ["a calendar Base permits an explicitly requested property scan", { base_id: "Calendar.base", property_only: true }],
+        ["an opted-in scan returns Markdown outside the selected Base and labels it", {
+          base_id: "Smoke.base", view: "Active", evaluate: true, property_only: true,
+        }],
+      ]) {
+        const result = await withTimeout(
+          client.callTool({ name: "bases_query", arguments: { ...args, ...propertyQuery } }),
+          regression,
+        );
+        assert.equal(result.isError, false, regression);
+        const payload = jsonOf(result, regression);
+        assert.equal(payload.source, "local-fallback", regression);
+        assert.equal(payload.mode, "property-scan", regression);
+        assert.equal(payload.evaluate, false, regression);
+        assert.equal(payload.total, 1, regression);
+        assert.deepEqual(payload.rows.map((row) => row.file.path), ["/Root.md"], regression);
+        assert.ok(payload.limitations.includes("Non-Markdown files are not listed."), regression);
+      }
 
       const baseValidation = await withTimeout(
         client.callTool({
@@ -766,209 +1042,67 @@ async function main() {
     }
 
     if (modeArg === "headless-guarded" || modeArg === "headless-filesystem") {
-      const update = await withTimeout(
-        client.callTool({
-          name: "obsidian_update_note",
-          arguments: {
-            targetType: "filePath",
-            targetIdentifier: "Projects/Headless.md",
-            modificationType: "wholeFile",
-            wholeFileMode: "append",
-            content: "\nGuarded append smoke.",
-            returnContent: true,
-          },
-        }),
-        "guarded update",
-      );
-      assertTextIncludes(update, "Guarded append smoke", "guarded update");
-
-      const replace = await withTimeout(
-        client.callTool({
-          name: "obsidian_search_replace",
-          arguments: {
-            targetType: "filePath",
-            targetIdentifier: "Projects/Headless.md",
-            replacements: [
-              {
-                search: "Guarded append smoke",
-                replace: "Guarded replace smoke",
-              },
-            ],
-            returnContent: true,
-          },
-        }),
-        "guarded search replace",
-      );
-      assertTextIncludes(
-        replace,
-        "Guarded replace smoke",
-        "guarded search replace",
-      );
-
-      const frontmatter = await withTimeout(
-        client.callTool({
-          name: "obsidian_manage_frontmatter",
-          arguments: {
-            filePath: "Projects/Headless.md",
-            operation: "set",
-            key: "headless_guarded_smoke",
-            value: true,
-          },
-        }),
-        "guarded frontmatter",
-      );
-      assertTextIncludes(
-        frontmatter,
-        "headless_guarded_smoke",
-        "guarded frontmatter",
-      );
+      if (modeArg === "headless-filesystem") {
+        const target = path.join(vaultRoot, "Projects", "Headless.md");
+        const before = await readFile(target, "utf8");
+        for (const [state, age, heartbeatAge, expectedState, refusal] of [
+          ["error", 0, 0, "error", "error"], ["ok", 6, 0, "lagging", "pull_too_old"],
+          ["running", 3, 2, "stalled", "stalled"],
+        ]) {
+          await writeReceipt(state, age, heartbeatAge);
+          const blocked = await withTimeout(client.callTool({
+            name: "obsidian_move_note",
+            arguments: {
+              sourcePath: "Projects/Headless.md", targetPath: "Projects/Blocked.md",
+              expectedHash: createHash("sha1").update(before).digest("hex"),
+            },
+          }), "Sync write guard");
+          assert.equal(blocked.isError, true);
+          const { details } = JSON.parse(blocked.content[0].text).error;
+          assert.equal(details.reasonCode, "upstream_sync_write_blocked");
+          assert.equal(details.upstreamSync, expectedState);
+          assert.equal(details.syncWriteRefusal, refusal);
+          const read = await withTimeout(client.callTool({
+            name: "obsidian_read_note", arguments: { filePath: "Projects/Headless.md", format: "markdown" },
+          }), "read with Sync write guard enabled");
+          assert.equal(read.isError, false);
+          assert.equal(await readFile(target, "utf8"), before);
+        }
+        await writeReceipt("ok");
+      }
+      assert.ok(!toolNames.includes("obsidian_batch_frontmatter"));
+      const textPatch = async (key, filePath = "Projects/Headless.md") => {
+        return client.callTool({ name: "obsidian_text_patch_plan", arguments: {
+          path: filePath, idempotencyKey: key,
+          operations: [{ op: "append_body", text: "\nGuarded append smoke.\n" }],
+        } });
+      };
+      const planned = jsonOf(await withTimeout(textPatch("smoke-append"), "guarded append plan"), "guarded append plan");
+      const applied = jsonOf(await withTimeout(client.callTool({ name: "obsidian_text_patch_apply", arguments: {
+        planRef: planned.planRef, idempotencyKey: "smoke-append",
+      } }), "guarded append apply"), "guarded append apply");
+      assert.equal(applied.outcome, "committed");
+      assert.match(await readFile(path.join(vaultRoot, "Projects", "Headless.md"), "utf8"), /Guarded append smoke/u);
 
       if (modeArg === "headless-filesystem") {
-        const tagsAdd = await withTimeout(
-          client.callTool({
-            name: "obsidian_manage_tags",
-            arguments: {
-              filePath: "Projects/Headless.md",
-              operation: "add",
-              location: "inline",
-              tags: ["headless/filesystem"],
-            },
-          }),
-          "filesystem inline tags add",
-        );
-        assertTextIncludes(
-          tagsAdd,
-          "headless/filesystem",
-          "filesystem inline tags add",
-        );
-
-        const tagIndex = await withTimeout(
-          client.callTool({
-            name: "obsidian_manage_tags",
-            arguments: {
-              operation: "index",
-            },
-          }),
-          "filesystem tag index",
-        );
-        assertTextIncludes(
-          tagIndex,
-          "headless/filesystem",
-          "filesystem tag index",
-        );
-
-        const tagsRemove = await withTimeout(
-          client.callTool({
-            name: "obsidian_manage_tags",
-            arguments: {
-              filePath: "Projects/Headless.md",
-              operation: "remove",
-              location: "inline",
-              tags: ["headless/filesystem"],
-            },
-          }),
-          "filesystem inline tags remove",
-        );
-        assertTextIncludes(
-          tagsRemove,
-          "currentTags",
-          "filesystem inline tags remove",
-        );
-
-        const tagAudit = await withTimeout(
-          client.callTool({
-            name: "obsidian_manage_tags",
-            arguments: { operation: "audit" },
-          }),
-          "filesystem tag audit",
-        );
-        assertTextIncludes(tagAudit, "frontmatterTags", "filesystem tag audit");
-
-        const tagRenameDryRun = await withTimeout(
-          client.callTool({
-            name: "obsidian_manage_tags",
-            arguments: {
-              operation: "rename",
-              fromTag: "headless",
-              toTag: "headless/renamed",
-              dryRun: true,
-            },
-          }),
-          "filesystem tag rename dry run",
-        );
-        assertTextIncludes(
-          tagRenameDryRun,
-          "headless/renamed",
-          "filesystem tag rename dry run",
-        );
-
-        const batchDryRun = await withTimeout(
-          client.callTool({
-            name: "obsidian_batch_frontmatter",
-            arguments: {
-              dryRun: true,
-              operations: [
-                {
-                  filePath: "Projects/Headless.md",
-                  set: { headless_batch_smoke: "dry-run" },
-                },
-              ],
-            },
-          }),
-          "filesystem batch frontmatter dry run",
-        );
-        assertTextIncludes(
-          batchDryRun,
-          '"dryRun": true',
-          "filesystem batch frontmatter dry run",
-        );
-
-        const batchSet = await withTimeout(
-          client.callTool({
-            name: "obsidian_batch_frontmatter",
-            arguments: {
-              dryRun: false,
-              operations: [
-                {
-                  filePath: "Projects/Headless.md",
-                  set: { headless_batch_smoke: "ok" },
-                },
-              ],
-            },
-          }),
-          "filesystem batch frontmatter set",
-        );
-        assertTextIncludes(
-          batchSet,
-          "headless_batch_smoke",
-          "filesystem batch frontmatter set",
-        );
-
-        const moveTarget = jsonOf(
-          await withTimeout(
-            client.callTool({
-              name: "obsidian_update_note",
-              arguments: {
-                targetType: "filePath",
-                targetIdentifier: "Projects/MoveMe.md",
-                modificationType: "wholeFile",
-                wholeFileMode: "append",
-                content: "move me",
-                returnContent: true,
-              },
-            }),
-            "filesystem move target create",
-          ),
-          "filesystem move target create",
-        );
-
+        const createFixture = async (relative, content) => {
+          const created = jsonOf(await client.callTool({ name: "obsidian_note_create_plan", arguments: {
+            path: relative, content, idempotencyKey: relative,
+          } }), "create helper");
+          const result = jsonOf(await client.callTool({ name: "obsidian_note_create_apply", arguments: {
+            planRef: created.planRef, idempotencyKey: relative,
+          } }), "create helper apply");
+          assert.equal(result.outcome, "committed");
+          return createHash("sha1").update(await readFile(path.join(vaultRoot, relative))).digest("hex");
+        };
+        const moveHash = await createFixture("Projects/MoveMe.md", "Move me.\n");
         const moveResult = await withTimeout(
           client.callTool({
             name: "obsidian_move_note",
             arguments: {
               sourcePath: "Projects/MoveMe.md",
               targetPath: "Projects/Moved.md",
-              expectedHash: moveTarget.stats.hash,
+              expectedHash: moveHash,
             },
           }),
           "filesystem move",
@@ -1094,6 +1228,49 @@ async function main() {
           "filesystem canvas validate",
         );
 
+        const canvasIds = ["concurrent-a", "concurrent-b"];
+        const canvasEditPath = "Canvases/Generated.canvas";
+        const canvasEdits = await withTimeout(
+          Promise.all(canvasIds.map((nodeId) => client.callTool({
+            name: "obsidian_manage_canvas",
+            arguments: {
+              operation: "add_text_node",
+              filePath: canvasEditPath,
+              dryRun: false,
+              nodeId,
+              text: nodeId,
+            },
+          }))),
+          "concurrent filesystem canvas edits",
+        );
+        const canvasEditState = JSON.parse(
+          await readFile(path.join(vaultRoot, canvasEditPath), "utf8"),
+        );
+        const savedEditIds = canvasEditState.nodes.map(({ id }) => id)
+          .filter((id) => canvasIds.includes(id)).sort();
+        const appliedEditIds = canvasIds.filter((_, index) => !canvasEdits[index].isError);
+        const refusedEdits = canvasEdits.filter((result) => result.isError);
+
+        const canvasCreatePath = "Canvases/Concurrent.canvas";
+        const canvasCreates = await withTimeout(
+          Promise.all(canvasIds.map((id) => client.callTool({
+            name: "obsidian_manage_canvas",
+            arguments: {
+              operation: "create",
+              filePath: canvasCreatePath,
+              dryRun: false,
+              overwrite: false,
+              nodes: [{ id, type: "text", x: 0, y: 0, width: 200, height: 100, text: id }],
+            },
+          }))),
+          "concurrent filesystem canvas creates",
+        );
+        const appliedCreateIds = canvasIds.filter((_, index) => !canvasCreates[index].isError);
+        const refusedCreates = canvasCreates.filter((result) => result.isError);
+        const canvasCreateState = JSON.parse(
+          await readFile(path.join(vaultRoot, canvasCreatePath), "utf8"),
+        );
+
         const baseCreate = await withTimeout(
           client.callTool({
             name: "bases_create",
@@ -1114,6 +1291,49 @@ async function main() {
           baseCreate,
           "filesystem-guarded",
           "guarded bases create",
+        );
+
+        const basePath = path.join(vaultRoot, "GuardedSmoke.base");
+        const originalBase = await readFile(basePath, "utf8");
+        const duplicateBase = await withTimeout(
+          client.callTool({
+            name: "bases_create",
+            arguments: {
+              path: "GuardedSmoke.base",
+              overwrite: false,
+              spec: { views: [{ type: "table", name: "Replacement" }] },
+            },
+          }),
+          "guarded bases create without overwrite",
+        );
+        assert.deepEqual(
+          {
+            successfulCanvasEditCountIsPositive: appliedEditIds.length > 0,
+            savedCanvasEdits: savedEditIds,
+            canvasEditConflictCodes: refusedEdits.map(
+              (result) => jsonOf(result, "canvas edit conflict").error?.code,
+            ),
+            onlyOneCanvasCreateSucceeded: appliedCreateIds.length === 1,
+            canvasCreateConflictCodes: refusedCreates.map(
+              (result) => jsonOf(result, "canvas create conflict").error?.code,
+            ),
+            savedCanvasCreate: canvasCreateState.nodes.map(({ id }) => id),
+            duplicateBaseConflictCode: duplicateBase.isError
+              ? jsonOf(duplicateBase, "base create conflict").error?.code
+              : undefined,
+            duplicateCreatePreservedBase: (await readFile(basePath, "utf8")) === originalBase,
+          },
+          {
+            successfulCanvasEditCountIsPositive: true,
+            savedCanvasEdits: appliedEditIds,
+            canvasEditConflictCodes: refusedEdits.map(() => "CONFLICT"),
+            onlyOneCanvasCreateSucceeded: true,
+            canvasCreateConflictCodes: ["CONFLICT"],
+            savedCanvasCreate: appliedCreateIds,
+            duplicateBaseConflictCode: "CONFLICT",
+            duplicateCreatePreservedBase: true,
+          },
+          "headless Canvas and Base handlers must preserve successful writes and reject conflicting creates",
         );
 
         const baseConfig = await withTimeout(
@@ -1138,51 +1358,13 @@ async function main() {
           "guarded bases config",
         );
 
-        const rowUpsert = await withTimeout(
-          client.callTool({
-            name: "bases_upsert_rows",
-            arguments: {
-              base_id: "GuardedSmoke.base",
-              operations: [
-                {
-                  file: "Projects/Headless.md",
-                  set: { headless_guarded_smoke_row: "ok" },
-                },
-              ],
-            },
-          }),
-          "guarded bases rows",
-        );
-        assertTextIncludes(
-          rowUpsert,
-          "filesystem-guarded",
-          "guarded bases rows",
-        );
-
-        const deleteTarget = jsonOf(
-          await withTimeout(
-            client.callTool({
-              name: "obsidian_update_note",
-              arguments: {
-                targetType: "filePath",
-                targetIdentifier: "Projects/DeleteMe.md",
-                modificationType: "wholeFile",
-                wholeFileMode: "append",
-                content: "delete me",
-                returnContent: true,
-              },
-            }),
-            "guarded delete target create",
-          ),
-          "guarded delete target create",
-        );
-
+        const deleteHash = await createFixture("Projects/DeleteMe.md", "Delete me.\n");
         const deleteResult = await withTimeout(
           client.callTool({
             name: "obsidian_delete_note",
             arguments: {
               filePath: "Projects/DeleteMe.md",
-              expectedHash: deleteTarget.stats.hash,
+              expectedHash: deleteHash,
             },
           }),
           "guarded delete",
@@ -1190,34 +1372,17 @@ async function main() {
         assertTextIncludes(deleteResult, "deletedHash", "guarded delete");
       }
 
-      const staleHash = await client.callTool({
-        name: "obsidian_update_note",
-        arguments: {
-          targetType: "filePath",
-          targetIdentifier: "Projects/Headless.md",
-          modificationType: "wholeFile",
-          wholeFileMode: "append",
-          content: "bad stale write",
-          expectedHash: "not-the-current-hash",
-        },
-      });
-      if (!staleHash.isError) {
-        throw new Error("Expected stale expectedHash write to be rejected");
-      }
-
-      const traversal = await client.callTool({
-        name: "obsidian_update_note",
-        arguments: {
-          targetType: "filePath",
-          targetIdentifier: "../escape.md",
-          modificationType: "wholeFile",
-          wholeFileMode: "append",
-          content: "bad",
-        },
-      });
-      if (!traversal.isError) {
-        throw new Error("Expected path traversal write to be rejected");
-      }
+      const stale = jsonOf(await textPatch("stale-smoke"), "stale plan");
+      const target = path.join(vaultRoot, "Projects", "Headless.md");
+      const concurrent = (await readFile(target, "utf8")) + "\nExternal edit.\n";
+      await writeFile(target, concurrent);
+      const conflict = jsonOf(await client.callTool({ name: "obsidian_text_patch_apply", arguments: {
+        planRef: stale.planRef, idempotencyKey: "stale-smoke",
+      } }), "stale apply");
+      assert.equal(conflict.outcome, "conflict");
+      assert.equal(await readFile(target, "utf8"), concurrent);
+      const traversal = await textPatch("traversal-smoke", "../escape.md");
+      assert.equal(Boolean(traversal.isError), true, "Path traversal must be rejected");
     }
 
     console.log(
@@ -1245,6 +1410,7 @@ async function main() {
     await rm(vaultRoot, { recursive: true, force: true }).catch(
       () => undefined,
     );
+    await rm(evidenceDir, { recursive: true, force: true });
   }
 }
 

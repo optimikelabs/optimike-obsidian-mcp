@@ -20,7 +20,6 @@ export const TOOL_GROUP_IDS = [
   "canvas.governed",
   "external.move",
   "external.read",
-  "metadata.direct.batch",
   "metadata.direct.frontmatter",
   "metadata.direct.tags",
   "metadata.governed",
@@ -99,7 +98,6 @@ const CANONICAL_UNIQUE_TOOL_NAMES = [
   "obsidian_list_notes",
   "obsidian_global_search",
   "obsidian_manage_tags",
-  "obsidian_batch_frontmatter",
   "list_all_tasks",
   "query_tasks",
   "bases_list",
@@ -145,6 +143,10 @@ const CANONICAL_UNIQUE_TOOL_NAMES = [
 const COMPATIBILITY_HISTORICAL_TOOL_NAMES = ["bases_upsert_config"] as const;
 
 const GOVERNED_OPERATION_TOOL_NAMES = [
+  "obsidian_operation_revert_plan",
+  "obsidian_operation_revert_apply",
+  "obsidian_operation_revert_status",
+  "obsidian_operation_revert_recover",
   "asset_import_plan",
   "asset_import_apply",
   "asset_import_status",
@@ -163,9 +165,11 @@ const GOVERNED_OPERATION_TOOL_NAMES = [
   "obsidian_note_move_plan",
   "obsidian_note_move_apply",
   "obsidian_note_move_status",
+  "obsidian_note_move_recover",
   "obsidian_note_delete_plan",
   "obsidian_note_delete_apply",
   "obsidian_note_delete_status",
+  "obsidian_note_delete_recover",
   "obsidian_note_replace_plan",
   "obsidian_note_replace_apply",
   "obsidian_note_replace_status",
@@ -260,12 +264,16 @@ const LIVE_MODES = [
   "hybrid-live",
 ] as const satisfies readonly ToolRegistrationMode[];
 
-const BASE_READ_MODES = [
-  "live",
-  "hybrid-live",
+const HEADLESS_MODES = [
   "headless-readonly",
   "headless-guarded",
   "headless-filesystem",
+] as const satisfies readonly ToolRegistrationMode[];
+
+const LIVE_AND_HEADLESS_MODES = [
+  "live",
+  "hybrid-live",
+  ...HEADLESS_MODES,
 ] as const satisfies readonly ToolRegistrationMode[];
 
 const GUARDED_NOTE_MODES = [
@@ -321,7 +329,8 @@ function defineTool(
 }
 
 /** Recovery is a domain contract, not a mandatory synthetic fourth tool. */
-export function governedLifecycleRoles(family: string): readonly GovernedLifecycleRole[] {
+export function governedLifecycleRoles(family: string, headlessFilesystem = false): readonly GovernedLifecycleRole[] {
+  if (headlessFilesystem && (family === "note-move" || family === "note-delete")) return ["plan", "apply", "status", "recover"];
   return ["note-move", "note-delete", "note-create", "base-create", "canvas-create", "base-rows", "asset-import"].includes(family)
     ? ["plan", "apply", "status"]
     : ["plan", "apply", "status", "recover"];
@@ -331,12 +340,17 @@ function governedFamily(
   prefix: string,
   group: ToolGroupId,
   family: string,
+  modes: readonly ToolRegistrationMode[] = LIVE_MODES,
 ): readonly ToolSurfaceEntry[] {
-  return governedLifecycleRoles(family).map((role) =>
-    defineTool(`${prefix}_${role}`, group, family, LIVE_MODES, {
+  const headlessFileOperation = family === "note-move" || family === "note-delete";
+  const roles = governedLifecycleRoles(family, headlessFileOperation);
+  return roles.map((role) =>
+    defineTool(`${prefix}_${role}`, group, family,
+      !headlessFileOperation ? modes : role === "recover" ? FILESYSTEM_ONLY : LIVE_OR_FILESYSTEM_MODES, {
       annotationClass: role === "plan" ? "governed-plan"
         : role === "status" ? "read-only" : "governed-mutation",
       lifecycleRole: role,
+      ...(headlessFileOperation ? { availabilityRules: [{ modes: FILESYSTEM_ONLY, requires: ["vault-cache"] }] } : {}),
     }),
   );
 }
@@ -374,12 +388,14 @@ const OPERON_MUTATION_TOOLS = [
 ] as const;
 
 export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
-  defineTool("obsidian_get_frontmatter", "notes.read", "frontmatter-read", LIVE_MODES, {
-    annotationClass: "read-only",
+  defineTool("obsidian_get_frontmatter", "notes.read", "frontmatter-read", LIVE_AND_HEADLESS_MODES, {
+    availabilityRules: [{ modes: HEADLESS_MODES, requires: ["vault-cache"] }],
   }),
   ...governedFamily("asset_import", "assets.governed", "asset-import").map(entry => ({...entry, availabilityRules: [{modes: LIVE_MODES, requires: ["asset-policy" as const]}]})),
   defineTool("obsidian_read_note", "notes.read", "notes-core", ALL_MODES),
-  defineTool("obsidian_note_links", "notes.read", "note-links", LIVE_MODES),
+  defineTool("obsidian_note_links", "notes.read", "note-links", LIVE_AND_HEADLESS_MODES, {
+    availabilityRules: [{ modes: HEADLESS_MODES, requires: ["vault-cache"] }],
+  }),
   defineTool("obsidian_list_notes", "notes.read", "notes-core", ALL_MODES),
   defineTool("obsidian_global_search", "notes.read", "notes-core", ALL_MODES, {
     availabilityRules: [
@@ -394,7 +410,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "obsidian_update_note",
     "notes.direct.common",
     "notes-core",
-    GUARDED_NOTE_MODES,
+    LIVE_MODES,
     {
       surfaceClass: "direct",
       annotationClass: "destructive",
@@ -405,7 +421,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "obsidian_search_replace",
     "notes.direct.common",
     "notes-core",
-    GUARDED_NOTE_MODES,
+    LIVE_MODES,
     {
       surfaceClass: "direct",
       annotationClass: "destructive",
@@ -430,23 +446,24 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "notes.direct.admin",
     "notes-admin",
     FILESYSTEM_ONLY,
-    { surfaceClass: "direct", annotationClass: "destructive" },
+    { surfaceClass: "direct", annotationClass: "destructive", preferredAlternativeFamily: "note-move" },
   ),
 
   ...governedFamily("bases_rows_patch", "bases.governed", "base-rows"),
-  ...governedFamily("obsidian_note_replace", "notes.governed", "note-replace"),
-  ...governedFamily("obsidian_text_patch", "notes.governed", "text-patch"),
+  ...governedFamily("obsidian_note_replace", "notes.governed", "note-replace", LIVE_OR_FILESYSTEM_MODES),
+  ...governedFamily("obsidian_text_patch", "notes.governed", "text-patch", GUARDED_NOTE_MODES),
   ...governedFamily("obsidian_note_move", "notes.governed", "note-move"),
   // Destructive: lives in the admin group so it is exposed only by the `operational`
   // and `full` profiles, never by `standard` or `authoring`.
   ...governedFamily("obsidian_note_delete", "notes.direct.admin", "note-delete"),
-  ...governedFamily("obsidian_note_create", "notes.governed", "note-create"),
+  ...governedFamily("obsidian_note_create", "notes.governed", "note-create", GUARDED_NOTE_MODES),
+  ...governedFamily("obsidian_operation_revert", "notes.governed", "operation-revert", FILESYSTEM_ONLY),
 
   defineTool(
     "obsidian_manage_frontmatter",
     "metadata.direct.frontmatter",
     "frontmatter-direct",
-    GUARDED_NOTE_MODES,
+    LIVE_MODES,
     {
       surfaceClass: "direct",
       annotationClass: "destructive",
@@ -457,14 +474,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "obsidian_manage_tags",
     "metadata.direct.tags",
     "tags",
-    LIVE_OR_FILESYSTEM_MODES,
-    { surfaceClass: "direct", annotationClass: "destructive" },
-  ),
-  defineTool(
-    "obsidian_batch_frontmatter",
-    "metadata.direct.batch",
-    "frontmatter-batch",
-    FILESYSTEM_ONLY,
+    LIVE_MODES,
     { surfaceClass: "direct", annotationClass: "destructive" },
   ),
 
@@ -472,9 +482,10 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "obsidian_frontmatter_patch",
     "metadata.governed",
     "frontmatter-patch",
+    GUARDED_NOTE_MODES,
   ),
 
-  defineTool("bases_list", "bases.read", "bases", BASE_READ_MODES, {
+  defineTool("bases_list", "bases.read", "bases", LIVE_AND_HEADLESS_MODES, {
     availabilityRules: [
       {
         modes: ["headless-readonly"],
@@ -482,7 +493,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
       },
     ],
   }),
-  defineTool("bases_get_schema", "bases.read", "bases", BASE_READ_MODES, {
+  defineTool("bases_get_schema", "bases.read", "bases", LIVE_AND_HEADLESS_MODES, {
     availabilityRules: [
       {
         modes: ["headless-readonly"],
@@ -490,7 +501,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
       },
     ],
   }),
-  defineTool("bases_query", "bases.read", "bases", BASE_READ_MODES, {
+  defineTool("bases_query", "bases.read", "bases", LIVE_AND_HEADLESS_MODES, {
     availabilityRules: [
       {
         modes: ["headless-readonly"],
@@ -521,7 +532,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "bases_upsert_rows",
     "bases.direct",
     "bases",
-    LIVE_OR_FILESYSTEM_MODES,
+    LIVE_MODES,
     { surfaceClass: "direct", annotationClass: "destructive" },
   ),
 
@@ -576,7 +587,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "obsidian_list_pending_operations",
     "runtime.status",
     "operation-cockpit",
-    LIVE_MODES,
+    GUARDED_NOTE_MODES,
   ),
   defineTool(
     "obsidian_runtime_maintenance",

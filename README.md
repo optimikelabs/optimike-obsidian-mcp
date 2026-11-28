@@ -15,12 +15,12 @@ Any connection lets an AI read a vault. Optimike Obsidian MCP matters when your 
 | You want to… | What the MCP does |
 | --- | --- |
 | Approve before the AI writes | It prepares a plan; what gets written is exactly what you approved, then it is verified. If the connection drops, the write is not blindly replayed. |
-| Keep writing while it works | Its write is refused if the note changes between its plan and the write, so an edit made meanwhile is not overwritten. |
+| Keep writing while it works | For a full replacement, the agent can pass the hash from its original read so planning refuses later edits. A change after planning still blocks the write. |
 | Keep Bases, links and tasks correct | Obsidian-format properties, moves through Obsidian, deletion to the trash, Operon tasks through Operon. |
 | Have your rules applied | Before each write, the AI is pointed to the `AGENTS.md` files that apply, from Claude, ChatGPT or Codex; a strict mode refuses the write until it has read them. |
 | Find the right passage | Semantic search returns the passage that answers, with its lines. |
 
-These guarantees apply to governed writes: Obsidian open and the Atomic Write Bridge plugin, whose writes stay off until you enable them in its settings. If your AI only reads your vault, file access or a lighter MCP is enough.
+Live governed writes use the Atomic Write Bridge plugin, whose writes stay off until you enable them in its settings. On a copied or dedicated vault, headless move and trash have their own [governed filesystem workflow](docs/headless-server-profile.md#governed-move-and-trash). If your AI only reads your vault, file access or a lighter MCP is enough.
 
 ## Capability map
 
@@ -29,7 +29,7 @@ These guarantees apply to governed writes: Obsidian open and the Atomic Write Br
 | Notes                   | Read/search/direct edits plus governed note and Frontmatter operations | Vault; Local REST API + Atomic Write Bridge                |
 | Bases and Canvas        | Queries, formula checks by Obsidian's engine, bounded writes, governed formulas and Canvas graph plans | Bases Bridge; Atomic Write Bridge                          |
 | Tasks                   | Tasks-compatible Markdown plus 27 governed Operon tools                | Operon Developer API V1 through the Bridge                 |
-| Semantic search         | Smart Connections index search                                         | `.smart-env` + Ollama, OpenAI-compatible or built-in model query embedding |
+| Semantic search         | Smart Connections index search                                         | `.smart-env` or an external v3 generation, plus a compatible query embedder |
 | Runtime                 | Shared SQLite cache, health, maintenance and degraded modes            | Local filesystem                                           |
 | External documents      | Default-deny reads/handoff plus opt-in local move                      | Explicit root allowlist                                    |
 | Headless administration | Guarded metadata and filesystem operations                             | Copied or dedicated vault                                  |
@@ -47,7 +47,7 @@ The canonical tool registry is documented in [Tool Surface](docs/obsidian_mcp_to
 | Same-machine HTTP                        | authenticated loopback HTTP                              |
 | Remote HTTP                              | reviewed TLS reverse proxy + private network; pilot only |
 
-Runtime answers what the backend can execute. It does not decide how many tools the model should see.
+The runtime sets backend capabilities. With the shared cache enabled, headless modes can read frontmatter keys and inspect links between indexed Markdown notes. [Headless read coverage](docs/headless-server-profile.md#contract).
 
 ## Tool surface profiles
 
@@ -77,7 +77,7 @@ Unqualified `/mcp` now uses `standard`; `/mcp/full` remains the explicit complet
 
 Requirements:
 
-- Node.js `>=22.12.0`;
+- Node.js `>=22.13.0`;
 - Obsidian Desktop only for live features;
 - capability-specific plugins listed below.
 
@@ -133,7 +133,7 @@ Operon mutations require the Bridge mutation setting plus:
 OPERON_MUTATIONS_ENABLED=true
 ```
 
-Stale Operon snapshots remain read-only. No Operon route falls back to raw Markdown or private APIs. Official adoption and Daily/Weekly routing negotiate their exact additive grant on first use, including after a cold MCP start; a pending or refused grant still fails closed. Operon owns every opaque sealed plan and same-plan recovery. Task Type and Task Image stay scalar, Task Gallery stays an ordered array, and `__taskDataType` is read-only. Full compatibility, certified/provisional versions, recovery semantics and current API gaps live in the [Operon MCP contract](docs/operon-mcp-contract.md) and [CLI / Developer API audit](docs/operon-cli-audit.md).
+Stale Operon snapshots remain read-only. Live Operon mutations use only the native Bridge contract. The [headless Operon reader](docs/headless-server-profile.md#operon-without-desktop) reads synchronized Markdown and plugin settings. Official adoption and Daily/Weekly routing negotiate their exact additive grant on first use, including after a cold MCP start; a pending or refused grant still fails closed. Operon owns every opaque sealed plan and same-plan recovery. Task Type and Task Image stay scalar, Task Gallery stays an ordered array, and `__taskDataType` is read-only. Full compatibility, certified/provisional versions, recovery semantics and current API gaps live in the [Operon MCP contract](docs/operon-mcp-contract.md) and [CLI / Developer API audit](docs/operon-cli-audit.md).
 
 Operon `3.6.0` exposes the public periodic Task Workflow plan as metadata-only, without a pre-apply task-source path. The exact-SHA release canary negotiates and previews periodic operations but skips periodic applies with reason
 `public_task_source_projection_unavailable`. This contains the destructive canary
@@ -149,7 +149,7 @@ plan → apply → status → recover
 
 After timeout or transport loss, call `status` before `recover`; never create a blind replacement mutation. Durable plans are not bound to the profile that created them. When the vault keeps agent rules in `AGENTS.md`, every write plan lists the files that apply to the paths it writes, and `MCP_VAULT_INSTRUCTIONS=enforce` refuses writes until the agent has received them in their current version; the server proves they were served, not that they are followed ([Vault agent instructions](docs/vault-instructions.md)).
 
-If the client lost the opaque plan reference, call `obsidian_list_pending_operations`. The readonly cockpit lists only pending or uncertain governed Obsidian receipts from the live runtime's already-open journals, with the exact domain `planRef` and the next safe action. It never exposes targets, idempotency keys, content, hashes or backend bindings, and it never invokes status, apply or recovery. See [Pending Operation Cockpit](docs/operation-cockpit-p5.md). Uncertain operations that nothing can settle are closed, after owner review, with `obsidian_operation_close` ([Administrative closure](docs/administrative-closure.md)).
+If the client lost the opaque plan reference, call `obsidian_list_pending_operations`. The readonly cockpit lists only pending or uncertain governed Obsidian receipts from the runtime's already-open journals, with the exact domain `planRef` and the next safe action. It never exposes targets, idempotency keys, content, hashes or backend bindings, and it never invokes status, apply or recovery. See [Pending Operation Cockpit](docs/operation-cockpit-p5.md). Uncertain operations that nothing can settle are closed, after owner review, with `obsidian_operation_close` ([Administrative closure](docs/administrative-closure.md)).
 
 ## External document roots
 
@@ -172,9 +172,9 @@ See [External Roots Setup](docs/external-roots-setup.md).
 
 ## Semantic search
 
-`smart_semantic_search` is the canonical semantic-search tool. It searches the local Smart Connections index. Query embedding can remain local through Ollama, use an OpenAI-compatible provider, or reuse the Smart Connections built-in model (BGE Micro by default) once the optional `@huggingface/transformers` package is installed. See [embedders](README_EMBEDDERS.md). Set `granularity` to `sections` to get the heading sections and paragraphs that answer instead of whole notes, or to `both` to rank notes and sections together; the default `notes` keeps the previous result shape. A section result gives the note `path`, the Smart Connections `block_key`, its `headings` path, `lines` `[start, end]` (1-based, inclusive) and the `score`; with `with_snippets`, `snippet` holds those lines (at most 1,200 characters). Sections use the block vectors Smart Connections already computes for the active model (`.smart-env/smart_blocks/<model fingerprint>`); frontmatter blocks are not searched, and the `folders` and `tags` filters apply to the note of each section. Before answering, the server checks each section against the note as it reads now: `lines_verified: true` proves the lines hold exactly the text that was embedded, found again at its new place when an edit above moved it; `false` means that text changed since Smart Connections indexed it, so `lines` are those of the indexed version and no snippet is returned. A vault without block vectors for the active model answers `semantic_sections_unavailable`.
+`smart_semantic_search` is the canonical semantic-search tool. By default, it searches the local Smart Connections index. Query embedding can remain local through Ollama, use an OpenAI-compatible provider, or reuse the Smart Connections built-in model (BGE Micro by default) once the optional `@huggingface/transformers` package is installed. See [embedders](README_EMBEDDERS.md). Set `granularity` to `sections` to get the heading sections and paragraphs that answer instead of whole notes, or to `both` to rank notes and sections together; the default `notes` keeps the previous result shape. A section result gives the note `path`, the Smart Connections `block_key`, its `headings` path, `lines` `[start, end]` (1-based, inclusive) and the `score`; with `with_snippets`, `snippet` holds those lines (at most 1,200 characters). Sections use the block vectors Smart Connections already computes for the active model (`.smart-env/smart_blocks/<model fingerprint>`); frontmatter blocks are not searched, and the `folders` and `tags` filters apply to the note of each section. Before answering, the server checks each section against the note as it reads now: `lines_verified: true` proves the lines hold exactly the text that was embedded, found again at its new place when an edit above moved it; `false` means that text changed since Smart Connections indexed it, so `lines` are those of the indexed version and no snippet is returned. A vault without block vectors for the active model answers `semantic_sections_unavailable`. [Ranked and hybrid search](OPERATIONS.md#ranked-and-hybrid-search).
 
-See [Operations](OPERATIONS.md) for providers and cache behavior.
+Set `SMART_ENV_GENERATION_POINTER` to read an external Smart Env v3 index and receive its `generation_id`. New publications take effect on the next request. See the [publication contract](docs/semantic-vector-cache-encoding.md#external-smart-env-v3-generations) and [Operations](OPERATIONS.md).
 
 ## Verification
 

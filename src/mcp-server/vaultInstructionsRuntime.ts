@@ -2,6 +2,9 @@ import { config } from "../config/index.js";
 import type { ObsidianRestApiService } from "../services/obsidianRestAPI/index.js";
 import type { VaultCacheService } from "../services/obsidianRestAPI/vaultCache/index.js";
 import { OperonService } from "../services/operon/service.js";
+import { filesystemOperonService } from "../services/operon/filesystemService.js";
+import { FilesystemOperonMutations } from "../services/operon/filesystemMutations.js";
+import type { GovernedNoteReplaceRuntime } from "./tools/governedNoteReplaceTools/runtime.js";
 import {
   filesystemInstructionsSource,
   InstructionProbeLimiter,
@@ -26,6 +29,7 @@ let runtimeKey: unknown;
 export function defaultVaultInstructionsRuntime(
   obsidianService: ObsidianRestApiService | undefined,
   vaultCacheService: VaultCacheService | undefined,
+  notes?: GovernedNoteReplaceRuntime,
 ): VaultInstructionsRuntime | undefined {
   const key = obsidianService ?? vaultCacheService ?? "none";
   if (runtime && runtimeKey === key) return runtime;
@@ -69,6 +73,9 @@ export function defaultVaultInstructionsRuntime(
   let seals: VaultInstructionsSealJournal | undefined;
   let sealsFailed = false;
   let operon: OperonService | undefined;
+  const filesystemOperon = config.obsidianRuntimeMode === "headless-filesystem" && vaultCacheService && notes?.isFilesystem
+    ? filesystemOperonService(vaultCacheService) : undefined;
+  const filesystemWriter = filesystemOperon && notes ? new FilesystemOperonMutations(filesystemOperon, notes) : undefined;
   runtime = {
     settings: {
       defaultMode: config.vaultInstructionsMode,
@@ -91,12 +98,13 @@ export function defaultVaultInstructionsRuntime(
     },
     assetFolder: config.assetFolder,
     resolveOperonTaskPath: async (operonId) => {
-      operon ??= new OperonService();
-      const result = (await operon.getTask({ operonId })) as {
+      const service = filesystemOperon ?? (operon ??= new OperonService());
+      const result = (await service.getTask({ operonId, forceRefresh: Boolean(filesystemOperon) })) as {
         task?: { path?: unknown };
       };
       return typeof result?.task?.path === "string" ? result.task.path : undefined;
     },
+    resolveOperonRecoveryPath: filesystemWriter ? ref => filesystemWriter.recoveryPath(ref) : undefined,
     resolveOperonFileTaskFolder: async () => {
       operon ??= new OperonService();
       return operon.configuredFileTaskFolder();

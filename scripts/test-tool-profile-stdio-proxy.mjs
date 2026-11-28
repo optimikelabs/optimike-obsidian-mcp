@@ -65,8 +65,16 @@ async function waitForHealth(port, child) {
 
 async function openProxy(vault, port, profile) {
   const args = ["dist/stdio-proxy.js"];
+  if (profile === "tasks") {
+    const configUrl = new URL("../dist/config/index.js", import.meta.url).href;
+    const preload = "await import(" + JSON.stringify(configUrl) + "); delete process.env.OBSIDIAN_RUNTIME_MODE;";
+    args.unshift("--import", "data:text/javascript," + encodeURIComponent(preload));
+  }
   if (profile) args.push("--tool-profile", profile);
-  const env = sharedEnv(vault, port, { MCP_TRANSPORT_TYPE: "stdio" });
+  const env = sharedEnv(vault, port, {
+    MCP_TRANSPORT_TYPE: "stdio",
+    MCP_PROXY_REQUIRE_EXISTING_BACKEND: "true",
+  });
   if (profile) {
     // Deliberately conflicting env proves CLI precedence inside each proxy.
     env.MCP_TOOL_PROFILE = profile === "standard" ? "full" : "standard";
@@ -104,7 +112,7 @@ try {
   const implicit = await openProxy(vault, port);
   try {
     const names = (await implicit.listTools()).tools.map((tool) => tool.name);
-    assert.equal(names.length, 9);
+    assertHeadlessProfileNames(names, "standard");
     assert.ok(names.includes("smart_semantic_search"));
     assert.ok(!names.includes("external_read"));
   } finally {
@@ -115,7 +123,7 @@ try {
   try {
     const result = await standard.listTools();
     const names = result.tools.map((tool) => tool.name);
-    assert.equal(names.length, 9);
+    assertHeadlessProfileNames(names, "standard");
     assert.ok(names.includes("smart_semantic_search"));
     assert.ok(!names.includes("smart_search"));
     assert.ok(!names.includes("smart-search"));
@@ -149,7 +157,7 @@ try {
   try {
     const result = await tasks.listTools();
     const names = result.tools.map((tool) => tool.name);
-    assert.equal(names.length, 14);
+    assertHeadlessProfileNames(names, "tasks");
     assert.ok(names.includes("operon_status"));
     assert.ok(names.includes("operon_get_configuration"));
     assert.ok(names.includes("operon_list_tasks"));

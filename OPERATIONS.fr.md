@@ -6,6 +6,52 @@ Version anglaise : [OPERATIONS.md](OPERATIONS.md)
 
 Ce guide explique comment le serveur tourne réellement, de quoi il dépend, comment Tasks et la recherche sémantique fonctionnent, et ce qui permet de garder une faible empreinte mémoire.
 
+## Recherche classée et hybride
+
+`obsidian_global_search` cherche par défaut une chaîne ou une expression
+régulière et trie les résultats du plus récent au plus ancien. Avec
+`mode: "ranked"`, BM25 classe le Markdown en cache par pertinence. Ce mode
+ignore la casse et les accents, prend en compte les pluriels courants en
+français et en anglais, et donne plus de poids aux titres, aux alias YAML et
+aux intertitres. Les filtres de dossier et de date s'appliquent.
+
+`hybrid: true` dans `smart_semantic_search` fusionne les rangs BM25, les
+vecteurs de note et le meilleur vecteur de section par note. Chaque chemin
+apparaît une fois avec les rangs et scores des `signals` et la
+`best_section` disponible. Une note sans intertitre peut renvoyer tout son
+corps Markdown comme section lexicale. Le serveur vérifie les signaux
+sémantiques contre le cache du coffre. Si l'index ou l'encodeur est
+indisponible, ou si aucun vecteur éligible n'est à jour, BM25 prend le relais
+et `provenance` en donne la raison. Le mode hybride utilise les deux
+granularités et prime sur `granularity`. Une section vérifiée peut contribuer
+quand le vecteur de la note entière manque ou est périmé. Le serveur réutilise
+les plages vérifiées tant que l'index sémantique et l'empreinte de la note en
+cache correspondent. Il lit les extraits des seuls résultats renvoyés, dans le
+texte qui porte cette empreinte.
+
+`rrf_k` vaut 20 par défaut. `short_note_floor` réduit le poids du vecteur
+de note sous le nombre de caractères de prose choisi. Le seuil vaut 0 par
+défaut (désactivé), car les seuils positifs ont dégradé le classement sur
+la réplique. Une section vérifiée garde son propre score. BM25 indexe aussi
+le code et les liens.
+Le seuil compte les libellés visibles des liens et exclut les blocs de code
+délimités, le code en ligne et les destinations des liens.
+
+Chaque classement fournit au moins 60 candidats à la fusion quand ils
+sont disponibles. Au-delà de 20 résultats demandés, le budget croît avec
+`top_k` jusqu'à 100 candidats par classement.
+
+Le serveur prépare l'index BM25 en mémoire une fois le cache du coffre prêt.
+Un appel précoce rejoint la construction déjà lancée. Le serveur laisse les
+autres outils fonctionner entre les lots. Les recherches suivantes
+reconstruisent les partitions dont les métadonnées des notes en cache ont
+changé. Sur une réplique locale en lecture seule de 8 818 notes, la
+construction à froid a pris 15,8 s sous charge, contre 21,7 s auparavant.
+Après le passage du ramasse-miettes, le heap retenu a augmenté de 56 Mo,
+contre 217 Mo. Les tableaux typés représentaient 25 Mo supplémentaires.
+La mémoire résidente du processus a augmenté de 177 Mo pendant la mesure,
+contre 260 Mo auparavant. Ces chiffres proviennent d'une seule réplique.
+
 ## Modèle runtime
 
 Le runtime final repose sur deux couches :
@@ -88,26 +134,43 @@ Pour valider sur un vrai coffre, garder `OBSIDIAN_SHARED_CACHE_DB_PATH` hors du 
 
 Le serveur embarque une politique d’exclusion pour les scans runtime filesystem. Elle évite d’indexer le bruit opérationnel et les artefacts de validation :
 
-- `.obsidian`, `.trash`, `.git`
-- `.tmp`, `tmp`, `node_modules`
+- Fichiers et dossiers dont le nom commence par un point, à toute profondeur, dont `.obsidian`, `.trash`, `.git` et `.tmp`
+- `tmp` et `node_modules`
 - dossiers de screenshots, dossiers build/cache, fichiers SQLite/DB et fichiers log
 
-Ajouter des règles locales avec `OBSIDIAN_VAULT_EXCLUDE_PATTERNS`, au format gitignore séparé par virgules ou retours ligne. Exemple :
+En mode headless, les listes, recherches et lectures de notes par chemin omettent les fichiers Markdown cachés. Au démarrage, le cache partagé retire les entrées déjà indexées que la politique en vigueur exclut. Ce comportement suit la visibilité par défaut de [l’API Vault d’Obsidian](https://docs.obsidian.md/Plugins/Vault).
+
+Ajouter des règles locales avec `OBSIDIAN_VAULT_EXCLUDE_PATTERNS`, au format gitignore séparé par virgules ou retours ligne. Une règle `!` peut inclure explicitement un chemin caché, par exemple `!.private/Shared.md`. Depuis un checkout neuf, compiler le serveur avant de lancer la vérification des exclusions.
 
 ```bash
 OBSIDIAN_VAULT_EXCLUDE_PATTERNS="tmp/**,**/tmp/**,Efforts/Archives/**"
 npm run check:vault-exclusions -- --vault=/chemin/vers/vault
 ```
 
-Cette politique protège le cache Optimike, la recherche, Tasks et le fallback local Bases. Elle n’empêche pas Obsidian Headless/Sync de télécharger les fichiers. Pour un serveur durable, commencer par un vault copié en pull-only, puis nettoyer le contenu côté Sync ou utiliser un profil/vault serveur spécifique avant toute validation d’écriture guarded.
+Cette politique protège le cache Optimike, la recherche, Tasks et le fallback local Bases. En headless, le scan des liens peut lire les noms des fichiers visibles exclus pour résoudre les références. Leur contenu reste hors du cache. La politique n’empêche pas Obsidian Headless/Sync de télécharger les fichiers. Pour un serveur durable, commencer par un vault copié en pull-only, puis nettoyer le contenu côté Sync ou utiliser un profil/vault serveur spécifique avant toute validation d’écriture guarded.
 
 ## Modes runtime
 
 - `live` : mode complet par défaut. Requiert Obsidian Desktop + Local REST API + `OBSIDIAN_API_KEY`.
 - `hybrid` : Local REST API optionnelle et non bloquante. Si l’API est configurée, les tools live sont exposées ; sinon `OBSIDIAN_VAULT` est requis et la surface cache/filesystem reste disponible.
-- `headless-readonly` : requiert `OBSIDIAN_VAULT`; ne requiert ni Obsidian Desktop, ni Local REST API, ni `OBSIDIAN_API_KEY`; expose lecture, liste, recherche, Tasks, sémantique, runtime et fallback local Bases en lecture seule.
-- `headless-guarded` : même surface de lecture headless, plus écritures filesystem bornées pour `obsidian_update_note`, `obsidian_search_replace` et `obsidian_manage_frontmatter`. Les updates de note sont limitées à append/prepend ; overwrite reste bloqué par la politique guarded. Le fallback local Bases en lecture seule est aussi disponible.
-- `headless-filesystem` : même surface que `headless-guarded`, avec des fonctions filesystem explicites pour sandbox ou vault dédié : tags frontmatter/inline, index/audit local des tags, rename en dry-run, opérations admin move/archive/delete avec `expectedHash` ou `expectedMtime`, batch frontmatter avec dry-run, création/config YAML `.base`, rows Bases comme opérations `set` de frontmatter Markdown, et helpers JSON Canvas minimaux.
+- `headless-readonly` : requiert `OBSIDIAN_VAULT`; ne requiert ni Obsidian Desktop, ni Local REST API, ni `OBSIDIAN_API_KEY`; expose lecture, liste, recherche, Tasks, sémantique, runtime et fallback local Bases en lecture seule. Avec le cache partagé actif, il inclut `obsidian_get_frontmatter` et `obsidian_note_links`. L’index des liens réside dans le cache SQLite partagé et se met à jour avec le scan Markdown.
+- `headless-guarded` ajoute les patches gouvernés du texte et du frontmatter, la création durable et le cockpit à la surface de lecture headless. L’édition d’une note existante exige par défaut l’échange atomique natif. La gestion gouvernée des dates exige `OPTIMIKE_VAULT_TIMEZONE`. Voir le [profil serveur headless](docs/headless-server-profile.fr.md).
+- `headless-filesystem` ajoute le remplacement complet gouverné, le retour arrière, le déplacement, l’archivage et la suppression avec `expectedHash` ou `expectedMtime`, ainsi que les écritures Bases et Canvas minimales. Avec le cache partagé en mode full, il expose aussi le cycle gouverné de déplacement et de corbeille.
+
+Le [profil serveur headless](docs/headless-server-profile.fr.md#écritures-markdown-gouvernées)
+décrit le journal gouverné, la politique des dates et les verrous entre processus.
+Le service d’écriture directe commun à `headless-guarded` et `headless-filesystem`
+exécute successivement les mutations du même fichier résolu dans un même
+processus serveur. Une mise à jour qui modifie le contenu invalide le précédent
+`expectedHash`. Lors d’ajouts concurrents en fin de fichier, le service conserve
+le texte de chaque appel, même sans précondition. Avant de remplacer le fichier,
+le service revérifie le hash du contenu lu ou l’absence de la cible pour une
+création. Les outils Canvas transmettent le hash du Canvas qu’ils ont lu,
+même quand l’appel ne fournit pas `expectedHash`. La création d’un Canvas ou
+d’une Base avec `overwrite=false` exige que la cible soit absente.
+En cas d’écart, il renvoie `CONFLICT` et supprime le fichier temporaire. Un autre
+processus peut encore modifier la cible entre le dernier contrôle et le
+renommage, ce qui exige de coordonner séparément les écritures indépendantes.
 
 Règle opérationnelle : les modes headless signifient Optimike MCP au-dessus d’un vault Markdown synchronisé. Ils ne chargent pas les plugins communautaires Obsidian et ne fournissent pas active file, command palette ou Bases Bridge sans Desktop.
 
@@ -174,11 +237,30 @@ Le serveur final peut exposer des capacités différentes selon les plugins Obsi
 - Fallback local Bases
 
   - disponible en modes headless pour `bases_list`, `bases_get_schema` et `bases_query`
-  - renvoie `source: "local-fallback"`
-
-- supporte l’égalité directe, les arrays, `contains`, `in`, les comparaisons, le tri simple, la pagination et l’inspection de schéma
-
-  - n’évalue pas les formules, filtres plugin, propriétés calculées ni la sémantique exacte des vues UI
+  - les lignes d’une Base nécessitent Obsidian et le Bases Bridge, même pour
+    une Base sans filtre et quelle que soit la valeur de `evaluate`. Sans l’API
+    REST d’Obsidian, `bases_query` renvoie `SERVICE_UNAVAILABLE` sauf avec
+    `property_only: true`
+  - `property_only: true` parcourt les propriétés Markdown en cache
+    indépendamment de la Base et de ses vues. Le fichier Base doit exister
+  - le parcours renvoie `source: "local-fallback"`, `mode: "property-scan"`,
+    `evaluate: false` et `limitations`. Ses lignes et son total décrivent le
+    parcours Markdown, avec le filtre de propriétés, le tri et la pagination de la requête.
+    Les fichiers non Markdown sont exclus
+  - les filtres du parcours prennent en charge l’égalité directe, les tableaux,
+    `eq`, `ne`, `contains`, `in`, `gt`, `gte`, `lt` et `lte`. Filtres
+    et tris acceptent les clés de frontmatter sans préfixe et `file.path`,
+    `file.name`, `file.ctime`, `file.mtime` et `file.size`. Combiner les
+    conditions avec `{"and":[...]}`, `{"or":[...]}` ou `{"not":...}`.
+    Chaque groupe a une seule clé logique. Une feuille peut être une table de
+    propriétés locale, une comparaison comme `type == "project"` ou une
+    propriété évaluée comme booléen, par exemple `active`. Une feuille textuelle
+    est limitée à 1 024 caractères. Les dates et horodatages gardent leur texte YAML.
+    Les filtres utilisent des chemins `file.path` relatifs au coffre. L’égalité
+    et l’appartenance acceptent aussi un slash initial. Les formes inconnues,
+    objets opérateurs vides et tableaux d’objets opérateurs renvoient
+    `VALIDATION_ERROR`. Les références à des formules dans les filtres et tris
+    sont refusées même avec `property_only: true`
 
 - Smart Connections
   - requis pour la recherche sémantique
@@ -241,10 +323,11 @@ pour un runtime contrôlé offrant des garanties de latence plus strictes.
 
 Séquence client :
 
-1. `obsidian_note_replace_plan(path, nextContent, idempotencyKey)` ;
-2. `obsidian_note_replace_apply(planRef, idempotencyKey)` ;
-3. après timeout ou réponse perdue, appeler `obsidian_note_replace_status` ;
-4. appeler `obsidian_note_replace_recover` uniquement si le reçu autorise la
+1. Lire la note avec `obsidian_read_note` et conserver son `sha256`.
+2. Appeler `obsidian_note_replace_plan` avec `path`, `nextContent`, `idempotencyKey` et l’empreinte lue dans `expectedBeforeSha256`.
+3. Appeler `obsidian_note_replace_apply(planRef, idempotencyKey)`.
+4. Après un timeout ou une réponse perdue, appeler `obsidian_note_replace_status`.
+5. Appeler `obsidian_note_replace_recover` uniquement si le reçu autorise la
    récupération du plan exact.
 
 Le `planRef` est opaque. Apply et recover n’acceptent jamais une nouvelle cible,
@@ -482,11 +565,59 @@ Exemples :
 
 Au démarrage, le backend préchauffe la recherche sémantique en chargeant le snapshot et en envoyant une petite requête d’embedding au provider configuré. Avec le modèle intégré, c’est ce préchauffage en arrière-plan qui télécharge et charge le modèle la première fois : la première requête d’un agent ne l’attend pas. Désactivation possible avec `SEMANTIC_SEARCH_PREWARM=false` ; texte de warmup surchargeable avec `SEMANTIC_SEARCH_PREWARM_TEXT`.
 
+Le [producteur d’index sémantique autonome](docs/semantic-index-producer.fr.md)
+prépare des générations Smart Environment v3 hors du coffre, sans Obsidian Desktop.
+
+Les [générations externes](docs/semantic-vector-cache-encoding.md#external-smart-env-v3-generations)
+utilisent le pointeur et l’identifiant de génération pour actualiser le cache.
+Un chargement à froid vérifie les deux fichiers de vecteurs, y compris lors
+d’une recherche de notes seules ou du préchauffage.
+Utiliser un seul mode sémantique par cache SQLite partagé. Attribuer des
+valeurs `OBSIDIAN_SHARED_CACHE_DB_PATH` distinctes aux backends qui utilisent
+le pointeur externe et `SMART_ENV_DIR`. Leurs snapshots se remplacent dans une
+base commune, ce qui provoque des lectures à froid répétées.
+
 ### Recherche par sections
+
+Le chargement décrit ici s’applique à `SMART_ENV_DIR`.
 
 `granularity: sections` ou `both` charge les vecteurs de sections à la première requête de ce type, jamais au préchauffage : un runtime qui ne cherche que des notes garde son empreinte mémoire précédente. Les vecteurs de sections restent en mémoire dans un seul tableau float32 pendant toute la vie du processus. Le premier chargement à froid lit une seule fois les enregistrements sources de Smart Connections pour les notes et les sections ; ensuite, les références des sections viennent du store partagé et seuls les vecteurs sont relus dans `smart_blocks/<empreinte du modèle>`. Le cache des sections se rafraîchit quand les enregistrements sources, le modèle actif ou ce fichier de vecteurs de blocs (date de modification ou taille) changent, avec le même TTL que les notes. Chaque résultat de section lit sa note pour vérifier ses lignes, même sans `with_snippets`. La recherche d’une section déplacée est bornée par requête (200 000 lignes hachées) ; au-delà, les sections déplacées restantes indiquent `lines_verified: false` (une section encore à ses lignes indexées reste vérifiée). La recherche ne va jamais au-delà de la fin de la note.
 
 Mesure locale du 16 novembre 2026 (pas un engagement de service) : un coffre de 6 889 notes avec 44 924 vecteurs de sections de 640 dimensions. Premier chargement à froid des notes et des sections : 7,7 à 8,2 s (notes seules : 5,5 s). Chargement depuis le store partagé dans un nouveau processus : 0,45 à 0,56 s pour les sections, après 0,7 à 0,9 s pour les notes. Classement des sections : 50 à 85 ms par requête, en plus de l’embedding de la requête. Les sections ajoutent environ 123 Mo de mémoire résidente (110 Mo de vecteurs, 13 à 15 Mo de références).
+
+## Services Sync et index sémantique headless
+
+Planifiez une passe Sync à instance unique et gardez le producteur d’index au
+premier plan sous son superviseur. Les deux services et le lecteur MCP
+utilisent le même coffre. Placez le reçu, l’index et le cache SQLite partagé
+hors du coffre. Réglez séparément `OBSIDIAN_CACHE_REFRESH_INTERVAL_MIN` si
+les lectures de notes doivent refléter les changements plus vite.
+
+Sous Linux, utilisez les [unités et le timer systemd utilisateur](OPERATIONS.md#systemd-user-units).
+Renseignez votre fichier d’environnement avec les chemins absolus vers les
+scripts installés, le point d’entrée JS du CLI Obsidian, le coffre et les
+répertoires d’état, ainsi que les paramètres de l’encodeur. Exécutez
+`ob sync-setup` sous le compte de service avant d’activer le timer.
+Le producteur redémarre en cas d’échec. Un arrêt normal annule l’encodage en
+cours. Placez l’index sur un système de fichiers local à la machine.
+
+Sous Windows, créez deux tâches dans le Planificateur de tâches. Utilisez le
+chemin absolu de `node.exe` comme programme. Dans les arguments, reprenez le
+chemin absolu du script installé et les options des exemples systemd, en
+plaçant chaque chemin entre guillemets. Utilisez le compte qui possède le cache
+dédié et a configuré Obsidian Headless. Pour Sync, déclenchez toutes les
+minutes. Pour le producteur, déclenchez au démarrage, réessayez en cas d’échec
+et désactivez la durée maximale d’exécution. Sélectionnez **Ne pas démarrer une
+nouvelle instance** pour les deux tâches. En premier plan, Ctrl+C annule
+l’encodage. Après un arrêt forcé, prévoyez un intervalle d’au moins une minute
+avant le redémarrage pour laisser expirer le bail. Voir la
+[reprise du producteur](docs/semantic-index-producer.fr.md#publication-et-reprise).
+
+Configurez le lecteur MCP avec `OBSIDIAN_SYNC_HEARTBEAT_FILE`,
+`SMART_ENV_GENERATION_POINTER` pointant vers `CURRENT`,
+`SMART_ENV_QUERY_FINGERPRINT` et l’encodeur de requête correspondant. Voir le
+[profil serveur](docs/headless-server-profile.fr.md#preuve-de-synchronisation-amont)
+et le [mode service du producteur](docs/semantic-index-producer.fr.md#mode-service).
 
 ## Mode dégradé
 
@@ -497,7 +628,11 @@ Si Obsidian REST n’est plus joignable mais que le cache partagé est chaud, le
 
 Le but est de garder le MCP utile quand Obsidian tombe temporairement, tout en rendant l’état explicite.
 
-Si une première lecture ou recherche arrive pendant que le cache filesystem est encore en construction, la tool attend brièvement que le cache soit prêt, puis renvoie les stats cache si le vault reste indisponible. Sur gros coffre, utiliser `obsidian_runtime_maintenance` avec `refresh_all` comme gate manuelle de readiness.
+En mode `headless-readonly`, `obsidian_read_note` peut vérifier et lire sur disque un chemin Markdown exact, casse comprise, pendant la construction initiale du cache ou une reconstruction forcée. Les réponses issues de cette lecture contiennent `readPath: "direct-filesystem"` et l’horodatage `observedAt` de la note. Les exclusions et les contrôles des liens s’appliquent toujours. Pendant un rafraîchissement périodique, les lectures attendent le cache, comme les listes, les recherches et les lectures par chemin sans distinction de casse. L’état du cache décrit l’inventaire complet. Sur un gros coffre, utiliser `obsidian_runtime_maintenance` avec `refresh_all` pour attendre manuellement que le cache soit prêt.
+
+Une lecture directe indique `provenance.partial: false` pour la note demandée,
+même pendant l’actualisation de l’inventaire. Sa fraîcheur part de `observedAt`.
+Les lectures servies par le cache gardent les horodatages de l’inventaire.
 
 ## Santé et maintenance
 
@@ -697,6 +832,7 @@ Variables importantes :
 - `MCP_PROXY_START_TIMEOUT_MS`
 - `OBSIDIAN_VAULT`
 - `SMART_ENV_DIR`
+- `SMART_ENV_GENERATION_POINTER` et `SMART_ENV_QUERY_FINGERPRINT` pour un [index sémantique externe](docs/semantic-vector-cache-encoding.md#external-smart-env-v3-generations) optionnel, à configurer sur le backend
 - `OBSIDIAN_BASE_URL`
 - `OBSIDIAN_API_KEY`
 - `MCP_EXTERNAL_ROOTS_FILE`
@@ -741,9 +877,17 @@ ne modifie aucun document source.
 
 Vérifie :
 
-- `SMART_ENV_DIR`
+- `SMART_ENV_DIR` ou le [pointeur et l’empreinte de la génération externe](docs/semantic-vector-cache-encoding.md#external-smart-env-v3-generations)
 - la disponibilité du provider d’embedding
 - l’état runtime via `obsidian_runtime_status`
+
+En mode externe, le fichier UTF-8 `CURRENT` contient un identifiant comme
+`g42` suivi d’un unique retour à la ligne LF ou CRLF. Un BOM UTF-8 est accepté.
+Le serveur lit `generations/g42` à côté du pointeur. Préparer la
+génération complète sur le même volume, puis remplacer le pointeur par
+renommage atomique. Garder la génération précédente immuable et lisible
+jusqu’à la fin des requêtes qui ont pu la sélectionner. Si le pointeur,
+l’index ou l’empreinte est invalide, la recherche est indisponible.
 
 ### Les résultats Tasks semblent stale
 

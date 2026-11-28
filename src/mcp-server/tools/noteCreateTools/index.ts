@@ -78,7 +78,7 @@ export function registerNoteCreateTools(
   server.registerTool(
     "obsidian_note_create_plan",
     {
-      description:
+      description: runtime.isFilesystem ? "Seal one absent-only Markdown creation. The headless filesystem authority maintains configured dates. The parent directory must already exist." :
         `Seal one absent-only Markdown creation in the existing durable journal. Caller-supplied frontmatter must use Obsidian's canonical form; a refusal returns expectedFrontmatter for resubmission. Type issues are warnings. Does not create a note. Requires the separate Bridge creation grant and writable MCP policy; no automatic naming or parent-directory creation. ${NOTE_NAME_RULES_DESCRIPTION}`,
       inputSchema: mcpSchema(Plan.shape),
       annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,

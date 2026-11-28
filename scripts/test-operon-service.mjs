@@ -1,3 +1,4 @@
+import "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import http from "node:http";
@@ -174,12 +175,14 @@ const state = {
   holdValidation: null,
   notReadyStatuses: 0,
   holdNextStatus: null,
+  resetStatuses: 0,
   taskGetSignature: null,
   taskGetOtherId: null,
   failPages: 0,
   failHeldPages: false,
   validationCalls: 0,
   mutationCalls: 0,
+  resetNextBatchWrite: false,
   pendingRecoveryCalls: 0,
   recoveryCalls: 0,
   lastTaskWorkflowRecoveryBody: null,
@@ -320,6 +323,8 @@ function stableJson(value) {
 }
 
 const server = http.createServer((request, response) => {
+  // Avoid idle socket reuse across the fixture's SQLite and journal work.
+  response.setHeader("Connection", "close");
   if (state.mode === "offline") {
     sendJson(response, 503, { error: "offline" });
     return;
@@ -352,6 +357,11 @@ const server = http.createServer((request, response) => {
     return;
   }
   if (request.method === "GET" && url.pathname.endsWith("/status")) {
+    if (state.resetStatuses > 0) {
+      state.resetStatuses -= 1;
+      request.socket.destroy();
+      return;
+    }
     if (state.holdNextStatus) {
       const hold = state.holdNextStatus;
       state.holdNextStatus = null;
@@ -769,6 +779,11 @@ const server = http.createServer((request, response) => {
     request.on("end", () => {
       const params = JSON.parse(body);
       const pin = url.pathname.endsWith("/pinned");
+      if (!pin && state.resetNextBatchWrite) {
+        state.resetNextBatchWrite = false;
+        request.socket.destroy();
+        return;
+      }
       if (
         pin &&
         params.idempotencyKey === "pin-pending-grant" &&
@@ -1165,6 +1180,20 @@ for (const level of ["info", "warning"]) {
 
 try {
   const service = new OperonService();
+
+  state.resetStatuses = 1;
+  const retriedStatus = await service.status();
+  assert.equal(
+    retriedStatus.source,
+    "operon-live",
+    "status should retry a socket hang-up",
+  );
+  assert.equal(retriedStatus.ok, true);
+
+  state.resetStatuses = 2;
+  const unavailableStatus = await service.status();
+  assert.equal(unavailableStatus.source, "unavailable");
+  assert.equal(state.resetStatuses, 0, "status should retry exactly once");
 
   state.mode = "initializing";
   const initializingStatus = await service.status();
@@ -1720,6 +1749,7 @@ try {
   );
   assert.equal(state.mutationCalls, afterBatchCalls);
   state.badBatchReadback = true;
+  state.resetStatuses = 1;
   await assert.rejects(
     service.updateTasks({
       ...batchRequest,
@@ -1728,7 +1758,19 @@ try {
     }),
     (error) => error.details?.mutationMayHaveApplied === true,
   );
+  assert.equal(state.mutationCalls, afterBatchCalls + 1);
   state.badBatchReadback = false;
+  state.resetNextBatchWrite = true;
+  await assert.rejects(
+    service.updateTasks({
+      ...batchRequest,
+      dryRun: false,
+      idempotencyKey: "batch-transport-reset",
+    }),
+    { code: "ECONNRESET" },
+  );
+  assert.equal(state.mutationCalls, afterBatchCalls + 2, "a write must not retry");
+
   config.operonMutationAllowedPathPrefixes = ["Allowed"];
   const scopedCalls = state.mutationCalls;
   await assert.rejects(

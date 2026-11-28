@@ -66,6 +66,7 @@ export interface VaultInstructionsRuntime {
   seals: () => VaultInstructionsSealJournal | undefined;
   assetFolder?: string;
   resolveOperonTaskPath?: (operonId: string) => Promise<string | undefined>;
+  resolveOperonRecoveryPath?: (recoveryRef: string) => string;
   /**
    * Read-only preflight: the folder Operon routes new file tasks to (`""`
    * when none is configured). Throws when it cannot be read.
@@ -89,6 +90,7 @@ const GOVERNED_FAMILIES = new Set([
   "obsidian_frontmatter_patch",
   "obsidian_note_replace",
   "obsidian_note_create",
+  "obsidian_operation_revert",
   "obsidian_note_delete",
   "obsidian_note_move",
   "bases_rows_patch",
@@ -169,6 +171,11 @@ function directTargets(
   runtime: VaultInstructionsRuntime,
 ): TargetSpec | undefined {
   switch (name) {
+    case "operon_recover_mutation": {
+      if (!runtime.resolveOperonRecoveryPath) return undefined;
+      try { return explicit(file(runtime.resolveOperonRecoveryPath(p.recoveryRef)), 1); }
+      catch { return { kind: "unresolved", hint: "Use a known filesystem Operon recovery reference." }; }
+    }
     case "obsidian_update_note":
     case "obsidian_search_replace":
       return p.targetType === "filePath"
@@ -355,9 +362,11 @@ const DIRECT_TOOLS = new Set([
   "operon_relocate_task",
 ]);
 
-export function vaultInstructionsToolRole(name: string): ToolRole | undefined {
+export function vaultInstructionsToolRole(name: string, canResolveOperonRecovery = false): ToolRole | undefined {
   if (name === "obsidian_read_note") return { kind: "read-proof" };
-  if (DIRECT_TOOLS.has(name)) return { kind: "direct" };
+  if (DIRECT_TOOLS.has(name) || (name === "operon_recover_mutation" && canResolveOperonRecovery)) {
+    return { kind: "direct" };
+  }
   const lifecycle = /^(.*)_(plan|apply|recover)$/u.exec(name);
   if (lifecycle && GOVERNED_FAMILIES.has(lifecycle[1])) {
     return lifecycle[2] === "plan"
@@ -747,7 +756,8 @@ function planRevealedTargets(
   family: string,
   receipt: Record<string, any> | undefined,
 ): VaultInstructionsTarget[] | "indeterminate" {
-  if (family !== "obsidian_note_move") return [];
+  if (family !== "obsidian_note_move" && family !== "obsidian_note_delete") return [];
+  if (family === "obsidian_note_delete" && receipt?.affectedPaths === undefined) return [];
   const affected = receipt?.affectedPaths;
   if (!Array.isArray(affected)) return "indeterminate";
   const targets: VaultInstructionsTarget[] = [];
@@ -1167,7 +1177,7 @@ export function installVaultInstructionsGate(
   if (!runtime || installed.has(server)) return;
   const register = server.registerTool.bind(server) as Registrar;
   server.registerTool = ((name: string, configuration: unknown, callback: Callback) => {
-    const role = vaultInstructionsToolRole(name);
+    const role = vaultInstructionsToolRole(name, Boolean(runtime.resolveOperonRecoveryPath));
     if (!role || typeof callback !== "function") {
       return register(name, configuration, callback);
     }

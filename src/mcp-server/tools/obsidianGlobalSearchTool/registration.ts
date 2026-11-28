@@ -15,15 +15,13 @@ import {
   requestContextService,
 } from "../../../utils/index.js";
 // Import types, schema shape, and the core processing logic from logic.ts
-import type {
-  ObsidianGlobalSearchInput,
-  ObsidianGlobalSearchResponse,
-} from "./logic.js"; // Ensure '.js' extension
+import type { ObsidianGlobalSearchInput } from "./logic.js";
 import {
   ObsidianGlobalSearchInputSchemaShape,
   processObsidianGlobalSearch,
 } from "./logic.js";
 import { mcpSchema } from "../../mcpSchema.js";
+import { noteReadResult } from "../noteReadResult.js";
 
 /**
  * Registers the 'obsidian_global_search' tool with the MCP server instance.
@@ -40,7 +38,7 @@ export async function registerObsidianGlobalSearchTool(
   vaultCacheService: VaultCacheService, // Now required
 ): Promise<void> {
   const toolName = "obsidian_global_search";
-  const toolDescription = `Performs search across the Obsidian vault using text or regex, using live Markdown content with a shared-cache fallback. Supports filtering by modification date, optionally restricting search to a specific directory path (recursively), pagination (page, pageSize), and limiting matches shown per file (maxMatchesPerFile). Returns a JSON object containing success status, a message, pagination details (currentPage, pageSize, totalPages), total file/match counts (before pagination), and an array of results. Each result includes the file path, filename, creation timestamp (ctime), modification timestamp (mtime), and an array of match context snippets (limited by maxMatchesPerFile). matchCount reports all content occurrences per file independently of the snippet limit; returnedMatchCount reports detailed snippets. hasMore/nextPage provide pagination. Compact mode omits off-page identities. Detailed mode includes at most 20 off-page vault-relative paths in alsoFoundInFiles, with alsoFoundInFilesTotal.`;
+  const toolDescription = `Performs search across the Obsidian vault using text or regex, using live Markdown content with a shared-cache fallback. Regex anchors ^ and $ match the start and end of each line, respectively. Supports filtering by modification date, optionally restricting search to a specific directory path (recursively), pagination (page, pageSize up to 500), and limiting matches shown per file (maxMatchesPerFile). Returns a JSON object containing success status, a message, pagination details (currentPage, pageSize, totalPages), total file/match counts (before pagination), and an array of results. Each result includes the file path, filename, creation timestamp (ctime), modification timestamp (mtime), and an array of match context snippets (limited by maxMatchesPerFile). Live results retain the Obsidian path and include a vault-relative diskPath when a unique local spelling containing U+00A0 or U+202F differs. Use diskPath for filesystem access when present. matchCount reports all content occurrences per file independently of the snippet limit; returnedMatchCount reports detailed snippets. hasMore/nextPage provide pagination. Compact mode omits off-page identities. Detailed mode includes at most 20 off-page vault-relative paths in alsoFoundInFiles, with alsoFoundInFilesTotal.`;
 
   const registrationContext: RequestContext =
     requestContextService.createRequestContext({
@@ -56,7 +54,7 @@ export async function registerObsidianGlobalSearchTool(
       server.registerTool(
         toolName,
         {
-          description: toolDescription,
+          description: toolDescription + ' Set mode to "ranked" for BM25 relevance on cached Markdown, with title, alias and heading boosts.',
           inputSchema: mcpSchema(ObsidianGlobalSearchInputSchemaShape),
           annotations: READ_ONLY_TOOL_ANNOTATIONS,
         },
@@ -83,29 +81,16 @@ export async function registerObsidianGlobalSearchTool(
           logger.debug(`Handling '${toolName}' request`, handlerContext);
 
           return await ErrorHandler.tryCatch(
-            async () => {
-              const response: ObsidianGlobalSearchResponse =
-                await processObsidianGlobalSearch(
-                  params,
-                  handlerContext,
-                  obsidianService,
-                  vaultCacheService,
-                );
-              logger.debug(
-                `'${toolName}' processed successfully`,
+            () => noteReadResult(
+              () => processObsidianGlobalSearch(
+                params,
                 handlerContext,
-              );
-
-              return {
-                content: [
-                  {
-                    type: "text",
-                    text: JSON.stringify(response, null, 2),
-                  },
-                ],
-                isError: false,
-              };
-            },
+                obsidianService,
+                vaultCacheService,
+              ),
+              vaultCacheService,
+              { operation: `executing tool ${toolName}`, toolName, params },
+            ),
             {
               operation: `executing tool ${toolName}`,
               context: handlerContext,

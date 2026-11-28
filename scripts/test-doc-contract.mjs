@@ -28,6 +28,12 @@ async function text(relativePath) {
 
 const readme = await text("README.md");
 const readmeFr = await text("README.fr.md");
+const { engines } = JSON.parse(await text("package.json"));
+for (const guide of ["docs/semantic-index-producer.md", "docs/semantic-index-producer.fr.md"]) {
+  const [, firstParagraph] = (await text(guide)).split(/\r?\n\r?\n/u);
+  assert.ok(firstParagraph.includes(`Node ${engines.node.slice(2)} `),
+    `${guide} must document the package's minimum Node version in the prerequisites`);
+}
 assert.ok(readme.split(/\r?\n/).length <= 220, "README.md must stay concise");
 assert.ok(
   readmeFr.split(/\r?\n/).length <= 220,

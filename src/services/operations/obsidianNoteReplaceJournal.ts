@@ -3,11 +3,13 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
-import type { OperationProof } from "./contract.js";
+import { HEADLESS_VAULT_LOCK_BUSY, type OperationProof } from "./contract.js";
 import type {
   ModifiedTimeSettlementEvidence,
   ModifiedTimeSettlementPolicy,
 } from "./modifiedTimeSettlement.js";
+
+export const FILESYSTEM_OPERON_PROJECTION = "operon.filesystem.mutation";
 
 export type ObsidianNoteReplaceStatus =
   | "planned"
@@ -74,6 +76,25 @@ export type ObsidianNoteReplacePlan = {
   beforeSha256: string;
   afterSha256: string;
   nextContent: string;
+  filesystem?: {
+    policyDigest: string;
+    beforeContent?: string;
+    projectedSha256?: string;
+    stagedIdentity?: string;
+    stagedSha256?: string;
+    stagedContent?: string;
+    publicationConfirmed?: true;
+    localStage?: true;
+    localStageMode?: "exchange" | "legacy";
+    backupVerified?: true;
+    witnessesCleaned?: true;
+    exchangeRollback?: { identity: string; sha256: string; bytesBase64: string };
+    displacedObservation?: { sha256: string; bytesBase64: string };
+    displacedEditRecoverable?: true;
+    // Private evidence. null means publication was followed by absence.
+    divergentObservation?: { sha256: string; bytesBase64: string; modifiedAt?: string } | null;
+    replacesConcurrentEdit?: import("./contract.js").ConcurrentEditReplacement;
+  };
   bindingFingerprint: string;
   status: ObsidianNoteReplaceStatus;
   createdAt: string;
@@ -98,10 +119,47 @@ export type ObsidianNoteReplacePlan = {
   administrativeClosure?: AdministrativeClosureEvidence;
 };
 
+export type TextPatchProposalIdentity = {
+  id: string;
+  intentDigest: string;
+  publicIdempotencyKey: string;
+  path: string;
+  beforeSha256: string;
+  bindingFingerprint: string;
+};
+
+export type TextPatchProposalTrace = TextPatchProposalIdentity & {
+  operationId: string | null;
+  planRef: string | null;
+  planDigest: string | null;
+  terminalStatus: ObsidianNoteReplaceStatus | null;
+};
+
+export type TextPatchProposalSeal = {
+  identity: TextPatchProposalIdentity;
+  reference: (plan: ObsidianNoteReplacePlan) => { planRef: string; planDigest: string };
+};
+
+type NewPlan = Omit<ObsidianNoteReplacePlan, "operationId" | "status" | "createdAt" | "updatedAt">;
+
 export class ObsidianNoteReplaceConcurrencyError extends Error {
   constructor() {
     super("The note replacement state changed concurrently.");
   }
+}
+
+export function displacedFilesystemEdit(plan: ObsidianNoteReplacePlan) {
+  return plan.status === "outcome_unknown" && plan.filesystem?.displacedEditRecoverable
+    ? plan.filesystem.displacedObservation : undefined;
+}
+
+export function replacedConcurrentEdit(plan: ObsidianNoteReplacePlan) {
+  const observed = plan.filesystem?.divergentObservation;
+  if (displacedFilesystemEdit(plan)) {
+    return observed && observed.sha256 !== plan.filesystem?.stagedSha256
+      ? { sha256: observed.sha256, observedAt: plan.updatedAt, modifiedAt: observed.modifiedAt } : undefined;
+  }
+  return plan.filesystem?.replacesConcurrentEdit;
 }
 
 export function noteReplaceIdempotencyConflict(): McpError {
@@ -116,6 +174,8 @@ export type ObsidianNoteReplaceJournalOptions = {
   now?: () => number;
   terminalRetentionMs?: number;
   plannedRetentionMs?: number;
+  proposalConflictRetentionMs?: number;
+  proposalTraceRetentionMs?: number;
   purgeIntervalMs?: number;
   executionLeaseMs?: number;
   executionSweepIntervalMs?: number;
@@ -125,6 +185,8 @@ export type ObsidianNoteReplaceJournalOptions = {
 };
 
 export type PendingOperationKind =
+  | "obsidian.operation.revert"
+  | typeof FILESYSTEM_OPERON_PROJECTION
   | "obsidian.note.replace"
   | "obsidian.frontmatter.patch"
   | "obsidian.base.formula.patch"
@@ -235,6 +297,8 @@ export class ObsidianNoteReplaceJournal {
   private readonly now: () => number;
   private readonly terminalRetentionMs: number;
   private readonly plannedRetentionMs: number;
+  private readonly proposalConflictRetentionMs: number;
+  private readonly proposalTraceRetentionMs: number;
   private readonly purgeIntervalMs: number;
   private readonly executionLeaseMs: number;
   private readonly executionSweepIntervalMs: number;
@@ -255,6 +319,8 @@ export class ObsidianNoteReplaceJournal {
     this.terminalRetentionMs =
       options.terminalRetentionMs ?? 30 * 24 * 60 * 60 * 1000;
     this.plannedRetentionMs = options.plannedRetentionMs ?? 30 * 24 * 60 * 60 * 1000;
+    this.proposalConflictRetentionMs = options.proposalConflictRetentionMs ?? 90 * 24 * 60 * 60 * 1000;
+    this.proposalTraceRetentionMs = options.proposalTraceRetentionMs ?? 365 * 24 * 60 * 60 * 1000;
     this.purgeIntervalMs = options.purgeIntervalMs ?? 60 * 60 * 1000;
     this.executionLeaseMs = options.executionLeaseMs ?? 30_000;
     this.executionSweepIntervalMs = options.executionSweepIntervalMs ?? 1_000;
@@ -313,6 +379,42 @@ export class ObsidianNoteReplaceJournal {
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
           )
+        `);
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS operon_filesystem_recovery_keys (
+            idempotency_key TEXT PRIMARY KEY,
+            operation_id TEXT NOT NULL REFERENCES obsidian_note_replace_plans(operation_id) ON DELETE CASCADE
+          ) STRICT
+        `);
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS obsidian_text_patch_proposals (
+            id TEXT PRIMARY KEY,
+            intent_digest TEXT NOT NULL,
+            public_key TEXT NOT NULL UNIQUE,
+            path TEXT NOT NULL,
+            before_sha256 TEXT NOT NULL,
+            binding_fingerprint TEXT NOT NULL,
+            operation_id TEXT UNIQUE,
+            plan_ref TEXT,
+            plan_digest TEXT,
+            terminal_status TEXT,
+            retained_since TEXT,
+            CHECK (
+              (operation_id IS NULL AND plan_ref IS NULL AND plan_digest IS NULL AND terminal_status IS 'conflict')
+              OR (operation_id IS NOT NULL AND plan_ref IS NOT NULL AND plan_digest IS NOT NULL)
+            )
+          ) STRICT
+        `);
+        this.ensureProposalRetentionColumn();
+        this.db.exec(`
+          CREATE TRIGGER IF NOT EXISTS obsidian_text_patch_proposal_trace_on_purge
+          AFTER DELETE ON obsidian_note_replace_plans
+          BEGIN
+            UPDATE obsidian_text_patch_proposals
+            SET terminal_status = OLD.status, retained_since = OLD.updated_at
+            WHERE operation_id = OLD.operation_id;
+          END;
+          DROP TRIGGER IF EXISTS obsidian_text_patch_proposal_retention;
         `);
         this.db.exec(`
           CREATE TABLE IF NOT EXISTS obsidian_note_replace_runtime_leases (
@@ -440,14 +542,80 @@ export class ObsidianNoteReplaceJournal {
   }
 
   create(
-    input: Omit<
-      ObsidianNoteReplacePlan,
-      "operationId" | "status" | "createdAt" | "updatedAt"
-    >,
+    input: NewPlan,
     maximumActiveProjectionRows?: number,
   ): ObsidianNoteReplacePlan {
     this.maybePurgeTerminalPlans();
     const existing = this.getByIdempotencyKey(input.idempotencyKey);
+    return this.insertPlan(input, existing, maximumActiveProjectionRows);
+  }
+
+  getTextPatchProposal(id: string): TextPatchProposalTrace | undefined {
+    this.maybePurgeTerminalPlans();
+    return this.selectTextPatchProposal(id);
+  }
+
+  private selectTextPatchProposal(id: string): TextPatchProposalTrace | undefined {
+    return this.db.prepare(`SELECT id, intent_digest AS intentDigest, public_key AS publicIdempotencyKey,
+      path, before_sha256 AS beforeSha256, binding_fingerprint AS bindingFingerprint,
+      operation_id AS operationId, plan_ref AS planRef, plan_digest AS planDigest,
+      terminal_status AS terminalStatus FROM obsidian_text_patch_proposals WHERE id = ?`)
+      .get(id) as TextPatchProposalTrace | undefined;
+  }
+
+  recordTextPatchProposalConflict(identity: TextPatchProposalIdentity): void {
+    this.insertTextPatchProposal(identity, null, null, "conflict");
+  }
+
+  createTextPatchProposalPlan(input: NewPlan, seal: TextPatchProposalSeal): ObsidianNoteReplacePlan {
+    const { identity } = seal;
+    if (identity.path !== input.path ||
+        identity.beforeSha256 !== input.beforeSha256 ||
+        identity.bindingFingerprint !== input.bindingFingerprint ||
+        input.projection?.kind !== "obsidian.text.patch" ||
+        input.projection.publicIdempotencyKey !== identity.publicIdempotencyKey) {
+      throw new McpError(BaseErrorCode.CONFLICT, "The plan does not match the proposal identity.");
+    }
+    this.maybePurgeTerminalPlans();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      // A proposal conflict or expired trace also owns its ID. Never associate
+      // an existing ordinary plan, even if a caller used this key before import existed.
+      if (this.selectTextPatchProposal(identity.id) || this.selectByIdempotencyKey(input.idempotencyKey)) {
+        throw noteReplaceIdempotencyConflict();
+      }
+      const plan = this.insertPlan(input);
+      const reference = seal.reference(plan);
+      this.insertTextPatchProposal(identity, plan.operationId, reference, null);
+      this.db.exec("COMMIT");
+      return plan;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  private insertTextPatchProposal(
+    identity: TextPatchProposalIdentity,
+    operationId: string | null,
+    reference: { planRef: string; planDigest: string } | null,
+    terminalStatus: "conflict" | null,
+  ): void {
+    this.db.prepare(`INSERT INTO obsidian_text_patch_proposals
+      (id, intent_digest, public_key, path, before_sha256, binding_fingerprint,
+       operation_id, plan_ref, plan_digest, terminal_status, retained_since)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`)
+      .run(identity.id, identity.intentDigest, identity.publicIdempotencyKey,
+        identity.path, identity.beforeSha256, identity.bindingFingerprint,
+        operationId, reference?.planRef ?? null, reference?.planDigest ?? null, terminalStatus,
+        terminalStatus ? new Date(this.now()).toISOString() : null);
+  }
+
+  private insertPlan(
+    input: NewPlan,
+    existing?: ObsidianNoteReplacePlan,
+    maximumActiveProjectionRows?: number,
+  ): ObsidianNoteReplacePlan {
     if (existing) {
       if (!sameRequestInput(existing, input)) {
         throw noteReplaceIdempotencyConflict();
@@ -475,8 +643,10 @@ export class ObsidianNoteReplaceJournal {
       updatedAt: now,
       effectTracking: { contractVersion: 1, untracked: false, attempts: [] },
     };
+    const operon = input.projection?.kind === FILESYSTEM_OPERON_PROJECTION;
     const insertValues = maximumActiveProjectionRows === undefined
-      ? "VALUES (?, ?, ?, ?, ?, ?)"
+      ? operon ? "SELECT ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM operon_filesystem_recovery_keys WHERE idempotency_key = ?)"
+        : "VALUES (?, ?, ?, ?, ?, ?)"
       : "SELECT ?, ?, ?, ?, ?, ? WHERE (SELECT count(*) FROM obsidian_note_replace_plans WHERE status IN ('planned','applying','outcome_unknown') AND json_extract(payload_json, '$.projection.kind') = ?) < ?";
     const inserted = this.db
       .prepare(
@@ -492,6 +662,7 @@ export class ObsidianNoteReplaceJournal {
         JSON.stringify(plan),
         plan.createdAt,
         plan.updatedAt,
+        ...(operon && maximumActiveProjectionRows === undefined ? [input.idempotencyKey] : []),
         ...(maximumActiveProjectionRows === undefined ? [] : [input.projection!.kind, maximumActiveProjectionRows]),
       );
     if (inserted.changes === 1) return plan;
@@ -499,8 +670,9 @@ export class ObsidianNoteReplaceJournal {
     // Another process won the same-key race after our optimistic lookup.
     // SQLite serializes the conflicting insert; reload its durable winner
     // instead of surfacing a UNIQUE constraint as an MCP INTERNAL_ERROR.
-    const winner = this.getByIdempotencyKey(input.idempotencyKey);
+    const winner = this.selectByIdempotencyKey(input.idempotencyKey);
     if (!winner) {
+      if (operon && this.operonRecoveryOwner(input.idempotencyKey)) throw this.operonKeyConflict();
       if (maximumActiveProjectionRows !== undefined) {
         throw new McpError(
           BaseErrorCode.SERVICE_UNAVAILABLE,
@@ -514,6 +686,29 @@ export class ObsidianNoteReplaceJournal {
       throw noteReplaceIdempotencyConflict();
     }
     return winner;
+  }
+
+  private operonRecoveryOwner(key: string) {
+    const row = this.db.prepare("SELECT operation_id FROM operon_filesystem_recovery_keys WHERE idempotency_key = ?").get(key);
+    return row?.operation_id;
+  }
+
+  private operonKeyConflict() {
+    return new McpError(BaseErrorCode.CONFLICT, "The Operon idempotency key is already in use.", { reasonCode: "idempotency_key_reused" });
+  }
+
+  bindOperonRecoveryKey(operationId: string, key: string) {
+    this.assertOpen();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const owner = this.operonRecoveryOwner(key);
+      if ((owner && owner !== operationId) || this.selectByIdempotencyKey(key)) throw this.operonKeyConflict();
+      if (!owner) this.db.prepare("INSERT INTO operon_filesystem_recovery_keys VALUES (?, ?)").run(key, operationId);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   get(operationId: string): ObsidianNoteReplacePlan | undefined {
@@ -532,6 +727,10 @@ export class ObsidianNoteReplaceJournal {
   getByIdempotencyKey(key: string): ObsidianNoteReplacePlan | undefined {
     this.maybeMarkInterruptedPlans();
     this.maybePurgeTerminalPlans();
+    return this.selectByIdempotencyKey(key);
+  }
+
+  private selectByIdempotencyKey(key: string): ObsidianNoteReplacePlan | undefined {
     const row = this.db
       .prepare(
         "SELECT payload_json FROM obsidian_note_replace_plans WHERE idempotency_key = ?",
@@ -701,6 +900,94 @@ export class ObsidianNoteReplaceJournal {
       throw new ObsidianNoteReplaceConcurrencyError();
     }
     return updated;
+  }
+
+  recordFilesystemStage(operationId: string, attemptId: string, stagedIdentity: string, stagedSha256: string,
+    stagedContent?: string, localStageMode?: "exchange" | "legacy"): void {
+    this.updateFilesystemAttempt(operationId, attemptId, { stagedIdentity, stagedSha256, stagedContent,
+      ...(stagedContent === undefined ? {} : { localStage: true, localStageMode }) });
+  }
+
+  confirmFilesystemPublication(operationId: string, attemptId: string): void {
+    this.updateFilesystemAttempt(operationId, attemptId, { publicationConfirmed: true });
+  }
+
+  recordFilesystemDivergence(operationId: string, observation: Exclude<NonNullable<ObsidianNoteReplacePlan["filesystem"]>["divergentObservation"], undefined>,
+    displacedObservation?: { sha256: string; bytesBase64: string }, disposition?: "conflict" | "restore-displaced"): void {
+    this.transitionInternal(operationId, ["applying", "outcome_unknown"], disposition === "conflict" ? "conflict" : "outcome_unknown",
+      "headless_postflight_diverged", undefined, true, undefined, undefined, { divergentObservation: observation, displacedObservation,
+        ...(disposition === "restore-displaced" ? { displacedEditRecoverable: true } : {}) });
+  }
+
+  settleUnpublishedFilesystem(operationId: string, status: "conflict" | "failed", reason = "headless_not_published"): void {
+    this.transitionInternal(operationId, ["applying", "outcome_unknown"], status,
+      reason, undefined, true, undefined);
+  }
+
+  settleUnstagedFilesystemRecovery(operationId: string): ObsidianNoteReplacePlan {
+    return this.transitionInternal(operationId, ["outcome_unknown"], "conflict",
+      "The note changed before the interrupted operation reached publication.", undefined, false, undefined,
+      undefined, undefined, true);
+  }
+
+  settleFilesystemLockBusy(plan: ObsidianNoteReplacePlan): void {
+    const current = this.get(plan.operationId);
+    const attemptId = plan.executionOwner?.attemptId;
+    if (!current || !attemptId || current.filesystem?.stagedIdentity) return;
+    const ownsAttempt = current.status === "applying" && current.executionOwner?.attemptId === attemptId;
+    const interruptedAttempt = current.status === "outcome_unknown" && current.executionStartedAtEpochMs === plan.executionStartedAtEpochMs &&
+      current.effectTracking?.attempts.at(-1)?.attemptId === attemptId;
+    if (ownsAttempt || interruptedAttempt) {
+      this.transitionInternal(plan.operationId, [current.status], "failed", HEADLESS_VAULT_LOCK_BUSY, attemptId, false, undefined);
+    }
+  }
+
+  recordFilesystemExchangeRollback(operationId: string, displaced: NonNullable<NonNullable<ObsidianNoteReplacePlan["filesystem"]>["exchangeRollback"]>): void {
+    const row = this.get(operationId);
+    if (!row?.filesystem || !["applying", "outcome_unknown"].includes(row.status)) throw new ObsidianNoteReplaceConcurrencyError();
+    const updated = { ...row, filesystem: { ...row.filesystem, exchangeRollback: displaced } };
+    const result = this.db.prepare("UPDATE obsidian_note_replace_plans SET payload_json = ? WHERE operation_id = ? AND payload_json = ?")
+      .run(JSON.stringify(updated), operationId, JSON.stringify(row));
+    if (Number(result.changes) !== 1) throw new ObsidianNoteReplaceConcurrencyError();
+  }
+
+  interruptedFilesystemReplacements(): string[] {
+    const rows = this.db.prepare(`SELECT operation_id FROM obsidian_note_replace_plans
+      WHERE (status IN ('applying', 'outcome_unknown') OR
+        (status = 'conflict' AND json_type(payload_json, '$.filesystem.divergentObservation') IS NOT NULL))
+        AND json_extract(payload_json, '$.filesystem.localStage') = 1
+        AND COALESCE(json_extract(payload_json, '$.projection.kind'), '') <> 'obsidian.note.create'
+        AND json_type(payload_json, '$.filesystem.witnessesCleaned') IS NULL`).all();
+    return rows.map(row => String(row.operation_id));
+  }
+
+  verifyFilesystemBackup(operationId: string): void {
+    const row = this.get(operationId);
+    if (!row?.filesystem || !["applying", "outcome_unknown"].includes(row.status)) throw new ObsidianNoteReplaceConcurrencyError();
+    const updated = { ...row, filesystem: { ...row.filesystem, backupVerified: true } };
+    const result = this.db.prepare("UPDATE obsidian_note_replace_plans SET payload_json = ? WHERE operation_id = ? AND payload_json = ?")
+      .run(JSON.stringify(updated), operationId, JSON.stringify(row));
+    if (Number(result.changes) !== 1) throw new ObsidianNoteReplaceConcurrencyError();
+  }
+
+  confirmFilesystemWitnessCleanup(operationId: string): void {
+    const row = this.get(operationId);
+    if (!row?.filesystem || row.filesystem.divergentObservation === undefined) throw new ObsidianNoteReplaceConcurrencyError();
+    const updated = { ...row, filesystem: { ...row.filesystem, witnessesCleaned: true } };
+    const result = this.db.prepare("UPDATE obsidian_note_replace_plans SET payload_json = ? WHERE operation_id = ? AND payload_json = ?")
+      .run(JSON.stringify(updated), operationId, JSON.stringify(row));
+    if (Number(result.changes) !== 1) throw new ObsidianNoteReplaceConcurrencyError();
+  }
+
+  private updateFilesystemAttempt(operationId: string, attemptId: string, evidence: Partial<NonNullable<ObsidianNoteReplacePlan["filesystem"]>>): void {
+    const current = this.get(operationId);
+    if (!current?.filesystem || current.status !== "applying" ||
+        current.executionOwner?.attemptId !== attemptId) throw new ObsidianNoteReplaceConcurrencyError();
+    const updated = { ...current, filesystem: { ...current.filesystem, ...evidence } };
+    const result = this.db.prepare(
+      "UPDATE obsidian_note_replace_plans SET payload_json = ? WHERE operation_id = ? AND status = 'applying' AND payload_json = ?",
+    ).run(JSON.stringify(updated), operationId, JSON.stringify(current));
+    if (Number(result.changes) !== 1) throw new ObsidianNoteReplaceConcurrencyError();
   }
 
   deferSettlement(
@@ -900,10 +1187,18 @@ export class ObsidianNoteReplaceJournal {
     verifiedCommitWithoutOwner: boolean,
     settlementEvidence: ModifiedTimeSettlementEvidence | undefined,
     effectProof?: OperationProof,
+    filesystemUpdate?: Partial<NonNullable<ObsidianNoteReplacePlan["filesystem"]>>,
+    requireUnstagedFilesystem = false,
   ): ObsidianNoteReplacePlan {
     this.maybePurgeTerminalPlans();
     const current = this.get(operationId);
     if (!current || !expected.includes(current.status)) {
+      throw new ObsidianNoteReplaceConcurrencyError();
+    }
+    if (requireUnstagedFilesystem && (!current.filesystem || current.filesystem.stagedIdentity)) {
+      throw new ObsidianNoteReplaceConcurrencyError();
+    }
+    if (next === "committed" && current.filesystem?.divergentObservation !== undefined) {
       throw new ObsidianNoteReplaceConcurrencyError();
     }
     if (
@@ -953,6 +1248,9 @@ export class ObsidianNoteReplaceJournal {
         ? { modifiedTimeSettlementEvidence: settlementEvidence }
         : {}),
       ...(effectProof ? { effectProof } : {}),
+      ...(current.filesystem ? { filesystem: { ...current.filesystem, ...filesystemUpdate,
+        ...(STABLE_TERMINAL.has(next) && current.filesystem.divergentObservation === undefined && filesystemUpdate?.divergentObservation === undefined && !current.filesystem.exchangeRollback
+          ? { stagedContent: undefined } : {}) } } : {}),
       ...(STABLE_TERMINAL.has(next) ? { nextContent: "" } : {}),
       ...(failure ? { failure } : { failure: undefined }),
     };
@@ -1009,7 +1307,21 @@ export class ObsidianNoteReplaceJournal {
            AND updated_at < ?`,
       )
       .run(cutoff);
-    if (Number(result.changes) > 0 || Number(expired.changes) > 0) {
+    // Older traces had no timestamp. Give them a full window from the first
+    // sweep after upgrade. Live and unresolved plans never enter this sweep.
+    this.db.prepare(`UPDATE obsidian_text_patch_proposals SET retained_since = ?
+      WHERE terminal_status IS NOT NULL AND retained_since IS NULL`).run(expiredAt);
+    const purgedProposals = this.db.prepare(`DELETE FROM obsidian_text_patch_proposals
+      WHERE (operation_id IS NULL AND retained_since < ?)
+         OR (operation_id IS NOT NULL AND retained_since < ?)`)
+      .run(new Date(now - this.proposalConflictRetentionMs).toISOString(),
+        new Date(now - this.proposalTraceRetentionMs).toISOString());
+    const expiredDivergences = this.db.prepare(`DELETE FROM obsidian_note_replace_plans
+      WHERE status = 'outcome_unknown' AND updated_at < ?
+        AND json_type(payload_json, '$.filesystem.divergentObservation') IS NOT NULL
+        AND (json_extract(payload_json, '$.filesystem.witnessesCleaned') = 1
+          OR json_type(payload_json, '$.filesystem.localStage') IS NULL)`).run(cutoff);
+    if (Number(result.changes) > 0 || Number(expired.changes) > 0 || Number(purgedProposals.changes) > 0 || Number(expiredDivergences.changes) > 0) {
       this.walCheckpointRequired = true;
       this.checkpointSensitiveFrames();
     }
@@ -1160,6 +1472,18 @@ export class ObsidianNoteReplaceJournal {
     } catch (error) {
       // Another process may have completed the same additive migration.
       if (!hasEpoch()) throw error;
+    }
+  }
+
+  private ensureProposalRetentionColumn(): void {
+    const hasRetention = () =>
+      (this.db.prepare("PRAGMA table_info(obsidian_text_patch_proposals)").all() as Array<{ name: string }>)
+        .some((column) => column.name === "retained_since");
+    if (hasRetention()) return;
+    try {
+      this.db.exec("ALTER TABLE obsidian_text_patch_proposals ADD COLUMN retained_since TEXT");
+    } catch (error) {
+      if (!hasRetention()) throw error;
     }
   }
 

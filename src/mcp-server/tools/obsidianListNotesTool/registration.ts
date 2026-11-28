@@ -17,15 +17,13 @@ import {
 } from "../../../utils/index.js";
 import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
 // Import necessary types, schema, and logic function from the logic file
-import type {
-  ObsidianListNotesInput,
-  ObsidianListNotesResponse,
-} from "./logic.js";
+import type { ObsidianListNotesInput } from "./logic.js";
 import {
   ObsidianListNotesInputSchema,
   processObsidianListNotes,
 } from "./logic.js";
 import { mcpSchema } from "../../mcpSchema.js";
+import { noteReadResult } from "../noteReadResult.js";
 
 /**
  * Registers the 'obsidian_list_notes' tool with the MCP server.
@@ -48,7 +46,7 @@ export const registerObsidianListNotesTool = async (
 ): Promise<void> => {
   const toolName = "obsidian_list_notes";
   const toolDescription =
-    "Lists files and subdirectories within a specified Obsidian vault folder. Supports optional filtering by extension or name regex, and recursive listing to a specified depth (-1 for infinite). Returns an object containing the listed directory path, a formatted tree string of its contents, and the total entry count. Use an empty string or '/' for dirPath to list the vault root.";
+    "Lists files and subdirectories within a specified Obsidian vault folder. Supports filtering by extension or name regex and recursive listing to a specified depth (-1 for infinite). Returns the directory path, the total entry count, and either paginated compact entries or a formatted tree string. Live compact entries retain the Obsidian path and include a vault-relative diskPath when a unique local spelling containing U+00A0 or U+202F differs. Use diskPath for filesystem access when present. Use an empty string or '/' for dirPath to list the vault root.";
 
   // Create a context specifically for the registration process.
   const registrationContext: RequestContext =
@@ -89,29 +87,16 @@ export const registerObsidianListNotesTool = async (
           logger.debug(`Handling '${toolName}' request`, handlerContext);
 
           try {
-            // Delegate the actual file listing and filtering logic to the processing function.
-            const response: ObsidianListNotesResponse =
-              await processObsidianListNotes(
+            return await noteReadResult(
+              () => processObsidianListNotes(
                 params,
                 handlerContext,
                 obsidianService,
                 vaultCacheService,
-              );
-            logger.debug(
-              `'${toolName}' processed successfully`,
-              handlerContext,
+              ),
+              vaultCacheService,
+              { operation: `processing ${toolName} handler`, toolName, params },
             );
-
-            // Format the successful response object from the logic function into the required MCP CallToolResult structure.
-            return {
-              content: [
-                {
-                  type: "text", // Standard content type for structured JSON data
-                  text: JSON.stringify(response, null, 2), // Pretty-print JSON
-                },
-              ],
-              isError: false, // Indicate successful execution
-            };
           } catch (error) {
             return {
               content: [

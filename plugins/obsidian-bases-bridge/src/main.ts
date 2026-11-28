@@ -32,6 +32,11 @@ import {
 import { normalizeLinkish } from "./link-normalization.mjs";
 import { baseQuerySnapshot } from "./base-query-snapshot.mjs";
 import {
+  BASE_QUERY_FILTER_VERSION,
+  BaseQueryFilterError,
+  compileBaseQueryFilter,
+} from "../../../src/services/baseQueryFilter.js";
+import {
   BASE_ATOMIC_CONTRACT_VERSION,
   BASE_ATOMIC_REST_PREFIX,
   BaseBindingConflictError,
@@ -254,7 +259,7 @@ type BasePublicErrorDescriptor = {
   code: string;
   reasonCode: string;
   status: "blocked" | "conflict" | "not_found" | "rejected";
-  retryable: false;
+  retryable: boolean;
   message: string;
 };
 
@@ -317,6 +322,27 @@ const BASE_PUBLIC_ERRORS: Record<string, BasePublicErrorDescriptor> = {
     status: "rejected",
     retryable: false,
     message: "The Base could not be read.",
+  },
+  base_query_selection_unavailable: {
+    code: "base_query_selection_unavailable",
+    reasonCode: "base_query_selection_unavailable",
+    status: "rejected",
+    retryable: false,
+    message: "Obsidian's Bases engine could not select the requested rows.",
+  },
+  base_query_row_disappeared: {
+    code: "base_query_row_disappeared",
+    reasonCode: "base_query_row_disappeared",
+    status: "rejected",
+    retryable: true,
+    message: "A selected Base row is no longer available. Run the query again.",
+  },
+  base_view_not_found: {
+    code: "base_view_not_found",
+    reasonCode: "base_view_not_found",
+    status: "not_found",
+    retryable: false,
+    message: "The requested Base view was not found.",
   },
   forbidden_key: {
     code: "forbidden_key",
@@ -606,7 +632,7 @@ type BaseSchemaResponse = {
 };
 type BaseQueryRequest = {
   view?: string;
-  filter?: any;
+  filter?: unknown;
   sort?: Array<{ prop: string; dir?: "asc" | "desc" }>;
   limit?: number;
   page?: number;
@@ -622,22 +648,7 @@ type QueryCandidateRow = {
   values?: Record<string, string | null>;
 };
 
-/** True when a filter tree references a formula, which only the engine computes. */
-/**
- * The request filter without its formula predicates, for rows whose formula
- * values were not computed: a predicate that cannot be evaluated keeps the row
- * instead of being evaluated against missing values. In `and`, the predicate
- * is dropped; an `or` or a `not` that involves a formula keeps every row.
- */
-export function withoutFormulaPredicates(filter: unknown): unknown {
-  if (!filterMentionsFormula(filter)) return filter;
-  if (filter && typeof filter === "object" && !Array.isArray(filter)) {
-    const and = (filter as any).and;
-    if (Array.isArray(and)) return { and: and.map((part: unknown) => withoutFormulaPredicates(part)) };
-  }
-  return null;
-}
-
+/** True when a stored filter tree references a formula, which only the engine computes. */
 function filterMentionsFormula(filter: unknown, depth = 0): boolean {
   if (depth > 32) return true;
   if (typeof filter === "string") return /(^|[^\w.])formula\./u.test(filter);
@@ -652,6 +663,7 @@ function filterMentionsFormula(filter: unknown, depth = 0): boolean {
   return false;
 }
 type BaseQueryResponse = {
+  filterVersion?: number;
   baseSnapshot?: ReturnType<typeof baseQuerySnapshot>;
   total: number;
   page: number;
@@ -1372,11 +1384,41 @@ export default class BasesBridgePlugin extends Plugin {
       return { ok: !res.ok, warnings };
     }
 
-    // Built-in functions
+    const call = this.evaluateFilterCall(file, raw, schema, formulaValues);
+    if (call !== undefined) return { ok: call, warnings };
+
+    // Comparisons: support ==, =, !=, >=, <=, >, <
+    const opMatch = raw.match(/^(.*?)\s*(==|=|!=|>=|<=|>|<)\s*(.*?)\s*$/);
+    if (opMatch) {
+      const leftRef = opMatch[1].trim();
+      const op = opMatch[2];
+      const rightRaw = opMatch[3].trim();
+
+      const left = this.getValueForRef(file, leftRef, schema, formulaValues);
+      const right = parseComparisonLiteral(rightRaw);
+      return { ok: compareFilterValues(left, op, right), warnings };
+    }
+
+    // Bare identifier: treat as a truthy frontmatter key.
+    if (isTruthyFilterReference(raw)) {
+      const v = this.getValueForRef(file, raw, schema, formulaValues);
+      return { ok: isTruthyFilterValue(v), warnings };
+    }
+
+    warnings.push("Filter non reconnu.");
+    return { ok: true, warnings };
+  }
+
+  private evaluateFilterCall(
+    file: TFile,
+    raw: string,
+    schema?: BaseSchemaResponse,
+    formulaValues?: Record<string, string | null>,
+  ): boolean | undefined {
     const hasTagMatch = raw.match(/^file\.hasTag\((.+)\)$/);
     if (hasTagMatch) {
       const tag = stripQuotes(hasTagMatch[1]);
-      return { ok: this.getTagSet(file).has(tag.replace(/^#/, "")), warnings };
+      return this.getTagSet(file).has(tag.replace(/^#/, ""));
     }
     const inFolderMatch = raw.match(/^file\.inFolder\((.+)\)$/);
     if (inFolderMatch) {
@@ -1384,12 +1426,12 @@ export default class BasesBridgePlugin extends Plugin {
         .replace(/\\/g, "/")
         .replace(/\/+$/g, "");
       const prefix = folder ? `${folder}/` : "";
-      return { ok: prefix ? file.path.startsWith(prefix) : true, warnings };
+      return !prefix || file.path.startsWith(prefix);
     }
     const hasLinkMatch = raw.match(/^file\.hasLink\((.+)\)$/);
     if (hasLinkMatch) {
       const target = stripQuotes(hasLinkMatch[1]);
-      return { ok: this.fileHasLink(file, target), warnings };
+      return this.fileHasLink(file, target);
     }
 
     // List literal contains: ["a","b"].contains(file.ext)
@@ -1399,19 +1441,19 @@ export default class BasesBridgePlugin extends Plugin {
       const needleRef = listContainsMatch[2].trim();
       let needle = this.getValueForRef(file, needleRef, schema, formulaValues);
       if (needle === undefined) needle = stripQuotes(needleRef);
-      return { ok: items.includes(String(needle ?? "")), warnings };
+      return items.includes(String(needle ?? ""));
     }
 
     // String helpers on file.*
     const pathStartsWithMatch = raw.match(/^file\.path\.startsWith\((.+)\)$/);
     if (pathStartsWithMatch) {
       const prefix = stripQuotes(pathStartsWithMatch[1]).replace(/\\/g, "/");
-      return { ok: file.path.startsWith(prefix), warnings };
+      return file.path.startsWith(prefix);
     }
     const pathContainsMatch = raw.match(/^file\.path\.contains\((.+)\)$/);
     if (pathContainsMatch) {
       const needle = stripQuotes(pathContainsMatch[1]).replace(/\\/g, "/");
-      return { ok: file.path.includes(needle), warnings };
+      return file.path.includes(needle);
     }
     const folderStartsWithMatch = raw.match(
       /^file\.folder\.startsWith\((.+)\)$/,
@@ -1421,20 +1463,20 @@ export default class BasesBridgePlugin extends Plugin {
         .replace(/\\/g, "/")
         .replace(/\/+$/g, "");
       const folder = dirname(file.path);
-      return { ok: folder.startsWith(prefix), warnings };
+      return folder.startsWith(prefix);
     }
     const folderContainsMatch = raw.match(/^file\.folder\.contains\((.+)\)$/);
     if (folderContainsMatch) {
       const needle = stripQuotes(folderContainsMatch[1]).replace(/\\/g, "/");
       const folder = dirname(file.path);
-      return { ok: folder.includes(needle), warnings };
+      return folder.includes(needle);
     }
 
     // file.tags.contains("tag/subtag")
     const fileTagsContainsMatch = raw.match(/^file\.tags\.contains\((.+)\)$/);
     if (fileTagsContainsMatch) {
       const tag = stripQuotes(fileTagsContainsMatch[1]);
-      return { ok: this.getTagSet(file).has(tag.replace(/^#/, "")), warnings };
+      return this.getTagSet(file).has(tag.replace(/^#/, ""));
     }
 
     // collection.contains(link("Domaines")) / list(dans).contains(link("Atlas/Maps/Réunions"))
@@ -1451,8 +1493,7 @@ export default class BasesBridgePlugin extends Plugin {
         : v === undefined || v === null
           ? []
           : [v];
-      const ok = arr.some((x) => normalizeLinkish(String(x)) === want);
-      return { ok, warnings };
+      return arr.some((x) => normalizeLinkish(String(x)) === want);
     }
     const propContainsLinkMatch = raw.match(
       /^([\p{L}\p{N}_-]+)\.contains\(link\((.+)\)\)$/u,
@@ -1467,8 +1508,7 @@ export default class BasesBridgePlugin extends Plugin {
         : v === undefined || v === null
           ? []
           : [v];
-      const ok = arr.some((x) => normalizeLinkish(String(x)) === want);
-      return { ok, warnings };
+      return arr.some((x) => normalizeLinkish(String(x)) === want);
     }
 
     // Generic contains/startsWith on simple file.* fields
@@ -1480,34 +1520,13 @@ export default class BasesBridgePlugin extends Plugin {
       const op = fileFieldOpMatch[2];
       const needle = stripQuotes(fileFieldOpMatch[3]);
       const hay = String(this.getValueForRef(file, field, schema, formulaValues) ?? "");
-      if (op === "contains") return { ok: hay.includes(needle), warnings };
-      return { ok: hay.startsWith(needle), warnings };
+      return op === "contains" ? hay.includes(needle) : hay.startsWith(needle);
     }
 
-    // Comparisons: support ==, =, !=, >=, <=, >, <
-    const opMatch = raw.match(/^(.*?)\s*(==|=|!=|>=|<=|>|<)\s*(.*?)\s*$/);
-    if (opMatch) {
-      const leftRef = opMatch[1].trim();
-      const op = opMatch[2];
-      const rightRaw = opMatch[3].trim();
-
-      const left = this.getValueForRef(file, leftRef, schema, formulaValues);
-      const right = parseComparisonLiteral(rightRaw);
-      return { ok: compareFilterValues(left, op, right), warnings };
-    }
-
-    // Bare identifier: treat as "truthy" frontmatter key (used a lot in Bases configs)
-    // Ex: `- groupe_réunion` or `- sas_statut`
-    if (isTruthyFilterReference(raw)) {
-      const v = this.getValueForRef(file, raw, schema, formulaValues);
-      return { ok: isTruthyFilterValue(v), warnings };
-    }
-
-    warnings.push("Filter non reconnu.");
-    return { ok: true, warnings };
+    return undefined;
   }
 
-  private evaluateFilter(
+  private evaluateStoredFilter(
     file: TFile,
     filter: any,
     schema?: BaseSchemaResponse,
@@ -1521,7 +1540,7 @@ export default class BasesBridgePlugin extends Plugin {
       if (Array.isArray((filter as any).and)) {
         const warnings: string[] = [];
         for (const part of (filter as any).and) {
-          const res = this.evaluateFilter(file, part, schema, formulaValues);
+          const res = this.evaluateStoredFilter(file, part, schema, formulaValues);
           warnings.push(...res.warnings);
           if (!res.ok) return { ok: false, warnings };
         }
@@ -1531,19 +1550,20 @@ export default class BasesBridgePlugin extends Plugin {
         const warnings: string[] = [];
         let any = false;
         for (const part of (filter as any).or) {
-          const res = this.evaluateFilter(file, part, schema, formulaValues);
+          const res = this.evaluateStoredFilter(file, part, schema, formulaValues);
           warnings.push(...res.warnings);
           if (res.ok) any = true;
         }
         return { ok: any, warnings };
       }
       if ((filter as any).not) {
-        const res = this.evaluateFilter(file, (filter as any).not, schema, formulaValues);
+        const res = this.evaluateStoredFilter(file, (filter as any).not, schema, formulaValues);
         return { ok: !res.ok, warnings: res.warnings };
       }
     }
 
-    // Unknown filter shape: accept but warn.
+    // Stored Base syntax can exceed the fallback evaluator's subset. Warn so
+    // callers can distinguish this approximate snapshot from engine results.
     return { ok: true, warnings: ["Filter non supporté (shape inconnu)."] };
   }
 
@@ -1601,17 +1621,29 @@ export default class BasesBridgePlugin extends Plugin {
   }
 
   /**
-   * Base query. With `evaluate: true`, Obsidian's engine selects the rows of
-   * the view (global and view filters, sort, limit) and computes every
-   * formula from the same Base bytes as `baseSnapshot`: `source: "engine"`.
-   * Otherwise, or when the engine is unavailable, the Bridge's supported-filter
-   * snapshot selects the rows and no formula value is returned:
-   * `source: "fallback"`, with one warning per formula when evaluation was
-   * requested.
+   * Public queries use the same native row selection in both evaluate modes.
+   * The qualified route can explicitly request a supported-filter snapshot
+   * for the governed Base row reader.
    */
-  private async handleBaseQuery(req: any, res: any): Promise<void> {
+  private async handleBaseQuery(
+    req: any,
+    res: any,
+    supportedFilterSnapshot = false,
+  ): Promise<void> {
     const id = normBaseId(req.params?.id);
     const body: BaseQueryRequest = (req.body ?? {}) as any;
+    let requestFilter;
+    try {
+      requestFilter = compileBaseQueryFilter(body.filter, true);
+    } catch (error) {
+      if (!(error instanceof BaseQueryFilterError)) throw error;
+      // The compiler supplies only fixed guidance and a positional node path.
+      responseStatus(res, 400).json({
+        ok: false,
+        error: { code: "INVALID_PARAMS", message: error.message, node: error.node },
+      });
+      return;
+    }
     const config = await this.readBaseConfig(id);
     const schema = this.extractSchema(config.id, config.json);
 
@@ -1648,50 +1680,47 @@ export default class BasesBridgePlugin extends Plugin {
         warningsSet.add(String(w));
       }
     };
-    if (viewName && !view) addWarnings(["Vue introuvable."]);
+    if (viewName && !view) {
+      sendJson(res, 404, atomicError("base_view_not_found"));
+      return;
+    }
     const formulaFilterWarning = (filter: unknown) => {
       if (filterMentionsFormula(filter)) {
         addWarnings(["Filtre sur formule non évalué par le Bridge."]);
       }
     };
 
-    let source: "engine" | "fallback" = "fallback";
-    let candidates: QueryCandidateRow[] | null = null;
+    const source = supportedFilterSnapshot ? "fallback" : "engine";
+    let candidates: QueryCandidateRow[] = [];
     const engineDeps = { app: this.app, parseYaml, stringifyYaml, obsidianVersion: apiVersion };
-    if (evaluate) {
-      // The engine first selects the rows without computing formulas; values
-      // are computed below, only for the rows that need them.
+    if (!supportedFilterSnapshot) {
       const engine = await selectBaseViewRowsWithEngine(engineDeps, {
         path: config.id,
         text: config.yaml,
         viewIndex,
       });
-      if (engine.available) {
-        source = "engine";
-        candidates = [];
-        for (const rowPath of engine.paths) {
-          const file = this.app.vault.getAbstractFileByPath(rowPath);
-          if (file instanceof TFile) candidates.push({ file });
-          else addWarnings(["Ligne du moteur introuvable dans le coffre."]);
-        }
-      } else {
-        for (const name of formulaNames) {
-          addWarnings([`formula_not_evaluated:${name}:${engine.reason}`]);
-        }
+      if (!engine.available) {
+        sendJson(res, 503, atomicError("base_query_selection_unavailable"));
+        return;
       }
-    }
-
-    if (!candidates) {
+      for (const rowPath of engine.paths) {
+        const file = this.app.vault.getAbstractFileByPath(rowPath);
+        if (!(file instanceof TFile)) {
+          sendJson(res, 503, atomicError("base_query_row_disappeared"));
+          return;
+        }
+        candidates.push({ file });
+      }
+    } else {
       // Bridge supported-filter snapshot: global and view filters only.
       const baseFilter = {
         and: [schema.filters, view?.filters].filter(Boolean),
       };
       formulaFilterWarning(baseFilter);
-      candidates = [];
       for (const f of this.app.vault.getFiles()) {
         if (!(f instanceof TFile)) continue;
         if (f.path.startsWith(".obsidian/") || f.extension === "base") continue;
-        const r = this.evaluateFilter(f, baseFilter, schema);
+        const r = this.evaluateStoredFilter(f, baseFilter, schema);
         addWarnings(r.warnings);
         if (r.ok) candidates.push({ file: f });
       }
@@ -1727,40 +1756,41 @@ export default class BasesBridgePlugin extends Plugin {
       }
     }
 
-    // Computes the formula values of the given rows with the engine. When the
-    // engine fails midway, the query falls back: no formula value is returned.
+    // Value computation can fail after native selection has succeeded. Keep
+    // the selection's provenance and report the unavailable columns separately.
     const fillValues = async (rows: QueryCandidateRow[]) => {
-      if (source !== "engine" || formulaNames.length === 0) return;
+      if (source !== "engine" || formulaNames.length === 0) return true;
       const missing = rows.filter((row) => !row.values);
-      if (missing.length === 0) return;
+      if (missing.length === 0) return true;
       const result = await evaluateRowsWithEngine(engineDeps, {
         path: config.id,
         text: config.yaml,
         paths: missing.map((row) => row.file.path),
       });
       if (!result.available) {
-        source = "fallback";
-        for (const row of candidates ?? []) delete row.values;
         for (const name of formulaNames) {
           addWarnings([`formula_not_evaluated:${name}:${result.reason}`]);
         }
-        return;
+        return false;
       }
       for (const row of missing) {
         row.values = result.values.get(row.file.path) ?? Object.fromEntries(formulaNames.map((name) => [name, null]));
       }
+      return true;
     };
 
     // A request filter or sort on a formula needs the values of every row.
-    const needsAllValues =
-      (!!body?.filter && filterMentionsFormula(body.filter)) ||
+    const needsAllValues = requestFilter.usesFormula ||
       sortSpecs.some((s) => s.prop.startsWith("formula."));
-    let formulaValuesMissing = false;
+    let skipFormulas = source === "fallback";
     if (needsAllValues && source === "engine" && formulaNames.length > 0) {
       if (candidates.length <= ENGINE_MAX_FORMULA_FILTER_ROWS) {
-        await fillValues(candidates);
+        if (!(await fillValues(candidates))) {
+          sendJson(res, 503, atomicError("base_query_selection_unavailable"));
+          return;
+        }
       } else {
-        formulaValuesMissing = true;
+        skipFormulas = true;
         // Computing every row would block Obsidian for seconds: the formula
         // part of the request filter or sort is not evaluated, and says so.
         addWarnings([
@@ -1771,15 +1801,15 @@ export default class BasesBridgePlugin extends Plugin {
 
     // Without formula values (fallback, or past the row cap), formula
     // predicates and sorts are skipped rather than run on missing values.
-    const skipFormulas = source === "fallback" || formulaValuesMissing;
-    if (body?.filter) {
-      if (source === "fallback") formulaFilterWarning(body.filter);
-      const filter = skipFormulas ? withoutFormulaPredicates(body.filter) : body.filter;
-      candidates = candidates.filter((row) => {
-        const r = this.evaluateFilter(row.file, filter, schema, row.values);
-        addWarnings(r.warnings);
-        return r.ok;
-      });
+    if (body.filter !== undefined) {
+      if (source === "fallback" && requestFilter.usesFormula) {
+        addWarnings(["Filtre sur formule non évalué par le Bridge."]);
+      }
+      candidates = candidates.filter((row) => requestFilter.matches({
+        read: (key) => this.getValueForRef(row.file, key, schema, row.values),
+        evaluateLiveCall: (statement) =>
+          this.evaluateFilterCall(row.file, statement, schema, row.values) ?? false,
+      }, skipFormulas));
     }
 
     if (source === "fallback" && sortSpecs.some((s) => s.prop.startsWith("formula."))) {
@@ -1794,17 +1824,18 @@ export default class BasesBridgePlugin extends Plugin {
     const total = candidates.length;
     const start = (page - 1) * limit;
     const pageRows = candidates.slice(start, start + limit);
-    await fillValues(pageRows);
+    if (evaluate) await fillValues(pageRows);
     const rows: BaseQueryRow[] = pageRows
       .map(({ file, values }) => ({
         file: { path: file.path, name: file.basename },
-        props: this.buildRowProps(file, schema, values),
+        props: this.buildRowProps(file, schema, evaluate ? values : undefined),
         computed: evaluate && values ? { ...values } : undefined,
       }));
 
     const warnings = Array.from(warningsSet).sort((a, b) => a.localeCompare(b));
     if (warningsTruncated) warnings.push("Warnings tronqués (max 200).");
     const response: BaseQueryResponse = {
+      ...(requestFilter.usesPropertyTable ? { filterVersion: BASE_QUERY_FILTER_VERSION } : {}),
       total,
       page,
       rows,
@@ -2313,7 +2344,13 @@ export default class BasesBridgePlugin extends Plugin {
 
         api
           .addRoute(`${REST_PREFIX}/bases/:id(*)/query`)
-          .post(withPublicLegacyBaseBoundary(queryBase));
+          .post(withPublicLegacyBaseBoundary((req, res) =>
+            this.handleBaseQuery(
+              req,
+              res,
+              req.body?.evaluate === false && req.body?.selection === "supported-filter-snapshot",
+            ),
+          ));
         api
           .addRoute(`/bases/:id(*)/query`)
           .post(withPublicLegacyBaseBoundary(queryBase));

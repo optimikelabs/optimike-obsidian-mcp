@@ -52,12 +52,16 @@ import {
   type ObsidianNoteReplacePlanInput,
 } from "../../../services/operations/obsidianNoteReplaceOperationAdapter.js";
 import {
+  FILESYSTEM_OPERON_PROJECTION,
   ObsidianNoteReplaceJournal,
   type ObsidianNoteReplacePlan,
   type PendingOperationRowsInput,
   type PendingOperationRowsPage,
+  type TextPatchProposalIdentity,
 } from "../../../services/operations/obsidianNoteReplaceJournal.js";
 import { RestAtomicWriteBackend } from "../../../services/operations/restAtomicWriteBackend.js";
+import { defaultFilesystemJournal, FilesystemNoteBackend, filesystemJournalPath } from "../../../services/operations/filesystemNoteBackend.js";
+import { FilesystemRevert } from "../../../services/operations/filesystemRevert.js";
 import {
   AdministrativeClosureService,
   type AdministrativeClosureReasonCode,
@@ -77,13 +81,17 @@ import { logger, requestContextService } from "../../../utils/index.js";
 
 const PLAN_REF_PREFIX = "obsidian-note-replace:v1:";
 export const PROJECTED_IDEMPOTENCY_KEY_PREFIX = "optimike:projection:v1:";
+type ExpectedSource = { sha256: string; bindingFingerprint: string };
 
 type CallContext =
   | {
       kind: "plan";
+      previewOnly?: boolean;
       path: string;
       nextContent: string;
+      proposal?: TextPatchProposalIdentity;
       requireNativeFormat?: boolean;
+      callerExpectedBeforeSha256?: string;
       atomicWriteStatus?: unknown;
     }
   | { kind: "apply" | "recover"; path: string; requireNativeFormat?: boolean; atomicWriteStatus?: unknown };
@@ -94,11 +102,32 @@ function normalizeKey(value: string): string {
   return value.trim().toLowerCase();
 }
 
+type PlanningRead = Awaited<ReturnType<AtomicWriteBackend["read"]>>;
+
+function verifyPlanningRead(path: string, source: PlanningRead): void {
+  if (source.path !== path ||
+      source.sha256 !== createHash("sha256").update(source.content, "utf8").digest("hex") ||
+      source.size !== Buffer.byteLength(source.content, "utf8")) {
+    throw new McpError(BaseErrorCode.CONFLICT, "The planning read could not be verified.", { reason: "note_source_proof_invalid" });
+  }
+}
+
+function assertCallerBase(expected: string, observed: string): void {
+  if (observed !== expected) {
+    throw new McpError(BaseErrorCode.CONFLICT, "The note changed since the caller read it.", {
+      reasonCode: "note_replace_base_changed",
+      observedSha256: observed,
+      mutationMayHaveApplied: false,
+    });
+  }
+}
+
 function assertSupportedMarkdownEnvelope(
   content: string,
   phase: "plan" | "effect",
+  allowBom = false,
 ): void {
-  const reason = content.startsWith("\uFEFF")
+  const reason = !allowBom && content.startsWith("\uFEFF")
     ? "markdown_bom_unsupported"
     : /\r(?!\n)/u.test(content)
       ? "markdown_line_ending_unsupported"
@@ -113,7 +142,7 @@ function assertSupportedMarkdownEnvelope(
 }
 
 function parseFrontmatter(content: string): FrontmatterRecord {
-  const lines = content.split("\n");
+  const lines = content.replace(/^\uFEFF/u, "").split("\n");
   const line = (index: number): string =>
     (lines[index] ?? "").endsWith("\r")
       ? (lines[index] ?? "").slice(0, -1)
@@ -255,16 +284,17 @@ function validateReplacement(
     unsupportedModifiedPropertyNames: [],
     unsupportedIntegrations: [],
   },
+  allowBom = false,
 ): void {
   // Frontmatter and settlement comparisons are line-structural. Reject inputs
   // that those parsers cannot interpret unambiguously before any policy or CAS
   // decision, even when the configured protected-key set happens to be empty.
-  assertSupportedMarkdownEnvelope(currentContent, phase);
-  assertSupportedMarkdownEnvelope(nextContent, phase);
+  assertSupportedMarkdownEnvelope(currentContent, phase, allowBom);
+  assertSupportedMarkdownEnvelope(nextContent, phase, allowBom);
 
   let validation: ReturnType<typeof validateObsidianMarkdown>;
   try {
-    validation = validateObsidianMarkdown(nextContent);
+    validation = validateObsidianMarkdown(allowBom ? nextContent.replace(/^\uFEFF/u, "") : nextContent);
   } catch {
     throw new McpError(
       phase === "plan"
@@ -366,6 +396,10 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
 
   constructor(private readonly delegate: AtomicWriteBackend, private readonly journal: ObsidianNoteReplaceJournal) {}
 
+  get filesystem() {
+    return this.delegate instanceof FilesystemNoteBackend ? this.delegate : undefined;
+  }
+
   withContext<T>(
     context: CallContext,
     operation: () => Promise<T>,
@@ -376,7 +410,7 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
   async status() {
     let status = await measureGovernedPhase("bridgeStatus", () => this.delegate.status());
     const context = this.callContext.getStore();
-    if (context) {
+    if (context && !this.filesystem) {
       const scope = await this.delegate.read({ contractVersion: 1, path: context.path });
       if (scope.dateManagement?.managed === false) status = { ...status, protection: undefined, settlement: undefined };
     }
@@ -400,13 +434,27 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
     const result = await measureGovernedPhase("noteRead", () => this.delegate.read(payload));
     const context = this.callContext.getStore();
     if (context?.kind === "plan") {
+      if (context.proposal && result.bindingFingerprint !== context.proposal.bindingFingerprint) {
+        throw new McpError(BaseErrorCode.CONFLICT, "The proposal belongs to a different Atomic Write authority.", {
+          reason: "proposal_authority_mismatch",
+        });
+      }
+      if (context.proposal && result.sha256 !== context.proposal.beforeSha256) {
+        throw new McpError(BaseErrorCode.CONFLICT, "The note changed while the proposal was being sealed.", {
+          reason: "proposal_changed_during_seal", retryable: true,
+        });
+      }
       if (context.path !== payload.path) {
         throw new McpError(
           BaseErrorCode.CONFLICT,
           "The planning read target differs from the requested note target.",
         );
       }
-      assertCurrentWritePolicy("plan", payload.path, context.nextContent);
+      if (!context.previewOnly) assertCurrentWritePolicy("plan", payload.path, context.nextContent);
+      if (context.callerExpectedBeforeSha256 !== undefined) {
+        verifyPlanningRead(payload.path, result);
+        assertCallerBase(context.callerExpectedBeforeSha256, result.sha256);
+      }
       if (!context.atomicWriteStatus) {
         throw new McpError(
           BaseErrorCode.CONFLICT,
@@ -423,35 +471,74 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
           context.atomicWriteStatus,
           config.mcpProtectedFrontmatterKeys,
         ),
-        result.dateManagement?.managed === false ? undefined : effectiveAtomicWriteDateProtection(context.atomicWriteStatus),
+        this.filesystem || result.dateManagement?.managed === false ? undefined : effectiveAtomicWriteDateProtection(context.atomicWriteStatus),
+        Boolean(this.filesystem),
       );
     }
     return result;
   }
 
-  async prepareForPlan(path: string, expectedSource?: { sha256: string; bindingFingerprint: string }, requireNativeFormat = false) {
+  async prepareForPlan(path: string, {
+    expectedSource,
+    proposal = false,
+    requireNativeFormat = false,
+    callerExpectedBeforeSha256,
+  }: {
+    expectedSource?: ExpectedSource;
+    proposal?: boolean;
+    requireNativeFormat?: boolean;
+    callerExpectedBeforeSha256?: string;
+  } = {}) {
     const source = await this.delegate.read({ contractVersion: 1, path });
-    if (source.path !== path || source.sha256 !== createHash("sha256").update(source.content, "utf8").digest("hex") ||
-        source.size !== Buffer.byteLength(source.content, "utf8"))
-      throw new McpError(BaseErrorCode.CONFLICT, "The planning read could not be verified.", { reason: "note_source_proof_invalid" });
+    verifyPlanningRead(path, source);
+    const strictBase = callerExpectedBeforeSha256 !== undefined;
+    if (strictBase) assertCallerBase(callerExpectedBeforeSha256, source.sha256);
+    if (proposal && expectedSource) {
+      if (source.bindingFingerprint !== expectedSource.bindingFingerprint)
+        throw new McpError(BaseErrorCode.CONFLICT, "The proposal belongs to a different Atomic Write authority.", { reason: "proposal_authority_mismatch" });
+      if (source.sha256 !== expectedSource.sha256)
+        throw new McpError(BaseErrorCode.CONFLICT, "The current note differs from the proposal base.", { reason: "proposal_base_changed" });
+    }
     const fenceKey = operationDigest({ domain: "obsidian-date-preparation-v1", path, bindingFingerprint: source.bindingFingerprint });
     const unverified = (check?: DatePreparationCheck) => new McpError(BaseErrorCode.CONFLICT,
       "La préparation des dates a pu modifier ou normaliser la note. Une revue administrative est nécessaire avant reprise : obsidian_operation_close avec datePreparationPaths.",
       { reasonCode: "date_preparation_unverified", mutationMayHaveApplied: true, ...(check ? { preparationCheck: check } : {}) });
-    // A lock whose attempt provably never reached its effect point is released
-    // (and that attempt revoked forever); any other lock needs owner review.
-    if (this.journal.hasDatePreparationFence(fenceKey) &&
-        !(await this.releaseUnstartedPreparation(fenceKey, source.bindingFingerprint))) throw unverified();
-    if (expectedSource && (source.sha256 !== expectedSource.sha256 || source.bindingFingerprint !== expectedSource.bindingFingerprint))
+    // Explicit proposal and strict-base plans leave existing date preparation for owner review.
+    if (this.journal.hasDatePreparationFence(fenceKey)) {
+      if (proposal) throw new McpError(BaseErrorCode.CONFLICT, "An existing date-preparation lock blocks this proposal.", {
+        reason: "proposal_date_preparation_locked",
+      });
+      if (strictBase) {
+        throw new McpError(BaseErrorCode.CONFLICT, "A previous date preparation is still locked.", {
+          reasonCode: "note_replace_date_preparation_locked",
+          mutationMayHaveApplied: false,
+        });
+      }
+      if (!(await this.releaseUnstartedPreparation(fenceKey, source.bindingFingerprint))) throw unverified();
+    }
+    if (expectedSource && !proposal && (source.sha256 !== expectedSource.sha256 || source.bindingFingerprint !== expectedSource.bindingFingerprint))
       throw new McpError(BaseErrorCode.CONFLICT, "The note changed before date preparation.");
+    if (this.filesystem) return source; // The date mutation is sealed into the effect, never performed during plan.
     const originalFormat = requireNativeFormat ? await inspectNativeFrontmatter(this.delegate, source.content, source.bindingFingerprint) : undefined;
     if (source.dateManagement?.managed === false) return { ...source, datePreparation: { kind: "outside-date-management" as const, message: "Note hors gestion des dates." } };
     const status = await this.delegate.status();
+    if (proposal && status.backend.bindingFingerprint !== source.bindingFingerprint)
+      throw new McpError(BaseErrorCode.CONFLICT, "The proposal belongs to a different Atomic Write authority.", { reason: "proposal_authority_mismatch" });
     const protection = effectiveAtomicWriteDateProtection(status);
+    if (proposal && protection.unsupportedIntegrations.some(({ activeRoles }) => activeRoles.includes("created")))
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The proposal target's creation-date requirements cannot be verified.", { reason: "proposal_date_management_unverified" });
     const created = [...new Set([...protection.createdPropertyNames,
       ...(protection.createdPropertyNames.length || !status.datePreparation?.supported ? [] : config.mcpProtectedFrontmatterKeys.filter(key => /^(création|creation|created)$/iu.test(key)))])];
     const fm = parseFrontmatter(source.content);
     if (!created.some(key => entriesForKey(fm, normalizeKey(key)).length === 0)) return source;
+    if (proposal)
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The proposal target requires creation-date preparation.", { reason: "proposal_date_preparation_required" });
+    if (strictBase) {
+      throw new McpError(BaseErrorCode.CONFLICT, "The note needs date preparation before strict replacement planning.", {
+        reasonCode: "note_replace_date_preparation_required",
+        mutationMayHaveApplied: false,
+      });
+    }
     if (requireNativeFormat && frontmatterEnvelope(originalFormat!.content)?.yaml.trim() === "{}")
       throw new McpError(BaseErrorCode.VALIDATION_ERROR, "An empty frontmatter mapping cannot be verified with automatic dates.", { reasonCode: "frontmatter_empty_mapping_date_management" });
     assertCurrentWritePolicy("plan", path, source.content);
@@ -634,7 +721,7 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
     }
   }
 
-  async replace(payload: Parameters<AtomicWriteBackend["replace"]>[0]) {
+  async replace(payload: Parameters<AtomicWriteBackend["replace"]>[0], plan?: ObsidianNoteReplacePlan) {
     try {
       const context = this.callContext.getStore();
       if (!context || context.kind === "plan") {
@@ -679,6 +766,12 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
       const comparison = context.requireNativeFormat ? (await inspectNativeFrontmatter(this.delegate, current.content, current.bindingFingerprint)).content : current.content;
       if (context.requireNativeFormat && (await inspectNativeFrontmatter(this.delegate, payload.nextContent, current.bindingFingerprint)).normalized)
         throw new McpError(BaseErrorCode.CONFLICT, "The sealed note no longer matches the native frontmatter format.", { reasonCode: "frontmatter_format_changed" });
+      const dates = effectiveAtomicWriteDateProtection(context.atomicWriteStatus);
+      const locallyMaintained = this.filesystem ? new Set([
+        ...dates.createdPropertyNames,
+        ...(await this.filesystem.status()).protection!.frontmatterDateProperties.integrations.flatMap(
+          entry => entry.modifiedPropertyName ? [entry.modifiedPropertyName] : []),
+      ].map(normalizeKey)) : new Set<string>();
       validateReplacement(
         comparison,
         payload.nextContent,
@@ -686,13 +779,17 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
         effectiveAtomicWriteProtectedFrontmatterKeys(
           context.atomicWriteStatus,
           config.mcpProtectedFrontmatterKeys,
-        ),
-        current.dateManagement?.managed === false ? undefined : effectiveAtomicWriteDateProtection(context.atomicWriteStatus),
+        ).filter(key => !locallyMaintained.has(normalizeKey(key))),
+        this.filesystem || current.dateManagement?.managed === false ? undefined : dates,
+        Boolean(this.filesystem),
       );
     } catch (error) {
+      if (this.filesystem && (error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+        throw markAtomicWritePreDispatchError(new McpError(BaseErrorCode.CONFLICT, "The sealed note no longer exists."));
+      }
       throw markAtomicWritePreDispatchError(error);
     }
-    return measureGovernedPhase("atomicCas", () => this.delegate.replace(payload));
+    return measureGovernedPhase("atomicCas", () => this.delegate.replace(payload, plan));
   }
 }
 
@@ -716,6 +813,7 @@ export type GovernedNoteReplacePlanView = {
   path: string;
   beforeSha256: string;
   afterSha256: string;
+  projectedSha256?: string;
   bindingFingerprint: string;
   status: ObsidianNoteReplacePlan["status"];
   projection?: ObsidianNoteReplacePlan["projection"];
@@ -723,7 +821,12 @@ export type GovernedNoteReplacePlanView = {
 };
 
 export class GovernedNoteReplaceRuntime {
+  get isFilesystem(): boolean { return Boolean(this.backend.filesystem); }
+  restoreInterruptedFilesystemReplacements() { return this.backend.filesystem?.restoreInterruptedReplacements(); }
+  filesystemStatus() { return this.backend.filesystem!.status(); }
+  ownsFilesystemBinding(binding: string) { return this.backend.filesystem?.ownsBinding(binding) === true; }
   readonly noteCreate: NoteCreateOperationAdapter | undefined;
+  readonly filesystemRevert: FilesystemRevert | undefined;
   readonly baseCreate: VaultFileCreateOperationAdapter | undefined;
   readonly canvasCreate: VaultFileCreateOperationAdapter | undefined;
   readonly assetImport: AssetImportOperationAdapter | undefined;
@@ -749,6 +852,8 @@ export class GovernedNoteReplaceRuntime {
     fileCreateBackends: readonly VaultFileCreateBackend[] = [],
   ) {
     this.noteCreate = noteCreateBackend ? new NoteCreateOperationAdapter(noteCreateBackend, journal) : undefined;
+    this.filesystemRevert = backend.filesystem && config.obsidianRuntimeMode === "headless-filesystem" ?
+      new FilesystemRevert(backend.filesystem, journal) : undefined;
     const fileCreate = (kind: "base" | "canvas") => {
       const found = fileCreateBackends.find((item) => item.kind === kind);
       return found ? new VaultFileCreateOperationAdapter(found, journal) : undefined;
@@ -760,7 +865,7 @@ export class GovernedNoteReplaceRuntime {
     this.closure = new AdministrativeClosureService(journal, backend, this.closureProfiles(noteCreateBackend, fileCreateBackends),
       ["obsidian-canvas-patch:v1:", "obsidian-base-formula-patch:v1:", "obsidian-base-config-patch:v1:", "oasset:"]);
     if (
-      config.assetImportEnabled &&
+      !backend.filesystem && config.assetImportEnabled &&
       config.assetFolder &&
       config.obsidianVaultPath
     ) {
@@ -901,7 +1006,33 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
   }
 
   readForProjection(path: string, requireNativeFormat = false) {
-    return this.backend.prepareForPlan ? this.backend.prepareForPlan(path, undefined, requireNativeFormat) : this.backend.read({ contractVersion: 1, path });
+    return this.backend.prepareForPlan ? this.backend.prepareForPlan(path, { requireNativeFormat }) : this.backend.read({ contractVersion: 1, path });
+  }
+
+  readForTextPatchProposal(path: string, expectedSource: ExpectedSource) {
+    return this.backend.prepareForPlan(path, { expectedSource, proposal: true });
+  }
+
+  async rethrowProposalError(error: unknown, bindingFingerprint: string): Promise<never> {
+    if (!(error instanceof McpError) || error.code !== BaseErrorCode.NOT_FOUND ||
+        error.details?.reasonCode !== "resource_not_found") throw error;
+    const status = await this.backend.status();
+    if (status.backend.bindingFingerprint !== bindingFingerprint) {
+      throw new McpError(BaseErrorCode.CONFLICT, "The proposal belongs to a different Atomic Write authority.", {
+        reason: "proposal_authority_mismatch",
+      });
+    }
+    throw new McpError(BaseErrorCode.NOT_FOUND, "The proposal target was not found.", {
+      reason: "target_not_found", retryable: true,
+    });
+  }
+
+  getTextPatchProposal(id: string) {
+    return this.journal.getTextPatchProposal(id);
+  }
+
+  recordTextPatchProposalConflict(identity: TextPatchProposalIdentity) {
+    this.journal.recordTextPatchProposalConflict(identity);
   }
 
   releasePreparation(source: { datePreparation?: OperationReceipt["datePreparation"] }) {
@@ -913,6 +1044,7 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
   }
 
   async renderFrontmatterEntries(content: string, operations: FrontmatterPatchOperation[], bindingFingerprint: string) {
+    if (this.isFilesystem) return undefined; // The lossless local compiler renders the authorized top-level entries.
     const result: Record<string, string> = Object.create(null) as Record<string, string>;
     for (const entry of nativeFrontmatterPatchKeys(content, operations)) {
       const json = JSON.stringify({ [entry.key]: entry.value });
@@ -938,6 +1070,7 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
       ...input,
       fallbackOperationKind: "obsidian.note.replace",
       admittedProjectionKinds: [
+        ...(this.filesystemRevert ? ["obsidian.operation.revert" as const] : []),
         "obsidian.frontmatter.patch",
         "obsidian.text.patch",
         "obsidian.note.move",
@@ -948,7 +1081,7 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
         "obsidian.base.rows.patch",
         "obsidian.asset.import",
       ],
-      allowUnprojectedFallback: true,
+      allowUnprojectedFallback: config.obsidianRuntimeMode !== "headless-guarded",
     });
   }
 
@@ -957,6 +1090,20 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
   ): GovernedNoteReplacePlanView | undefined {
     const plan = this.journal.getByIdempotencyKey(idempotencyKey);
     return plan ? this.view(plan) : undefined;
+  }
+
+  listPendingOperonPlans() {
+    const input: PendingOperationRowsInput = { fallbackOperationKind: FILESYSTEM_OPERON_PROJECTION,
+      admittedProjectionKinds: [FILESYSTEM_OPERON_PROJECTION], allowUnprojectedFallback: false, limit: 100 };
+    return (["applying", "outcome_unknown"] as const).flatMap(status => {
+      const page = this.journal.listPendingOperationRows({ ...input, status });
+      if (page.hasMore) throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "The pending filesystem Operon recovery list exceeds its bound.");
+      return page.rows.map(row => ({ ...row, planRef: PLAN_REF_PREFIX + row.operationId }));
+    });
+  }
+
+  bindOperonRecoveryKey(operationId: string, key: string) {
+    this.journal.bindOperonRecoveryKey(operationId, key);
   }
 
   inspect(reference: string): GovernedNoteReplacePlanView {
@@ -979,11 +1126,23 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
     );
   }
 
-  plan(input: ObsidianNoteReplacePlanInput): Promise<OperationReceipt> {
-    assertCurrentWritePolicy("plan", input.path, input.nextContent);
+  plan(
+    input: ObsidianNoteReplacePlanInput,
+    callerExpectedBeforeSha256?: string,
+    previewOnly = false,
+  ): Promise<OperationReceipt> {
+    if (!previewOnly) assertCurrentWritePolicy("plan", input.path, input.nextContent);
     return this.backend.withContext(
-      { kind: "plan", path: input.path, nextContent: input.nextContent, requireNativeFormat: !!input.frontmatterFormat },
-      () => this.adapter.plan(input),
+      {
+        kind: "plan",
+        previewOnly,
+        path: input.path,
+        nextContent: input.nextContent,
+        requireNativeFormat: !!input.frontmatterFormat,
+        callerExpectedBeforeSha256,
+        proposal: input.proposalSeal?.identity,
+      },
+      () => this.adapter.plan(input, previewOnly),
     );
   }
 
@@ -993,8 +1152,12 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
     completionMode: SettlementCompletionMode = "verified",
   ): Promise<OperationReceipt> {
     const plan = this.required(reference);
+    if (plan.projection?.kind === FILESYSTEM_OPERON_PROJECTION && plan.projection.proof.previewOnly === true) {
+      throw new McpError(BaseErrorCode.FORBIDDEN, "An Operon preview cannot publish an effect.");
+    }
     if (plan.status === "planned") {
       assertCurrentWritePolicy("apply", plan.path, plan.nextContent);
+      if (this.backend.filesystem) await this.backend.filesystem.status();
     }
     const operation = this.backend.withContext({ kind: "apply", path: plan.path, requireNativeFormat: !!plan.frontmatterFormat }, () =>
       this.adapter.apply(reference, idempotencyKey, completionMode),
@@ -1013,22 +1176,32 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
       );
     }
     assertCurrentWritePolicy("plan", input.path, input.nextContent);
-    const identity = operationDigest({ path: input.path, nextContent: input.nextContent });
+    const { path, expectedBeforeSha256 } = input;
+    const strictBase = expectedBeforeSha256 !== undefined;
+    const identity = operationDigest({ path, nextContent: input.nextContent, ...(strictBase ? { expectedBeforeSha256 } : {}) });
     const existing = this.findPlanByIdempotencyKey(input.idempotencyKey);
     if (existing?.idempotencyIdentity === identity) return this.status(`${PLAN_REF_PREFIX}${existing.operationId}`);
-    if (existing) return this.plan(existing.idempotencyIdentity ? { ...input, idempotencyIdentity: identity } : input);
-    assertSupportedMarkdownEnvelope(input.nextContent, "plan");
-    if (!validateObsidianMarkdown(input.nextContent).ok) {
+    if (existing) return this.plan(existing.idempotencyIdentity || strictBase ? { ...input, idempotencyIdentity: identity } : input);
+    assertSupportedMarkdownEnvelope(input.nextContent, "plan", this.isFilesystem);
+    if (!validateObsidianMarkdown(this.isFilesystem ? input.nextContent.replace(/^\uFEFF/u, "") : input.nextContent).ok) {
       throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The sealed next content is not valid conservative Obsidian Markdown.", { reason: "markdown_validation_failed" });
     }
     const before = await this.backend.read({ contractVersion: 1, path: input.path });
+    if (strictBase) {
+      verifyPlanningRead(path, before);
+      assertCallerBase(expectedBeforeSha256, before.sha256);
+    }
     const status = await this.backend.status();
     const keys = effectiveAtomicWriteProtectedFrontmatterKeys(status, config.mcpProtectedFrontmatterKeys);
     const beforeFormat = await inspectNativeFrontmatter(this.backend, before.content, before.bindingFingerprint);
     const format = await inspectNativeFrontmatter(this.backend, input.nextContent, before.bindingFingerprint);
     rejectNonCanonical(format);
-    validateReplacement(beforeFormat.content, input.nextContent, "plan", keys);
-    const source = await this.backend.prepareForPlan(input.path, before, true);
+    validateReplacement(beforeFormat.content, input.nextContent, "plan", keys, undefined, this.isFilesystem);
+    const source = await this.backend.prepareForPlan(path, {
+      expectedSource: before,
+      requireNativeFormat: true,
+      callerExpectedBeforeSha256: expectedBeforeSha256,
+    });
     try {
     let nextContent = input.nextContent;
     if (source.datePreparation?.kind === "date-manager-before-plan") {
@@ -1049,7 +1222,7 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
     }
     const result = await this.plan({ ...input, nextContent, idempotencyIdentity: identity,
       frontmatterFormat: { normalization: { applied: false }, typeWarnings: format.warnings },
-      expectedBeforeSha256: source.sha256, expectedBindingFingerprint: source.bindingFingerprint, datePreparation: source.datePreparation });
+      expectedBeforeSha256: source.sha256, expectedBindingFingerprint: source.bindingFingerprint, datePreparation: source.datePreparation }, expectedBeforeSha256);
     if (source.datePreparation?.kind === "date-manager-before-plan" && this.inspect(result.planRef).beforeSha256 !== source.sha256) throw new DatePreparationPlanFailure(source.datePreparation);
     return result;
     } catch (error) {
@@ -1081,13 +1254,14 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
     reference: string,
     idempotencyKey: string,
     completionMode: SettlementCompletionMode = "verified",
+    validateReplay?: () => Promise<void>,
   ): Promise<OperationReceipt> {
     const plan = this.required(reference);
-    if (plan.status === "outcome_unknown") {
+    if (plan.status === "outcome_unknown" || (plan.filesystem && plan.status === "applying")) {
       assertCurrentWritePolicy("recover", plan.path, plan.nextContent);
     }
     const operation = this.backend.withContext({ kind: "recover", path: plan.path, requireNativeFormat: !!plan.frontmatterFormat }, () =>
-      this.adapter.recover(reference, idempotencyKey, completionMode),
+      this.adapter.recover(reference, idempotencyKey, completionMode, validateReplay),
     );
     return this.refreshCacheAfterCommit(plan, operation, true);
   }
@@ -1143,6 +1317,7 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
       path: plan.path,
       beforeSha256: plan.beforeSha256,
       afterSha256: plan.afterSha256,
+      ...(plan.filesystem?.projectedSha256 ? { projectedSha256: plan.filesystem.projectedSha256 } : {}),
       bindingFingerprint: plan.bindingFingerprint,
       status: plan.status,
       ...(plan.projection
@@ -1192,21 +1367,29 @@ export function createGovernedNoteReplaceRuntime(
   obsidianService: ObsidianRestApiService | undefined,
   vaultCacheService?: VaultCacheService,
 ): GovernedNoteReplaceRuntime | undefined {
-  if (!obsidianService) return undefined;
+  const headless = !obsidianService && (config.obsidianRuntimeMode === "headless-guarded" ||
+    config.obsidianRuntimeMode === "headless-filesystem") && config.obsidianVaultPath;
+  if (!obsidianService && !headless) return undefined;
+  const journalPath = headless
+    ? config.headlessGovernedJournalPath ? filesystemJournalPath(headless, config.headlessGovernedJournalPath) : defaultFilesystemJournal(headless)
+    : config.obsidianNoteReplaceJournalPath;
 
   const journal = new ObsidianNoteReplaceJournal(
-    config.obsidianNoteReplaceJournalPath,
-    { executionLeaseMs: config.obsidianNoteReplaceExecutionLeaseMs, plannedRetentionMs: config.obsidianPlannedRetentionMs },
+    journalPath,
+    {
+      executionLeaseMs: config.obsidianNoteReplaceExecutionLeaseMs,
+      plannedRetentionMs: config.obsidianPlannedRetentionMs,
+      proposalConflictRetentionMs: config.obsidianProposalConflictRetentionMs,
+      proposalTraceRetentionMs: config.obsidianProposalTraceRetentionMs,
+    },
   );
-  const backend = new GovernedAtomicWriteBackend(
-    new RestAtomicWriteBackend(obsidianService),
-    journal,
-  );
+  const filesystem = headless ? new FilesystemNoteBackend(headless, journalPath, journal) : undefined;
+  const backend = new GovernedAtomicWriteBackend(filesystem ?? new RestAtomicWriteBackend(obsidianService!), journal);
   const adapter = new ObsidianNoteReplaceOperationAdapter(
     backend,
     journal,
     undefined,
-    { modifiedTimeProtectedKeys: config.mcpProtectedFrontmatterKeys },
+    { modifiedTimeProtectedKeys: config.mcpProtectedFrontmatterKeys, filesystem },
   );
   const runtime = new GovernedNoteReplaceRuntime(
     backend,
@@ -1220,10 +1403,10 @@ export function createGovernedNoteReplaceRuntime(
       ),
     ),
     vaultCacheService,
-    new RestNativeNoteMoveBackend(obsidianService),
-    new RestNoteCreateBackend(obsidianService),
-    new RestNoteDeleteBackend(obsidianService),
-    [new RestVaultFileCreateBackend(obsidianService, "base"), new RestVaultFileCreateBackend(obsidianService, "canvas")],
+    obsidianService ? new RestNativeNoteMoveBackend(obsidianService) : undefined,
+    filesystem ?? new RestNoteCreateBackend(obsidianService!),
+    obsidianService ? new RestNoteDeleteBackend(obsidianService) : undefined,
+    obsidianService ? [new RestVaultFileCreateBackend(obsidianService, "base"), new RestVaultFileCreateBackend(obsidianService, "canvas")] : [],
   );
 
   // The application lifecycle closes the runtime explicitly. This synchronous

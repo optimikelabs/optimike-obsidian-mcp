@@ -10,6 +10,7 @@ import { generateUUID, sanitizeInputForLogging } from "../index.js"; // Import f
 import { logger } from "./logger.js";
 import { isPublicToolInputIssues, type PublicToolInputIssues } from "./toolInputValidation.js";
 import { BASE_FORMULA_ENGINE_REFUSAL, isPublicFormulaCheck, type PublicFormulaCheck } from "../../services/basesEngineContract.js";
+import { BASE_QUERY_FILTER_ERROR, isBaseQueryFilterNode } from "../../services/baseQueryFilter.js";
 import {
   NOTE_NAME_REASON_CODES, checkNoteName, isNoteNameHint, isNoteNameReasonCode,
 } from "../../services/noteNameRules.js";
@@ -227,7 +228,10 @@ const SAFE_ERROR_DETAIL_FIELDS = new Set([
   "planRef",
   "recoveryRef",
   "reasonCode",
+  "upstreamSync",
+  "syncWriteRefusal",
   "validationIssues",
+  "filterNode",
   // Bases engine refusal: bounded, schema-checked formula diagnosis.
   "formulaCheck",
   // Note-name refusal (shared rule): closed hint and a validated suggestion.
@@ -238,6 +242,7 @@ const SAFE_ERROR_DETAIL_FIELDS = new Set([
   "recoveryAllowed",
   "applyAllowed",
   "mutationMayHaveApplied",
+  "observedSha256",
   // Closed, content-free sub-cause of date_preparation_unverified.
   "preparationCheck",
   "httpStatus",
@@ -251,8 +256,28 @@ type SafeDetailValue = string | number | boolean | PublicToolInputIssues | Publi
 const CALLER_DERIVED_PUBLIC_FIELDS = new Set(["suggestedPath", "suggestedName"]);
 
 const SAFE_PUBLIC_REASON_CODES = new Set<string>([
+  "headless_plan_stale",
+  "headless_operation_pending",
+  "headless_manual_repair_required",
+  "hard_links_unsupported",
+  "headless_backlink_limit",
+  "headless_backlink_inspection_limit",
+  "headless_link_coverage_incomplete",
+  "headless_parent_missing",
+  "headless_plan_ref_invalid",
+  "headless_link_target_changed",
+  "headless_trash_preference_unsupported",
   "invalid_tool_arguments",
+  "vault_path_alias_ambiguous",
+  "base_query_invalid_filter",
+  "base_query_filter_bridge_upgrade_required",
+  "headless_link_index_building",
+  "headless_link_cache_refreshing",
+  "headless_link_cache_events_pending",
+  "headless_link_cache_uncertain",
   BASE_FORMULA_ENGINE_REFUSAL,
+  "base_query_requires_obsidian",
+  "base_query_unsupported_local_input",
   ...NOTE_NAME_REASON_CODES,
   ...NATIVE_MOVE_PUBLIC_REASON_CODES,
   ...OPERON_REFUSAL_CODES,
@@ -290,6 +315,9 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "frontmatter_envelope_invalid",
   "invalid_frontmatter",
   "ambiguous_base_view",
+  "base_query_row_disappeared",
+  "base_query_selection_unavailable",
+  "base_view_not_found",
   "ambiguous_delete_comment",
   "ambiguous_trailing_comment",
   "asset_bytes_invalid",
@@ -474,15 +502,24 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "yaml_tag_unsupported",
 
   "semantic_index_unavailable",
+  "upstream_sync_write_blocked",
   "semantic_embedder_configuration_invalid",
   "semantic_query_embedding_failed",
   "semantic_query_vector_invalid",
   "semantic_sections_unavailable",
   "atomic_write_creation_property_missing",
   "date_preparation_unverified",
+  "headless_date_policy_unavailable",
+  "headless_atomic_exchange_unavailable",
+  "headless_vault_lock_busy",
+  "headless_note_path_spelling",
+  "headless_revert_target_missing",
   "date_preparation_bridge_upgrade_required",
   "date_preparation_fdm_pending",
   "date_preparation_not_started",
+  "note_replace_base_changed",
+  "note_replace_date_preparation_required",
+  "note_replace_date_preparation_locked",
   "effect_attempt_limit_reached",
   "frontmatter_format_capability_missing",
   "frontmatter_format_changed",
@@ -623,9 +660,12 @@ function isSafeDiagnosticString(field: string, value: string): boolean {
   if (field === "profile") {
     return SAFE_PROFILES.has(value);
   }
-  if (field === "planDigest") return /^[a-f0-9]{64}$/u.test(value);
+  if (field === "planDigest" || field === "observedSha256") return /^[a-f0-9]{64}$/u.test(value);
   if (field === "preparationCheck") return isDatePreparationCheck(value);
   if (field === "reasonCode") return SAFE_PUBLIC_REASON_CODES.has(value);
+  if (field === "filterNode") return isBaseQueryFilterNode(value);
+  if (field === "upstreamSync") return ["unknown", "current", "lagging", "stalled", "error"].includes(value);
+  if (field === "syncWriteRefusal") return ["evidence_unavailable", "pull_too_old", "stalled", "error"].includes(value);
   if (field === "hint") return isNoteNameHint(value) || isNativeMoveHint(value);
   // A suggestion is only released if it satisfies the shared name rule itself.
   if (CALLER_DERIVED_PUBLIC_FIELDS.has(field)) return checkNoteName(value, { extensions: null }).ok;
@@ -704,8 +744,51 @@ function safeDiagnosticFields(
 }
 
 function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
+  if (
+    code === BaseErrorCode.SERVICE_UNAVAILABLE &&
+    reasonCode === "base_query_requires_obsidian"
+  )
+    return "Base rows require Obsidian and the Bases Bridge, including for Bases without filters. Set property_only: true to scan cached Markdown properties independently of the Base and its views. Filters using file.ext, note.*, formula.* or file.hasTag(...) require Obsidian.";
+  if (
+    code === BaseErrorCode.VALIDATION_ERROR &&
+    reasonCode === "base_query_unsupported_local_input"
+  )
+    return "Unsupported local Base query sort. Use unprefixed frontmatter keys or file.path, file.name, file.ctime, file.mtime, file.size. Sorting on evaluated formulas requires Obsidian and the Bases Bridge.";
+  if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "base_query_invalid_filter")
+    return BASE_QUERY_FILTER_ERROR;
+  if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "base_query_filter_bridge_upgrade_required")
+    return "Property-table filters require Bases Bridge 1.3.1 or later. Update the Bridge bundle and retry.";
+  if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "base_query_row_disappeared")
+    return "A selected Base row is no longer available. Run the query again.";
+  if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "base_query_selection_unavailable")
+    return "Obsidian's Bases engine could not select the requested rows.";
+  if (code === BaseErrorCode.NOT_FOUND && reasonCode === "base_view_not_found")
+    return "The requested Base view was not found.";
+  if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "headless_link_index_building")
+    return "The headless link index is building. Retry obsidian_note_links later.";
+  if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "headless_link_cache_refreshing")
+    return "The shared note cache is refreshing. Retry obsidian_note_links after the refresh.";
+  if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "headless_link_cache_events_pending")
+    return "The shared note cache is processing pending file events. Retry obsidian_note_links after they settle.";
+  if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "headless_link_cache_uncertain")
+    return "The shared note cache needs a successful refresh. Retry obsidian_note_links after it completes.";
+  if (reasonCode === "upstream_sync_write_blocked")
+    return "Headless write blocked. Verify a recent successful upstream Sync pull, then retry.";
+  if (reasonCode === "headless_date_policy_unavailable")
+    return "Headless governed writes require supported Frontmatter Date Manager settings and OPTIMIKE_VAULT_TIMEZONE matching the process.";
+  if (reasonCode === "headless_atomic_exchange_unavailable")
+    return "This filesystem cannot atomically exchange an existing note. Use a supported filesystem or the live runtime.";
+  if (reasonCode === "headless_vault_lock_busy")
+    return "The headless vault lock is busy. No write was started. Retry with a new plan after the lock is released.";
+  if (reasonCode === "headless_revert_target_missing") return "The note no longer exists.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_tool_arguments")
     return "Invalid tool arguments. See validationIssues for the field and reason.";
+  if (reasonCode === "headless_parent_missing")
+    return "The destination parent folder must already exist.";
+  if (reasonCode === "headless_link_coverage_incomplete")
+    return "Link extraction is incomplete for a source that could affect this operation. Complete link coverage is required.";
+  if (reasonCode === "headless_plan_ref_invalid")
+    return "Use the planRef returned by the matching plan tool.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === BASE_FORMULA_ENGINE_REFUSAL)
     return "Obsidian's Bases engine reports that this plan would add a formula error. Nothing was sealed or written. See formulaCheck for the engine messages, unknown functions and suggestions, then fix the formula using https://help.obsidian.md/bases/functions and https://help.obsidian.md/bases/syntax.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_frontmatter")
@@ -718,6 +801,12 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
     return "Le gestionnaire de dates ou une autre préparation occupe encore la file ; rien n'a été modifié par cette préparation. Relancez le plan dans une trentaine de secondes.";
   if (reasonCode === "date_preparation_not_started")
     return "La préparation des dates n'a pas démarré ; rien n'a été modifié par cette préparation. Relisez la note puis relancez le plan.";
+  if (reasonCode === "note_replace_base_changed")
+    return "La note a changé depuis la lecture initiale. Relisez-la avec obsidian_read_note et reconstruisez le remplacement à partir du contenu et de l’empreinte renvoyés.";
+  if (reasonCode === "note_replace_date_preparation_required")
+    return "La note doit recevoir une date de création. Ouvrez-la et enregistrez-la dans Obsidian, attendez que le gestionnaire de dates ait terminé, puis relisez-la avec obsidian_read_note et reconstruisez le remplacement à partir du contenu et de l’empreinte renvoyés.";
+  if (reasonCode === "note_replace_date_preparation_locked")
+    return "Une préparation de date précédente reste verrouillée. Demandez au propriétaire du coffre de la vérifier avec obsidian_operation_close et datePreparationPaths. Après résolution, relisez la note avec obsidian_read_note avant de reconstruire le remplacement.";
   if (reasonCode === "effect_attempt_limit_reached")
     return "La limite de tentatives de cette opération est atteinte. Consultez son statut avant toute nouvelle action ; ne rejouez pas un effet incertain.";
   if (reasonCode === "atomic_bridge_version_unsupported")
@@ -740,6 +829,8 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
     return "The note move was refused. See reasonCode and hint.";
   if (code === BaseErrorCode.VALIDATION_ERROR && isNoteNameReasonCode(reasonCode))
     return "The note path is not a valid name on every platform and in Obsidian. See hint and suggestedPath.";
+  if (code === BaseErrorCode.CONFLICT && reasonCode === "vault_path_alias_ambiguous")
+    return "The requested path and its Obsidian alias returned different content.";
   switch (code) {
     case BaseErrorCode.UNAUTHORIZED:
       return "Authentication is required for this request.";

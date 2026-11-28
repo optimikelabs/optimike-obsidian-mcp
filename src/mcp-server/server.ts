@@ -37,6 +37,7 @@ import path from "node:path";
 import { z } from "zod/v3";
 // Import validated configuration and environment details.
 import { config, environment } from "../config/index.js";
+import { BaseErrorCode, McpError } from "../types-global/errors.js";
 // Import core utilities: ErrorHandler, logger, requestContextService.
 import {
   ErrorHandler,
@@ -103,6 +104,8 @@ import { startHttpTransport } from "./transports/httpTransport.js";
 import { activeHttpRequestId } from "./transports/httpRequestState.js";
 import { connectStdioTransport } from "./transports/stdioTransport.js";
 import { registerToolRoutingResource } from "./resources/toolRoutingResource.js";
+import { resolveToolRegistrationMode } from "../services/capabilityManifest.js";
+import { TOOL_PROFILE_MODE_CAPABILITY } from "./toolProfiles.js";
 import {
   installVaultInstructionsGate,
   vaultInstructionsServerText,
@@ -321,230 +324,11 @@ function registerFormatValidationTool(
   );
 }
 
-function registerHeadlessGuardedWriteTools(
+function registerHeadlessFilesystemTools(
   server: McpServer,
   vaultCacheService: VaultCacheService | undefined,
-  includeFilesystemFeatures = false,
 ): void {
   const vaultFileService = new VaultFileService();
-
-  server.registerTool(
-    "obsidian_update_note",
-    {
-      description:
-        "Headless-guarded direct filesystem append/prepend for explicit filePath targets on a copied or dedicated vault. Uses atomic file writes, path safety and optional preconditions, but has no durable plan/status/recovery receipt.",
-      inputSchema: mcpSchema(
-        z.object({
-          targetType: z.literal("filePath"),
-          targetIdentifier: z.string().min(1),
-          modificationType: z.literal("wholeFile"),
-          wholeFileMode: z.enum(["append", "prepend"]),
-          content: z.string(),
-          expectedHash: z.string().optional(),
-          expectedMtime: z.number().optional(),
-          returnContent: z.boolean().optional().default(false),
-        }),
-      ),
-      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
-    },
-    async (params) => {
-      const context = requestContextService.createRequestContext({
-        operation: "headlessGuardedUpdateNote",
-        toolName: "obsidian_update_note",
-        target: params.targetIdentifier,
-      });
-      assertWriteAllowed({
-        operation: "obsidian_update_note",
-        action: params.wholeFileMode,
-        target: params.targetIdentifier,
-        context,
-      });
-      const result = await vaultFileService.updateWholeFile(
-        params.targetIdentifier,
-        params.wholeFileMode,
-        params.content,
-        context,
-        {
-          expectedHash: params.expectedHash,
-          expectedMtime: params.expectedMtime,
-        },
-      );
-      await updateCacheAfterGuardedWrite(
-        vaultCacheService,
-        result.path,
-        context,
-      );
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                success: true,
-                mode: "headless-guarded",
-                path: result.path,
-                stats: {
-                  ctime: result.ctime,
-                  mtime: result.mtime,
-                  size: result.size,
-                  hash: result.hash,
-                },
-                content: params.returnContent ? result.content : undefined,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-        isError: false,
-      };
-    },
-  );
-
-  server.registerTool(
-    "obsidian_search_replace",
-    {
-      description:
-        "Headless-guarded direct filesystem exact search/replace for explicit filePath targets on a copied or dedicated vault. Optional hash/mtime preconditions prevent stale writes; no durable plan/status/recovery receipt is created.",
-      inputSchema: mcpSchema(
-        z.object({
-          targetType: z.literal("filePath"),
-          targetIdentifier: z.string().min(1),
-          replacements: z
-            .array(z.object({ search: z.string().min(1), replace: z.string() }))
-            .min(1),
-          expectedHash: z.string().optional(),
-          expectedMtime: z.number().optional(),
-          returnContent: z.boolean().optional().default(false),
-        }),
-      ),
-      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
-    },
-    async (params) => {
-      const context = requestContextService.createRequestContext({
-        operation: "headlessGuardedSearchReplace",
-        toolName: "obsidian_search_replace",
-        target: params.targetIdentifier,
-      });
-      assertWriteAllowed({
-        operation: "obsidian_search_replace",
-        action: "replace",
-        target: params.targetIdentifier,
-        context,
-      });
-      const { result, replacementsApplied } =
-        await vaultFileService.searchReplace(
-          params.targetIdentifier,
-          params.replacements,
-          context,
-          {
-            expectedHash: params.expectedHash,
-            expectedMtime: params.expectedMtime,
-          },
-        );
-      await updateCacheAfterGuardedWrite(
-        vaultCacheService,
-        result.path,
-        context,
-      );
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                success: true,
-                mode: "headless-guarded",
-                path: result.path,
-                replacementsApplied,
-                stats: {
-                  ctime: result.ctime,
-                  mtime: result.mtime,
-                  size: result.size,
-                  hash: result.hash,
-                },
-                content: params.returnContent ? result.content : undefined,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-        isError: false,
-      };
-    },
-  );
-
-  server.registerTool(
-    "obsidian_manage_frontmatter",
-    {
-      description:
-        "Headless-guarded direct filesystem frontmatter setter for one key on a copied or dedicated vault. This fallback is exposed only when the live governed projection is unavailable and creates no durable receipt.",
-      inputSchema: mcpSchema(
-        z.object({
-          filePath: z.string().min(1),
-          operation: z.literal("set"),
-          key: z.string().min(1),
-          value: z.any(),
-          expectedHash: z.string().optional(),
-          expectedMtime: z.number().optional(),
-        }),
-      ),
-      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
-    },
-    async (params) => {
-      const context = requestContextService.createRequestContext({
-        operation: "headlessGuardedManageFrontmatter",
-        toolName: "obsidian_manage_frontmatter",
-        target: params.filePath,
-      });
-      assertWriteAllowed({
-        operation: "obsidian_manage_frontmatter",
-        action: "set",
-        target: params.filePath,
-        frontmatterKeys: [params.key],
-        context,
-      });
-      const { result, value } = await vaultFileService.setFrontmatterKey(
-        params.filePath,
-        params.key,
-        params.value,
-        context,
-        {
-          expectedHash: params.expectedHash,
-          expectedMtime: params.expectedMtime,
-        },
-      );
-      await updateCacheAfterGuardedWrite(
-        vaultCacheService,
-        result.path,
-        context,
-      );
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                success: true,
-                mode: "headless-guarded",
-                path: result.path,
-                key: params.key,
-                value,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-        isError: false,
-      };
-    },
-  );
-
-  if (!includeFilesystemFeatures) {
-    return;
-  }
 
   server.registerTool(
     "obsidian_delete_note",
@@ -602,249 +386,6 @@ function registerHeadlessGuardedWriteTools(
                 mode: "headless-guarded",
                 path: deleted.path,
                 deletedHash: deleted.hash,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-        isError: false,
-      };
-    },
-  );
-
-  server.registerTool(
-    "obsidian_manage_tags",
-    {
-      description:
-        "Headless-filesystem tag management for YAML frontmatter tags, inline Markdown tags, and local tag index.",
-      inputSchema: mcpSchema(
-        z.object({
-          filePath: z.string().min(1).optional(),
-          operation: z.enum([
-            "add",
-            "remove",
-            "list",
-            "index",
-            "audit",
-            "rename",
-          ]),
-          tags: z.array(z.string()).default([]),
-          fromTag: z.string().optional(),
-          toTag: z.string().optional(),
-          dryRun: z.boolean().default(true),
-          location: z
-            .enum(["frontmatter", "inline", "both"])
-            .default("frontmatter"),
-          expectedHash: z.string().optional(),
-          expectedMtime: z.number().optional(),
-        }),
-      ),
-      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
-    },
-    async (params) => {
-      const context = requestContextService.createRequestContext({
-        operation: "headlessGuardedManageTags",
-        toolName: "obsidian_manage_tags",
-        target: params.filePath,
-      });
-      if (params.operation === "index" || params.operation === "audit") {
-        const entries = vaultCacheService?.getEntriesByPrefix("") ?? [];
-        const counts = new Map<string, { files: number; paths: string[] }>();
-        const files = [];
-        for (const entry of entries) {
-          if (path.extname(entry.path).toLowerCase() !== ".md") {
-            continue;
-          }
-          const content =
-            (await vaultCacheService?.getEntry(entry.path))?.content ?? "";
-          const extracted = extractMarkdownTags(content);
-          for (const tag of extracted.allTags) {
-            const current = counts.get(tag) ?? { files: 0, paths: [] };
-            current.files += 1;
-            current.paths.push(entry.path);
-            counts.set(tag, current);
-          }
-          if (params.operation === "audit" && extracted.allTags.length > 0) {
-            files.push({
-              path: entry.path,
-              frontmatterTags: extracted.frontmatterTags,
-              inlineTags: extracted.inlineTags,
-              allTags: extracted.allTags,
-              conflicts: extracted.allTags.filter(
-                (tag) =>
-                  extracted.frontmatterTags.includes(tag) &&
-                  extracted.inlineTags.includes(tag),
-              ),
-            });
-          }
-        }
-        const tags = [...counts.entries()]
-          .map(([tag, value]) => ({
-            tag,
-            files: value.files,
-            paths: value.paths.sort(),
-          }))
-          .sort((left, right) => left.tag.localeCompare(right.tag));
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(
-                {
-                  success: true,
-                  mode: "headless-filesystem",
-                  source: "filesystem-cache",
-                  tags,
-                  files: params.operation === "audit" ? files : undefined,
-                  limitations: [
-                    "The index is built from Markdown files in the shared cache.",
-                    "It does not evaluate Obsidian plugin-specific tag behavior.",
-                  ],
-                },
-                null,
-                2,
-              ),
-            },
-          ],
-          isError: false,
-        };
-      }
-      if (params.operation === "rename") {
-        if (!params.fromTag || !params.toTag) {
-          throw new Error(
-            "fromTag and toTag are required for operation=rename.",
-          );
-        }
-        const fromTag = params.fromTag.replace(/^#+/u, "").trim();
-        const toTag = params.toTag.replace(/^#+/u, "").trim();
-        if (!fromTag || !toTag) {
-          throw new Error("fromTag and toTag must contain a tag name.");
-        }
-        const entries = vaultCacheService?.getEntriesByPrefix("") ?? [];
-        const candidates = [];
-        for (const entry of entries) {
-          if (path.extname(entry.path).toLowerCase() !== ".md") continue;
-          const content =
-            (await vaultCacheService?.getEntry(entry.path))?.content ?? "";
-          if (extractMarkdownTags(content).allTags.includes(fromTag)) {
-            candidates.push(entry.path);
-          }
-        }
-        assertWriteAllowed({
-          operation: "obsidian_manage_tags",
-          action: params.dryRun ? "renameDryRun" : "rename",
-          batchCount: candidates.length,
-          allowInReadonly: params.dryRun,
-          allowInGuarded: true,
-          context,
-        });
-        const results = [];
-        for (const candidate of candidates) {
-          if (params.dryRun) {
-            results.push({
-              path: candidate,
-              fromTag,
-              toTag,
-            });
-            continue;
-          }
-          const { result, before, after } = await vaultFileService.renameTag(
-            candidate,
-            fromTag,
-            toTag,
-            context,
-            {},
-          );
-          await updateCacheAfterGuardedWrite(
-            vaultCacheService,
-            result.path,
-            context,
-          );
-          results.push({
-            path: result.path,
-            before: before.allTags,
-            after: after.allTags,
-            hash: result.hash,
-          });
-        }
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(
-                {
-                  success: true,
-                  mode: "headless-filesystem",
-                  dryRun: params.dryRun,
-                  count: results.length,
-                  results,
-                },
-                null,
-                2,
-              ),
-            },
-          ],
-          isError: false,
-        };
-      }
-      if (!params.filePath) {
-        throw new Error("filePath is required unless operation=index.");
-      }
-      if (params.operation !== "list") {
-        assertWriteAllowed({
-          operation: "obsidian_manage_tags",
-          action: params.operation,
-          target: params.filePath,
-          batchCount: params.tags.length,
-          allowInGuarded: true,
-          context,
-        });
-      }
-      const { result, currentTags, frontmatterTags, inlineTags } =
-        await vaultFileService.manageTags(
-          params.filePath,
-          params.operation,
-          params.tags,
-          params.location as VaultTagLocation,
-          context,
-          {
-            expectedHash: params.expectedHash,
-            expectedMtime: params.expectedMtime,
-          },
-        );
-      if (result) {
-        await updateCacheAfterGuardedWrite(
-          vaultCacheService,
-          result.path,
-          context,
-        );
-      }
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                success: true,
-                mode: "headless-filesystem",
-                path: params.filePath,
-                location: params.location,
-                frontmatterTags,
-                inlineTags,
-                currentTags,
-                stats: result
-                  ? {
-                      ctime: result.ctime,
-                      mtime: result.mtime,
-                      size: result.size,
-                      hash: result.hash,
-                    }
-                  : undefined,
-                limitations: [
-                  "Headless tag management edits Markdown/YAML text only.",
-                  "It does not evaluate Obsidian's plugin-specific tag behavior.",
-                ],
               },
               null,
               2,
@@ -970,123 +511,6 @@ function registerHeadlessGuardedWriteTools(
                   size: result.size,
                   hash: result.hash,
                 },
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-        isError: false,
-      };
-    },
-  );
-
-  server.registerTool(
-    "obsidian_batch_frontmatter",
-    {
-      description:
-        "Headless-filesystem batch frontmatter set with dry-run support. Protected keys remain blocked by write policy.",
-      inputSchema: mcpSchema(
-        z.object({
-          operations: z
-            .array(
-              z.object({
-                filePath: z.string().min(1),
-                set: z.record(z.any()).default({}),
-                expectedHash: z.string().optional(),
-                expectedMtime: z.number().optional(),
-              }),
-            )
-            .min(1),
-          dryRun: z.boolean().default(true),
-          continueOnError: z.boolean().default(false),
-        }),
-      ),
-      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
-    },
-    async (params) => {
-      const context = requestContextService.createRequestContext({
-        operation: "headlessFilesystemBatchFrontmatter",
-        toolName: "obsidian_batch_frontmatter",
-        target: "batch",
-      });
-      const keys = params.operations.flatMap((operation) =>
-        Object.keys(operation.set ?? {}),
-      );
-      assertWriteAllowed({
-        operation: "obsidian_batch_frontmatter",
-        action: params.dryRun ? "dryRun" : "set",
-        batchCount: params.operations.length,
-        frontmatterKeys: keys,
-        allowInReadonly: params.dryRun,
-        allowInGuarded: true,
-        context,
-      });
-      const results = [];
-      for (const [itemIndex, operation] of params.operations.entries()) {
-        try {
-          if (Object.keys(operation.set ?? {}).length === 0) {
-            throw new Error(
-              "obsidian_batch_frontmatter supports non-empty set only.",
-            );
-          }
-          if (params.dryRun) {
-            const current = await vaultFileService.read(
-              operation.filePath,
-              context,
-            );
-            results.push({
-              file: current.path,
-              dryRun: true,
-              setKeys: Object.keys(operation.set),
-              currentHash: current.hash,
-            });
-            continue;
-          }
-          const { result } = await vaultFileService.setFrontmatterKeys(
-            operation.filePath,
-            operation.set,
-            context,
-            {
-              expectedHash: operation.expectedHash,
-              expectedMtime: operation.expectedMtime,
-            },
-          );
-          await updateCacheAfterGuardedWrite(
-            vaultCacheService,
-            result.path,
-            context,
-          );
-          results.push({
-            file: result.path,
-            setKeys: Object.keys(operation.set),
-            mtime: result.mtime,
-            hash: result.hash,
-          });
-        } catch (error) {
-          results.push(
-            publicBatchItemErrorPayload(error, {
-              operation: "obsidian_batch_frontmatter:item",
-              toolName: "obsidian_batch_frontmatter",
-              itemIndex,
-              params: operation,
-            }),
-          );
-          if (!params.continueOnError) {
-            break;
-          }
-        }
-      }
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                ok: results.every((result) => !("error" in result)),
-                dryRun: params.dryRun,
-                source: "filesystem-guarded",
-                results,
               },
               null,
               2,
@@ -1305,7 +729,10 @@ function registerHeadlessGuardedWriteTools(
       try {
         current = await vaultFileService.read(target, context);
       } catch (error) {
-        if (params.operation !== "create") {
+        if (
+          params.operation !== "create" ||
+          (error as NodeJS.ErrnoException)?.code !== "ENOENT"
+        ) {
           throw error;
         }
       }
@@ -1350,8 +777,10 @@ function registerHeadlessGuardedWriteTools(
           : parseCanvasContent(current?.content ?? "");
 
       if (params.operation === "create" && current && !params.overwrite) {
-        throw new Error(
+        throw new McpError(
+          BaseErrorCode.CONFLICT,
           "Canvas file already exists. Pass overwrite=true to replace it.",
+          { ...context, filePath: target },
         );
       }
 
@@ -1432,52 +861,40 @@ function registerHeadlessGuardedWriteTools(
         };
       }
 
+      let result: VaultFileReadResult;
       if (current) {
-        const result = await vaultFileService.updateWholeFile(
+        if (params.expectedHash && params.expectedHash !== current.hash) {
+          throw new McpError(
+            BaseErrorCode.CONFLICT,
+            "File changed since the caller-provided expectedHash.",
+            {
+              ...context,
+              expectedHash: params.expectedHash,
+              actualHash: current.hash,
+              path: current.path,
+            },
+          );
+        }
+        result = await vaultFileService.updateWholeFile(
           target,
           "overwrite",
           nextContent,
           context,
           {
-            expectedHash: params.expectedHash,
+            expectedHash: current.hash,
             expectedMtime: params.expectedMtime,
           },
         );
-        await updateCacheAfterGuardedWrite(
-          vaultCacheService,
-          result.path,
+      } else if (params.overwrite) {
+        result = await vaultFileService.writeAtomic(target, nextContent, context);
+      } else {
+        result = await vaultFileService.createIfAbsent(
+          target,
+          nextContent,
           context,
         );
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(
-                {
-                  ok: true,
-                  source: "filesystem-guarded",
-                  filePath: result.path,
-                  stats: {
-                    mtime: result.mtime,
-                    size: result.size,
-                    hash: result.hash,
-                  },
-                  validation,
-                },
-                null,
-                2,
-              ),
-            },
-          ],
-          isError: false,
-        };
       }
 
-      const result = await vaultFileService.writeAtomic(
-        target,
-        nextContent,
-        context,
-      );
       await updateCacheAfterGuardedWrite(
         vaultCacheService,
         result.path,
@@ -1562,18 +979,18 @@ function registerHeadlessGuardedWriteTools(
           isError: false,
         };
       }
-      const result = await vaultFileService.updateWholeFile(
-        target,
-        "overwrite",
-        yaml,
-        context,
-        params.overwrite
-          ? {
+      const result = params.overwrite
+        ? await vaultFileService.updateWholeFile(
+            target,
+            "overwrite",
+            yaml,
+            context,
+            {
               expectedHash: params.expectedHash,
               expectedMtime: params.expectedMtime,
-            }
-          : undefined,
-      );
+            },
+          )
+        : await vaultFileService.createIfAbsent(target, yaml, context);
       await updateCacheAfterGuardedWrite(
         vaultCacheService,
         result.path,
@@ -1703,111 +1120,6 @@ function registerHeadlessGuardedWriteTools(
     },
   );
 
-  server.registerTool(
-    "bases_upsert_rows",
-    {
-      description:
-        "Headless-filesystem direct frontmatter set operations for notes referenced by a .base. Unset is unsupported; the multi-note request is not one atomic batch and has no durable batch recovery receipt.",
-      inputSchema: mcpSchema(
-        z.object({
-          base_id: z.string().min(1),
-          operations: z
-            .array(
-              z.object({
-                file: z.string().min(1),
-                set: z.record(z.any()).optional(),
-                expectedHash: z.string().optional(),
-                expected_mtime: z.number().optional(),
-              }),
-            )
-            .min(1),
-          continueOnError: z.boolean().default(false),
-        }),
-      ),
-      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
-    },
-    async (params) => {
-      const context = requestContextService.createRequestContext({
-        operation: "headlessGuardedBasesUpsertRows",
-        toolName: "bases_upsert_rows",
-        target: params.base_id,
-      });
-      const keys = params.operations.flatMap((operation) =>
-        Object.keys(operation.set ?? {}),
-      );
-      assertWriteAllowed({
-        operation: "bases_upsert_rows",
-        action: "upsert_rows",
-        target: params.base_id,
-        batchCount: params.operations.length,
-        frontmatterKeys: keys,
-        allowInGuarded: true,
-        context,
-      });
-      const results = [];
-      for (const [itemIndex, operation] of params.operations.entries()) {
-        try {
-          if (!operation.set || Object.keys(operation.set).length === 0) {
-            throw new Error(
-              "headless-guarded bases_upsert_rows supports set only.",
-            );
-          }
-          const { result } = await vaultFileService.setFrontmatterKeys(
-            operation.file,
-            operation.set,
-            context,
-            {
-              expectedHash: operation.expectedHash,
-              expectedMtime: operation.expected_mtime,
-            },
-          );
-          await updateCacheAfterGuardedWrite(
-            vaultCacheService,
-            result.path,
-            context,
-          );
-          results.push({
-            file: result.path,
-            mtime: result.mtime,
-            hash: result.hash,
-          });
-        } catch (error) {
-          results.push(
-            publicBatchItemErrorPayload(error, {
-              operation: "bases_upsert_rows:item",
-              toolName: "bases_upsert_rows",
-              itemIndex,
-              params: operation,
-            }),
-          );
-          if (!params.continueOnError) {
-            break;
-          }
-        }
-      }
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                ok: results.every((result) => !("error" in result)),
-                source: "filesystem-guarded",
-                results,
-                limitations: [
-                  "Headless rows update Markdown frontmatter only.",
-                  "Unset, formulas, calculated properties, and Obsidian UI semantics are not supported.",
-                ],
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-        isError: false,
-      };
-    },
-  );
 }
 
 /**
@@ -1870,15 +1182,18 @@ async function createMcpServerInstance(
   const vaultInstructions = defaultVaultInstructionsRuntime(
     obsidianService,
     vaultCacheService,
+    governedNoteReplaceRuntime,
   );
   const instructions = withToolSearchInstruction(
     await vaultInstructionsServerText(vaultInstructions),
   );
+  const registrationMode = resolveToolRegistrationMode(obsidianService);
   const server = new McpServer(
     { name: config.mcpServerName, version: config.mcpServerVersion },
     {
       capabilities: {
         logging: {}, // Server can receive logging/setLevel and send notifications/message
+        experimental: { [TOOL_PROFILE_MODE_CAPABILITY]: { registrationMode } },
         // Defer only opted-in modern resources until the public Skills boundary is installed.
         ...(!skillsActive ? { resources: { listChanged: true } } : {}),
         // Tools are registered after installing the public privacy boundary.
@@ -1913,7 +1228,7 @@ async function createMcpServerInstance(
       const registry = await configuredSkillRegistry(externalRootsService, resolveToolProfile(), servingContext);
       if (registry) installSkillsExtension(server.server, registry, { deferResourceRead: true });
     }
-    registerToolRoutingResource(server);
+    registerToolRoutingResource(server, registrationMode);
 
     // Register read/cache-friendly tools first. In headless-readonly, the REST
     // service is intentionally absent and these tools must use the shared cache.
@@ -1927,6 +1242,10 @@ async function createMcpServerInstance(
       obsidianService,
       vaultCacheService,
     );
+    if (obsidianService || (vaultCacheService && (isHeadlessReadonly || isHeadlessGuarded || isHeadlessFilesystem))) {
+      registerObsidianGetFrontmatterTool(server, obsidianService, vaultCacheService);
+      await registerObsidianNoteLinksTool(server, obsidianService, vaultCacheService);
+    }
     if (vaultCacheService) {
       await registerObsidianGlobalSearchTool(
         server,
@@ -1972,16 +1291,11 @@ async function createMcpServerInstance(
     );
 
     if (isHeadlessGuarded || isHeadlessFilesystem) {
-      registerHeadlessGuardedWriteTools(
-        server,
-        vaultCacheService,
-        isHeadlessFilesystem,
-      );
+      if (isHeadlessFilesystem) registerHeadlessFilesystemTools(server, vaultCacheService);
       await registerBasesListTool(server, undefined, localBasesService);
       await registerBasesGetSchemaTool(server, undefined, localBasesService);
       await registerBasesQueryTool(server, undefined, localBasesService);
     } else if (!isHeadlessReadonly && obsidianService) {
-      await registerObsidianNoteLinksTool(server, obsidianService);
       await registerObsidianDeleteNoteTool(
         server,
         obsidianService,
@@ -2002,7 +1316,6 @@ async function createMcpServerInstance(
         obsidianService,
         vaultCacheService,
       );
-      registerObsidianGetFrontmatterTool(server, obsidianService);
       await registerObsidianManageTagsTool(
         server,
         obsidianService,

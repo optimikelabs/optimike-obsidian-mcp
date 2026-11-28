@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import "../../config/toolProfileCli.js";
 import { installToolProfileRegistrationGate } from "../toolProfileRuntime.js";
+import type { ToolRegistrationMode } from "../toolSurfaceRegistry.js";
 
 export const TOOL_ROUTING_RESOURCE_URI =
   "optimike://guides/tool-routing" as const;
@@ -13,8 +14,10 @@ runtime- and profile-dependent; never infer that an absent tool can be emulated 
 ## Canonical priorities
 
 - Read, list and exact text search: use the dedicated read/search tools.
-- Frontmatter key reads: use \`obsidian_get_frontmatter\` in live/hybrid mode.
+- Frontmatter key reads: use \`obsidian_get_frontmatter\` when exposed.
   It is read-only and does not accept mutation inputs.
+- Outgoing references and backlinks: use \`obsidian_note_links\`. In headless
+  modes it reports filesystem observations limited to indexed Markdown files.
 - Semantic search: use \`smart_semantic_search\`. It is the only registered
   semantic-search tool in 3.0.
 - Operon-managed tasks: use \`operon_list_tasks\` or \`operon_query_tasks\`. Use
@@ -74,10 +77,10 @@ closed next action. It never applies or recovers an operation.
 There is intentionally no generic public \`operation_*\` surface.
 `;
 
-export function registerToolRoutingResource(server: McpServer): void {
+export function registerToolRoutingResource(server: McpServer, registrationMode?: ToolRegistrationMode): void {
   // server.ts calls this bootstrap point before registering any MCP tools.
   // Install the selected profile first so hidden tools never reach tools/list.
-  installToolProfileRegistrationGate(server);
+  installToolProfileRegistrationGate(server, undefined, registrationMode);
 
   server.registerResource(
     "optimike-tool-routing",

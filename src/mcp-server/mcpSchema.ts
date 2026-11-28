@@ -3,6 +3,9 @@ import {
   type StandardSchemaWithJSON,
 } from "@modelcontextprotocol/server";
 import { z } from "zod/v3";
+import { McpError } from "../types-global/errors.js";
+import { toolInvocation } from "../utils/internal/activeTool.js";
+import { parseToolInput } from "../utils/internal/toolInputValidation.js";
 import {
   ignoreOverride,
   zodToJsonSchema,
@@ -94,6 +97,29 @@ export function mcpSchema(
                 message,
               })),
             };
+      },
+    },
+  };
+}
+
+/** Retain a sanitized validation error while the SDK still validates before dispatch. */
+export function mcpSchemaWithPublicValidation<S extends z.ZodRawShape>(shape: S) {
+  const schema = z.object(shape);
+  const standard = mcpSchema(schema)["~standard"];
+  return {
+    "~standard": {
+      ...standard,
+      async validate(input: unknown) {
+        const result = await standard.validate(input);
+        if (result.issues) {
+          try { parseToolInput(schema, input); }
+          catch (error) {
+            if (!(error instanceof McpError)) throw error;
+            const invocation = toolInvocation.getStore();
+            if (invocation) invocation.inputError = error;
+          }
+        }
+        return result;
       },
     },
   };

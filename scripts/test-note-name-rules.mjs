@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
+import fs from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
+import { test } from "node:test";
 import os from "node:os";
 import path from "node:path";
 process.env.NODE_ENV = "test";
@@ -249,5 +252,93 @@ try {
   await assert.rejects(service.moveFile("Notes/Existante.md", "Notes/Cible #2.md", context, { expectedHash: (await service.read("Notes/Existante.md", context)).hash }), (error) => error.details.reasonCode === "note_name_link_character");
   const moved = await service.moveFile("Notes/Existante.md", "Notes/Déplacée — ok.md", context, { expectedHash: (await service.read("Notes/Existante.md", context)).hash });
   eq(moved.result.path.replaceAll("\\", "/"), "Notes/Déplacée — ok.md");
+
+  await test("direct prepend leaves a BOM and CRLF frontmatter at the start", async () => {
+    const file = "Notes/Frontmatter.md";
+    const envelope = "\uFEFF---\r\nlabel: fixture\r\n---\r\n";
+    await service.writeAtomic(file, envelope + "Body.\r\n", context);
+    await service.updateWholeFile(file, "prepend", "Prepended.\r\n", context);
+    assert.equal((await service.read(file, context)).content, envelope + "Prepended.\r\nBody.\r\n");
+  });
+
+  await test("a missing vault root is a path validation error before creation", async () => {
+    const missingRoot = path.join(root, "missing-vault");
+    await assert.rejects(
+      new VaultFileService(missingRoot).writeAtomic("Note.md", "new\n", context),
+      {
+        code: BaseErrorCode.VALIDATION_ERROR,
+        message: "Unable to verify parent real path inside the vault root.",
+      },
+    );
+    assert.equal(existsSync(missingRoot), false);
+  });
+
+  await test("concurrent updates cannot both commit against the same stale hash", async () => {
+    const file = "Notes/Conditional.md";
+    const { hash } = await service.writeAtomic(file, "base\n", context);
+    const otherService = new VaultFileService(vault);
+    await fs.symlink(path.join(vault, "Notes"), path.join(vault, "Alias"), "junction");
+    const outcomes = await Promise.allSettled(
+      Array.from({ length: 6 }, (_, index) =>
+        (index % 2 ? service : otherService).updateWholeFile(
+          index % 2 ? file : "Alias/Conditional.md",
+          "overwrite",
+          `writer ${index}\n`,
+          context,
+          { expectedHash: hash },
+        ),
+      ),
+    );
+    const winners = outcomes.filter((outcome) => outcome.status === "fulfilled");
+    assert.equal(winners.length, 1);
+    for (const outcome of outcomes) {
+      if (outcome.status === "rejected") {
+        assert.equal(outcome.reason.code, BaseErrorCode.CONFLICT);
+      }
+    }
+    assert.equal(await fs.readFile(path.join(vault, file), "utf8"), winners[0].value.content);
+  });
+
+  await test("concurrent appends to a new note preserve every line", async () => {
+    const file = "New folder/Appends.md";
+    const lines = Array.from({ length: 6 }, (_, index) => `append ${index}`);
+    const outcomes = await Promise.allSettled(
+      lines.map((line) => service.updateWholeFile(file, "append", `${line}\n`, context)),
+    );
+    assert.deepEqual(outcomes.map(({ status }) => status), lines.map(() => "fulfilled"));
+    const content = await fs.readFile(path.join(vault, file), "utf8");
+    assert.deepEqual(content.trimEnd().split("\n").sort(), lines);
+  });
+
+  await test("an external edit or creation during staging survives and leaves no temp file", async (t) => {
+    for (const initial of ["base\n", undefined]) {
+      await t.test(initial === undefined ? "target created externally" : "target edited externally", async () => {
+        const file = "Notes/External.md";
+        const target = path.join(vault, file);
+        const originalWriteFile = fs.writeFile;
+        if (initial !== undefined) await originalWriteFile(target, initial);
+        fs.writeFile = async (stagedPath, ...args) => {
+          await originalWriteFile(stagedPath, ...args);
+          if (typeof stagedPath === "string" && stagedPath.startsWith(`${target}.`) && stagedPath.endsWith(".tmp")) {
+            await originalWriteFile(target, "external edit\n");
+          }
+        };
+        syncBuiltinESMExports();
+        try {
+          await assert.rejects(
+            service.updateWholeFile(file, "append", "MCP edit\n", context),
+            (error) => error.code === BaseErrorCode.CONFLICT,
+          );
+          assert.equal(await fs.readFile(target, "utf8"), "external edit\n");
+          const siblings = await fs.readdir(path.dirname(target));
+          assert.equal(siblings.some((name) => name.startsWith("External.md.") && name.endsWith(".tmp")), false);
+        } finally {
+          fs.writeFile = originalWriteFile;
+          syncBuiltinESMExports();
+          await fs.rm(target, { force: true });
+        }
+      });
+    }
+  });
 } finally { rmSync(root, { recursive: true, force: true }); }
 console.log(`note name rules: ${checks} checks passed`);

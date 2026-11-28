@@ -15,12 +15,12 @@ Lire un coffre, n’importe quelle connexion le fait. Optimike Obsidian MCP sert
 | Vous voulez… | Ce que fait le MCP |
 | --- | --- |
 | Valider avant que l’IA écrive | Elle prépare un plan ; ce qui s’écrit est exactement ce que vous avez validé, puis c’est vérifié. Si la connexion coupe, l’écriture n’est pas rejouée à l’aveugle. |
-| Continuer à écrire pendant qu’elle travaille | Son écriture est refusée si la note change entre son plan et l’écriture : une modification faite entre-temps n’est pas écrasée. |
+| Continuer à écrire pendant qu’elle travaille | Pour un remplacement complet, l’agent peut transmettre l’empreinte de sa lecture initiale afin que le plan soit refusé si la note a changé. Une modification après le plan bloque aussi l’écriture. |
 | Garder vos Bases, liens et tâches justes | Propriétés au format d’Obsidian, déplacements par Obsidian, suppression vers la corbeille, tâches Operon par Operon. |
 | Que vos règles s’appliquent | Avant chaque écriture, l’IA est renvoyée vers les `AGENTS.md` qui s’appliquent, depuis Claude, ChatGPT ou Codex ; un mode strict refuse l’écriture tant qu’elle ne les a pas lus. |
 | Trouver le bon passage | La recherche par le sens renvoie le passage qui répond, avec ses lignes. |
 
-Ces garanties s’appliquent aux écritures gouvernées : Obsidian ouvert et le plugin Atomic Write Bridge, dont les écritures restent fermées tant que vous ne les ouvrez pas dans ses réglages. Si votre IA ne fait que lire votre coffre, un accès aux fichiers ou un MCP plus léger suffit.
+Les écritures gouvernées en mode live passent par le plugin Atomic Write Bridge, dont les écritures restent fermées tant que vous ne les ouvrez pas dans ses réglages. Sur une copie ou un coffre dédié, le déplacement et la corbeille headless suivent une [procédure gouvernée sur le système de fichiers](docs/headless-server-profile.fr.md#déplacement-et-corbeille-gouvernés). Si votre IA ne fait que lire votre coffre, un accès aux fichiers ou un MCP plus léger suffit.
 
 ## Carte des capacités
 
@@ -29,7 +29,7 @@ Ces garanties s’appliquent aux écritures gouvernées : Obsidian ouvert et le 
 | Notes                   | Lecture/recherche/éditions directes + opérations gouvernées Note et Frontmatter | Coffre ; Local REST API + Atomic Write Bridge        |
 | Bases et Canvas         | Requêtes, vérification des formules par le moteur d’Obsidian, écritures bornées, formules et graphes Canvas gouvernés | Bases Bridge ; Atomic Write Bridge                   |
 | Tâches                  | Markdown Tasks-compatible + 27 outils Operon gouvernés                          | Operon Developer API V1 via le Bridge                |
-| Recherche sémantique    | Recherche dans l’index Smart Connections                                        | `.smart-env` + embedding Ollama, compatible OpenAI ou modèle intégré |
+| Recherche sémantique    | Recherche dans l’index Smart Connections                                        | `.smart-env` ou une génération v3 externe, avec un encodeur de requêtes compatible |
 | Runtime                 | Cache SQLite partagé, santé, maintenance et modes dégradés                      | Filesystem local                                     |
 | Documents externes      | Lectures/handoff default-deny + diagnostic de move local                        | Allowlist de racines                                 |
 | Administration headless | Opérations métadonnées/filesystem bornées                                       | Copie ou coffre dédié                                |
@@ -47,7 +47,7 @@ Le registre canonique des outils est documenté dans [Surface des outils](docs/o
 | HTTP sur la même machine                 | HTTP loopback authentifié                                |
 | HTTP distant                             | reverse proxy TLS revu + réseau privé ; pilote seulement |
 
-Le runtime répond à ce que le backend peut exécuter. Il ne décide pas combien d’outils le modèle doit voir.
+Le runtime définit les capacités du backend. Avec le cache partagé actif, les modes headless peuvent lire une clé de frontmatter et examiner les liens entre notes Markdown indexées. [Couverture des lectures headless](docs/headless-server-profile.fr.md#contrat).
 
 ## Profils de surface d’outils
 
@@ -75,7 +75,7 @@ Le chemin `/mcp` sans qualificatif utilise désormais `standard` ; `/mcp/full` r
 
 Pré-requis :
 
-- Node.js `>=22.12.0` ;
+- Node.js `>=22.13.0` ;
 - Obsidian Desktop uniquement pour les fonctions live ;
 - plugins correspondant aux capacités activées.
 
@@ -131,7 +131,7 @@ Les mutations Operon exigent le réglage de mutation du Bridge plus :
 OPERON_MUTATIONS_ENABLED=true
 ```
 
-Les snapshots Operon obsolètes restent read-only. Aucune route Operon ne retombe sur du Markdown brut ou des API privées. L’adoption officielle et le routage Daily/Weekly négocient leur grant additif exact au premier usage, y compris après un démarrage MCP à froid ; un grant en attente ou refusé échoue toujours fermé. Operon reste propriétaire de chaque plan opaque scellé et de sa récupération same-plan. Task Type et Task Image restent scalaires, Task Gallery reste un tableau ordonné et `__taskDataType` est read-only. Les versions certifiées/provisoires, la récupération et les gaps d’API sont détaillés dans le [Contrat MCP Operon](docs/operon-mcp-contract.fr.md) et l’[Audit CLI / Developer API](docs/operon-cli-audit.fr.md).
+Les snapshots Operon obsolètes restent read-only. Les mutations Operon passent par le Bridge natif. Le [lecteur Operon headless](docs/headless-server-profile.fr.md#operon-sans-desktop) lit le Markdown et les réglages synchronisés. L’adoption officielle et le routage Daily/Weekly négocient leur grant additif exact au premier usage, y compris après un démarrage MCP à froid ; un grant en attente ou refusé échoue toujours fermé. Operon reste propriétaire de chaque plan opaque scellé et de sa récupération same-plan. Task Type et Task Image restent scalaires, Task Gallery reste un tableau ordonné et `__taskDataType` est read-only. Les versions certifiées/provisoires, la récupération et les gaps d’API sont détaillés dans le [Contrat MCP Operon](docs/operon-mcp-contract.fr.md) et l’[Audit CLI / Developer API](docs/operon-cli-audit.fr.md).
 
 Operon `3.6.0` expose le plan public Task Workflow périodique uniquement sous forme de métadonnées, sans chemin de source des tâches avant apply. La canary de release sur le SHA exact négocie et prévisualise les opérations périodiques, mais saute les applies périodiques avec la raison
 `public_task_source_projection_unavailable`. Cela confine la canary destructive
@@ -147,7 +147,7 @@ plan → apply → status → recover
 
 Après timeout ou perte de transport, appeler `status` avant `recover` ; ne jamais recréer aveuglément une mutation. Les plans durables ne sont pas liés au profil qui les a créés. Quand le coffre range des règles d’agent dans `AGENTS.md`, chaque plan d’écriture liste les fichiers qui s’appliquent aux chemins qu’il écrit, et `MCP_VAULT_INSTRUCTIONS=enforce` refuse l’écriture tant que l’agent ne les a pas reçus dans leur version actuelle ; le serveur prouve qu’ils ont été servis, pas qu’ils sont respectés ([Instructions d’agent du coffre](docs/vault-instructions.fr.md)).
 
-Si le client a perdu la référence opaque du plan, appeler `obsidian_list_pending_operations`. Ce cockpit read-only liste uniquement les reçus Obsidian gouvernés en attente ou incertains depuis les journaux déjà ouverts du runtime live, avec le `planRef` métier exact et la prochaine action sûre. Il n'expose ni cible, ni clé d'idempotence, ni contenu, ni hash, ni binding backend, et n'appelle jamais status, apply ou recovery. Voir [Cockpit des opérations en attente](docs/operation-cockpit-p5.fr.md). Les opérations incertaines que rien ne peut régler se clôturent, après revue du propriétaire, avec `obsidian_operation_close` ([Clôture administrative](docs/administrative-closure.fr.md)).
+Si le client a perdu la référence opaque du plan, appeler `obsidian_list_pending_operations`. Ce cockpit read-only liste uniquement les reçus Obsidian gouvernés en attente ou incertains depuis les journaux déjà ouverts du runtime, avec le `planRef` métier exact et la prochaine action sûre. Il n'expose ni cible, ni clé d'idempotence, ni contenu, ni hash, ni binding backend, et n'appelle jamais status, apply ou recovery. Voir [Cockpit des opérations en attente](docs/operation-cockpit-p5.fr.md). Les opérations incertaines que rien ne peut régler se clôturent, après revue du propriétaire, avec `obsidian_operation_close` ([Clôture administrative](docs/administrative-closure.fr.md)).
 
 ## Racines documentaires externes
 
@@ -173,9 +173,9 @@ Voir [Configuration External Roots](docs/external-roots-setup.fr.md).
 
 ## Recherche sémantique
 
-`smart_semantic_search` est l’outil canonique. Il interroge l’index Smart Connections local. L’embedding de requête peut rester local via Ollama, utiliser un fournisseur compatible OpenAI, ou reprendre le modèle intégré de Smart Connections (BGE Micro par défaut) une fois le paquet optionnel `@huggingface/transformers` installé. Voir [embedders](README_EMBEDDERS.md). Avec `granularity` à `sections`, l’outil renvoie les sections de titre et les paragraphes qui répondent au lieu des notes entières ; avec `both`, il classe notes et sections ensemble ; la valeur par défaut `notes` garde la forme de résultat précédente. Un résultat de section donne le `path` de la note, la `block_key` Smart Connections, le chemin de titres `headings`, les lignes `lines` `[début, fin]` (à partir de 1, bornes incluses) et le `score` ; avec `with_snippets`, `snippet` contient ces lignes (1 200 caractères au plus). Les sections utilisent les vecteurs de blocs que Smart Connections calcule déjà pour le modèle actif (`.smart-env/smart_blocks/<empreinte du modèle>`) ; les blocs de frontmatter ne sont pas cherchés, et les filtres `folders` et `tags` s’appliquent à la note de chaque section. Avant de répondre, le serveur vérifie chaque section dans la note telle qu’elle est maintenant : `lines_verified: true` prouve que les lignes contiennent exactement le texte vectorisé, retrouvé à sa nouvelle place si une modification plus haut l’a déplacé ; `false` signifie que ce texte a changé depuis l’indexation par Smart Connections : `lines` sont alors celles de la version indexée et aucun extrait n’est renvoyé. Un coffre sans vecteurs de blocs pour le modèle actif répond `semantic_sections_unavailable`.
+`smart_semantic_search` est l’outil canonique. Par défaut, il interroge l’index Smart Connections local. L’embedding de requête peut rester local via Ollama, utiliser un fournisseur compatible OpenAI, ou reprendre le modèle intégré de Smart Connections (BGE Micro par défaut) une fois le paquet optionnel `@huggingface/transformers` installé. Voir [embedders](README_EMBEDDERS.md). Avec `granularity` à `sections`, l’outil renvoie les sections de titre et les paragraphes qui répondent au lieu des notes entières ; avec `both`, il classe notes et sections ensemble ; la valeur par défaut `notes` garde la forme de résultat précédente. Un résultat de section donne le `path` de la note, la `block_key` Smart Connections, le chemin de titres `headings`, les lignes `lines` `[début, fin]` (à partir de 1, bornes incluses) et le `score` ; avec `with_snippets`, `snippet` contient ces lignes (1 200 caractères au plus). Les sections utilisent les vecteurs de blocs que Smart Connections calcule déjà pour le modèle actif (`.smart-env/smart_blocks/<empreinte du modèle>`) ; les blocs de frontmatter ne sont pas cherchés, et les filtres `folders` et `tags` s’appliquent à la note de chaque section. Avant de répondre, le serveur vérifie chaque section dans la note telle qu’elle est maintenant : `lines_verified: true` prouve que les lignes contiennent exactement le texte vectorisé, retrouvé à sa nouvelle place si une modification plus haut l’a déplacé ; `false` signifie que ce texte a changé depuis l’indexation par Smart Connections : `lines` sont alors celles de la version indexée et aucun extrait n’est renvoyé. Un coffre sans vecteurs de blocs pour le modèle actif répond `semantic_sections_unavailable`. [Recherche classée et hybride](OPERATIONS.fr.md#recherche-classée-et-hybride).
 
-Voir [Exploitation](OPERATIONS.fr.md) pour les providers et le cache.
+`SMART_ENV_GENERATION_POINTER` permet de lire un index Smart Env v3 externe et d’obtenir son `generation_id`. Une publication prend effet à la requête suivante. Voir le [contrat de publication](docs/semantic-vector-cache-encoding.md#external-smart-env-v3-generations) et le [guide d’exploitation](OPERATIONS.fr.md).
 
 ## Validation
 

@@ -14,6 +14,8 @@ import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { supportedAtomicBridgeVersion } from "../atomicBridgeVersion.js";
 import {
   OPERATION_RUNTIME_CONTRACT_VERSION,
+  HEADLESS_VAULT_LOCK_BUSY,
+  isHeadlessVaultLockBusy,
   operationDigest,
   type OperationAdapter,
   type OperationOutcome,
@@ -22,7 +24,10 @@ import {
 } from "./contract.js";
 import {
   ObsidianNoteReplaceConcurrencyError,
+  FILESYSTEM_OPERON_PROJECTION,
   ObsidianNoteReplaceJournal,
+  displacedFilesystemEdit,
+  replacedConcurrentEdit,
   noteReplaceIdempotencyConflict,
   type ObsidianNoteReplacePlan,
   type ObsidianNoteReplaceProjection,
@@ -77,7 +82,7 @@ const StatusSchema = z
     contractVersion: z.literal(1),
     plugin: z.object({ id: z.string().min(1), version: z.string().min(1) }),
     backend: z.object({
-      kind: z.literal("obsidian-vault-process"),
+      kind: z.enum(["obsidian-vault-process", "headless-filesystem"]),
       bindingFingerprint: z.string().regex(SHA256),
       atomicCas: z.literal(true),
       writeEnabled: z.boolean(),
@@ -229,10 +234,14 @@ export interface AtomicWriteBackend {
   prepareDate?(payload: { contractVersion: 1; path: string; expectedSha256: string; bindingFingerprint: string;
     fence?: { contractVersion: 1; epoch: string; attemptId: string } }): Promise<AtomicWriteReadResponse>;
   resolveEffectFence?(payload: EffectFenceResolveRequest): Promise<EffectFenceResolveResponse>;
-  replace(payload: AtomicWriteCasRequest): Promise<AtomicWriteCasResponse>;
+  replace(payload: AtomicWriteCasRequest, plan?: ObsidianNoteReplacePlan): Promise<AtomicWriteCasResponse>;
 }
 
 export type ObsidianNoteReplacePlanInput = {
+  proposalSeal?: {
+    identity: import("./obsidianNoteReplaceJournal.js").TextPatchProposalIdentity;
+    reference: (receipt: OperationReceipt) => { planRef: string; planDigest: string };
+  };
   path: string;
   nextContent: string;
   idempotencyKey: string;
@@ -248,6 +257,10 @@ export type ObsidianNoteReplaceAdapterOptions = {
   modifiedTimeProtectedKeys?: readonly string[];
   now?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
+  filesystem?: {
+    seal(path: string, content: string, source: AtomicWriteReadResponse, requireAtomicExchange?: boolean, previewOnly?: boolean): Promise<{ content: string; policyDigest: string }>;
+    matchesEffect(plan: ObsidianNoteReplacePlan): Promise<boolean>;
+  };
 };
 
 function normalizedKey(value: string): string {
@@ -534,7 +547,8 @@ function receipt(
   const current = state(plan);
   const terminal = current.phase === "terminal";
   const recoverable =
-    plan.status === "applying" || plan.status === "outcome_unknown";
+    plan.status === "applying" ||
+    (plan.status === "outcome_unknown" && !plan.filesystem?.stagedIdentity);
   const digest = planDigest(profile, plan);
   const settlementCheckAt =
     plan.modifiedTimeSettlementPolicy &&
@@ -550,7 +564,8 @@ function receipt(
         )
       : undefined;
   const committedSha256 =
-    plan.modifiedTimeSettlementEvidence?.observedSha256 ?? plan.afterSha256;
+    plan.filesystem?.stagedSha256 ?? plan.modifiedTimeSettlementEvidence?.observedSha256 ?? plan.afterSha256;
+  const concurrentEdit = replacedConcurrentEdit(plan);
   return {
     contractVersion: OPERATION_RUNTIME_CONTRACT_VERSION,
     operationId: plan.operationId,
@@ -563,7 +578,7 @@ function receipt(
     phase: current.phase,
     outcome: current.outcome,
     backend: {
-      kind: profile.backendKind,
+      kind: plan.filesystem ? "headless-filesystem" : profile.backendKind,
       bindingFingerprint: plan.bindingFingerprint,
     },
     target: { kind: profile.targetKind, logicalRef: plan.path },
@@ -618,6 +633,10 @@ function receipt(
         }
       : {}),
     postflight: {
+      ...(plan.filesystem && plan.status === "committed" ? { source: "filesystem-reread" as const } : {}),
+      ...(plan.filesystem && plan.failure === "headless_atomic_exchange_unavailable" ? { reason: plan.failure } : {}),
+      ...(displacedFilesystemEdit(plan) ? { reason: "headless_displaced_edit" as const } : {}),
+      ...(plan.failure === HEADLESS_VAULT_LOCK_BUSY ? { reason: HEADLESS_VAULT_LOCK_BUSY, retryable: true as const } : {}),
       ...(settlementCheckAt !== undefined
         ? {
             reason: "modified_time_settlement" as const,
@@ -634,6 +653,7 @@ function receipt(
               ? "unverified"
               : "not_started",
     },
+    ...(concurrentEdit ? { replacesConcurrentEdit: concurrentEdit } : {}),
     admittedAt: plan.createdAt,
     updatedAt: plan.updatedAt,
     ...(terminal ? { terminalAt: plan.updatedAt } : {}),
@@ -709,6 +729,8 @@ export class ObsidianNoteReplaceOperationAdapter
     input: ObsidianNoteReplacePlanInput,
     afterSha256: string,
   ): OperationReceipt | undefined {
+    // A proposal may replay only through its durable association.
+    if (input.proposalSeal) return undefined;
     const existing = this.journal.getByIdempotencyKey(input.idempotencyKey);
     if (!existing) return undefined;
     const identityBound =
@@ -723,9 +745,12 @@ export class ObsidianNoteReplaceOperationAdapter
     return receipt(this.profile, existing);
   }
 
-  async plan(input: ObsidianNoteReplacePlanInput): Promise<OperationReceipt> {
+  async plan(input: ObsidianNoteReplacePlanInput, previewOnly = false): Promise<OperationReceipt> {
     validateInput(this.profile, input);
-    const afterSha256 = createHash("sha256")
+    if (previewOnly && (!this.options.filesystem || input.projection?.kind !== FILESYSTEM_OPERON_PROJECTION || input.projection.proof.previewOnly !== true)) {
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Only an Operon filesystem preview can bypass the plan write gate.");
+    }
+    let afterSha256 = createHash("sha256")
       .update(input.nextContent, "utf8")
       .digest("hex");
     const initialReplay = this.replayIfDurableWinner(input, afterSha256);
@@ -740,7 +765,12 @@ export class ObsidianNoteReplaceOperationAdapter
     }
     const statusReplay = this.replayIfDurableWinner(input, afterSha256);
     if (statusReplay) return statusReplay;
-    if (!status.backend.writeEnabled) {
+    if (input.proposalSeal && status.backend.bindingFingerprint !== input.expectedBindingFingerprint) {
+      throw new McpError(BaseErrorCode.CONFLICT, "The proposal belongs to a different Atomic Write authority.", {
+        reason: "proposal_authority_mismatch",
+      });
+    }
+    if (!previewOnly && !status.backend.writeEnabled) {
       const replay = this.replayIfDurableWinner(input, afterSha256);
       if (replay) return replay;
       throw new Error(
@@ -765,9 +795,11 @@ export class ObsidianNoteReplaceOperationAdapter
     ) {
       const replay = this.replayIfDurableWinner(input, afterSha256);
       if (replay) return replay;
-      throw new Error(
-        "Atomic-write backend identity or target changed during planning.",
-      );
+      const message = "Atomic-write backend identity or target changed during planning.";
+      if (input.proposalSeal) {
+        throw new McpError(BaseErrorCode.CONFLICT, message, { reason: "proposal_authority_mismatch" });
+      }
+      throw new Error(message);
     }
     if (
       input.expectedBeforeSha256 !== undefined &&
@@ -778,6 +810,7 @@ export class ObsidianNoteReplaceOperationAdapter
       throw new McpError(
         BaseErrorCode.CONFLICT,
         `The ${this.profile.targetLabel} changed after the domain projection was compiled.`,
+        input.proposalSeal ? { reason: "proposal_changed_during_seal", retryable: true } : undefined,
       );
     }
     if (
@@ -795,6 +828,18 @@ export class ObsidianNoteReplaceOperationAdapter
       status,
       this.options.modifiedTimeProtectedKeys ?? [],
     );
+    let filesystem: ObsidianNoteReplacePlan["filesystem"];
+    let nextContent = input.nextContent;
+    if (this.options.filesystem) {
+      const sealed = await this.options.filesystem.seal(input.path, nextContent, read,
+        input.projection?.kind === FILESYSTEM_OPERON_PROJECTION, previewOnly);
+      filesystem = { policyDigest: sealed.policyDigest, beforeContent: read.content, projectedSha256: afterSha256 };
+      nextContent = sealed.content;
+      afterSha256 = createHash("sha256").update(nextContent, "utf8").digest("hex");
+      if (afterSha256 === read.sha256 && !(previewOnly && input.projection?.proof.noChange === true)) {
+        throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The sealed edit would leave the note unchanged.");
+      }
+    }
     // Bind every configured/dynamic protected date/key at admission. Older
     // plans without this sealed list keep their original strict settlement.
     const allowsProjectedFormatting =
@@ -818,6 +863,7 @@ export class ObsidianNoteReplaceOperationAdapter
       afterSha256,
       ...(input.frontmatterFormat ? { frontmatterFormat: input.frontmatterFormat } : {}),
       bindingFingerprint: read.bindingFingerprint,
+      ...(filesystem ? { filesystemPolicyDigest: filesystem.policyDigest } : {}),
       ...(input.idempotencyIdentity
         ? { idempotencyIdentity: input.idempotencyIdentity }
         : {}),
@@ -830,27 +876,29 @@ export class ObsidianNoteReplaceOperationAdapter
           }
         : {}),
     });
-    return receipt(
-      this.profile,
-      this.journal.create({
-        idempotencyKey: input.idempotencyKey,
-        requestDigest,
-        ...(input.datePreparation ? { datePreparation: input.datePreparation } : {}),
-        ...(input.frontmatterFormat ? { frontmatterFormat: input.frontmatterFormat } : {}),
-        ...(input.idempotencyIdentity
-          ? { idempotencyIdentity: input.idempotencyIdentity }
-          : {}),
-        ...(sealedProjection ? { projection: sealedProjection } : {}),
-        path: input.path,
-        beforeSha256: read.sha256,
-        afterSha256,
-        nextContent: input.nextContent,
-        bindingFingerprint: read.bindingFingerprint,
-        ...(modifiedTimeSettlementPolicy
-          ? { modifiedTimeSettlementPolicy }
-          : {}),
-      }),
-    );
+    const newPlan = {
+      idempotencyKey: input.idempotencyKey,
+      requestDigest,
+      ...(input.datePreparation ? { datePreparation: input.datePreparation } : {}),
+      ...(input.frontmatterFormat ? { frontmatterFormat: input.frontmatterFormat } : {}),
+      ...(input.idempotencyIdentity ? { idempotencyIdentity: input.idempotencyIdentity } : {}),
+      ...(sealedProjection ? { projection: sealedProjection } : {}),
+      path: input.path,
+      beforeSha256: read.sha256,
+      afterSha256,
+      nextContent,
+      ...(filesystem ? { filesystem } : {}),
+      bindingFingerprint: read.bindingFingerprint,
+      ...(modifiedTimeSettlementPolicy ? { modifiedTimeSettlementPolicy } : {}),
+    };
+    const seal = input.proposalSeal;
+    const plan = seal
+      ? this.journal.createTextPatchProposalPlan(newPlan, {
+          identity: seal.identity,
+          reference: (plan) => seal.reference(receipt(this.profile, plan)),
+        })
+      : this.journal.create(newPlan);
+    return receipt(this.profile, plan);
   }
 
   async apply(
@@ -911,6 +959,7 @@ export class ObsidianNoteReplaceOperationAdapter
     reference: string,
     idempotencyKey: string,
     completionMode: SettlementCompletionMode = "verified",
+    validateReplay?: () => Promise<void>,
   ): Promise<OperationReceipt> {
     let plan = this.required(reference, idempotencyKey);
     if (plan.status === "committed") return receipt(this.profile, plan);
@@ -933,6 +982,11 @@ export class ObsidianNoteReplaceOperationAdapter
       return receipt(this.profile, plan);
     }
     if (plan.status !== "outcome_unknown") {
+      return receipt(this.profile, plan);
+    }
+    if (this.options.filesystem && plan.filesystem?.stagedIdentity) {
+      // Reconciliation may prove the first effect. It may never replay a
+      // publication attempt, even if the old bytes have reappeared.
       return receipt(this.profile, plan);
     }
     plan = this.beginModifiedTimeSettlementObservationOrReload(plan);
@@ -960,11 +1014,16 @@ export class ObsidianNoteReplaceOperationAdapter
         ),
       );
     }
-    if (read.sha256 === plan.afterSha256) {
+    if (this.options.filesystem ? await this.options.filesystem.matchesEffect(plan) : read.sha256 === plan.afterSha256) {
       return receipt(
         this.profile,
         this.transitionOrReload(plan, [plan.status], "committed"),
       );
+    }
+    if (this.options.filesystem && this.journal.get(plan.operationId)?.filesystem?.stagedIdentity) {
+      // The previous attempt reached the publication boundary. Even if Sync
+      // restored the old bytes, this cannot authorize a second effect.
+      return receipt(this.profile, plan);
     }
     const settlement = this.modifiedTimeSettlement(plan, read.content);
     if (settlement) {
@@ -974,6 +1033,17 @@ export class ObsidianNoteReplaceOperationAdapter
       );
     }
     if (read.sha256 !== plan.beforeSha256) {
+      if (this.options.filesystem && plan.projection?.kind === FILESYSTEM_OPERON_PROJECTION) {
+        // Operon publication requires a durable staging witness. Without one,
+        // different bytes prove a pre-publication conflict, not an uncertain write.
+        try {
+          const conflict = this.journal.settleUnstagedFilesystemRecovery(plan.operationId);
+          return receipt(this.profile, conflict);
+        } catch (error) {
+          if (!(error instanceof ObsidianNoteReplaceConcurrencyError)) throw error;
+          return receipt(this.profile, this.required(reference));
+        }
+      }
       return receipt(
         this.profile,
         this.uncertain(
@@ -982,6 +1052,7 @@ export class ObsidianNoteReplaceOperationAdapter
         ),
       );
     }
+    await validateReplay?.();
     let applying: ObsidianNoteReplacePlan;
     try {
       applying = this.journal.transition(
@@ -1084,7 +1155,7 @@ export class ObsidianNoteReplaceOperationAdapter
         ...(fenceEpoch
           ? { fence: { contractVersion: 1, epoch: fenceEpoch, attemptId: executionAttemptId } }
           : {}),
-      });
+      }, plan);
       plan = this.beginModifiedTimeSettlementObservationOrReload(
         plan,
         executionAttemptId,
@@ -1096,11 +1167,14 @@ export class ObsidianNoteReplaceOperationAdapter
         return plan;
       }
       const result = CasSchema.parse(rawResult);
+      const expectedAfter = this.options.filesystem
+        ? this.journal.get(plan.operationId)?.filesystem?.stagedSha256
+        : plan.afterSha256;
       if (
         result.bindingFingerprint !== plan.bindingFingerprint ||
         result.path !== plan.path ||
         result.beforeSha256 !== plan.beforeSha256 ||
-        result.afterSha256 !== plan.afterSha256
+        result.afterSha256 !== expectedAfter
       ) {
         throw new Error(
           "Atomic-write postflight did not match the sealed plan.",
@@ -1139,6 +1213,7 @@ export class ObsidianNoteReplaceOperationAdapter
         executionAttemptId,
       );
     } catch (error) {
+      if (this.options.filesystem && isHeadlessVaultLockBusy(error)) throw error;
       if (error instanceof Error && preDispatchErrors.delete(error)) {
         casDispatched = false;
       }
@@ -1161,7 +1236,7 @@ export class ObsidianNoteReplaceOperationAdapter
       const conflict =
         error instanceof McpError && error.code === BaseErrorCode.CONFLICT;
       if (conflict) {
-        if (!casDispatched) {
+        if (!casDispatched || (this.options.filesystem && !recoveredFromUnknown)) {
           return this.transitionOrReload(
             plan,
             ["applying"],
@@ -1279,7 +1354,7 @@ export class ObsidianNoteReplaceOperationAdapter
     ) {
       return plan;
     }
-    if (matchesTarget && read.sha256 === plan.afterSha256) {
+    if (matchesTarget && (this.options.filesystem ? await this.options.filesystem.matchesEffect(plan) : read.sha256 === plan.afterSha256)) {
       return this.transitionOrReload(
         plan,
         ["applying"],
@@ -1353,6 +1428,10 @@ export class ObsidianNoteReplaceOperationAdapter
     executionAttemptId?: string,
     completionRead?: z.infer<typeof ReadSchema>,
   ): Promise<ObsidianNoteReplacePlan> {
+    if (this.options.filesystem && plan.filesystem) {
+      if (await this.options.filesystem.matchesEffect(plan)) return this.commitAfterVerifiedProofOrReload(plan);
+      return this.journal.get(plan.operationId) ?? plan;
+    }
     // The sealed delay cannot yield terminal proof yet. Avoid redundant backend reads.
     const early = plan.modifiedTimeSettlementPolicy && this.modifiedTimeSettlementObservationRemainingMs(plan) > 0;
     const token = plan.settlementDeferred?.kind === 'postflight' ? plan.settlementDeferred.completionToken : undefined;

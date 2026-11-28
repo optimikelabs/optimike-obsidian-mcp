@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add governed filesystem Operon writes for standalone Operon 4.6.0 tasks.
+  Create inline tasks and update or transition canonical inline and file
+  tasks through the existing tools, with atomic exchange and same-plan
+  recovery. Workflows with additional effects require Desktop.
+
+- Governed Markdown body and frontmatter patches, durable note creation and the
+  pending-operation cockpit work without Desktop in both writable headless modes.
+  `headless-filesystem` also supports whole-note replacement and governed revert.
+  Headless plans seal the on-disk hash and configured date policy. Applies use
+  cross-process locking, durable receipts and an on-disk postflight.
+
+### Fixed
+
+- Replace existing governed notes without a transient absence on compatible
+  Linux and macOS filesystems. Other filesystems fail closed unless an operator
+  explicitly enables the legacy fallback for a vault without bidirectional sync.
+- Require the vault owner's explicit timezone and preserve the modification stamp
+  within the configured interval. Hide remaining direct Markdown editors in
+  headless, including Base row upsert, and insert compatibility prepends below the YAML envelope.
+- Probe atomic exchange on the target filesystem before sealing an existing-note
+  plan. Restore displaced concurrent edits by exchange, or through a sealed
+  revert if automatic restoration cannot be verified. Reconcile exchange witnesses
+  at startup and detect quoted top-level Excalidraw keys.
+- Offer restoration only for verified displaced edits and keep newer on-disk
+  edits in place. Clean empty exchange probes at startup.
+- Identify the concurrent edit a headless restore would replace and let operators
+  restore it from the committed revert. Report a busy path lock as retryable
+  before any write and record the attempt as failed.
+- Preserve the published and observed versions when a headless postflight
+  detects a concurrent external edit. Keep the result uncertain and allow a
+  separately sealed revert against the observed hash in full write mode.
+- Protect headless publication from external edits with a verified displaced
+  file and exclusive linking. Reconcile interrupted staging and creation,
+  retry sharing violations on Windows and share locks by vault.
+- Honor explicit timezone, YAML date types, date change tracking and minimum
+  update intervals in governed headless writes. Route direct search/replace
+  and single-property frontmatter edits to the governed headless tools.
+- Serialize headless filesystem mutations per file within a server process.
+  Recheck the content hash or target absence before replacement and discard the
+  temporary file on conflict. Reject stale Canvas edits and Canvas or Base
+  creates that would overwrite an existing file with `overwrite=false` (#201).
+- Base rows require Obsidian and the Bases Bridge, including for filterless Bases. Headless `bases_query` requires `property_only: true` for a labeled scan of cached Markdown properties, independent of the Base and its views. The scan accepts `and`/`or`/`not` filter trees with simple leaves and rejects unsupported filter and sort inputs, including formula references (#200).
+
+- Whole-note replacement can now refuse edits that arrive between the caller's source read and plan creation. Pass the new `sha256` from `obsidian_read_note` as `expectedBeforeSha256` to `obsidian_note_replace_plan`. A stale base or required date preparation refuses without writing or sealing a plan. Apply still compares the sealed hash at the write boundary. (#221)
+
+- Headless note listings, searches, and reads by path omit dot-prefixed Markdown files and files under dot-prefixed directories by default. Explicit re-inclusions still apply, and the shared cache removes previously indexed excluded rows on startup (#227).
+
+- Live JSON note reads and frontmatter key reads use the YAML from the same Local REST response when cached properties disagree. They signal affected keys with `metadataCacheStale` and require no additional REST request (#230).
+
+- Live compact listings and global search results include a vault-relative `diskPath` when a single local spelling with U+00A0 or U+202F differs from the Obsidian path.
+
+- `obsidian_read_note` accepts existing paths containing U+00A0, U+202F or decomposed Unicode. `obsidian_list_notes` accepts these folder spellings, and filesystem-backed reads and compact listings include `diskPath` when the physical spelling differs from the returned vault path (#231).
+
+- `bases_query` rejects unsupported request filter nodes before selecting rows and reports their position. A bare string yields `VALIDATION_ERROR`. Bases Bridge 1.3.1 applies property tables with the same operators as the headless scanner. Upgrade the Bridge to use property tables over REST. (#211)
+- Request filter expressions now reject unquoted comparison values with spaces, slashes or brackets, property names with spaces, and empty expression leaves. Quote string values and use a property table for names with spaces. Empty value arrays, `in` lists, and `and`/`or` groups are also rejected. Live property tables can compare rendered formula text against numeric or boolean operands. (#211)
+- `obsidian_global_search` matches regex anchors `^` and `$` at the start and end of each line in both live and headless modes.
+- Bases Bridge 1.3.2 uses Obsidian's engine to select the same live `bases_query` rows in both `evaluate` modes. `evaluate: false` omits formula result columns, and an unavailable selection returns an explicit error. An unknown view now returns HTTP 404 (`base_view_not_found`). Governed Base row selection explicitly requests its supported-filter snapshot. Update the MCP and Bridge together.
+
+### Added
+
+- `smart_semantic_search` can read a published external Smart Env v3 generation selected by `SMART_ENV_GENERATION_POINTER`. Searches switch on the next request, keep notes and sections in the same generation, and report the generation ID. See the [publication contract](docs/semantic-vector-cache-encoding.md#external-smart-env-v3-generations).
+- Headless note reads, listings, search and status distinguish local cache freshness from upstream Sync evidence. An optional heartbeat records the last successful pull, exposes stalled or failed sync, and can guard filesystem writes. Authenticated status lists indexed Sync conflict files.
+- The standalone semantic index producer has a polling service mode with incremental embeddings, an exclusive producer lock, retry backoff and atomic publication. External semantic search and runtime status expose the generation, build time and observed pending changes.
+- Headless Sync receipts are bound to the vault path. Status caps the conflict list and reports the full count. The semantic service recovers abandoned producer leases, keeps a reader grace period before pruning, and requires one-use authorization for deletions beyond its configured limit.
+- The semantic service caps generations, carries forward a changing note's last published vectors, and keeps running through Windows file contention or a damaged retirement ledger. Status reports blocked pruning or ledger recovery, and the producer waits at capacity until it can reclaim a slot. Node.js 22.13.0 or later is required.
+- Read Operon tasks in all three headless modes from synchronized Markdown and plugin settings. The shared vault cache supplies inline and file tasks, workflow IDs, dates and stored relationships. Reads report filesystem provenance and cache completeness. Supported saved filters run locally, and active timer state still requires Desktop. A synthetic parity check exercises the live REST and headless MCP paths.
+- Governed move and trash in `headless-filesystem` with full write mode. Move plans seal indexed backlink rewrites for notes and attachments. Trash plans report backlinks and require acknowledgement when links exist. Both support exact-plan recovery, refresh the shared filesystem link index and retain completion evidence. An abandoned move provides inverse edits for manual repair.
+
 ## [3.23.1] - 2026-11-26
 
 No Bridge change: Atomic Write Bridge 0.10.0, Operon Bridge 0.9.9 and Bases Bridge 1.3.0 ship unchanged in the bundle of this release. See the [English](docs/releases/3.23.1.md) and [French](docs/releases/3.23.1.fr.md) release notes.
@@ -52,8 +122,6 @@ Bases Bridge 1.3.0 and Atomic Write Bridge 0.10.0 ship in the bundle of this rel
 ## [3.21.0] - 2026-11-16
 
 No Bridge change: Atomic Write Bridge 0.9.2, Operon Bridge 0.9.9 and Bases Bridge 1.2.2 ship unchanged in the bundle of this release, so upgrading from 3.20.0 needs no Bridge reinstall. A section search loads the section vectors once per process. See the [English](docs/releases/3.21.0.md) and [French](docs/releases/3.21.0.fr.md) release notes.
-
-### Added
 
 - `smart_semantic_search` returns the sections that answer, not only whole notes. The optional `granularity` takes `notes` (default, result shape unchanged), `sections` or `both` (notes and sections ranked together). A section result gives the note `path`, `block_key`, `headings`, `lines` `[start, end]` and `score`, plus the text of those lines as `snippet` (at most 1,200 characters). Sections use the block vectors Smart Connections already stores for the active model in `.smart-env/smart_blocks/<model fingerprint>`, with the same freshness rule as notes (`read_hash` equal to `last_read.hash`); frontmatter blocks are skipped and the `folders` and `tags` filters apply. Each section is checked against the note as it reads now: `lines_verified: true` proves the lines hold the embedded text, found again when an edit above moved it; `false` returns the indexed lines without a snippet. On a real vault of 6,889 notes, 16 % of the 44,924 sections had moved since indexing and 0.5 % had changed. Section vectors load on the first section query only (about 123 MB for 44,924 vectors of 640 dimensions); the shared store keeps their references, not the vectors. Without block vectors for the active model, a section search answers `semantic_sections_unavailable` before embedding the query. See [semantic search](README.md#semantic-search) and [section search](OPERATIONS.md#section-search).
 

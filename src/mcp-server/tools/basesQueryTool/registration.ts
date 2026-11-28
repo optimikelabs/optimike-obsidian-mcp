@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
+import { BaseQueryFilterError } from "../../../services/baseQueryFilter.js";
 import { LocalBasesService } from "../../../services/localBasesService.js";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
@@ -11,6 +12,7 @@ import {
 } from "../../../utils/index.js";
 import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
 import {
+  BasesQueryDispatchSchema,
   BasesQueryInput,
   BasesQueryInputSchema,
   processBasesQuery,
@@ -19,7 +21,7 @@ import { mcpSchema } from "../../mcpSchema.js";
 
 const TOOL_NAME = "bases_query";
 const TOOL_DESCRIPTION =
-  "Exécute une requête sur une base (.base) avec filtres additionnels, tri et pagination.";
+  "Interroge les lignes d’une Base (.base) via Obsidian et le Bases Bridge. Sans REST, property_only: true est requis pour parcourir les propriétés des notes Markdown en cache, indépendamment des règles de la Base et de ses vues.";
 
 export async function registerBasesQueryTool(
   server: McpServer,
@@ -34,11 +36,15 @@ export async function registerBasesQueryTool(
 
   await ErrorHandler.tryCatch(
     async () => {
+      const advertisedSchema = mcpSchema(BasesQueryInputSchema)["~standard"];
+      const dispatchSchema = mcpSchema(BasesQueryDispatchSchema)["~standard"];
       server.registerTool(
         TOOL_NAME,
         {
           description: TOOL_DESCRIPTION,
-          inputSchema: mcpSchema(BasesQueryInputSchema.shape),
+          inputSchema: {
+            "~standard": { ...advertisedSchema, validate: dispatchSchema.validate },
+          },
           annotations: READ_ONLY_TOOL_ANNOTATIONS,
         },
         async (params: BasesQueryInput) => {
@@ -67,15 +73,21 @@ export async function registerBasesQueryTool(
               isError: false,
             };
           } catch (error) {
+            const failure = error instanceof BaseQueryFilterError
+              ? new McpError(BaseErrorCode.VALIDATION_ERROR, error.message, {
+                  reasonCode: "base_query_invalid_filter",
+                  filterNode: error.node,
+                })
+              : error;
             return {
               content: [
                 {
                   type: "text",
                   text: JSON.stringify(
-                    publicMcpToolErrorPayload(error, {
+                    publicMcpToolErrorPayload(failure, {
                       operation: "HandleBasesQuery",
                       toolName: TOOL_NAME,
-                      params,
+                      params: { hasFilter: params.filter !== undefined },
                     }),
                     null,
                     2,

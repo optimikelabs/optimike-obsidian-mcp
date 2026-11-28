@@ -1,3 +1,4 @@
+import "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
 import { load } from "js-yaml";
 import { createHash } from "node:crypto";
@@ -44,6 +45,9 @@ let targetPath = "Test.md";
 let preparedDate = "";
 let overridePreparedDate;
 let preparationGate;
+let beforeFormat;
+let noteMissing = false;
+let loseNextCas = false;
 let content = initial,
   active = true,
   preparations = 0,
@@ -105,9 +109,13 @@ const fake = {
     };
   },
   async readAtomicWriteNote() {
+    if (noteMissing) throw new McpError(BaseErrorCode.NOT_FOUND, "Missing fixture note", { reasonCode: "resource_not_found" });
     return read();
   },
-  async inspectAtomicFrontmatterFormat({ yaml }) { return nativeFormatFixture(binding).inspectFrontmatterFormat(yaml); },
+  async inspectAtomicFrontmatterFormat({ yaml }) {
+    beforeFormat?.();
+    return nativeFormatFixture(binding).inspectFrontmatterFormat(yaml);
+  },
   async prepareAtomicWriteDate(request) {
     preparations++;
     if (!active) throw new McpError(BaseErrorCode.VALIDATION_ERROR, "missing", { reasonCode: "atomic_write_creation_property_missing" });
@@ -136,6 +144,10 @@ const fake = {
     };
   },
   async replaceAtomicWriteNote(request) {
+    if (loseNextCas) {
+      loseNextCas = false;
+      throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Fixture disconnected before CAS completion.");
+    }
     if (request.expectedSha256 !== hash(content)) throw Error("conflict");
     writes++;
     const beforeSha256 = hash(content);
@@ -153,7 +165,48 @@ const fake = {
 };
 const runtime = createGovernedNoteReplaceRuntime(fake);
 const text = new GovernedTextPatchRuntime(runtime);
+function proposal(id, baseSha256 = read().sha256) {
+  return {
+    path: targetPath,
+    operations: [{ op: "append_body", text: "Proposal text" }],
+    idempotencyKey: `optimike:proposal:v1:${id}`,
+    proposal: { version: 1, bindingFingerprint: binding, baseSha256 },
+  };
+}
+
+function rejectsWithProposalReason(input, reasonCode, retryable) {
+  return assert.rejects(text.plan(input), (error) => {
+    const result = publicMcpToolErrorPayload(error, { operation: "test", toolName: "obsidian_text_patch_plan", params: {} });
+    assert.equal(result.error.details.reasonCode, reasonCode);
+    if (retryable) assert.equal(result.error.details.retryable, true);
+    return true;
+  });
+}
+
 try {
+  const strictRequest = {
+    path: targetPath,
+    nextContent: initial.replace(/\r\n/g, "\n").replace("needle", "replacement"),
+    idempotencyKey: "strict-date-preparation-refusal",
+    expectedBeforeSha256: hash(initial),
+  };
+  await assert.rejects(runtime.planPublicDirect(strictRequest), error => {
+    const { error: refusal } = publicMcpToolErrorPayload(error, {
+      operation: "obsidian_note_replace_plan",
+      toolName: "obsidian_note_replace_plan",
+      params: strictRequest,
+    });
+    assert.equal(refusal.code, "CONFLICT");
+    assert.equal(refusal.details.reasonCode, "note_replace_date_preparation_required");
+    assert.equal(refusal.details.mutationMayHaveApplied, false);
+    assert.match(refusal.message, /gestionnaire de dates.*relisez-la avec obsidian_read_note/u);
+    return true;
+  },
+    "strict replacement must refuse even a matching base when date preparation would modify it");
+  assert.equal(preparations, 0);
+  assert.equal(content, initial);
+  assert.equal(runtime.findPlanByIdempotencyKey(strictRequest.idempotencyKey), undefined);
+
   content = "---\n{}\n---\nneedle\n";
   await assert.rejects(text.plan({ path: targetPath, operations: [{ op: "append_body", text: "blocked" }], idempotencyKey: "empty-mapping" }), error => error.details?.reasonCode === "frontmatter_empty_mapping_date_management");
   assert.equal(preparations, 0);
@@ -351,6 +404,66 @@ try {
   assert.equal(quotedDate.frontmatterFormat.normalization.applied, true);
   assert.equal((await frontmatter.apply(quotedDate.planRef, "quoted-protected-date", "verified")).outcome, "committed");
   assert.equal(content, "---\ncréation: 2026-10-21\nstatut: clos\n---\nbody\n");
+  targetPath = "Proposal.md";
+  managed = true;
+  createdKey = "création";
+  modifiedKey = "modification";
+  const proposalBase = content;
+  const beforeProposalWrites = writes;
+  const beforeProposalPreparations = preparations;
+  const staleProposal = proposal("first-read-drift");
+  content += "Human edit\n";
+  assert.equal((await text.plan(staleProposal)).reason, "proposal_base_changed");
+  content = proposalBase;
+  assert.equal((await text.plan(staleProposal)).outcome, "conflict", "first-read base mismatch is retained");
+
+  const duringSeal = proposal("during-seal");
+  beforeFormat = () => {
+    beforeFormat = undefined;
+    content = proposalBase.replace("2026-10-21", "2026-10-22");
+  };
+  await rejectsWithProposalReason(duringSeal, "proposal_changed_during_seal", true);
+  assert.equal(runtime.getTextPatchProposal("during-seal"), undefined);
+  assert.match(content, /2026-10-22/);
+  content = proposalBase;
+  const [sealed, concurrentReplay] = await Promise.all([text.plan(duringSeal), text.plan(duringSeal)]);
+  assert.equal(sealed.planRef, concurrentReplay.planRef);
+  assert.equal(sealed.planDigest, concurrentReplay.planDigest);
+  await rejectsWithProposalReason({ ...duringSeal, operations: [{ op: "append_body", text: "Changed intent" }] }, "proposal_identity_conflict");
+
+  const missingProposal = proposal("missing");
+  noteMissing = true;
+  await rejectsWithProposalReason(missingProposal, "target_not_found", true);
+  assert.equal(runtime.getTextPatchProposal("missing"), undefined);
+  noteMissing = false;
+  const recoveredTarget = await text.plan(missingProposal);
+  assert.equal(recoveredTarget.phase, "planned");
+  assert.equal(writes, beforeProposalWrites);
+
+  const unknownAuthority = { ...proposal("wrong-authority") };
+  unknownAuthority.proposal.bindingFingerprint = hash("other authority");
+  await rejectsWithProposalReason(unknownAuthority, "proposal_authority_mismatch");
+  content = initial;
+  await rejectsWithProposalReason(proposal("undated"), "proposal_date_preparation_required");
+  assert.equal(content, initial);
+  assert.equal(preparations, beforeProposalPreparations);
+
+  content = proposalBase + "External edit\n";
+  assert.equal((await text.apply(sealed.planRef, duringSeal.idempotencyKey, "verified")).outcome, "conflict");
+  assert.equal(content, proposalBase + "External edit\n");
+  assert.equal(writes, beforeProposalWrites);
+  content = proposalBase;
+  loseNextCas = true;
+  const uncertain = await text.apply(recoveredTarget.planRef, missingProposal.idempotencyKey, "verified");
+  assert.equal(uncertain.outcome, "outcome_unknown");
+  assert.equal((await text.status(recoveredTarget.planRef)).recoveryRef, recoveredTarget.planRef);
+  assert.equal((await text.plan(missingProposal)).planDigest, recoveredTarget.planDigest);
+  const recovered = await text.recover(recoveredTarget.planRef, missingProposal.idempotencyKey, "verified");
+  assert.equal(recovered.outcome, "committed");
+  assert.equal(recovered.planDigest, recoveredTarget.planDigest);
+  assert.equal(writes, beforeProposalWrites + 1);
+  console.log("PASS: proposal checks retain first-read conflicts, retry seal drift and missing targets, reject changed identities, and recover the same plan.");
+
   managed = true;
   createdKey = "création";
   modifiedKey = "modification";
@@ -363,6 +476,8 @@ try {
   const beforeConcurrent = preparations;
   const first = text.plan({ path: targetPath, operations: [{ op: "append_body", text: "one" }], idempotencyKey: "concurrent-a" });
   await dispatched;
+  await rejectsWithProposalReason(proposal("date-lock"), "proposal_date_preparation_locked");
+  assert.equal(runtime.getTextPatchProposal("date-lock"), undefined);
   await assert.rejects(text.plan({ path: targetPath, operations: [{ op: "append_body", text: "two" }], idempotencyKey: "concurrent-b" }), /a pu modifier ou normaliser/);
   assert.equal(preparations, beforeConcurrent + 1);
   release();
@@ -394,6 +509,10 @@ try {
   await server.connect(serverTransport);
   await client.connect(clientTransport);
   try {
+    const invalidProposal = proposal("unknown-field");
+    invalidProposal.operations[0].unexpected = true;
+    const invalidWire = await client.callTool({ name: "obsidian_text_patch_plan", arguments: invalidProposal });
+    assert.equal(invalidWire.isError, true, "proposal operations must reject unknown fields");
     const wire = await client.callTool({ name: "obsidian_text_patch_plan", arguments: { path: targetPath,
       operations: [{ op: "replace_literal", search: "missing", replacement: "PRIVATE_BODY" }], idempotencyKey: "wire-preparation-failed" } });
     assert.equal(wire.isError, true);

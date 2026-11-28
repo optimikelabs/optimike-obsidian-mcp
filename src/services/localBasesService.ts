@@ -2,6 +2,7 @@ import path from "node:path";
 import { readdir, readFile } from "node:fs/promises";
 import { load } from "js-yaml";
 import { config } from "./../config/index.js";
+import { compileBaseQueryFilter } from "./baseQueryFilter.js";
 import type { VaultCacheService } from "./obsidianRestAPI/vaultCache/index.js";
 import type {
   BaseQueryRequest,
@@ -13,6 +14,8 @@ import type {
 } from "./obsidianRestAPI/types.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import type { RequestContext } from "../utils/index.js";
+import { isLocalBaseProperty } from "./localBaseFilter.js";
+import { readMarkdownFrontmatter } from "./readMarkdownFrontmatter.js";
 import {
   createVaultExclusionMatcher,
   isVaultPathExcluded,
@@ -54,76 +57,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function extractFrontmatter(content: string): Record<string, unknown> {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/u);
-  if (!match) return {};
-  try {
-    const parsed = load(match[1]);
-    return isRecord(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
 function readProperty(row: LocalBaseRow, prop: string): unknown {
   if (prop === "file.path") return row.file.path;
   if (prop === "file.name") return row.file.name;
-  if (prop.startsWith("file.")) return row.props[prop];
   return row.props[prop];
-}
-
-function scalarMatches(actual: unknown, expected: unknown): boolean {
-  if (Array.isArray(actual)) {
-    return actual.map(String).includes(String(expected));
-  }
-  return actual === expected;
-}
-
-function matchesFilter(
-  row: LocalBaseRow,
-  filter: Record<string, unknown>,
-): boolean {
-  for (const [key, expected] of Object.entries(filter)) {
-    const actual = readProperty(row, key);
-    if (Array.isArray(expected)) {
-      if (!expected.some((item) => scalarMatches(actual, item))) {
-        return false;
-      }
-      continue;
-    }
-    if (isRecord(expected)) {
-      for (const [operator, value] of Object.entries(expected)) {
-        if (operator === "eq" && !scalarMatches(actual, value)) return false;
-        if (operator === "ne" && scalarMatches(actual, value)) return false;
-        if (
-          operator === "contains" &&
-          !String(actual ?? "").includes(String(value))
-        ) {
-          return false;
-        }
-        if (
-          operator === "in" &&
-          (!Array.isArray(value) ||
-            !value.some((item) => scalarMatches(actual, item)))
-        ) {
-          return false;
-        }
-        if (operator === "gt" && !(Number(actual) > Number(value)))
-          return false;
-        if (operator === "gte" && !(Number(actual) >= Number(value)))
-          return false;
-        if (operator === "lt" && !(Number(actual) < Number(value)))
-          return false;
-        if (operator === "lte" && !(Number(actual) <= Number(value)))
-          return false;
-      }
-      continue;
-    }
-    if (!scalarMatches(actual, expected)) {
-      return false;
-    }
-  }
-  return true;
 }
 
 function compareValues(a: unknown, b: unknown): number {
@@ -151,9 +88,11 @@ export class LocalBasesService {
         const relativePathForPolicy = normalizeVaultRelativePath(
           path.relative(config.obsidianVaultPath!, absolutePath),
         );
-        if (
-          isVaultPathExcluded(relativePathForPolicy, this.vaultExclusionMatcher)
-        ) {
+        if (isVaultPathExcluded(
+          relativePathForPolicy,
+          this.vaultExclusionMatcher,
+          entry.isDirectory(),
+        )) {
           continue;
         }
         if (entry.isDirectory()) {
@@ -274,24 +213,42 @@ export class LocalBasesService {
 
   async queryBase(
     baseId: string,
-    request: BaseQueryRequest,
+    request: BaseQueryRequest & { property_only?: boolean },
     context: RequestContext,
   ): Promise<
-    Omit<BaseQueryResponse, "source" | "rows"> & {
+    BaseQueryResponse & {
       source: "local-fallback";
+      mode: "property-scan";
       rows: LocalBaseRow[];
       limitations: string[];
     }
   > {
+    const filter = compileBaseQueryFilter(request.filter, false);
+    if (request.property_only !== true) {
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        "Base query requires Obsidian.",
+        { ...context, reasonCode: "base_query_requires_obsidian", retryable: false },
+      );
+    }
+
     await this.getParsedBase(baseId, context);
-    await ensureCacheReady(this.vaultCacheService);
+    const sort = request.sort ?? [];
+    if (sort.some(({ prop }) => !isLocalBaseProperty(prop) || prop.startsWith("formula."))) {
+      throw new McpError(
+        BaseErrorCode.VALIDATION_ERROR,
+        "Unsupported local Base query sort.",
+        { ...context, reasonCode: "base_query_unsupported_local_input" },
+      );
+    }
+
     const rows: LocalBaseRow[] = [];
 
     for (const entry of this.vaultCacheService.getEntriesByPrefix()) {
       if (!entry.path.endsWith(".md")) continue;
       const cacheEntry = await this.vaultCacheService.getEntry(entry.path);
       if (!cacheEntry) continue;
-      const frontmatter = extractFrontmatter(cacheEntry.content);
+      const { frontmatter } = readMarkdownFrontmatter(cacheEntry.content);
       rows.push({
         file: {
           path: entry.path,
@@ -308,10 +265,9 @@ export class LocalBasesService {
       });
     }
 
-    const filtered = request.filter
-      ? rows.filter((row) => matchesFilter(row, request.filter!))
-      : rows;
-    const sort = request.sort ?? [];
+    const filtered = rows.filter((row) =>
+      filter.matches({ read: (key) => readProperty(row, key) }),
+    );
     const sorted = [...filtered].sort((a, b) => {
       for (const item of sort) {
         const direction = item.dir === "desc" ? -1 : 1;
@@ -331,13 +287,16 @@ export class LocalBasesService {
 
     return {
       source: "local-fallback",
+      mode: "property-scan",
       evaluate: false,
       total: filtered.length,
       page,
       rows: paged,
       limitations: [
-        "Local fallback supports direct equality plus simple eq/ne/in/contains/gt/gte/lt/lte filters.",
-        "Base-level filters, view filters, formulas, and calculated properties are not evaluated.",
+        "Rows and total describe cached Markdown notes matched by the request's property filter.",
+        "Non-Markdown files are not listed.",
+        "Local fallback supports property tables, logical groups, simple comparisons, and truthy property filters.",
+        "Base filters, view rules (filters, grouping, order and limits), formulas and calculated properties are ignored.",
       ],
     };
   }

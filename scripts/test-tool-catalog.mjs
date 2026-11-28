@@ -66,16 +66,19 @@ assert.equal(
 const governed = artifact.tools.filter(
   (entry) => entry.classification === "governed-operation",
 );
-assert.equal(governed.length, 45);
 const governedFamilies = new Map();
 for (const entry of governed) {
   const roles = governedFamilies.get(entry.family) ?? [];
   roles.push(entry.lifecycleRole);
   governedFamilies.set(entry.family, roles);
 }
-assert.equal(governedFamilies.size, 13);
+assert.deepEqual([...governedFamilies.keys()].sort(), [
+  "asset-import", "base-config-patch", "base-create", "base-formula-patch", "base-rows",
+  "canvas-create", "canvas-patch", "frontmatter-patch", "note-create", "note-delete",
+  "note-move", "note-replace", "operation-revert", "text-patch",
+]);
 for (const [family, roles] of governedFamilies) {
-  assert.deepEqual([...roles].sort(), ["note-move", "note-delete", "note-create", "base-create", "canvas-create", "base-rows", "asset-import"].includes(family) ? ["apply", "plan", "status"] : ["apply", "plan", "recover", "status"]);
+  assert.deepEqual([...roles].sort(), ["note-create", "base-create", "canvas-create", "base-rows", "asset-import"].includes(family) ? ["apply", "plan", "status"] : ["apply", "plan", "recover", "status"]);
 }
 
 const directAlternatives = [

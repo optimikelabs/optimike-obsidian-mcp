@@ -49,11 +49,10 @@ without them. See
 - `headless-readonly`: read/search/tasks/semantic/runtime/format validation and
   local readonly Bases fallback. Operon tools can only serve a previously
   validated stale snapshot.
-- `headless-guarded`: `headless-readonly` plus bounded filesystem writes for
-  note append/prepend, exact search-replace, and frontmatter `set`. Operon remains
-  read-only.
-- `headless-filesystem`: `headless-guarded` plus explicit local filesystem
-  features: tags, admin move/archive/delete, batch frontmatter, minimal Bases
+- `headless-guarded`: `headless-readonly` plus governed text and frontmatter
+  patches, durable note creation and the operations cockpit. Operon remains read-only.
+- `headless-filesystem`: `headless-guarded` plus governed note replacement and
+  revert, admin move/archive/delete, minimal Bases
   writes, and JSON Canvas helpers. Operon remains read-only.
 
 ### Local REST API 5.x contract
@@ -80,24 +79,35 @@ dependency of this MCP.
 - `obsidian_note_move_apply`: dispatch the sealed native FileManager rename once; requires the separate Bridge grant and `MCP_WRITE_MODE=full`.
 - `obsidian_note_move_status`: reconcile the durable outcome and separately observe `graph_postflight` without replaying a rename.
 
-The family is live/hybrid-live only and has no recover or undo operation. Missing native preference support is fail-closed; update-links OFF is admitted only for an empty observed neighborhood. Source-content CAS, an OS directory lock, open-editor behavior and a global graph transaction are not promised. See [the M3 contract](native-note-move-m3.md).
+The native implementation runs in live/hybrid-live and has no recover or undo operation. Missing native preference support is fail-closed; update-links OFF is admitted only for an empty observed neighborhood. Source-content CAS, an OS directory lock, open-editor behavior and a global graph transaction are not promised. See [the M3 contract](native-note-move-m3.md).
+
+In `headless-filesystem`, the same three tool names use an indexed filesystem plan, and `obsidian_note_move_recover` resumes or abandons that plan. See the [headless move and trash contract](headless-server-profile.md#governed-move-and-trash).
 
 ## Core Notes
 
-- `obsidian_read_note`: read a vault note by path, with cache fallback.
-- `obsidian_note_links`: live/hybrid-live only. Observe a bounded semantic neighborhood from Obsidian Desktop public `MetadataCache` APIs: outgoing links, embeds and frontmatter links with effective resolution; requested subpaths with heading/block validity when demonstrable; unresolved aggregates; and backlinks reconstructed from resolved relations. It reports provenance, truncation, explicit collection availability, a best-effort non-atomic snapshot and cache freshness as `unknown` when the public API cannot prove it. An unavailable source cache reports `coverage.outgoing.total: null` rather than fabricating zero links. It performs no write and makes no graph-preservation claim.
+- `obsidian_read_note`: read a vault note by path, with cache fallback and a
+  top-level `sha256` of the returned Markdown encoded as UTF-8.
+- `obsidian_note_links`: in live/hybrid-live, observe a bounded semantic neighborhood from Obsidian Desktop public `MetadataCache` APIs: outgoing links, embeds and frontmatter links with effective resolution; requested subpaths with heading/block validity when demonstrable; unresolved aggregates; and backlinks reconstructed from resolved relations. It reports provenance, truncation, explicit collection availability, a best-effort non-atomic snapshot and cache freshness as `unknown` when the public API cannot prove it. An unavailable source cache reports `coverage.outgoing.total: null` rather than fabricating zero links. It performs no write and makes no graph-preservation claim. In the three headless modes with the shared cache enabled, it projects the same response fields from indexed Markdown. See [Headless Server Profile](headless-server-profile.md#contract).
 - `obsidian_list_notes`: list notes and folders, using REST or cache/filesystem.
-- `obsidian_global_search`: text/regex search across cached vault content.
+- `obsidian_global_search` searches live or cached vault content and returns
+  up to 500 result files per page (`pageSize`). With `useRegex: true`, `^` and
+  `$` match the start and end of each line.
+  Opt into `mode: "ranked"` for cached BM25 scores on Markdown,
+  including boosts for note titles, aliases and headings. Ranked mode folds
+  accents and case, and rejects `useRegex: true` and `caseSensitive: true`.
 - `obsidian_update_note`: live REST note update for an explicit `filePath` or
-  the live `activeFile`, or guarded headless append/prepend for an explicit
-  `filePath` in filesystem modes.
+  the live `activeFile`. Prepend inserts below the frontmatter.
 - `obsidian_search_replace`: live REST search/replace for an explicit
-  `filePath` or the live `activeFile`, or guarded exact `filePath`
-  search/replace in headless write modes.
+  `filePath` or the live `activeFile`.
 - `obsidian_delete_note`: live REST delete with no plan or proof (hidden in
   `operational` in favour of the governed `obsidian_note_delete_*` family, see
   [governed note deletion](governed-note-delete.md)); in `headless-filesystem`,
   explicit filesystem delete requires `expectedHash` or `expectedMtime`.
+
+Live compact lists and both search response modes preserve each result's Obsidian
+`path`. When a unique spelling containing U+00A0 or U+202F can be verified in the
+configured local vault, the result also includes a vault-relative `diskPath`
+if it differs. Use it for filesystem access.
 
 ## Governed Atomic Note Replacement
 
@@ -107,7 +117,9 @@ current MCP write policy is revalidated before planning and before each effect.
 
 - `obsidian_note_replace_plan`: read one existing `.md` note, validate the
   complete next Markdown and protected frontmatter, then persist an opaque
-  sealed plan with before/after proofs. It does not write the note.
+  sealed plan with before/after proofs. Pass `expectedBeforeSha256` from the
+  source read to refuse a changed note or required date preparation before any
+  note change. If omitted, planning may prepare a missing creation date.
 - `obsidian_note_replace_apply`: apply only that `planRef` with its matching
   `idempotencyKey`; target, content, and hashes cannot be replaced by the
   caller.
@@ -217,12 +229,9 @@ durable recovery. See [the P3 contract](governed-canvas-p3.md).
 ## Metadata And Tags
 
 - `obsidian_manage_frontmatter`: live frontmatter operations using Local REST
-  API 5.x typed JSON values; in headless guarded modes, supports bounded
-  filesystem `set`.
-- `obsidian_batch_frontmatter`: filesystem batch frontmatter operations with
-  dry-run/default safety.
-- `obsidian_manage_tags`: live tag tool, or filesystem tag add/remove/list,
-  local index/audit, and dry-run rename in `headless-filesystem`.
+  API 5.x typed JSON values.
+- `obsidian_manage_tags`: live tag operations. In headless use governed text
+  and frontmatter patches to edit inline and frontmatter tags.
 
 ## Tasks
 
@@ -312,6 +321,11 @@ fail-closed; no private or Markdown fallback is introduced.
   the matching heading sections and paragraphs (block key, heading path,
   verified line range), or both ranked together. See the
   [README](../README.md#semantic-search).
+  With the optional [external index](semantic-vector-cache-encoding.md#external-smart-env-v3-generations),
+  each successful response includes the pinned `generation_id`.
+  `hybrid: true` returns one hit per note with a fused score, the
+  contributing ranks and the best section. Fallback and partial freshness
+  are identified in `provenance`. See [ranked and hybrid search](../OPERATIONS.md#ranked-and-hybrid-search).
 
 The former `smart_search` and `smart-search` aliases were physically removed in
 3.0. Existing clients must migrate to `smart_semantic_search`.
@@ -324,14 +338,35 @@ semantic manifest/vector metadata are cached locally for faster warm refreshes.
 - `bases_list`: list `.base` definitions via Bases Bridge REST or local fallback.
 - `bases_get_schema`: inspect a `.base` schema via REST or local fallback.
 - `bases_query`: query Bases via REST, or simple local fallback filters in
-  headless modes. Through the Bases Bridge, `evaluate` (default) lets
-  Obsidian's engine select the view's rows (filters, sort, limit) and compute
-  formulas for the rows of the requested page only (`source: "engine"`, values
-  as the engine's text); request filters and sorts on `formula.*` use these
-  values and compute every row, in chunks of 100, up to 1,000 rows (past it, formula predicates and sorts are skipped:
-  `formula_filter_not_evaluated:too_many_rows:<rows>:1000`). Without it, or when the engine is
-  unavailable, `source: "fallback"` returns no formula value; when `evaluate`
-  was requested and the engine is unavailable, one warning per formula says so.
+  headless modes. In live queries with Bases Bridge 1.3.2, the Bridge sends
+  the Base and view filters, view sort configuration, and view limit to
+  Obsidian's engine in both `evaluate` modes (`source: "engine"`).
+  Use request-level sorting to reorder the selected rows. See the
+  [Bridge README](../plugins/obsidian-bases-bridge/README.md#requêtes-query).
+  `evaluate: false` omits formula columns and
+  `computed`. Obsidian still evaluates formulas needed by the view. Request
+  filters and sorts on `formula.*` also use computed values in both modes,
+  in chunks of 100 up to 1,000 rows. Above that cap the Bridge skips the formula
+  criteria and emits `formula_filter_not_evaluated:too_many_rows:<rows>:1000`.
+  `evaluate: true` (default) returns the engine's rendered formula values for
+  the requested page. If the engine cannot select rows, the query returns
+  `SERVICE_UNAVAILABLE` with reason `base_query_selection_unavailable`. If a
+  selected file disappears during the query, retry on `base_query_row_disappeared`.
+  An unknown view returns `NOT_FOUND` with reason `base_view_not_found`.
+- The optional `bases_query.filter` is a JSON object. A property table such as
+  `{"status":"open","priority":{"gte":2}}` requires all its conditions.
+  Values can be scalars, non-empty scalar arrays (any match), or operator objects with
+  `eq`, `ne`, `in`, `contains`, `gt`, `gte`, `lt` and `lte`.
+  Use non-empty `and` and `or` arrays or a single `not` node to combine tables and
+  expressions, for example `{"and":["status == \"open\""]}`. A bare string
+  or unsupported node returns `VALIDATION_ERROR` with its location in
+  `error.details.filterNode`. The Bridge REST route returns HTTP 400
+  `INVALID_PARAMS` with `error.node`. Property tables use the same comparison
+  rules in both modes and require Bases Bridge 1.3.1 or later over REST.
+  Quote string values in expressions and use a property table for property
+  names with spaces. An `in` list must contain at least one value.
+  With the live engine, numeric and boolean operands in a property table can
+  match rendered `formula.*` values. The returned formula values remain text.
 - `bases_functions`: live only; the Bases formula functions of the installed
   Obsidian, grouped by receiver type, or the signatures of one type (`on`).
 - `bases_check`: live only; formula health of one Base or of every Base as
@@ -344,11 +379,25 @@ semantic manifest/vector metadata are cached locally for faster warm refreshes.
   `headless-filesystem`.
 - `bases_upsert_config`: live REST config upsert, or guarded YAML config update
   in `headless-filesystem`.
-- `bases_upsert_rows`: live REST row upsert, or guarded Markdown frontmatter
-  `set` operations in `headless-filesystem`.
+- `bases_upsert_rows`: live REST row upsert. In headless, edit note properties
+  through `obsidian_frontmatter_patch_plan/apply`.
 
-Local/headless Bases support does not evaluate Obsidian formulas, calculated
-properties, plugin-specific filters, or exact UI view semantics.
+Base rows require Obsidian and the Bases Bridge, including for filterless
+Bases. Without REST, `bases_query` returns `SERVICE_UNAVAILABLE` with reason
+`base_query_requires_obsidian` unless `property_only: true` is set. The value
+of `evaluate` does not change this requirement.
+
+Set `property_only: true` to explicitly scan cached Markdown notes in the
+local fallback. The Base must exist. The scan applies ad-hoc filters and sorts
+to raw properties and paginates their matches. Results report
+`source: "local-fallback"`, `mode: "property-scan"`, `evaluate: false`, and
+`limitations`. The rows and total describe cached Markdown notes independently
+of any Base or view rules. Local filters support `and`, `or`, and `not` trees with simple
+comparison expressions, bare truthy references, and local property maps.
+Unsupported filters and sorts return `VALIDATION_ERROR`. This includes
+`formula.*` references in an explicit property scan.
+See the [supported local filters and properties](../OPERATIONS.md#required-dependencies).
+On REST, the option is ignored and the Bridge receives its usual query.
 
 ## Canvas And Format Validation
 
@@ -476,7 +525,7 @@ exact plugin engine semantics remains outside the current headless surface.
 
 ## Dedicated frontmatter reads and operational profile
 
-`obsidian_get_frontmatter`: read-only live/hybrid key access using filePath and key; no set/delete/value inputs. `operational` retains complete workflows while suppressing redundant direct note/frontmatter mutations and reserving whole-Base replacement for `full`. See [Tool Surface Profiles](tool-surface-profiles.md).
+`obsidian_get_frontmatter`: read-only key access using `filePath` and `key`. Live/hybrid-live use Local REST. The three headless modes use the shared filesystem cache and return `provenance.source: filesystem`. An absent key omits `value`. A YAML null retains `value: null`. `operational` retains complete workflows while suppressing redundant direct note/frontmatter mutations and reserving whole-Base replacement for `full`. See [Tool Surface Profiles](tool-surface-profiles.md).
 
 
 ### Pin and batch update (Developer API V1)

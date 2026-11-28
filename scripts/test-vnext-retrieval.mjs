@@ -18,7 +18,10 @@ const context = {
   timestamp: new Date().toISOString(),
 };
 const files = new Map([
-  ["Parent/Child/VNext.md", "VNext VNext vnext\nLiteral [term]"],
+  [
+    "Parent/Child/VNext.md",
+    "VNext VNext vnext\n## Décisions\n## décisions\n## Décisions à revoir\nLiteral [term]",
+  ],
   ["Other/VNext.md", "VNext\n"],
   ["Parent/NoHit.md", "nothing"],
   ["ParentSibling/VNext.md", "VNext"],
@@ -114,12 +117,19 @@ for (const mode of ["live", "cache"]) {
         }),
         context,
         mode === "live" ? live : undefined,
-        cache,
+        mode === "cache" ? cache : undefined,
       );
     const regex = await search({});
     assert.equal(regex.totalFilesFound, 1);
     assert.equal(regex.totalMatchesFound, 3);
     assert.equal((await search({ caseSensitive: true })).totalMatchesFound, 2);
+    assert.equal((await search({ query: "^## Décisions" })).totalMatchesFound, 3);
+    assert.equal((await search({ query: "Décisions$" })).totalMatchesFound, 2);
+    assert.equal(
+      (await search({ query: "^## Décisions$", caseSensitive: true }))
+        .totalMatchesFound,
+      1,
+    );
     assert.equal(
       (await search({ query: "[term]", useRegex: false })).totalMatchesFound,
       1,

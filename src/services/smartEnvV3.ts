@@ -12,7 +12,9 @@ type ModelRecord = {
   max_tokens?: number;
 };
 
-type VectorReference = { file?: string; file_i?: number; read_hash?: string };
+type VectorReference = { file?: string; file_i?: number; read_hash?: string; at?: number };
+
+type BlockSelection = { version?: number; min_chars?: number; max_input_chars?: number };
 
 type BlockRecord = {
   lines?: unknown;
@@ -29,6 +31,7 @@ type SourceRecord = {
   };
   metadata?: { tags?: string[] };
   blocks_data?: Record<string, BlockRecord | null>;
+  block_embedding_selection?: BlockSelection;
 };
 
 type SearchSource = {
@@ -37,6 +40,7 @@ type SearchSource = {
   readHash: string | undefined;
   tags: string[] | undefined;
   blocks: SmartBlockCandidate[] | undefined;
+  blockSelection?: BlockSelection;
 };
 
 /** A block whose current vector reference passed every metadata check. */
@@ -48,6 +52,8 @@ export type SmartBlockCandidate = {
   fileIndex: number;
   /** `smartTextHash` of the embedded lines, as Smart Connections read them. */
   readHash: string;
+  /** Encoding time when collecting bootstrap metadata. */
+  encodedAt?: number;
 };
 
 export type SmartBlockRef = SmartBlockCandidate & { notePath: string };
@@ -118,7 +124,7 @@ export function smartTextHash(text: string): string {
   return hash32(text).toString(36);
 }
 
-function modelFingerprint(model: ModelRecord): string {
+export function modelFingerprint(model: ModelRecord): string {
   const key = JSON.stringify({
     provider_key: model.provider_key || "",
     model_key: model.model_key || "",
@@ -128,7 +134,9 @@ function modelFingerprint(model: ModelRecord): string {
   return `mf_${hash32(key).toString(36)}`;
 }
 
-async function activeModel(baseDir: string): Promise<ModelRecord | null> {
+export { modelFingerprint as smartModelFingerprint };
+
+export async function readSmartEnvV3Model(baseDir: string, strict = false): Promise<ModelRecord | null> {
   let selected: string;
   try {
     const settings = JSON.parse(await fs.readFile(path.join(baseDir, "smart_env.json"), "utf8"));
@@ -151,10 +159,11 @@ async function activeModel(baseDir: string): Promise<ModelRecord | null> {
     const trimmed = line.trim().replace(/,$/, "");
     if (!trimmed) continue;
     try {
-      const records = JSON.parse(`{${trimmed}}`) as Record<string, ModelRecord>;
-      const model = records[`embedding_models:${selected}`];
-      if (model) active = model;
+      const records = JSON.parse(`{${trimmed}}`) as Record<string, ModelRecord | null>;
+      const key = `embedding_models:${selected}`;
+      if (Object.hasOwn(records, key)) active = records[key] ?? null;
     } catch {
+      if (strict) throw new Error("Invalid semantic generation registry entry");
       // Ignore a malformed registry entry without losing later append-only values.
     }
   }
@@ -165,7 +174,7 @@ export async function detectSmartEnvQueryProvider(
   baseDir: string,
   expectedModel?: string,
 ): Promise<string | undefined> {
-  const model = await activeModel(baseDir);
+  const model = await readSmartEnvV3Model(baseDir);
   if (!model || (expectedModel && model.model_key !== expectedModel)) return undefined;
   return model.provider_key;
 }
@@ -180,6 +189,7 @@ const FRONTMATTER_BLOCK = /^#+---frontmatter---/u;
 function blockCandidates(
   blocks: SourceRecord["blocks_data"],
   fingerprint: string,
+  bootstrapMetadata?: boolean,
 ): SmartBlockCandidate[] | undefined {
   if (!blocks || typeof blocks !== "object") return undefined;
   const candidates: SmartBlockCandidate[] = [];
@@ -209,6 +219,7 @@ function blockCandidates(
       lineEnd: lines[1],
       fileIndex: index,
       readHash: reference.read_hash,
+      ...(bootstrapMetadata && typeof reference.at === "number" && { encodedAt: reference.at }),
     });
   }
   return candidates.length ? candidates : undefined;
@@ -294,45 +305,52 @@ export async function readSmartBlockVectors(
  * Note and block bodies are parsed one line at a time and never retained.
  * Returns null when the directory holds no Smart Environment v3 sources.
  */
-export async function readSmartEnvV3(
-  baseDir: string,
-  options: { blocks: boolean; notes?: boolean },
-): Promise<SmartEnvV3Index | null> {
-  const directory = path.join(baseDir, "smart_sources");
-  let files: string[];
+export async function smartEnvV3SourceFiles(baseDir: string): Promise<string[]> {
   try {
-    files = (await fs.readdir(directory))
+    return (await fs.readdir(path.join(baseDir, "smart_sources")))
       .filter((file) => /^smart_sources(?:_\d+)?\.ajson$/i.test(file))
       .sort((left, right) => {
         const shard = (name: string) => Number(name.match(/_(\d+)\.ajson$/i)?.[1] ?? 0);
         return shard(left) - shard(right);
       });
   } catch {
-    return null;
+    return [];
   }
-  if (!files.length) return null;
-  const model = await activeModel(baseDir);
-  const dimensions = Number(model?.dims || model?.dimensions || 0);
-  if (!model?.model_key || !Number.isInteger(dimensions) || dimensions <= 0) return { notes: [] };
-  const fingerprint = modelFingerprint(model);
+}
+
+export async function readSmartEnvV3References(
+  baseDir: string,
+  files: string[],
+  fingerprint: string,
+  options: { blocks: boolean; strict?: boolean; validatedGeneration?: boolean },
+): Promise<Map<string, SearchSource>> {
   const latest = new Map<string, SearchSource>();
   for (const file of files) {
     const lines = readline.createInterface({
-      input: createReadStream(path.join(directory, file), { encoding: "utf8" }),
+      input: createReadStream(path.join(baseDir, "smart_sources", file), { encoding: "utf8" }),
       crlfDelay: Infinity,
     });
     for await (const line of lines) {
       const trimmed = line.trim().replace(/,$/, "");
-      if (!trimmed.startsWith('"smart_sources:')) continue;
+      if (!trimmed || (!options.strict && !trimmed.startsWith('"smart_sources:'))) continue;
       try {
         const records = JSON.parse(`{${trimmed}}`) as Record<string, SourceRecord | null>;
-        const [key, source] = Object.entries(records)[0] ?? [];
+        const entries = Object.entries(records);
+        const [key, source] = entries[0] ?? [];
+        if (options.strict && (entries.length !== 1 || !key?.startsWith("smart_sources:") ||
+            (source !== null && key !== `smart_sources:${source?.path}`))) {
+          throw new Error("Unexpected Smart Environment source record");
+        }
         // Smart Connections appends `"smart_sources:<path>": null` when a note
         // is deleted; the latest record wins, so the note leaves the index.
         if (source === null && key?.startsWith("smart_sources:")) {
           latest.delete(key.slice("smart_sources:".length));
           continue;
         }
+        if (options.validatedGeneration && (!source?.path || key !== `smart_sources:${source.path}` ||
+            !/\.md$/iu.test(source.path) || /[:\\\x00-\x1f]/u.test(source.path) ||
+            source.path.split("/").some((segment) => !segment || segment === "." || segment === "..")))
+          throw new Error("Invalid semantic generation note path");
         // Search needs only the current vector reference and search metadata.
         // Never retain whole note bodies from the append-only source history.
         if (source?.path) latest.set(source.path, {
@@ -341,24 +359,60 @@ export async function readSmartEnvV3(
           readHash: source.last_read?.hash ?? source.last_import?.hash,
           tags: Array.isArray(source.metadata?.tags) ? source.metadata.tags : undefined,
           blocks: options.blocks
-            ? blockCandidates(source.blocks_data, fingerprint)
+            ? blockCandidates(source.blocks_data, fingerprint, options.strict)
             : undefined,
+          ...(options.strict && { blockSelection: source.block_embedding_selection }),
         });
       } catch {
+        if (options.strict) throw new Error("Invalid Smart Environment source record");
         // A partial append must not prevent reading the other source records.
       }
     }
   }
+  return latest;
+}
+
+export async function readSmartEnvV3(
+  baseDir: string,
+  options: {
+    blocks: boolean;
+    notes?: boolean;
+    expected?: {
+      fingerprint: string;
+      model: { provider_key: string; model_key: string; dimensions: number; max_tokens?: number };
+      noteCount: number;
+      sectionCount: number;
+    };
+  },
+): Promise<SmartEnvV3Index | null> {
+  const expected = options.expected;
+  const files = await smartEnvV3SourceFiles(baseDir);
+  if (!files.length) return null;
+  const model = await readSmartEnvV3Model(baseDir, Boolean(expected));
+  const dimensions = Number(model?.dims || model?.dimensions || 0);
+  if (!model?.model_key || !Number.isInteger(dimensions) || dimensions <= 0) return { notes: [] };
+  const fingerprint = modelFingerprint(model);
+  if (expected && (fingerprint !== expected.fingerprint ||
+      model.provider_key !== expected.model.provider_key ||
+      model.model_key !== expected.model.model_key ||
+      dimensions !== expected.model.dimensions ||
+      Number(model.max_tokens || 0) !== (expected.model.max_tokens ?? 0))) {
+    throw new Error("Semantic generation registry does not match its manifest");
+  }
+  const latest = await readSmartEnvV3References(baseDir, files, fingerprint, {
+    blocks: options.blocks, strict: Boolean(expected), validatedGeneration: Boolean(expected),
+  });
   // A caller whose note snapshot already matches these files skips them.
   const vectors =
     options.notes === false
       ? []
       : await readNoteVectors(
-          path.join(directory, fingerprint),
+          path.join(baseDir, "smart_sources", fingerprint),
           latest,
           fingerprint,
           dimensions,
           model.model_key,
+          expected?.noteCount,
         );
   if (!options.blocks) return { notes: vectors };
 
@@ -380,8 +434,12 @@ export async function readSmartEnvV3(
       dimensions,
     );
   } catch {
+    if (expected) throw new Error("Cannot read semantic generation section vectors");
     rows = { refs: [], vectors: new Float32Array(0), norms: new Float32Array(0) };
   }
+  if (expected && (rows.refs.length !== expected.sectionCount ||
+      rows.refs.some((ref, i) => ref.fileIndex !== i)))
+    throw new Error("Semantic generation section vectors do not match its manifest");
   return {
     notes: vectors,
     blocks: { model: model.model_key, fingerprint, dimensions, ...rows, tagsByNote },
@@ -398,14 +456,17 @@ async function readNoteVectors(
   fingerprint: string,
   dimensions: number,
   modelKey: string,
+  expectedCount?: number,
 ): Promise<SmartVec[]> {
   let binary: Buffer;
   try {
     binary = await fs.readFile(vectorFile);
   } catch {
+    if (expectedCount !== undefined) throw new Error("Cannot read semantic generation note vectors");
     return [];
   }
   const vectors: SmartVec[] = [];
+  const fileIndices = expectedCount === undefined ? undefined : new Set<number>();
   for (const source of latest.values()) {
     const reference = source.reference;
     const index = reference?.file_i;
@@ -421,6 +482,7 @@ async function readNoteVectors(
     if (offset + dimensions * 4 > binary.length) continue;
     const vec = Array.from({ length: dimensions }, (_, i) => binary.readFloatLE(offset + i * 4));
     if (vec.some((number) => !Number.isFinite(number))) continue;
+    fileIndices?.add(index);
     const notePath = source.path!;
     vectors.push({
       id: notePath,
@@ -428,8 +490,12 @@ async function readNoteVectors(
       title: path.basename(notePath, path.extname(notePath)),
       tags: source.tags,
       model: modelKey,
+      readHash: reference.read_hash,
       vec,
     });
   }
+  if (expectedCount !== undefined && (vectors.length !== latest.size ||
+      vectors.length !== expectedCount || fileIndices?.size !== expectedCount))
+    throw new Error("Semantic generation note vectors do not match its manifest");
   return vectors;
 }

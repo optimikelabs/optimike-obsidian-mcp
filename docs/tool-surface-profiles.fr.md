@@ -23,7 +23,7 @@ Les tailles ci-dessus excluent les trois outils optionnels d’assets : la confi
 
 Ces nombres sont des projections du registre actuel et peuvent être plus faibles dans les runtimes restreints. `full` signifie tous les outils structurellement enregistrés par le runtime actif, pas toujours 106 outils. Le registre canonique couvre 113 noms uniques entre tous les runtimes, dont quatre n’existent qu’en `headless-filesystem`. Le cockpit des opérations est live-only car il lit les journaux gouvernés possédés par le processus ; sa visibilité ne remplace jamais un grant d’écriture.
 
-`obsidian_note_links` est limité à `live` / `hybrid-live` : sa sémantique vient du `MetadataCache` public d’Obsidian Desktop. Les profils dégradés et headless l’omettent plutôt que de simuler le graphe depuis l’état filesystem.
+`obsidian_get_frontmatter` et `obsidian_note_links` appartiennent au groupe de lecture des notes. En live et hybrid-live, ils utilisent les services Desktop. Les trois modes headless les exposent avec le cache partagé actif. Voir les [lectures headless](headless-server-profile.fr.md#contrat) pour la couverture sur disque.
 
 L'[évaluation P6 du routage](tool-routing-evaluation-p6.fr.md) mesure ces
 surfaces depuis les schémas `tools/list` réels et une baseline versionnée de 31
@@ -72,7 +72,7 @@ Les profils modernes ne masquent une voie directe que lorsque la famille gouvern
 
 - `live` / `hybrid` live : exposer `obsidian_frontmatter_patch_{plan,apply,status,recover}` et masquer `obsidian_manage_frontmatter` ;
 - `live` / `hybrid` live : exposer `obsidian_text_patch_{plan,apply,status,recover}` et masquer `obsidian_update_note` / `obsidian_search_replace` seulement lorsque le quartet est complet ;
-- `headless-guarded` / `headless-filesystem` : la famille Frontmatter gouvernée est absente, donc `obsidian_manage_frontmatter` reste le fallback borné ;
+- `headless-guarded` / `headless-filesystem` exposent les familles gouvernées de patch de texte et de frontmatter. Les outils directs de note, texte, frontmatter et tags sont réservés au mode live, y compris avec le profil `full`. Le frontmatter par lot direct est retiré en headless. L’édition directe des lignes Base exige le mode live.
 - les helpers Canvas directs de `headless-filesystem` restent disponibles uniquement lorsque la famille Canvas live gouvernée est structurellement absente ;
 - `bases_upsert_config` n’est jamais un fallback de formule et reste réservé à `full`.
 
@@ -90,6 +90,10 @@ pour une session centrée sur les tâches : ses outils Operon restent découvrab
 si Desktop ou le Bridge est momentanément indisponible et renvoient un état
 structuré indisponible ou stale jusqu’au rafraîchissement du contrat live par
 `operon_status`.
+Les outils Operon réservés au live exigent un mode d’enregistrement `live` ou
+`hybrid-live` explicite. Le proxy stdio utilise le mode déclaré par le serveur
+connecté à l’initialisation MCP. Si le serveur omet ce mode, le proxy expose
+uniquement le sous-ensemble Operon disponible hors live.
 
 ```bash
 node dist/stdio-proxy.js --tool-profile standard
@@ -161,6 +165,8 @@ Les clients qui ont réellement besoin de l’administration, des racines extern
 ## Profil operational — usage courant complet
 
 `operational` garde les fonctions utiles de `full` : Operon, documents externes, diagnostics, import d’assets et fonctions directes distinctes. Dans un runtime live, il masque `obsidian_update_note`, `obsidian_search_replace`, `obsidian_manage_frontmatter` et `obsidian_delete_note` quand leurs familles gouvernées sont complètes ; la suppression passe par `obsidian_note_delete_plan`/`apply`/`status` ([suppression gouvernée](governed-note-delete.md)). `obsidian_get_frontmatter` est une lecture de clé dédiée, sans paramètres de mutation. Les lots `bases_upsert_rows` et les opérations composites/inline sur les tags gardent leurs contrats propres ; pour les tags YAML, préférer la projection frontmatter gouvernée. Le remplacement historique de document entier `bases_upsert_config` reste réservé à `full`.
+
+En lecture via Local REST, `obsidian_read_note` avec `format: "json"` et `obsidian_get_frontmatter` comparent les propriétés en cache au YAML reçu dans la même réponse. En cas d’écart, les deux outils renvoient les valeurs du Markdown et ajoutent `metadataCacheStale: { keys: [...] }` avec les clés ajoutées, supprimées ou modifiées. Le signal se trouve dans `content` pour la note en JSON et à la racine de la réponse pour la lecture d’une clé. Les dates restent des chaînes. Si le YAML est illisible, les outils conservent les propriétés fournies par REST et omettent le signal. La comparaison se fait sans requête REST supplémentaire, sans réindexation dans Obsidian et sans correction des résultats de Bases.
 
 Le profil compte 101 outils live avec cache, contre 106 dans `full`, hors publication optionnelle de trois outils d’assets. `/mcp/operational` et `--tool-profile operational` le sélectionnent. `full` conserve la compatibilité et ses anciens outils ; aucun droit ou contrat de mutation n’est étendu. Une famille structurellement absente peut laisser un fallback borné disponible dans un runtime dédié ; un conflit, une panne du Bridge ou un effet incertain dans un runtime gouverné n’autorise jamais de basculer vers une écriture directe.
 

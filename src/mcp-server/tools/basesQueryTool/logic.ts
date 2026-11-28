@@ -3,12 +3,18 @@
  */
 
 import { z } from "zod/v3";
+import {
+  BASE_QUERY_FILTER_DESCRIPTION,
+  BASE_QUERY_FILTER_VERSION,
+  compileBaseQueryFilter,
+} from "../../../services/baseQueryFilter.js";
 import { LocalBasesService } from "../../../services/localBasesService.js";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import {
   BaseQueryRequest,
   BaseQueryResponse,
 } from "../../../services/obsidianRestAPI/types.js";
+import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
   logger,
   RequestContext,
@@ -35,11 +41,11 @@ export const BasesQueryInputSchema = z
       .string()
       .min(1)
       .optional()
-      .describe("Vue à utiliser pour l'ordre/les formules. Optionnel."),
+      .describe("Vue de la Base à interroger via Obsidian et le Bases Bridge. Le parcours property_only ignore la vue."),
     filter: z
-      .record(z.any())
+      .record(z.unknown())
       .optional()
-      .describe("Filtre additionnel (JSON) appliqué par le bridge."),
+      .describe(BASE_QUERY_FILTER_DESCRIPTION + " Headless property scans require property_only: true."),
     sort: z
       .array(SortSchema)
       .optional()
@@ -57,14 +63,23 @@ export const BasesQueryInputSchema = z
       .describe("Numéro de page (1-indexé)."),
     evaluate: z
       .boolean()
-      .default(true)
-      .describe("Quand true, force l'utilisation des valeurs évaluées si disponibles."),
+      .optional()
+      .describe("Demande les valeurs évaluées via REST, avec true par défaut. Le parcours property_only est toujours sans calcul."),
+    property_only: z
+      .boolean()
+      .optional()
+      .describe("Sans REST, true est requis pour obtenir un parcours des propriétés des notes Markdown en cache. Ignore les filtres de la Base, les règles de vue et les formules. Sans effet via REST."),
   })
   .describe(
-    "Exécute une requête sur une base. Supporte filtres additionnels, tri, pagination et mode evaluate (engine).",
+    "Interroge une Base via Obsidian ou renvoie un parcours local de propriétés Markdown.",
   );
 
-export type BasesQueryInput = z.infer<typeof BasesQueryInputSchema>;
+// Keep the object shape in tools/list while letting the handler diagnose an
+// invalid filter through the public MCP validation error path.
+export const BasesQueryDispatchSchema = BasesQueryInputSchema.extend({
+  filter: z.unknown().optional(),
+});
+export type BasesQueryInput = z.infer<typeof BasesQueryDispatchSchema>;
 
 export async function processBasesQuery(
   params: BasesQueryInput,
@@ -92,12 +107,27 @@ export async function processBasesQuery(
   });
 
   if (obsidianService) {
+    const filter = compileBaseQueryFilter(params.filter, true);
     logger.debug("Querying base via REST bridge", context);
-    return obsidianService.queryBase(params.base_id, payload, context);
+    const { filterVersion, ...result } = await obsidianService.queryBase(
+      params.base_id,
+      { ...payload, evaluate: params.evaluate ?? true },
+      context,
+    );
+    if (filter.usesPropertyTable && filterVersion !== BASE_QUERY_FILTER_VERSION) {
+      throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Base query filter protocol unavailable.", {
+        reasonCode: "base_query_filter_bridge_upgrade_required",
+      });
+    }
+    return result;
   }
   if (localBasesService) {
     logger.debug("Querying base via local fallback", context);
-    return localBasesService.queryBase(params.base_id, payload, context);
+    return localBasesService.queryBase(
+      params.base_id,
+      { ...payload, property_only: params.property_only },
+      context,
+    );
   }
   throw new Error("Base query requires either Obsidian REST or local Bases fallback.");
 }

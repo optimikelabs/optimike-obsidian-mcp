@@ -416,16 +416,20 @@ try {
   }
 
   {
-    const { backend, adapter } = fixture("conflict");
+    const { backend, adapter } = fixture("strict-base-cas-conflict");
     const planned = await adapter.plan({
       path: backend.path,
       nextContent: "after",
-      idempotencyKey: "conflict",
+      idempotencyKey: "strict-base-cas-conflict",
+      expectedBeforeSha256: sha256(backend.content),
     });
-    backend.content = "concurrent edit";
-    const result = await adapter.apply(planned.planRef, "conflict");
+    backend.beforeWrite = async () => {
+      backend.content = "concurrent edit";
+    };
+    const result = await adapter.apply(planned.planRef, "strict-base-cas-conflict");
     assert.equal(result.outcome, "conflict");
-    assert.equal(backend.content, "concurrent edit");
+    assert.equal(backend.replaceCalls, 1);
+    assert.equal(backend.content, "concurrent edit", "the effect-point CAS protects an edit that arrives after apply preflight");
   }
 
   {

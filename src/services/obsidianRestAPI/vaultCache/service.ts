@@ -10,9 +10,13 @@ import { existsSync, mkdirSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { setImmediate as yieldToEventLoop } from "node:timers/promises";
+import ignore from "ignore";
 import { config } from "../../../config/index.js";
+import { isSyncConflictPath, SYNC_CONFLICT_LIMIT } from "../../upstreamSyncEvidence.js";
 import {
   createVaultExclusionMatcher,
+  DEFAULT_VAULT_EXCLUDE_PATTERNS,
   isVaultPathExcluded,
   normalizeVaultRelativePath,
 } from "../../vaultExclusions.js";
@@ -24,7 +28,13 @@ import {
   retryWithDelay,
 } from "../../../utils/index.js";
 import { NoteJson, ObsidianRestApiService } from "../index.js";
+import { normalizeVaultSlashes, toVaultPath } from "../../../utils/obsidian/obsidianApiUtils.js";
+import type { FilesystemNoteLinksResponse } from "../types.js";
 import { CacheEventSupervisor } from "./eventSupervisor.js";
+import { MarkdownLinkIndex } from "./markdownLinkIndex.js";
+import { extractIndexedLinkSource } from "./boundedLinkReferences.js";
+import { foldedPath, readVaultAppSettings } from "../../operations/headlessVaultFiles.js";
+import { MarkdownLinkWorker } from "./markdownLinkWorker.js";
 import {
   applyWalSizeLimit,
   checkpointWal,
@@ -48,6 +58,12 @@ export interface CacheIndexEntry {
 }
 
 type CacheRow = CacheIndexEntry & { content: string };
+type FileObservation = Pick<CacheIndexEntry, "mtime" | "size" | "hash">;
+type DirectFilesystemRead = CacheRow & { observedAt: string };
+
+function sameFileObservation(left: FileObservation, right: FileObservation): boolean {
+  return left.mtime === right.mtime && left.size === right.size && left.hash === right.hash;
+}
 type CacheRefreshSource = "rest" | "filesystem";
 type CacheReadinessStatus = "empty" | "building" | "ready" | "error";
 export type CacheUpdateResult =
@@ -97,6 +113,12 @@ CREATE TABLE IF NOT EXISTS shared_cache_metadata (
 `;
 
 const SHARED_CACHE_SCHEMA_VERSION = "2026-03-18.1";
+const LINK_CACHE_REFRESH_REASONS = new Map([
+  ["building", "headless_link_cache_refreshing"],
+  ["pending-events", "headless_link_cache_events_pending"],
+  ["uncertain", "headless_link_cache_uncertain"],
+  ["incomplete", "headless_link_cache_uncertain"],
+]);
 
 function computeContentHash(content: string): string {
   return createHash("sha1").update(content).digest("hex");
@@ -149,16 +171,43 @@ async function mapWithConcurrency<T, R>(
  */
 export class VaultCacheService {
   private readonly metadataCache = new Map<string, CacheIndexEntry>();
+  private metadataGeneration = 0;
   private readonly contentHotCache = new Map<string, CacheEntry>();
   private readonly hotCacheLimit = config.obsidianContentHotCacheLimit;
   private readonly obsidianService: ObsidianRestApiService | undefined;
   private readonly db: DatabaseSync;
+  private readonly directFilesystemReads = new Set<Promise<DirectFilesystemRead | undefined>>();
+  // Null records that more than one version was directly observed.
+  private readonly directFilesystemObservations = new Map<string, FileObservation | null>();
+  private acceptingDirectFilesystemReads = false;
+  private readonly fileUpsert;
+  private readonly dataVersion;
+  private readonly markdownLinks?: MarkdownLinkIndex;
+  private readonly filesystemIndexScope?: string;
+  private readonly technicalExclusions = ignore().add(DEFAULT_VAULT_EXCLUDE_PATTERNS);
+  private readonly linkReinclusions = config.obsidianVaultExcludePatterns.some((rule) => rule.startsWith("!"))
+    ? ignore().add(config.obsidianVaultExcludePatterns)
+    : undefined;
+  private checkedFilesystemVersion?: number;
+  private hotCacheDataVersion?: number;
+  private linkIndexRun?: Promise<void>;
+  private linkIndexWorker?: MarkdownLinkWorker;
+  private linkIndexIdleTimer?: ReturnType<typeof setTimeout>;
+  private linkIndexIdleRun?: Promise<void>;
+  private readonly linkExtraction = config.obsidianLinkExtraction;
   private readonly vaultExclusionMatcher = createVaultExclusionMatcher(
     config.obsidianVaultExcludePatterns,
   );
   private isCacheReady = false;
   private isBuilding = false;
   private lastRefreshStartedAt: number | null = null;
+  private refreshGeneration = 0;
+  private refreshCheckpoint?: {
+    at: number;
+    startedAt: number | null;
+    source: string | undefined;
+    origin: "startup-snapshot" | "process-refresh";
+  };
   private lastRefreshCompletedAt: number | null = null;
   private lastRefreshDurationMs: number | null = null;
   private lastRefreshError: string | null = null;
@@ -181,8 +230,29 @@ export class VaultCacheService {
   constructor(obsidianService?: ObsidianRestApiService) {
     this.obsidianService = obsidianService;
     this.db = this.initializeDatabase();
+    this.dataVersion = this.db.prepare("PRAGMA data_version");
+    this.fileUpsert = this.db.prepare(`
+      INSERT INTO file_cache (path, ctime, mtime, size, hash, content, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(path) DO UPDATE SET
+        ctime = excluded.ctime,
+        mtime = excluded.mtime,
+        size = excluded.size,
+        hash = excluded.hash,
+        content = excluded.content,
+        updated_at = excluded.updated_at
+    `);
+    if (!obsidianService && config.obsidianRuntimeMode.startsWith("headless-")) {
+      this.markdownLinks = new MarkdownLinkIndex(this.db, this.linkExtraction);
+      this.filesystemIndexScope = createHash("sha256").update(JSON.stringify([
+        "path-targets-v3", getVaultRoot(), config.obsidianVaultExcludePatterns,
+      ])).digest("hex");
+    }
     this.ensureMetadata();
     this.loadMetadataSnapshot();
+    if (this.markdownLinks && this.isCacheReady) {
+      this.isCacheReady = this.hasFilesystemIndexScope();
+    }
     logger.info(
       "VaultCacheService initialized with persistent shared store.",
       requestContextService.createRequestContext({
@@ -299,14 +369,48 @@ export class VaultCacheService {
     return this.metadataCache.size;
   }
 
+  public getRefreshEvidence() {
+    return {
+      lastRefreshAt: this.refreshCheckpoint?.at ?? null,
+      lastSuccessfulRefreshStartedAt: this.refreshCheckpoint?.startedAt ?? null,
+      refreshOrigin: this.refreshCheckpoint?.origin,
+      refreshing: Boolean(this.isBuilding || this.refreshRun || this.refreshRequested),
+      ready: this.isPubliclyReady(),
+      generation: this.refreshGeneration,
+    };
+  }
+
+  public getNewestFileMtimeMs(): number | null {
+    let newest: number | null = null;
+    for (const { mtime } of this.metadataCache.values()) {
+      newest = newest === null ? mtime : Math.max(newest, mtime);
+    }
+    return newest;
+  }
+
+  public getSyncConflicts() {
+    const syncConflictFiles: string[] = [];
+    let syncConflictCount = 0;
+    for (const key of this.metadataCache.keys()) {
+      const relative = normalizeVaultRelativePath(key);
+      if (!isSyncConflictPath(relative)) continue;
+      syncConflictCount++;
+      if (syncConflictFiles.length < SYNC_CONFLICT_LIMIT) syncConflictFiles.push(relative);
+    }
+    return { syncConflictFiles: syncConflictFiles.sort(), syncConflictCount };
+  }
+
   public getStats(): Record<string, unknown> {
+    const headless = config.obsidianRuntimeMode.startsWith("headless-");
     const eventCache = this.eventSupervisor?.snapshot() ?? {
       state: config.obsidianCacheEventsEnabled ? "not_applicable" : "disabled",
     };
     return {
       eventCache,
       dbPath: config.obsidianSharedCacheDbPath,
-      refreshSource: this.readMetadataValue("last_refresh_source"),
+      refreshSource: headless
+        ? this.refreshCheckpoint?.source
+        : this.readMetadataValue("last_refresh_source"),
       configuredRefreshSource: config.obsidianCacheSource,
       refreshConcurrency: config.obsidianCacheConcurrency,
       vaultExcludePatterns: config.obsidianVaultExcludePatterns,
@@ -319,7 +423,9 @@ export class VaultCacheService {
       cachedFileCount: this.metadataCache.size,
       hotCacheSize: this.contentHotCache.size,
       hotCacheLimit: this.hotCacheLimit,
-      lastRefreshAt: this.readMetadataNumber("last_refresh_at"),
+      lastRefreshAt: headless
+        ? this.refreshCheckpoint?.at
+        : this.readMetadataNumber("last_refresh_at"),
       lastRefreshStartedAt: this.lastRefreshStartedAt,
       lastRefreshCompletedAt: this.lastRefreshCompletedAt,
       lastRefreshDurationMs: this.lastRefreshDurationMs,
@@ -375,19 +481,36 @@ export class VaultCacheService {
     await this.refreshCache(true);
   }
 
-  public findMatchingPath(filePath: string): string | undefined {
-    const normalizedInput = normalizeDirPath(filePath);
-    if (this.metadataCache.has(normalizedInput)) {
-      return normalizedInput;
-    }
+  public isFilesystemBacked(): boolean {
+    return this.readMetadataValue("last_refresh_source") === "filesystem";
+  }
 
-    const normalized = normalizedInput.toLowerCase();
+  public findMatchingPath(filePath: string): string | undefined {
+    const exact = normalizedCacheFilePath(normalizeVaultSlashes(filePath));
+    if (!exact) return undefined;
+    if (this.metadataCache.has(exact)) return exact;
+
+    const normalized = toVaultPath(exact);
+    const folded = normalized.toLowerCase();
+    let normalizedMatch: string | undefined;
+    let foldedMatch: string | undefined;
+    let ambiguousFold = false;
     for (const candidate of this.metadataCache.keys()) {
-      if (candidate.toLowerCase() === normalized) {
-        return candidate;
+      const alias = toVaultPath(candidate);
+      if (alias === normalized) {
+        if (normalizedMatch) return undefined;
+        normalizedMatch = candidate;
+      } else if (alias.toLowerCase() === folded) {
+        if (foldedMatch) ambiguousFold = true;
+        foldedMatch = candidate;
       }
     }
-    return undefined;
+    return normalizedMatch ?? (ambiguousFold ? undefined : foldedMatch);
+  }
+
+  /** Revision of the metadata visible to this process, independent of SQLite writers. */
+  public getMetadataGeneration(): number {
+    return this.metadataGeneration;
   }
 
   public getEntriesByPrefix(prefix?: string): CacheIndexEntry[] {
@@ -400,12 +523,94 @@ export class VaultCacheService {
     });
   }
 
+  /** Read one exact Markdown path while the filesystem cache is being built. */
+  public async readExactFilesystemNote(
+    filePath: string,
+    context: RequestContext,
+  ): Promise<DirectFilesystemRead | undefined> {
+    if (
+      !this.acceptingDirectFilesystemReads ||
+      config.obsidianRuntimeMode !== "headless-readonly" ||
+      this.closing ||
+      this.directFilesystemReads.size >= config.obsidianCacheConcurrency ||
+      filePath.includes("\\")
+    ) {
+      return undefined;
+    }
+
+    const root = getVaultRoot();
+    const normalized = normalizedCacheFilePath(filePath);
+    if (
+      !root ||
+      !normalized ||
+      isVaultPathExcluded(normalized, this.vaultExclusionMatcher)
+    ) {
+      return undefined;
+    }
+
+    const read = this.readExactFilesystemRow(root, normalized, context).then((row) => {
+      if (!row) return undefined;
+      const { mtime, size, hash } = row;
+      const previous = this.directFilesystemObservations.get(normalized);
+      if (previous === undefined) {
+        this.directFilesystemObservations.set(normalized, { mtime, size, hash });
+      } else if (previous && !sameFileObservation(previous, row)) {
+        this.directFilesystemObservations.set(normalized, null);
+      }
+      return { ...row, observedAt: new Date().toISOString() };
+    });
+    this.directFilesystemReads.add(read);
+    try {
+      return await read;
+    } finally {
+      this.directFilesystemReads.delete(read);
+    }
+  }
+
+  private async readExactFilesystemRow(
+    root: string,
+    normalized: string,
+    context: RequestContext,
+  ): Promise<CacheRow | undefined> {
+    // Match actual directory entries so case-insensitive filesystems, aliases,
+    // and alternate data streams cannot invent a match outside the inventory.
+    const segments = normalized.slice(1).split("/");
+    let directory = root;
+    let prefix = "";
+    try {
+      for (const [index, segment] of segments.entries()) {
+        prefix += "/" + segment;
+        if (isVaultPathExcluded(prefix, this.vaultExclusionMatcher)) {
+          return undefined;
+        }
+        const entry = (await fs.readdir(directory, { withFileTypes: true }))
+          .find((candidate) => candidate.name === segment);
+        const final = index === segments.length - 1;
+        if (!entry || (final ? !entry.isFile() : !entry.isDirectory())) {
+          return undefined;
+        }
+        directory = path.join(directory, segment);
+      }
+      return await this.readCacheRow(normalized, "filesystem", context);
+    } catch {
+      // The normal cache path owns fallback matching and the public refusal.
+      return undefined;
+    }
+  }
+
   public async getEntry(filePath: string): Promise<CacheEntry | undefined> {
     if (
       !normalizedCacheFilePath(filePath) ||
       isVaultPathExcluded(filePath, this.vaultExclusionMatcher)
     )
       return undefined;
+    // This version changes for commits from another connection. Local
+    // writes invalidate their own entries in upsertRow and deleteRow.
+    const version = this.readDataVersion();
+    if (version !== this.hotCacheDataVersion) {
+      this.contentHotCache.clear();
+      this.hotCacheDataVersion = version;
+    }
     const cached = this.contentHotCache.get(filePath);
     if (cached) {
       this.touchHotCache(filePath, cached);
@@ -429,6 +634,274 @@ export class VaultCacheService {
     };
     this.touchHotCache(filePath, entry);
     return entry;
+  }
+
+  private findFilesystemNote(normalized: string, context: RequestContext): string {
+    if (!this.acceptFilesystemSource(normalized)) {
+      throw new McpError(BaseErrorCode.NOT_FOUND, "Markdown note not found in the shared filesystem cache.", context);
+    }
+    const exact = this.db.prepare("SELECT path FROM file_cache WHERE path = ?").get(normalized);
+    let matched = exact ? normalized : undefined;
+    if (!matched) {
+      const folded = normalized.toLowerCase();
+      for (const row of this.db.prepare("SELECT path FROM file_cache").iterate()) {
+        const candidate = row.path as string;
+        if (candidate.toLowerCase() !== folded || !this.acceptFilesystemSource(candidate)) continue;
+        if (matched) {
+          matched = undefined;
+          break;
+        }
+        matched = candidate;
+      }
+    }
+    if (!matched) throw new McpError(BaseErrorCode.NOT_FOUND, "Markdown note not found in the shared filesystem cache.", context);
+    return matched;
+  }
+
+  private async readFilesystemSnapshot<T>(
+    filePath: string,
+    context: RequestContext,
+    project: (matched: string, mtime: number) => T,
+    checkSnapshot?: () => void,
+  ): Promise<T> {
+    const normalized = normalizedCacheFilePath(filePath);
+    if (!normalized) {
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Expected a vault-relative Markdown note path.", context);
+    }
+    if (this.refreshRun) await this.refreshRun;
+    if (!this.isReady()) await this.buildVaultCache();
+    this.db.exec("BEGIN");
+    try {
+      checkSnapshot?.();
+      if (!this.isReady()) {
+        throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Shared filesystem cache reconciliation is incomplete.", context);
+      }
+      const matched = this.findFilesystemNote(normalized, context);
+      const note = this.db.prepare("SELECT mtime FROM file_cache WHERE path = ?").get(matched) as
+        { mtime: number };
+      return project(matched, note.mtime);
+    } finally {
+      this.db.exec("ROLLBACK");
+    }
+  }
+
+  public async readFilesystemNoteContent(filePath: string, context: RequestContext): Promise<string> {
+    return this.readFilesystemSnapshot(filePath, context, (matched) =>
+      this.db.prepare("SELECT content FROM file_cache WHERE path = ?").get(matched)!.content as string,
+    );
+  }
+
+  public async readFilesystemNoteLinks(filePath: string, limit: number, context: RequestContext): Promise<FilesystemNoteLinksResponse> {
+    const vaultRoot = getVaultRoot();
+    const links = this.markdownLinks;
+    if (!links || !vaultRoot) {
+      throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Shared filesystem link index is unavailable.", context);
+    }
+    return this.readFilesystemSnapshot(filePath, context, (matched, mtime) => {
+      if (this.linkIndexRun || !this.verifyFilesystemIndex(false)) {
+        this.scheduleFilesystemLinkIndex();
+        throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "The headless link index is building. Retry later.", {
+          ...context, reasonCode: "headless_link_index_building", retryable: true,
+        });
+      }
+      return {
+        ok: true,
+        contractVersion: 1,
+        path: matched.slice(1),
+        backend: { kind: "filesystem", bindingFingerprint: createHash("sha256").update(vaultRoot).digest("hex") },
+        cache: {
+          available: true, consistency: "best_effort_non_atomic_snapshot",
+          freshness: {
+            status: "unknown", observedAt: new Date().toISOString(), observedFileMtimeMs: mtime,
+            reason: "filesystem_cache_may_lag_disk",
+          },
+        },
+        provenance: {
+          sourceMetadata: "filesystem", resolution: "filesystem", subpath: "unavailable",
+          backlinks: "filesystem", unresolved: "filesystem",
+        },
+        ...links.read(matched, limit),
+        indexCoverage: links.readIndexCoverage(matched),
+      };
+    }, () => this.assertFilesystemLinkCacheReady(context));
+  }
+
+  private assertFilesystemLinkCacheReady(context: RequestContext): void {
+    const reasonCode = LINK_CACHE_REFRESH_REASONS.get(this.readMetadataValue("refresh_state") ?? "");
+    if (reasonCode) {
+      throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "The shared note cache is not settled.", {
+        ...context, reasonCode, retryable: true,
+      });
+    }
+  }
+
+  private readDataVersion(): number {
+    return this.dataVersion.get()!.data_version as number;
+  }
+
+  /** Refresh from disk before using the index to admit a filesystem mutation. */
+  public async readFilesystemMoveInventory(filePath: string, destination: string | undefined, limit: number) {
+    await this.refreshCache();
+    return this.filesystemMoveInventory(filePath, destination, limit);
+  }
+
+  private async filesystemMoveInventory(filePath: string, destination: string | undefined, limit: number) {
+    await this.linkIndexRun;
+    if (!this.markdownLinks || !this.verifyFilesystemIndex(false)) {
+      throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "The filesystem link inventory is incomplete.");
+    }
+    this.db.exec("BEGIN");
+    try {
+      if (!this.verifyFilesystemIndex(false)) {
+        throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "The filesystem link inventory is changing.");
+      }
+      const inventory = this.markdownLinks.moveInventory("/" + filePath, destination ? "/" + destination : undefined, limit);
+      if (!inventory.complete) {
+        throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The operation requires complete backlink coverage.",
+          { reasonCode: "headless_link_coverage_incomplete" });
+      }
+      this.db.exec("COMMIT");
+      return inventory;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  public extractFilesystemLinkSource(content: string, bytes: number, editable = false) {
+    return extractIndexedLinkSource(content, bytes, this.linkExtraction, editable);
+  }
+
+  public async readFilesystemResolutionTargets(): Promise<string[]> {
+    const targets: string[] = [];
+    const context = requestContextService.createRequestContext({ operation: "readFilesystemResolutionTargets" });
+    const markdown = await this.listAllMarkdownFilesFromFilesystem(context, targets);
+    return markdown.concat(targets);
+  }
+
+  public async refreshFilesystemMovePaths(paths: readonly string[], trashFolder: string): Promise<void> {
+    const root = getVaultRoot();
+    const links = this.markdownLinks;
+    if (!root || !links) throw new Error("filesystem_index_unavailable");
+    const context = requestContextService.createRequestContext({ operation: "refreshFilesystemMovePaths" });
+    await this.serializeCacheWrite(async () => {
+      for (const relative of new Set(paths)) {
+        const filePath = "/" + relative;
+        const trash = foldedPath(relative).startsWith(foldedPath(trashFolder) + "/");
+        const markdown = relative.toLowerCase().endsWith(".md");
+        if (markdown && !trash) {
+          try {
+            const row = await this.readCacheRow(filePath, "filesystem", context);
+            this.upsertRow(row);
+            continue;
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException)?.code !== "ENOENT" &&
+                !(error instanceof McpError && error.code === BaseErrorCode.NOT_FOUND)) throw error;
+          }
+        }
+        const present = !markdown && !trash && await fs.lstat(path.join(root, relative))
+          .then(stat => stat.isFile(), (error: NodeJS.ErrnoException) => {
+            if (error.code === "ENOENT") return false;
+            throw error;
+          });
+        if (markdown) this.deleteRow(filePath);
+        links.updatePathTarget(filePath, present);
+      }
+      this.checkedFilesystemVersion = undefined;
+    });
+    await this.linkIndexRun;
+    if (!links.coversCache(this.acceptFilesystemSource)) {
+      this.scheduleFilesystemLinkIndex();
+      await this.linkIndexRun;
+      if (!links.coversCache(this.acceptFilesystemSource)) throw new Error("filesystem_index_unavailable");
+    }
+  }
+
+  public allowsHeadlessOperationSource(relativePath: string): boolean {
+    return this.allowsHiddenLinkPath(relativePath) &&
+      !this.technicalExclusions.ignores(relativePath) &&
+      !isVaultPathExcluded(relativePath, this.vaultExclusionMatcher);
+  }
+
+  private verifyFilesystemIndex(remember = true): boolean {
+    if (!this.markdownLinks) return false;
+    // SQLite advances this value for other connections' commits, including
+    // incremental REST upserts that leave last_refresh_source untouched.
+    const version = this.readDataVersion();
+    if (version === this.checkedFilesystemVersion) return true;
+    if (this.readMetadataValue("refresh_state") !== "complete" ||
+        !this.hasFilesystemIndexScope() ||
+        !this.markdownLinks.coversCache(this.acceptFilesystemSource)) return false;
+    if (remember) this.checkedFilesystemVersion = version;
+    return true;
+  }
+
+  private hasFilesystemIndexScope(): boolean {
+    return this.filesystemIndexScope !== undefined &&
+      this.readMetadataValue("filesystem_link_inventory") === this.filesystemIndexScope;
+  }
+
+  private readonly acceptFilesystemSource = (filePath: string): boolean =>
+    !!normalizedCacheFilePath(filePath) &&
+    this.allowsHiddenLinkPath(normalizeVaultRelativePath(filePath)) &&
+    !this.technicalExclusions.ignores(normalizeVaultRelativePath(filePath)) &&
+    !isVaultPathExcluded(filePath, this.vaultExclusionMatcher);
+
+  private allowsHiddenLinkPath(relativePath: string, isDirectory = false): boolean {
+    const parts = relativePath.split("/");
+    if (!parts.some((part) => part.startsWith("."))) return true;
+    const reinclusions = this.linkReinclusions;
+    if (!reinclusions) return false;
+    // A negation can name a descendant without naming the directory itself.
+    if (isDirectory || reinclusions.test(relativePath).unignored) return true;
+    return parts.every((part, index) => !part.startsWith(".") ||
+      (index < parts.length - 1 && reinclusions.test(parts.slice(0, index + 1).join("/") + "/").unignored));
+  }
+
+  private scheduleFilesystemLinkIndex(): void {
+    if (!this.markdownLinks || this.closing || this.linkIndexRun || !this.isReady()) return;
+    // Scheduling can happen inside the read snapshot. Perform writes only
+    // after yielding, when that snapshot and any current writers have finished.
+    this.linkIndexRun = this.buildFilesystemLinkIndex(this.markdownLinks)
+      .catch(() => {
+        this.checkedFilesystemVersion = undefined;
+        if (!this.closing) {
+          logger.warning("Headless link indexing was interrupted. The link tool can retry.",
+            requestContextService.createRequestContext({ operation: "buildFilesystemLinkIndex" }));
+        }
+      })
+      .finally(() => { this.linkIndexRun = undefined; });
+  }
+
+  private async buildFilesystemLinkIndex(links: MarkdownLinkIndex): Promise<void> {
+    await yieldToEventLoop();
+    if (this.closing || !this.isReady()) return;
+    if (this.verifyFilesystemIndex()) return;
+    clearTimeout(this.linkIndexIdleTimer);
+    await this.linkIndexIdleRun;
+    if (this.closing) return;
+    const worker = this.linkIndexWorker ??= new MarkdownLinkWorker(
+      config.obsidianSharedCacheDbPath, this.linkExtraction, links,
+    );
+    try {
+      let afterPath = "";
+      while (!this.closing) {
+        if (this.refreshRun) await this.refreshRun;
+        if (this.closing || !this.isReady() || !this.hasFilesystemIndexScope() ||
+            this.readMetadataValue("refresh_state") !== "complete") return;
+        const last = await links.reconcileBatch(afterPath, this.acceptFilesystemSource, worker.indexPaths);
+        if (last === undefined && this.verifyFilesystemIndex()) return;
+        afterPath = last ?? "";
+        await yieldToEventLoop();
+      }
+    } finally {
+      if (!this.closing) {
+        this.linkIndexIdleTimer = setTimeout(() => {
+          this.linkIndexWorker = undefined;
+          this.linkIndexIdleRun = worker.close().finally(() => { this.linkIndexIdleRun = undefined; });
+        }, 30_000).unref();
+      }
+    }
   }
 
   /** Legacy post-write callers do not reinterpret a cache failure as a failed mutation. */
@@ -640,6 +1113,7 @@ export class VaultCacheService {
       !isVaultPathExcluded(
         folder ? candidate + "/" : candidate,
         this.vaultExclusionMatcher,
+        folder,
       )
     );
   }
@@ -648,8 +1122,12 @@ export class VaultCacheService {
     if (this.closed) return;
     this.stopPeriodicRefresh();
     this.closing = true;
+    clearTimeout(this.linkIndexIdleTimer);
     await this.eventStop;
     await this.refreshRun?.catch(() => undefined);
+    await this.linkIndexWorker?.close();
+    await this.linkIndexIdleRun;
+    await this.linkIndexRun;
     await this.cacheWriteTail;
     if (!this.closed) {
       this.db.close();
@@ -670,6 +1148,7 @@ export class VaultCacheService {
     }
     if (this.isCacheReady && this.lastRefreshError === null) {
       logger.info("Cache already built. Skipping.", initialBuildContext);
+      this.scheduleFilesystemLinkIndex();
       return;
     }
     await this.refreshCache(true);
@@ -697,6 +1176,7 @@ export class VaultCacheService {
         // Chain it into the same returned promise rather than dropping it.
         if (this.refreshRequested && !this.closing)
           return this.refreshCache(this.forceRefreshRequested);
+        this.scheduleFilesystemLinkIndex();
       });
     }
     return this.refreshRun;
@@ -713,15 +1193,23 @@ export class VaultCacheService {
       return;
     }
 
+    if (this.markdownLinks) {
+      isInitialBuild ||= !this.hasFilesystemIndexScope();
+      this.checkedFilesystemVersion = undefined;
+    }
+
     // Existing uncertainty cannot be discharged by an mtime/size-only scan.
     // Promote just that scan to content reproof; healthy periodic scans keep
     // their metadata optimization and SSE coverage remains a separate signal.
+    const allowDirectFilesystemReads = isInitialBuild;
     const previousState = this.readMetadataValue("refresh_state");
     isInitialBuild ||= this.lastRefreshError !== null || !this.isCacheReady ||
       (previousState !== "complete" && previousState !== "pending-events");
     this.isBuilding = true;
+    this.refreshGeneration++;
     const uncertaintyAtStart = this.uncertaintyGeneration;
-    this.lastRefreshStartedAt = Date.now();
+    const startedAt = Date.now();
+    this.lastRefreshStartedAt = startedAt;
     this.lastRefreshCompletedAt = null;
     this.lastRefreshDurationMs = null;
     this.lastRefreshError = null;
@@ -736,12 +1224,20 @@ export class VaultCacheService {
       this.upsertMetadataValue("refresh_state", "building");
       const startTime = Date.now();
       const refreshSource = await this.pickRefreshSource();
+      this.acceptingDirectFilesystemReads =
+        allowDirectFilesystemReads && refreshSource === "filesystem";
+      const pathTargets = this.markdownLinks ? [] as string[] : undefined;
       const remoteFiles =
         refreshSource === "filesystem"
-          ? await this.listAllMarkdownFilesFromFilesystem(context)
+          ? await this.listAllMarkdownFilesFromFilesystem(context, pathTargets)
           : await this.listAllMarkdownFiles("/", context);
       const remoteFileSet = new Set(remoteFiles);
       const cachedFileSet = new Set(this.metadataCache.keys());
+      if (this.markdownLinks) {
+        for (const row of this.db.prepare("SELECT path FROM file_cache").iterate()) {
+          cachedFileSet.add(row.path as string);
+        }
+      }
 
       let filesAdded = 0;
       let filesUpdated = 0;
@@ -760,25 +1256,14 @@ export class VaultCacheService {
         try {
           const cachedEntry = this.metadataCache.get(filePath);
           if (refreshSource === "filesystem") {
-            const vaultRoot = getVaultRoot();
-            if (!vaultRoot) {
-              return "failed";
-            }
-            const absolutePath = path.join(
-              vaultRoot,
-              filePath.replace(/^\/+/u, ""),
-            );
-            const stats = await fs.stat(absolutePath);
-            const remoteMtime = Math.round(stats.mtimeMs);
-            const remoteSize = stats.size;
-            const needsRefresh =
-              isInitialBuild ||
-              !cachedEntry ||
-              cachedEntry.mtime !== remoteMtime ||
-              cachedEntry.size !== remoteSize;
-
-            if (!needsRefresh) {
-              return "skipped";
+            if (!isInitialBuild && cachedEntry) {
+              const vaultRoot = getVaultRoot();
+              if (!vaultRoot) return "failed";
+              const stats = await fs.stat(path.join(vaultRoot, filePath.slice(1)));
+              if (cachedEntry.mtime === Math.round(stats.mtimeMs) && cachedEntry.size === stats.size &&
+                  (config.obsidianRuntimeMode !== "headless-filesystem" || cachedEntry.ctime === Math.round(stats.ctimeMs))) {
+                return "skipped";
+              }
             }
 
             this.upsertRow(
@@ -850,6 +1335,30 @@ export class VaultCacheService {
         }
       }
 
+      // Fence new reads and settle admitted ones before publishing readiness.
+      // Reopen files whose verified observations differ, inside this same scan.
+      this.acceptingDirectFilesystemReads = false;
+      if (this.directFilesystemReads.size) {
+        await Promise.all(this.directFilesystemReads);
+      }
+      const filesToRecheck = [];
+      for (const [filePath, observed] of this.directFilesystemObservations) {
+        const cached = this.metadataCache.get(filePath);
+        if (!observed || !cached || !sameFileObservation(observed, cached)) {
+          filesToRecheck.push(filePath);
+        }
+      }
+      if (filesToRecheck.length) {
+        // An admitted direct read only runs during an explicitly forced scan.
+        for (const outcome of await mapWithConcurrency(
+          filesToRecheck,
+          config.obsidianCacheConcurrency,
+          processFile,
+        )) {
+          outcomes.push(outcome);
+        }
+      }
+
       filesAdded += outcomes.filter((outcome) => outcome === "added").length;
       filesUpdated += outcomes.filter(
         (outcome) => outcome === "updated",
@@ -868,6 +1377,7 @@ export class VaultCacheService {
       this.lastRefreshCompletedAt = Date.now();
       this.lastRefreshDurationMs = Math.round(duration * 1000);
       this.lastRefreshFileCount = this.metadataCache.size;
+      const successfulAt = this.isCacheReady ? this.lastRefreshCompletedAt : null;
       // Commit completeness with its evidence. An interrupted scan retains
       // 'building'; partial work never advances the last successful checkpoint.
       this.db.exec("BEGIN IMMEDIATE");
@@ -875,14 +1385,27 @@ export class VaultCacheService {
         this.upsertMetadataValue("last_refresh_failed_files", String(this.lastRefreshFailedFiles));
         this.upsertMetadataValue("refresh_state", this.isCacheReady
           ? (this.eventWorkPending ? "pending-events" : "complete") : "incomplete");
-        if (this.isCacheReady) {
-          this.upsertMetadataValue("last_refresh_at", String(Date.now()));
+        if (successfulAt !== null) {
+          if (this.markdownLinks && pathTargets && this.filesystemIndexScope && refreshSource === "filesystem") {
+            this.markdownLinks.replacePathTargets(pathTargets);
+            this.upsertMetadataValue("filesystem_link_inventory", this.filesystemIndexScope);
+          }
+          this.upsertMetadataValue("last_refresh_at", String(successfulAt));
           this.upsertMetadataValue("last_refresh_source", refreshSource);
+          this.upsertMetadataValue("last_refresh_window", `${successfulAt}:${startedAt}`);
         }
         this.db.exec("COMMIT");
       } catch (error) {
         this.db.exec("ROLLBACK");
         throw error;
+      }
+      if (successfulAt !== null) {
+        this.refreshCheckpoint = {
+          at: successfulAt,
+          startedAt,
+          source: refreshSource,
+          origin: "process-refresh",
+        };
       }
       logger.info(
         `${
@@ -902,6 +1425,11 @@ export class VaultCacheService {
         this.isCacheReady = false;
       }
     } finally {
+      this.acceptingDirectFilesystemReads = false;
+      if (this.directFilesystemReads.size) {
+        await Promise.allSettled(this.directFilesystemReads);
+      }
+      this.directFilesystemObservations.clear();
       this.isBuilding = false;
     }
   }
@@ -926,10 +1454,40 @@ export class VaultCacheService {
   }
 
   private loadMetadataSnapshot(): void {
-    const stmt = this.db.prepare(
-      "SELECT path, ctime, mtime, size, hash FROM file_cache ORDER BY path ASC",
-    );
-    const rows = stmt.all() as unknown as CacheIndexEntry[];
+    // Read the index and its checkpoint from the same SQLite view. Subsequent
+    // commits from another server do not update this in-memory inventory.
+    this.db.exec("BEGIN");
+    let rows: CacheIndexEntry[];
+    let state: string | undefined;
+    try {
+      rows = this.db.prepare(
+        "SELECT path, ctime, mtime, size, hash FROM file_cache ORDER BY path ASC",
+      ).all() as unknown as CacheIndexEntry[];
+      state = this.readMetadataValue("refresh_state");
+      const lastRefreshAt = this.readMetadataNumber("last_refresh_at");
+      if (lastRefreshAt !== undefined) {
+        // An older writer can advance last_refresh_at without recording a
+        // window. Only a window paired with the loaded completion is usable.
+        const [completed, started] = (
+          this.readMetadataValue("last_refresh_window") ?? ""
+        ).split(":");
+        const startedAt = completed === String(lastRefreshAt) && started
+          ? Number(started)
+          : NaN;
+        this.refreshCheckpoint = {
+          at: lastRefreshAt,
+          startedAt: Number.isFinite(startedAt) ? startedAt : null,
+          source: this.readMetadataValue("last_refresh_source"),
+          origin: "startup-snapshot",
+        };
+      }
+      this.lastRefreshFailedFiles = Math.max(0, this.readMetadataNumber("last_refresh_failed_files") ?? 0);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    this.metadataGeneration++;
     this.metadataCache.clear();
     for (const row of rows) {
       if (
@@ -942,8 +1500,6 @@ export class VaultCacheService {
       }
       this.metadataCache.set(row.path, row);
     }
-    const state = this.readMetadataValue("refresh_state");
-    this.lastRefreshFailedFiles = Math.max(0, this.readMetadataNumber("last_refresh_failed_files") ?? 0);
     this.lastRefreshError = state && state !== "complete"
       ? "cache_refresh_unverified"
       : null;
@@ -967,27 +1523,7 @@ export class VaultCacheService {
   }
 
   private upsertRow(row: CacheRow): void {
-    const now = Date.now();
-    const stmt = this.db.prepare(`
-      INSERT INTO file_cache (path, ctime, mtime, size, hash, content, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(path) DO UPDATE SET
-        ctime = excluded.ctime,
-        mtime = excluded.mtime,
-        size = excluded.size,
-        hash = excluded.hash,
-        content = excluded.content,
-        updated_at = excluded.updated_at
-    `);
-    stmt.run(
-      row.path,
-      row.ctime,
-      row.mtime,
-      row.size,
-      row.hash,
-      row.content,
-      now,
-    );
+    this.fileUpsert.run(row.path, row.ctime, row.mtime, row.size, row.hash, row.content, Date.now());
 
     const indexEntry: CacheIndexEntry = {
       path: row.path,
@@ -996,14 +1532,17 @@ export class VaultCacheService {
       size: row.size,
       hash: row.hash,
     };
-    this.metadataCache.set(row.path, indexEntry);
-    this.touchHotCache(row.path, {
-      content: row.content,
-      ctime: row.ctime,
-      mtime: row.mtime,
-      size: row.size,
-      hash: row.hash,
-    });
+    const previous = this.metadataCache.get(row.path);
+    if (!previous || previous.hash !== row.hash || previous.mtime !== row.mtime ||
+        previous.ctime !== row.ctime || previous.size !== row.size) {
+      this.metadataCache.set(row.path, indexEntry);
+      this.metadataGeneration++;
+    }
+    this.contentHotCache.delete(row.path);
+    if (this.markdownLinks) {
+      this.checkedFilesystemVersion = undefined;
+      if (!this.isBuilding) this.scheduleFilesystemLinkIndex();
+    }
   }
 
   private readMetadataValue(key: string): string | undefined {
@@ -1037,7 +1576,7 @@ export class VaultCacheService {
   private deleteRow(filePath: string): void {
     const stmt = this.db.prepare("DELETE FROM file_cache WHERE path = ?");
     stmt.run(filePath);
-    this.metadataCache.delete(filePath);
+    if (this.metadataCache.delete(filePath)) this.metadataGeneration++;
     this.contentHotCache.delete(filePath);
   }
 
@@ -1077,8 +1616,9 @@ export class VaultCacheService {
           throw new Error("invalid_inventory_entry");
         }
         const fullPath = path.posix.join(normalizedPath, entry);
-        if (isVaultPathExcluded(fullPath, this.vaultExclusionMatcher)) continue;
-        if (entry.endsWith("/")) {
+        const isDirectory = entry.endsWith("/");
+        if (isVaultPathExcluded(fullPath, this.vaultExclusionMatcher, isDirectory)) continue;
+        if (isDirectory) {
           const subDirFiles = await this.listAllMarkdownFiles(
             fullPath,
             opContext,
@@ -1140,6 +1680,7 @@ export class VaultCacheService {
 
   private async listAllMarkdownFilesFromFilesystem(
     context: RequestContext,
+    pathTargets?: string[],
   ): Promise<string[]> {
     const vaultRoot = getVaultRoot();
     if (!vaultRoot) {
@@ -1147,6 +1688,11 @@ export class VaultCacheService {
     }
 
     const markdownFiles: string[] = [];
+    let trashFolder: string | undefined;
+    if (config.obsidianRuntimeMode === "headless-filesystem") {
+      try { trashFolder = foldedPath(readVaultAppSettings(vaultRoot).trashFolder); }
+      catch { /* Mutation planning checks app.json separately and fails closed. */ }
+    }
     const walk = async (directory: string): Promise<void> => {
       let entries: Dirent[];
       try {
@@ -1167,16 +1713,17 @@ export class VaultCacheService {
         const relativePath = normalizeVaultRelativePath(
           path.relative(vaultRoot, path.join(directory, entry.name)),
         );
-        if (isVaultPathExcluded(relativePath, this.vaultExclusionMatcher)) {
-          continue;
-        }
+        if (trashFolder && foldedPath(relativePath) === trashFolder) continue;
+        if (pathTargets && !this.allowsHiddenLinkPath(relativePath, entry.isDirectory())) continue;
+        const excluded = isVaultPathExcluded(relativePath, this.vaultExclusionMatcher, entry.isDirectory());
         const fullPath = path.join(directory, entry.name);
         if (entry.isDirectory()) {
-          await walk(fullPath);
-        } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
-          markdownFiles.push(
-            vaultRelativePathFromAbsolute(fullPath, vaultRoot),
-          );
+          const technical = this.technicalExclusions.ignores(relativePath + "/__cache_probe__.md");
+          if (!excluded || (pathTargets && !technical)) await walk(fullPath);
+        } else if (entry.isFile()) {
+          const filePath = vaultRelativePathFromAbsolute(fullPath, vaultRoot);
+          if (!excluded && entry.name.toLowerCase().endsWith(".md")) markdownFiles.push(filePath);
+          else if (pathTargets && !this.technicalExclusions.ignores(relativePath)) pathTargets.push(filePath);
         }
       }
     };

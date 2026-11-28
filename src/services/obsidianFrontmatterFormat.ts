@@ -68,7 +68,7 @@ export function preparationPlanRejection(error: unknown) {
 }
 
 export function frontmatterEnvelope(content: string): { start: number; end: number; yaml: string } | undefined {
-  const opening = /^---\r?\n/u.exec(content);
+  const opening = /^\uFEFF?---\r?\n/u.exec(content);
   if (!opening) return undefined;
   const close = /^---(?=\r?$)/gmu;
   close.lastIndex = opening[0].length;
@@ -77,10 +77,21 @@ export function frontmatterEnvelope(content: string): { start: number; end: numb
   return { start: opening[0].length, end: found.index, yaml: content.slice(opening[0].length, found.index) };
 }
 
+/** Direct prepend preserves the BOM and the frontmatter envelope. */
+export function prependMarkdownBody(content: string, prefix: string): string {
+  if (!prefix) return content;
+  const envelope = frontmatterEnvelope(content);
+  const close = envelope ? envelope.end + 3 : 0;
+  const newline = /^\r?\n/u.exec(content.slice(close))?.[0];
+  const offset = envelope ? close + (newline?.length ?? 0) : content.startsWith("\uFEFF") ? 1 : 0;
+  const separator = envelope && !newline ? (content.includes("\r\n") ? "\r\n" : "\n") : "";
+  return content.slice(0, offset) + separator + prefix + content.slice(offset);
+}
+
 export async function inspectNativeFrontmatter(backend: Pick<AtomicWriteBackend, "status" | "inspectFrontmatterFormat">, content: string, expectedBinding?: string) {
   let status;
   try { status = await backend.status(); } catch (error) {
-    if (error instanceof McpError && error.details?.reasonCode === "atomic_bridge_version_unsupported") throw error;
+    if (error instanceof McpError && ["atomic_bridge_version_unsupported", "headless_date_policy_unavailable"].includes(String(error.details?.reasonCode))) throw error;
     throw unavailable();
   }
   requireAtomicBridgeVersion(status);

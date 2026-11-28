@@ -7,6 +7,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { McpServer } from "@modelcontextprotocol/server";
 import { Client } from "@modelcontextprotocol/client";
 import { installToolProfileRegistrationGate } from "../dist/mcp-server/toolProfileRuntime.js";
+import { TOOL_PROFILE_MODE_CAPABILITY } from "../dist/mcp-server/toolProfiles.js";
 import { mcpSchema } from "../dist/mcp-server/mcpSchema.js";
 
 async function createVault() {
@@ -133,8 +134,10 @@ try {
   {
     const { client } = await openClient({ vault });
     try {
+      assert.deepEqual(client.getServerCapabilities().experimental?.[TOOL_PROFILE_MODE_CAPABILITY],
+        { registrationMode: "headless-readonly" });
       const names = await listedNames(client);
-      assert.equal(names.length, 9, "3.0 default must be standard");
+      assertHeadlessProfileNames(names, "standard");
       assert.ok(names.includes("smart_semantic_search"));
       assert.ok(!names.includes("smart_search"));
       assert.ok(!names.includes("smart-search"));
@@ -152,7 +155,7 @@ try {
     });
     try {
       const names = await listedNames(client);
-      assert.equal(names.length, 9, "CLI standard must override env full");
+      assertHeadlessProfileNames(names, "standard");
       assert.ok(names.includes("smart_semantic_search"));
       assert.ok(!names.includes("smart_search"));
       assert.ok(!names.includes("smart-search"));

@@ -14,6 +14,8 @@ Profiles reduce schema volume and routing ambiguity. They are not an authorizati
 
 `operational` preserves useful `full` workflows: Operon, external documents, diagnostics, assets and distinct direct capabilities. In live mode it hides `obsidian_update_note`, `obsidian_search_replace`, `obsidian_manage_frontmatter` and `obsidian_delete_note` when their governed families are complete; deletion goes through `obsidian_note_delete_plan`/`apply`/`status` ([governed note deletion](governed-note-delete.md)). `obsidian_get_frontmatter` provides dedicated read-only key access without mutation inputs. Batch `bases_upsert_rows` and composite/inline tag operations retain their separate contracts; prefer governed Frontmatter for YAML tags. Historical whole-document `bases_upsert_config` remains reserved for `full`.
 
+On live Local REST reads, `obsidian_read_note` with `format: "json"` and `obsidian_get_frontmatter` compare the cached properties with the YAML in the same REST response. If they differ, both return values from the Markdown and add `metadataCacheStale: { keys: [...] }` listing the added, removed or changed keys. The signal is inside `content` for the JSON note and at the top level for the key read. Dates stay strings. If the YAML cannot be parsed, the tools keep the REST properties and omit the signal. The check needs no extra REST request and does not refresh Obsidian’s index or correct Bases results.
+
 This profile has 101 live tools with cache versus 106 for `full`, excluding three optional asset tools. Select `/mcp/operational` or `--tool-profile operational`. `full` preserves compatibility and existing direct calls. No write rights or mutation contracts change. A structurally absent family may leave a bounded fallback visible on a dedicated runtime; a conflict, unavailable Bridge or uncertain effect in a governed runtime never authorizes direct-write fallback.
 
 Skills already explicitly published to `full` remain visible to `operational` with the same root/path checks; cursors remain profile-bound. Other profile policies remain unchanged. Stdio selection is fixed for one proxy lifetime; an existing session may require reconnection to discover its new catalogue.
@@ -32,7 +34,7 @@ The counts above exclude three optional asset tools: the current local configura
 
 Counts are projections of the current registry and may be lower in restricted runtimes. `full` means all tools structurally registered by the active runtime, not always 106 tools. The canonical registry covers 113 unique names across all runtimes because four names exist only in `headless-filesystem`. The operation cockpit is live-only because it reads the process-owned governed journals; visibility never substitutes for a write grant.
 
-`obsidian_note_links` is live/hybrid-live only because its semantics come from Obsidian Desktop's public `MetadataCache`; degraded and headless profiles omit it rather than simulating graph semantics from filesystem state.
+`obsidian_get_frontmatter` and `obsidian_note_links` are in the note-read group. Live and hybrid-live use Desktop services. All three headless modes expose them with the shared cache enabled. See [headless reads](headless-server-profile.md#contract) for filesystem coverage.
 
 The [P6 routing evaluation](tool-routing-evaluation-p6.md) measures these
 surfaces from actual `tools/list` schemas and a versioned 31-case baseline. Its
@@ -81,7 +83,7 @@ Modern profiles hide a direct tool only when the corresponding governed family i
 
 - `live` / live-capable `hybrid`: expose `obsidian_frontmatter_patch_{plan,apply,status,recover}` and hide `obsidian_manage_frontmatter`;
 - `live` / live-capable `hybrid`: expose `obsidian_text_patch_{plan,apply,status,recover}` and hide direct `obsidian_update_note` / `obsidian_search_replace` only after the quartet is complete;
-- `headless-guarded` / `headless-filesystem`: the governed Frontmatter family is absent, so `obsidian_manage_frontmatter` remains the bounded fallback;
+- `headless-guarded` / `headless-filesystem`: governed text and frontmatter families are registered. The direct note, text, frontmatter and tag editors are live-only, including in `full`. Headless batch frontmatter is removed. Direct Base row upsert is live-only.
 - `headless-filesystem` Canvas direct helpers remain available only where the governed live Canvas family is structurally absent;
 - `bases_upsert_config` is never a formula fallback and remains `full`-only.
 
@@ -98,6 +100,9 @@ exposed by this profile”, not “the Operon plugin is not loaded”. Use `task
 task-focused sessions: its Operon tools remain discoverable while Desktop or
 the Bridge is temporarily unavailable and return a structured unavailable or
 stale status until `operon_status` can refresh the live contract.
+Live-only Operon tools require an explicit `live` or `hybrid-live` registration
+mode. The stdio proxy uses the connected backend's mode from MCP initialization.
+If that backend omits the mode, the proxy exposes only the non-live Operon subset.
 
 ```bash
 node dist/stdio-proxy.js --tool-profile standard

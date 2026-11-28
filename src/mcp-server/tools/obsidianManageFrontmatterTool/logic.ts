@@ -5,6 +5,10 @@ import {
   PatchOptions,
   VaultCacheService,
 } from "../../../services/obsidianRestAPI/index.js";
+import {
+  type FrontmatterReadSignal,
+  resolveReadFrontmatter,
+} from "../../../services/obsidianRestAPI/readFrontmatter.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
   logger,
@@ -64,7 +68,7 @@ export type ObsidianManageFrontmatterInput = z.infer<
   typeof ManageFrontmatterInputSchema
 >;
 
-export interface ObsidianManageFrontmatterResponse {
+export interface ObsidianManageFrontmatterResponse extends FrontmatterReadSignal {
   success: boolean;
   message: string;
   value?: any;
@@ -126,13 +130,8 @@ export const processObsidianManageFrontmatter = async (
   switch (operation) {
     case "get": {
       const note = await getFileWithRetry(context);
-      const frontmatter = note.frontmatter ?? {};
-      const retrievedValue = frontmatter[key];
-      return {
-        success: true,
-        message: `Successfully retrieved key '${key}' from frontmatter.`,
-        value: retrievedValue,
-      };
+      const { frontmatter, ...signal } = resolveReadFrontmatter(note);
+      return { ...frontmatterKeyResponse(frontmatter ?? {}, key), ...signal };
     }
 
     case "set": {
@@ -213,3 +212,11 @@ export const processObsidianManageFrontmatter = async (
       );
   }
 };
+
+export function frontmatterKeyResponse(frontmatter: Record<string, unknown>, key: string): ObsidianManageFrontmatterResponse {
+  return {
+    success: true,
+    message: `Successfully retrieved key '${key}' from frontmatter.`,
+    value: Object.hasOwn(frontmatter, key) ? frontmatter[key] : undefined,
+  };
+}

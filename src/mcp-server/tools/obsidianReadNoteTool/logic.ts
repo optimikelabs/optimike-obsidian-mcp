@@ -1,13 +1,18 @@
 import path from "node:path"; // Using POSIX path functions for vault path manipulation
-import { load } from "js-yaml";
 import { z } from "zod/v3";
 import {
   NoteJson,
   ObsidianRestApiService,
 } from "../../../services/obsidianRestAPI/index.js";
 import { extractInlineTags } from "../../../services/markdownTags.js";
+import { readMarkdownFrontmatter } from "../../../services/readMarkdownFrontmatter.js";
+import {
+  type FrontmatterReadSignal,
+  resolveReadFrontmatter,
+} from "../../../services/obsidianRestAPI/readFrontmatter.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
+import { normalizeVaultSlashes, toVaultPath } from "../../../utils/obsidian/obsidianApiUtils.js";
 import {
   createFormattedStatWithTokenCount,
   logger,
@@ -102,17 +107,21 @@ type FormattedStat = {
  * This object is typically serialized to JSON and sent back to the client.
  */
 export interface ObsidianReadNoteResponse {
+  /** Vault-relative physical spelling, when different and known from the filesystem. */
+  diskPath?: string;
   /**
    * The content of the file in the requested format.
    * If format='markdown', this is a string.
    * If format='json', this is a NoteJson object (which also contains the content string and stats).
    */
-  content: string | NoteJson;
+  content: string | (NoteJson & FrontmatterReadSignal);
   /**
    * Optional formatted file statistics.
    * Included if format='json', or if format='markdown' and includeStat=true.
    */
   stats?: FormattedStat; // Renamed from stat
+  readPath?: "direct-filesystem";
+  observedAt?: string;
 }
 
 // ====================================================================================
@@ -156,52 +165,100 @@ export const processObsidianReadNote = async (
 
   const shouldRetryNotFound = (err: unknown) =>
     err instanceof McpError && err.code === BaseErrorCode.NOT_FOUND;
+  const requestedFilePath = normalizeVaultSlashes(originalFilePath.replace(/^ +| +$/gu, ""));
+  const vaultPath = toVaultPath(requestedFilePath);
+  if (vaultPath.split("/").some((segment) => segment === "." || segment === "..")) {
+    throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Expected a vault path without dot segments.");
+  }
 
-  const readFromSharedCache = async (
+  const verifyAliasContent = async (
+    exactPath: string,
+    note: NoteJson,
+    readContext: RequestContext,
+  ): Promise<void> => {
+    let exactContent: string | NoteJson;
+    try {
+      exactContent = await obsidianService!.getFileContent(exactPath, "markdown", readContext, "literal");
+    } catch (error) {
+      if (shouldRetryNotFound(error)) return;
+      throw error;
+    }
+    if (exactContent !== note.content) {
+      throw new McpError(
+        BaseErrorCode.CONFLICT,
+        "The requested path and its Obsidian alias returned different content.",
+        { reasonCode: "vault_path_alias_ambiguous" },
+      );
+    }
+  };
+
+  const readJson = async (filePath: string, readContext: RequestContext): Promise<NoteJson> => {
+    const exact = normalizeVaultSlashes(filePath);
+    const normalized = toVaultPath(exact);
+    try {
+      return await obsidianService!.getFileContent(exact, "json", readContext, "literal") as NoteJson;
+    } catch (error) {
+      if (!shouldRetryNotFound(error) || normalized === exact) throw error;
+      const note = await obsidianService!.getFileContent(normalized, "json", readContext, "literal") as NoteJson;
+      await verifyAliasContent(exact, note, readContext);
+      return note;
+    }
+  };
+
+  const readFromLocalSource = async (
     requestedPath: string,
   ): Promise<ObsidianReadNoteResponse | null> => {
-    if (!vaultCacheService?.isReady()) {
-      await vaultCacheService?.buildVaultCache();
-      await vaultCacheService?.waitUntilReady();
-    }
+    if (!vaultCacheService) return null;
 
-    if (!vaultCacheService?.isReady()) {
+    const direct = vaultCacheService.isReady()
+      ? undefined
+      : await vaultCacheService.readExactFilesystemNote(requestedPath, context);
+    if (!direct && !vaultCacheService.isReady()) {
+      await vaultCacheService.buildVaultCache();
+      await vaultCacheService.waitUntilReady();
+    }
+    if (!direct && !vaultCacheService.isReady()) {
       return null;
     }
 
-    const matchedPath = vaultCacheService.findMatchingPath(requestedPath);
+    const matchedPath =
+      direct?.path ?? vaultCacheService.findMatchingPath(requestedPath);
     if (!matchedPath) {
       return null;
     }
 
-    const cacheEntry = await vaultCacheService.getEntry(matchedPath);
+    const cacheEntry = direct ?? (await vaultCacheService.getEntry(matchedPath));
     if (!cacheEntry) {
       return null;
     }
 
     effectiveFilePath = matchedPath;
-    const noteJson = buildNoteJsonFromCache(matchedPath, cacheEntry);
+    const diskPath = matchedPath.replace(/^\//u, "");
+    const normalizedPath = toVaultPath(diskPath);
+    const useAlias = !direct && normalizedPath !== diskPath &&
+      vaultCacheService.findMatchingPath(normalizedPath) === matchedPath;
+    const noteJson = buildNoteJsonFromCache(useAlias ? normalizedPath : diskPath, cacheEntry);
+    const pathDetails = useAlias && vaultCacheService.isFilesystemBacked() ? { diskPath } : {};
     const formattedStat = needsFormattedStat ? await createFormattedStatWithTokenCount(
       noteJson.stat,
       noteJson.content ?? "",
       { ...context, operation: "formatSharedCacheResponse", effectiveFilePath: matchedPath },
     ) : undefined;
 
-    logger.info(`Serving ${matchedPath} from shared cache fallback.`, {
+    const source = direct ? "filesystem" : "shared-cache";
+    logger.info(`Serving ${matchedPath} from ${source}.`, {
       ...context,
-      fallbackMode: "shared-cache",
+      fallbackMode: source,
     });
 
-    if (requestedFormat === "json") {
-      return {
-        content: noteJson,
-        stats: formattedStat ?? undefined,
-      };
-    }
-
     return {
-      content: noteJson.content ?? "",
-      stats: includeStat ? formattedStat ?? undefined : undefined,
+      ...pathDetails,
+      content: requestedFormat === "json" ? noteJson : (noteJson.content ?? ""),
+      stats: formattedStat ?? undefined,
+      ...(direct && {
+        readPath: "direct-filesystem" as const,
+        observedAt: direct.observedAt,
+      }),
     };
   };
 
@@ -212,7 +269,7 @@ export const processObsidianReadNote = async (
     const readContext = { ...context, operation: "readFileAsJson" };
     try {
       if (!obsidianService) {
-        const cached = await readFromSharedCache(originalFilePath);
+        const cached = await readFromLocalSource(originalFilePath);
         if (cached) {
           return cached;
         }
@@ -229,12 +286,7 @@ export const processObsidianReadNote = async (
         readContext,
       );
       noteJson = await retryWithDelay(
-        () =>
-          obsidianService.getFileContent(
-            originalFilePath,
-            "json",
-            readContext,
-          ) as Promise<NoteJson>,
+        () => readJson(requestedFilePath, readContext),
         {
           operationName: "readFileWithRetry",
           context: readContext,
@@ -253,7 +305,7 @@ export const processObsidianReadNote = async (
         error instanceof McpError &&
         error.code === BaseErrorCode.SERVICE_UNAVAILABLE
       ) {
-        const cached = await readFromSharedCache(originalFilePath);
+        const cached = await readFromLocalSource(originalFilePath);
         if (cached) {
           return cached;
         }
@@ -272,9 +324,9 @@ export const processObsidianReadNote = async (
 
         try {
           // Use POSIX path functions as vault paths are typically /-separated
-          const dirname = path.posix.dirname(originalFilePath);
+          const dirname = path.posix.dirname(vaultPath);
           const filenameLower = path.posix
-            .basename(originalFilePath)
+            .basename(vaultPath)
             .toLowerCase();
           // Handle case where the file is in the vault root (dirname is '.')
           const dirToList = dirname === "." ? "/" : dirname;
@@ -284,7 +336,7 @@ export const processObsidianReadNote = async (
             fallbackContext,
           );
           const filesInDir = await retryWithDelay(
-              () => obsidianService!.listFiles(dirToList, fallbackContext),
+              () => obsidianService!.listFiles(dirToList, fallbackContext, "literal"),
             {
               operationName: "listFilesForReadFallback",
               context: fallbackContext,
@@ -298,7 +350,7 @@ export const processObsidianReadNote = async (
           const matches = filesInDir.filter(
             (f) =>
               !f.endsWith("/") && // Ensure it's a file, not a directory entry ending in /
-              path.posix.basename(f).toLowerCase() === filenameLower,
+              toVaultPath(path.posix.basename(f)).toLowerCase() === filenameLower,
           );
 
           if (matches.length === 1) {
@@ -312,12 +364,7 @@ export const processObsidianReadNote = async (
 
             // Retry reading the file content using the corrected path
             noteJson = await retryWithDelay(
-              () =>
-                obsidianService!.getFileContent(
-                  effectiveFilePath,
-                  "json",
-                  fallbackContext,
-                ) as Promise<NoteJson>,
+              () => readJson(effectiveFilePath, fallbackContext),
               {
                 operationName: "readFileWithFallbackRetry",
                 context: fallbackContext,
@@ -326,6 +373,9 @@ export const processObsidianReadNote = async (
                 shouldRetry: shouldRetryNotFound,
               },
             );
+            if (requestedFilePath !== vaultPath && requestedFilePath !== effectiveFilePath) {
+              await verifyAliasContent(requestedFilePath, noteJson, fallbackContext);
+            }
             logger.debug(
               `Successfully read file as JSON using fallback path: ${effectiveFilePath}`,
               fallbackContext,
@@ -411,9 +461,13 @@ export const processObsidianReadNote = async (
       // The formatted stats are provided in the top-level 'response.stats'.
       // Local REST's native tag list can include numeric PR references. Recompute
       // from the returned text using the same rules as the shared-cache path.
-      const normalizedContent = (noteJson.content ?? "").replace(/\r\n/g, "\n");
-      const { body } = extractFrontmatter(normalizedContent);
-      response.content = { ...noteJson, tags: extractTags(noteJson.frontmatter ?? {}, body) };
+      const { body } = readMarkdownFrontmatter(noteJson.content ?? "");
+      const resolved = resolveReadFrontmatter(noteJson);
+      response.content = {
+        ...noteJson,
+        ...resolved,
+        tags: extractTags(resolved.frontmatter ?? {}, body),
+      };
       response.stats = formattedStat; // Always include formatted stat at top level for JSON format
       logger.debug(
         `Response format set to JSON, including full NoteJson (with original numeric stat) and top-level formatted stat.`,
@@ -477,7 +531,7 @@ function buildNoteJsonFromCache(
     size: number;
   },
 ): NoteJson {
-  const { frontmatter, body } = extractFrontmatter(entry.content);
+  const { frontmatter, body } = readMarkdownFrontmatter(entry.content);
   return {
     content: entry.content,
     frontmatter,
@@ -491,30 +545,7 @@ function buildNoteJsonFromCache(
   };
 }
 
-function extractFrontmatter(content: string): {
-  frontmatter: Record<string, any>;
-  body: string;
-} {
-  const match = content.match(/^---\n([\s\S]*?)\n---\n?/u);
-  if (!match) {
-    return { frontmatter: {}, body: content };
-  }
-
-  try {
-    const parsed = load(match[1]);
-    return {
-      frontmatter:
-        parsed && typeof parsed === "object" && !Array.isArray(parsed)
-          ? (parsed as Record<string, any>)
-          : {},
-      body: content.slice(match[0].length),
-    };
-  } catch {
-    return { frontmatter: {}, body: content.slice(match[0].length) };
-  }
-}
-
-function extractTags(frontmatter: Record<string, any>, body: string): string[] {
+function extractTags(frontmatter: Record<string, unknown>, body: string): string[] {
   const collected = new Set<string>();
   const frontmatterTags = frontmatter.tags;
   if (Array.isArray(frontmatterTags)) {

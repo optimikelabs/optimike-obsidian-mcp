@@ -5,9 +5,11 @@ import {
   compileToolProfile,
   compileToolProfileNames,
   parseToolProfileId,
+  profileModeFromCapability,
   selectAvailableToolProfileNames,
 } from "../dist/mcp-server/toolProfiles.js";
 import { TOOL_REGISTRATION_MODES } from "../dist/mcp-server/toolSurfaceRegistry.js";
+import toolCatalog from "../evals/tool-catalog.v1.json" with { type: "json" };
 
 const WITH_CACHE = ["vault-cache"];
 
@@ -72,7 +74,7 @@ for (const profile of ["standard", "authoring", "tasks"]) {
       !names.includes("bases_upsert_config"),
       `${profile}/${registrationMode} must keep whole-Base config replacement full-only`,
     );
-    if (registrationMode === "live" || registrationMode === "hybrid-live") {
+    if (["live", "hybrid-live", "headless-guarded", "headless-filesystem"].includes(registrationMode)) {
       assert.ok(
         names.includes("obsidian_list_pending_operations"),
         `${profile}/${registrationMode} lost the readonly operation cockpit`,
@@ -80,7 +82,7 @@ for (const profile of ["standard", "authoring", "tasks"]) {
     } else {
       assert.ok(
         !names.includes("obsidian_list_pending_operations"),
-        `${profile}/${registrationMode} exposed a cockpit without live journals`,
+        `${profile}/${registrationMode} exposed a cockpit without governed note journals`,
       );
     }
     for (const hidden of [
@@ -138,10 +140,23 @@ for (const profile of TOOL_PROFILE_IDS) {
     for (const [family, roles] of lifecycleFamilies) {
       assert.deepEqual(
         roles.sort(),
-        ["note-move", "note-delete", "note-create", "base-create", "canvas-create", "base-rows"].includes(family) ? ["apply", "plan", "status"] : ["apply", "plan", "recover", "status"],
+        ["note-create", "base-create", "canvas-create", "base-rows"].includes(family) ||
+          (["note-move", "note-delete"].includes(family) && registrationMode !== "headless-filesystem")
+          ? ["apply", "plan", "status"] : ["apply", "plan", "recover", "status"],
         `${profile}/${registrationMode} exposes a partial ${family} lifecycle`,
       );
     }
+  }
+}
+
+const filesystemOperationNames = ["move", "delete"].flatMap(kind =>
+  ["plan", "apply", "status", "recover"].map(role => `obsidian_note_${kind}_${role}`));
+for (const mode of ["hybrid-degraded", "headless-readonly", "headless-guarded", "headless-filesystem"]) {
+  for (const requirements of [[], WITH_CACHE]) {
+    const names = compileToolProfileNames({ profile: "full", registrationMode: mode, availableStaticRequirements: requirements });
+    assert.deepEqual(names.filter(name => filesystemOperationNames.includes(name)),
+      mode === "headless-filesystem" && requirements.length ? filesystemOperationNames.slice().sort() : [],
+      `${mode}: filesystem operations require both the filesystem mode and cache`);
   }
 }
 
@@ -162,11 +177,11 @@ for (const profile of ["standard", "authoring"]) {
     registrationMode: "headless-guarded",
     availableStaticRequirements: WITH_CACHE,
   });
-  assert.ok(
-    guarded.includes("obsidian_manage_frontmatter"),
-    `${profile}/headless-guarded must keep the direct frontmatter fallback`,
-  );
-  assert.ok(!guarded.includes("obsidian_frontmatter_patch_plan"));
+  assert.ok(!guarded.includes("obsidian_manage_frontmatter"));
+  assert.ok(guarded.includes("obsidian_frontmatter_patch_plan"));
+  assert.ok(guarded.includes("obsidian_note_create_plan"));
+  assert.ok(!guarded.includes("obsidian_note_replace_plan"));
+  assert.ok(!guarded.includes("obsidian_operation_revert_plan"));
 
   for (const governed of [
     "obsidian_text_patch_plan",
@@ -175,6 +190,7 @@ for (const profile of ["standard", "authoring"]) {
     "obsidian_text_patch_recover",
   ]) {
     assert.ok(live.includes(governed), `${profile}/live lost ${governed}`);
+    assert.ok(guarded.includes(governed), `${profile}/headless-guarded lost ${governed}`);
   }
   assert.ok(!live.includes("obsidian_update_note"));
   assert.ok(!live.includes("obsidian_search_replace"));
@@ -243,7 +259,7 @@ const tasksSnapshot = compileToolProfileNames({
   registrationMode: "headless-readonly",
   availableStaticRequirements: WITH_CACHE,
 });
-assert.equal(tasksSnapshot.length, 14);
+assert.deepEqual(tasksSnapshot, toolCatalog.profiles.tasks.modes["headless-readonly"]);
 for (const required of [
   "operon_status",
   "operon_get_configuration",
@@ -251,6 +267,10 @@ for (const required of [
   "operon_get_task",
   "operon_query_tasks",
   "operon_validate",
+  "operon_get_relationships",
+  "operon_find_tasks",
+  "operon_resolve_task",
+  "operon_query_saved_filter",
   "list_all_tasks",
   "query_tasks",
 ]) {
@@ -260,11 +280,7 @@ for (const required of [
   );
 }
 for (const liveOnly of [
-  "operon_query_saved_filter",
   "operon_get_diagnostics",
-  "operon_find_tasks",
-  "operon_resolve_task",
-  "operon_get_relationships",
   "operon_build_context",
   "operon_get_timer_state",
   "operon_create_task",
@@ -283,6 +299,7 @@ for (const liveOnly of [
 
 const selectedSnapshotTasks = selectAvailableToolProfileNames({
   profile: "tasks",
+  registrationMode: "headless-readonly",
   availableNames: compileToolProfileNames({
     profile: "full",
     registrationMode: "headless-readonly",
@@ -291,8 +308,17 @@ const selectedSnapshotTasks = selectAvailableToolProfileNames({
 });
 assert.deepEqual(selectedSnapshotTasks, tasksSnapshot);
 
+const filesystemTaskTools = compileToolProfileNames({
+  profile: "tasks", registrationMode: "headless-filesystem", availableStaticRequirements: WITH_CACHE,
+});
+const filesystemOperonWrites = ["operon_create_task", "operon_update_task", "operon_transition_task",
+  "operon_list_pending_recoveries", "operon_recover_mutation"];
+assert.deepEqual(filesystemTaskTools.filter(name => name.startsWith("operon_")),
+  [...tasksSnapshot.filter(name => name.startsWith("operon_")), ...filesystemOperonWrites].sort((a, b) => a.localeCompare(b)));
+
 const selectedLiveTasks = selectAvailableToolProfileNames({
   profile: "tasks",
+  registrationMode: "live",
   availableNames: compileToolProfileNames({
     profile: "full",
     registrationMode: "live",
@@ -301,25 +327,38 @@ const selectedLiveTasks = selectAvailableToolProfileNames({
 });
 assert.deepEqual(selectedLiveTasks, tasksLive);
 
-for (const profile of ["standard", "authoring", "tasks", "full"]) {
-  const live = compileToolProfileNames({
-    profile,
-    registrationMode: "live",
-    availableStaticRequirements: WITH_CACHE,
-  });
-  assert.ok(
-    live.includes("obsidian_note_links"),
-    profile + "/live lost M2 note links",
-  );
+for (const mode of TOOL_REGISTRATION_MODES) {
+  const expected = toolCatalog.profiles.tasks.modes[mode];
+  assert.deepEqual(compileToolProfileNames({ profile: "tasks", registrationMode: mode, availableStaticRequirements: WITH_CACHE }),
+    expected, `tasks/${mode} must match the exact checked-in catalogue`);
+  const registrationMode = profileModeFromCapability({ registrationMode: mode });
+  assert.equal(registrationMode, mode);
+  const availableNames = [...toolCatalog.profiles.full.modes[mode]];
+  if (!LIVE_ENGINE_MODES.has(mode)) {
+    availableNames.push("obsidian_note_replace_plan", "operon_get_diagnostics", "operon_create_task");
+  }
+  assert.deepEqual(selectAvailableToolProfileNames({ profile: "tasks", availableNames, registrationMode }),
+    expected, `tasks/${mode} must ignore live-only names advertised outside a live mode`);
+}
+
+for (const capability of [undefined, {}, { registrationMode: "headless-unknown" }, { registrationMode: true }]) {
+  const names = selectAvailableToolProfileNames({ profile: "tasks", availableNames: toolCatalog.profiles.full.modes["headless-filesystem"],
+    registrationMode: profileModeFromCapability(capability) });
+  assert.ok(!names.includes("operon_get_diagnostics") && !names.includes("operon_create_task"));
+}
+
+const noteMetadataReads = ["obsidian_get_frontmatter", "obsidian_note_links"];
+for (const profile of ["standard", "authoring", "tasks", "operational", "full"]) {
+  for (const mode of ["live", "hybrid-live", "headless-readonly", "headless-guarded", "headless-filesystem"]) {
+    const names = compileToolProfileNames({ profile, registrationMode: mode, availableStaticRequirements: WITH_CACHE });
+    for (const name of noteMetadataReads) assert.ok(names.includes(name), `${profile}/${mode} lost ${name}`);
+  }
   const degraded = compileToolProfileNames({
     profile,
     registrationMode: "hybrid-degraded",
     availableStaticRequirements: WITH_CACHE,
   });
-  assert.ok(
-    !degraded.includes("obsidian_note_links"),
-    profile + "/hybrid-degraded exposed Desktop metadata cache",
-  );
+  for (const name of noteMetadataReads) assert.ok(!degraded.includes(name), `${profile}/hybrid-degraded exposed ${name}`);
 }
 
 const standardWithoutCache = compileToolProfileNames({
@@ -337,7 +376,12 @@ const readonlyWithoutCache = compileToolProfileNames({
   registrationMode: "headless-readonly",
   availableStaticRequirements: [],
 });
+assert.deepEqual(readonlyWithoutCache, [
+  "obsidian_list_notes", "obsidian_read_note", "obsidian_runtime_status",
+  "obsidian_validate_format", "smart_semantic_search",
+]);
 for (const absent of [
+  ...noteMetadataReads,
   "obsidian_global_search",
   "bases_list",
   "bases_get_schema",
@@ -345,10 +389,9 @@ for (const absent of [
 ]) {
   assert.ok(!readonlyWithoutCache.includes(absent));
 }
-assert.equal(readonlyWithoutCache.length, 5);
 
 console.log(
-  "PASS: profiles are deterministic, removed semantic aliases stay absent, whole-Base config stays full-only, governed families are atomic, and headless tasks expose only snapshot-safe Operon reads",
+  "PASS: profiles are deterministic, removed semantic aliases stay absent, whole-Base config stays full-only, governed families are atomic, and headless tasks expose filesystem Operon reads and no live-only tools",
 );
 
 // M5 intentionally belongs to authoring/full, not standard/tasks; partial families stay hidden.

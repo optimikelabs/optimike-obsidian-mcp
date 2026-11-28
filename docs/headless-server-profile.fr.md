@@ -13,9 +13,20 @@ Ce profil sert à valider un serveur dédié ou une copie Sync. Il garde une pos
 - Utiliser un vault dédié ou copié, pas le vault Desktop vivant.
 - Garder Obsidian Headless Sync en `pull-only` pour la première validation serveur.
 - Garder Optimike MCP en `headless-readonly` tant que list/read/search/tasks/Bases/status ne sont pas verts.
+- Avec le cache partagé actif, `obsidian_get_frontmatter` lit une clé YAML et `obsidian_note_links` renvoie les liens sortants, les liens non résolus et les backlinks. L’index couvre les wikilinks, les liens et intégrations Markdown locaux et les wikilinks YAML entre guillemets. Il ignore les liens dans le code, les commentaires, les formules en ligne ou en bloc et les éléments HTML. Le comportement des métadonnées Desktop dans le HTML en ligne reste à vérifier.
+- Dans un wikilink headless, `[[` non échappé ouvre un nouveau lien si l’alias courant est inachevé. Les crochets simples sont admis dans les alias. Dans le corps d’une note, les commentaires sont retirés des cibles et des alias. Les positions renvoyées restent celles de la note d’origine.
+- L’index des liens se construit sur un thread séparé après la mise à disposition du cache texte. La lecture, les listes, la recherche et le frontmatter restent disponibles pendant la construction. Durant cette période, `obsidian_note_links` renvoie `SERVICE_UNAVAILABLE` avec `reasonCode: headless_link_index_building` et `retryable: true`.
+- Les grosses notes sont analysées par sections, si possible entre deux paragraphes. Une section peut atteindre quatre fois la taille cible. Pour une ligne qui dépasse cette limite, seuls les wikilinks sont extraits. Une coupe incertaine, un plafond de références ou un dépassement du tas du worker limite la source. Le worker poursuit l’indexation du coffre.
+- Lorsqu’une source limitée concerne la réponse, `indexCoverage.sourceComplete` décrit les liens sortants et non résolus de la note demandée. `backlinksComplete` vaut false si une source limitée contient ou pourrait contenir un lien vers cette note. `limitedSourceCount` compte les sources concernées.
+
+L’index filesystem se règle avec `OBSIDIAN_LINK_LARGE_NOTE_BYTES` (262144 par défaut), `OBSIDIAN_LINK_SECTION_BYTES` (65536), `OBSIDIAN_LINK_MAX_REFERENCES` (8192 par source traitée par sections) et `OBSIDIAN_LINK_BATCH_BYTES` (262144 octets de texte source par lot). Une modification des limites d’extraction entraîne la reconstruction de l’index des liens après la disponibilité du cache texte.
+- Lorsqu’un processus réconcilie le cache texte partagé, l’outil de liens renvoie un motif réessayable qui précise l’état du cache. `headless_link_cache_refreshing` indique un rafraîchissement complet ou périodique en cours. `headless_link_cache_events_pending` indique des événements de fichiers en cours de traitement. `headless_link_cache_uncertain` indique que le cache attend un rafraîchissement réussi.
+- Quand plusieurs chemins Markdown correspondent, la résolution sur disque privilégie le dossier de la note source, puis le chemin le plus court, puis l’ordre alphabétique. Elle indique `resolution.ambiguous: true` lorsqu’elle départage plusieurs candidats. Ce départage reste à confirmer dans Desktop. Les chemins explicites relatifs ou depuis la racine ciblent l’emplacement indiqué. Le scan résout les noms des pièces jointes et les chemins exclus par l’utilisateur sans mettre leur contenu en cache. Les exclusions techniques comme `node_modules`, `dist`, `build`, `tmp` et `coverage` restent hors de l’inventaire. Les chemins commençant par un point exigent une réinclusion explicite de type gitignore.
+- Le comptage regroupe les références par chemin de destination, y compris lorsque leurs fragments diffèrent. La validation des fragments de titre et de bloc est `unknown`. Le headless apparie les balises HTML en ligne à l’intérieur d’un même bloc Markdown. Pour les formules en ligne, il applique la [règle de délimitation de Pandoc](https://pandoc.org/MANUAL.html#extension-tex_math_dollars) et préserve les dollars dans les destinations de liens, les autoliens et les wikilinks. Les règles exactes des métadonnées Desktop pour le HTML en ligne et les délimiteurs dollar restent à vérifier.
+- Le backend filesystem lit le cache partagé, qui peut contenir du Markdown actualisé via Local REST. Après une mise à jour REST, seules les lignes dont l’empreinte a changé sont réindexées, sans rouvrir les notes du coffre. Un changement de racine ou de périmètre d’exclusions impose un nouvel inventaire sur disque.
 - Garder le cache MCP hors du vault synchronisé.
 - Utiliser les exclusions pour le bruit opérationnel, sans prétendre qu’elles bloquent les téléchargements Obsidian Sync.
-- Ne pas promettre la parité Desktop. Move/delete, tags frontmatter ou inline, batch frontmatter, écritures Bases minimales, validation de format et helpers Canvas minimaux existent comme fonctions filesystem/locales bornées, pas comme comportement Obsidian Desktop.
+- Le déplacement, la suppression, les écritures Bases, la validation de format et les outils Canvas minimaux suivent des contrats filesystem bornés.
 
 ## Environnement
 
@@ -31,6 +42,195 @@ MCP_WRITE_MODE=readonly
 OBSIDIAN_VAULT_EXCLUDE_PATTERNS="tmp/**,**/tmp/**,**/screenshots/**,**/*screenshots*/**"
 SEMANTIC_SEARCH_PREWARM=false
 ```
+
+## Provenance des lectures de notes
+
+Dans les trois modes headless, `obsidian_runtime_status` indique le mode
+d’exécution et renvoie `headlessRead.source: "filesystem"`. Le serveur
+lit depuis son cache local sans connexion à Obsidian Desktop.
+`headlessRead.refreshing` signale un scan en attente ou en cours.
+`headlessRead.newestFileMtimeMs` contient la date de modification la plus
+récente parmi les fichiers Markdown indexés par ce processus, ou `null` si
+l’index est vide. `sharedCache.lastRefreshAt` indique la fin du dernier
+rafraîchissement réussi connu de cet index.
+`headlessRead.lastSuccessfulRefreshStartedAt` indique son début. Ce champ
+vaut `null` si le début est inconnu, notamment avec un ancien état SQLite.
+`headlessRead.refreshOrigin`
+indique s’il provient de ce processus (`"process-refresh"`) ou de l’état
+SQLite chargé au démarrage (`"startup-snapshot"`). Chaque processus conserve
+son propre repère pendant les scans des autres serveurs. Les dates sont
+exprimées en millisecondes depuis l’époque Unix.
+
+`obsidian_read_note`, `obsidian_list_notes` et `obsidian_global_search`
+renvoient un objet `provenance` pour les lectures réussies et les erreurs de
+disponibilité lorsque le cache headless est activé, y compris en mode
+compact. Il contient `source: "filesystem"`, `refreshOrigin` quand
+l’origine est connue, `lastSuccessfulRefreshStartedAt` et `lastRefreshAt`.
+`partial: true` signifie que les résultats peuvent être incomplets.
+Ce champ apparaît aussi quand une requête attend la fin du premier scan.
+`refreshing: true` signale une activité de rafraîchissement pendant la
+requête, même si le scan se termine avant la réponse.
+
+La fenêtre `maintenant − lastSuccessfulRefreshStartedAt` couvre les
+modifications sur disque que le scan a pu manquer en raison de son
+déroulement, y compris juste après un redémarrage qui réutilise l’état
+SQLite. Un fichier peut changer entre sa lecture et la fin du scan. Les
+fichiers peuvent être observés à des moments différents. Cette fenêtre
+décrit uniquement le déroulement du scan.
+
+## Preuve de synchronisation amont
+
+Le statut runtime, la provenance des lectures et les deux endpoints HTTP
+exposent `upstreamSync`, `lastSuccessfulPullAt`, `lagSecondsUpperBound` et
+`evidenceSource`. Le champ HTTP `freshnessScope: "local-cache"` et les codes de
+readiness restent liés à la lecture locale. Comparez la dernière synchronisation
+au début du scan pour savoir si le cache MCP a observé ses changements.
+`lagSecondsUpperBound` arrondit à la seconde supérieure le temps écoulé depuis
+le **début** de la dernière synchronisation réussie. Cette borne porte sur
+l’âge de l’observation du coffre distant. Les modifications non envoyées par
+un appareil, les fichiers exclus et les appareils déconnectés échappent à
+cette mesure.
+
+| Signal | Donnée exploitable |
+| --- | --- |
+| Exécution ponctuelle de `ob sync` | Une sortie normale à zéro marque la fin de la passe, même sans téléchargement. Un code non nul, une interruption ou un délai dépassé marque un échec. |
+| `ob sync --continuous` | La présence du processus signale son exécution. Sa sortie ne prouve pas un pull réussi. |
+| `ob sync-status --json` | Configuration exploitable par programme, sans date documentée de dernier pull réussi ni repère côté serveur. |
+| Journaux CLI et Sync | Diagnostic humain, sans schéma stable de corrélation, de fin ou d’horodatage. |
+| Fichiers d’état internes et dates des notes | Aucun schéma stable ni date de pull documentés. Les fichiers répliqués peuvent conserver les dates d’origine. |
+
+Voir [Obsidian Headless Sync](https://obsidian.md/help/sync/headless),
+[la référence CLI](https://github.com/obsidianmd/obsidian-headless#commands) et
+[les conflits Sync](https://obsidian.md/help/sync/troubleshoot).
+
+Définissez `OBSIDIAN_SYNC_HEARTBEAT_FILE` avec un chemin absolu hors du coffre,
+dans un dossier contrôlé par l’opérateur. Le lecteur attend le
+[reçu JSON versionné](headless-server-profile.md#upstream-sync-evidence).
+Écrivez d’abord un fichier temporaire voisin, puis remplacez le reçu en une
+opération atomique. Le script livré crée un reçu privé. Utilisez le même
+compte dédié pour MCP et le script, ou des permissions qui donnent au compte
+MCP la lecture à chaque remplacement.
+
+Le reçu v2 contient `vaultBinding`, le SHA-256 du chemin réel absolu du coffre
+en UTF-8, sans retour à la ligne. Un reçu d’un autre coffre ou un ancien reçu
+sans empreinte donne `unknown`. Utilisez des dates ISO UTC avec millisecondes.
+L’état du reçu est `running`
+au démarrage, `ok` après réussite, ou `error` après échec. Conservez le dernier
+`lastSuccessfulPull` au démarrage et en cas d’échec, ou laissez `null` jusqu’à
+la première réussite. Le backend renvoie `unknown` si la preuve est absente,
+illisible, datée dans le futur, incohérente ou si aucun pull réussi n’a été
+observé. Le délai `OBSIDIAN_SYNC_STALL_SECONDS` (600 par défaut) donne
+`stalled` si le reçu n’est plus actualisé. Un reçu récent signalant un échec
+donne `error`. Sinon, un pull réussi dans la fenêtre
+`OBSIDIAN_SYNC_CURRENT_SECONDS` (180 par défaut) donne `current`, puis
+`lagging` au-delà. Une exécution en cours peut conserver l’état établi par
+la dernière passe réussie.
+
+`OBSIDIAN_SYNC_WRITE_MAX_AGE_SECONDS` active le garde-fou d’écriture
+optionnel. Une écriture headless renvoie `upstream_sync_write_blocked` face
+à un état `unknown`, `stalled`, `error` ou à un pull trop ancien. L’erreur
+inclut `upstreamSync` et le code `syncWriteRefusal`. Les
+lectures, les simulations et les préconditions existantes restent
+applicables. Le statut runtime et `/statusz` authentifié listent les chemins
+relatifs des `syncConflictFiles` indexés, selon le motif Markdown daté
+d’Obsidian, avec une limite de 100 et le total `syncConflictCount`. La fusion
+automatique par défaut d’Obsidian ne crée aucun fichier de conflit. Une liste
+vide indique seulement qu’aucun fichier indexé ne correspond au motif.
+`/readyz` public ne contient aucun nom de note.
+
+Le script livré `scripts/obsidian-sync-heartbeat.mjs` exécute une passe du CLI
+avec un délai maximal et écrit le reçu. Planifiez-le sous le compte ayant
+déjà exécuté `ob sync-setup`. Utilisez un seul service Sync par coffre, en
+`pull-only` pour une réplique en lecture seule. Voir les
+[exemples de déploiement](../OPERATIONS.fr.md#services-sync-et-index-sémantique-headless).
+
+## Operon sans Desktop
+
+Choisissez `MCP_TOOL_PROFILE=tasks`, `operational` ou `full`. Dans les trois modes headless, `operon_list_tasks`, `operon_query_tasks`, `operon_get_task`, `operon_find_tasks`, `operon_get_relationships`, `operon_get_configuration`, `operon_status` et `operon_validate` lisent la copie synchronisée. `operon_query_saved_filter` prend un ID exact obtenu via `operon_get_configuration`.
+
+Le lecteur analyse le Markdown du cache. Il reconnaît les cases inline avec un `operonId` et des champs `{{clé:: valeur}}`, ainsi que les tâches fichier identifiées par leur frontmatter YAML. Un dossier comme `_Operon` sert de destination de création. Une tâche fichier peut se trouver ailleurs. Les deux formats portent les identifiants, dates, règles et occurrences de récurrence, relations stockées et champs gérés. Le lecteur ignore les blocs de code clôturés et les commentaires. L’indentation seule ne définit pas de parent.
+
+Synchronisez `.obsidian/plugins/operon/data.json` avec les notes. Ce fichier fournit les pipelines, identifiants et indicateurs de statut terminal, priorités, correspondances de champs, dossiers exclus, réglages de création et filtres enregistrés. Le lecteur accepte les réglages à plat et les paquets versionnés (2 et 3). En l’absence du fichier, il peut lire les champs canoniques, et les outils de configuration et de filtres renvoient `operon_filesystem_configuration_missing`. Le manifeste du plugin fournit sa version s’il est présent. Les épingles peuvent venir du paquet ou de l’ancien fichier `state/pinned-tasks.json`. Les index d’exécution, minuteurs actifs, automatismes de récurrence, rappels, numéros de série et caches de calendrier restent gérés par le plugin.
+
+La [documentation de stockage d’Operon](https://www.operon.cc/docs/docs-046-plugin-data-and-state-files/) décrit les fichiers JSON de récurrence et de minuteurs, les enregistrements de livraison des rappels et l’index d’exécution reconstructible.
+
+Chaque lecture indique `source: "filesystem"`, `freshness`, `cacheStatus`, `lastRefreshAt`, `lastRefreshCompletedAt` et `partial`. Avec `partial: true`, l’index est incomplet pendant le démarrage, une actualisation ou une erreur du cache. Quand l’outil propose `forceRefresh`, ce paramètre actualise l’index partagé depuis le disque. L’actualisation ne prouve pas que Desktop ou Sync est actif.
+
+Les anciens réglages sans liste de pipelines permettent la lecture des tâches et signalent que la résolution des statuts de workflow est indisponible. Si le serveur utilise un autre fuseau que Desktop, renseignez le fuseau IANA du coffre dans `OPERON_TIMEZONE`. Le lecteur consulte cette variable puis le réglage du plugin s’il existe. Une valeur non vide et invalide de `OPERON_TIMEZONE` empêche le démarrage. La variable `TZ` influe sur le fuseau serveur et déclenche toujours l’avertissement en l’absence de fuseau Operon configuré. Il applique le même fuseau aux horodatages des fichiers et aux dates relatives. Les réponses indiquent `timeZone` et `timeZoneSource`. Elles contiennent aussi `timeZoneWarning` si le lecteur utilise le fuseau par défaut du serveur ou se replie sur UTC quand ce fuseau est indisponible.
+
+Le finder classe les résultats localement en s’appuyant sur les dates stockées. Les relations lues comprennent les liens stockés, leurs inverses et la hiérarchie qui en découle. La validation, les scores du finder, les révisions et les métadonnées de configuration peuvent différer de Desktop. Le diagnostic des capacités indique que la lecture Operon est prête lorsque le cache est prêt et que `data.json` est valide. Les relations inférées par le moteur, la découverte des modèles de dossier et les minuteurs exigent Desktop. L’outil de compatibilité pour les minuteurs renvoie `operon_filesystem_live_required`. Les filtres enregistrés prennent en charge les groupes imbriqués, les arborescences de dossiers ainsi que les conditions usuelles sur les cases, textes, dates, listes, tags et épingles persistées. Comme dans Operon 4.6, `thisWeek` couvre du lundi au dimanche. En tri croissant, les dates vides passent en premier. Les statuts vides passent en dernier dans les deux sens. Le tri par dossier laisse la main au critère suivant ou conserve l’ordre d’entrée. Les champs, opérateurs ou tris non pris en charge renvoient `operon_filesystem_filter_unsupported`.
+
+La liste utilise le niveau `warm` du Bridge Developer API V1 et les identifiants canoniques de priorité. Elle omet la progression native des cases. Pour une tâche fichier, le lecteur peut utiliser la date de création du fichier. Il signale alors qu’elle peut correspondre à l’arrivée de la copie synchronisée. Comme Operon 4.6, le lecteur retient la plus récente entre la date de modification stockée et le `mtime` converti dans le fuseau retenu. Une tâche inline utilise sa propre date de modification stockée. L’index ignore les chemins masqués et applique les exclusions Operon aux fichiers disponibles dans le cache partagé. Les exclusions du cache peuvent réduire ce périmètre, ce que signale la réponse. Les filtres groupés et dynamiques renvoient une erreur explicite, et les curseurs sont liés à la génération qui les a produits.
+
+En headless, `operon_get_configuration` explique les écarts connus dans `configurationDifferences`. Le lecteur ajoute les sept champs fixes du catalogue Developer API et dérive les modèles de tâche fichier minimaux à partir des pipelines. Il signale les modèles de dossier de Desktop comme `unknown`. Il conserve le sens de synchronisation des champs ainsi que la langue, les cibles des tâches parentes et les réglages d’index et de documentation stockés. Il lit les filtres sur disque, y compris lorsque le Bridge 0.9.9 lit `filters` au premier niveau du catalogue et qu’Operon 4.6 publie les définitions dans `policies.filters`.
+
+### Mutations Operon gouvernées
+
+`headless-filesystem` reprend les schémas de `operon_create_task`,
+`operon_update_task`, `operon_transition_task`, `operon_list_pending_recoveries`
+et `operon_recover_mutation`. Il exige Operon 4.6.0, les noms canoniques des
+champs scalaires, un cache complet et la politique de dates des écritures
+Markdown gouvernées. L’échange atomique est obligatoire, même si le repli
+avec absence transitoire est activé pour d’autres outils. L’application exige
+`OPERON_MUTATIONS_ENABLED=true` et une politique MCP autorisant l’écriture.
+
+| Outil | Périmètre sur disque |
+| --- | --- |
+| `operon_create_task` | Ajout d’une tâche inline indépendante à la fin d’une note existante passée dans `task.targetPath` |
+| `operon_update_task` | Description ou tags inline. Priorité, échéance et date de démarrage sur une tâche inline canonique ou une tâche-fichier à propriétés scalaires simples. Une chaîne vide efface un champ scalaire pris en charge |
+| `operon_transition_task` | Statut configuré, identifiant stable ou intention du pipeline de la tâche. Un statut terminal règle la case et la date locale de fin ou d’annulation |
+| `operon_resolve_task` | Identifiant, emplacement exact, chemin, nom ou recherche textuelle locale. Les ambiguïtés sont signalées |
+| `operon_list_pending_recoveries` / `operon_recover_mutation` | Réconciliation du même plan dans le journal. La récupération accepte `recovery.kind="developer-api"` en politique d’écriture complète. Les deux appels exigent une liste de préfixes Operon vide |
+
+Lancer une simulation et utiliser une autre clé d’idempotence pour
+l’application. La simulation peut sceller un aperçu sous `MCP_WRITE_MODE=readonly`
+sans modifier le coffre. Une transition vers le statut courant ou l’effacement
+d’un champ absent renvoie `noChange` et un objet `fieldValues` vide. En cas de
+perte de réponse, relire le résultat avec la même requête et sa clé d’application,
+ou réconcilier la référence renvoyée. Si un autre appareil modifie la note
+après une interruption avant la mise en place des octets à publier, la reprise
+enregistre un `CONFLICT` définitif et préserve la modification. La
+révision issue de la lecture lie les octets de la note et la configuration.
+Une modification concurrente déclenche `CONFLICT`. Les reçus indiquent
+`source: "filesystem"`. Les dates de la tâche utilisent
+`OPTIMIKE_VAULT_TIMEZONE`. Régler cette valeur sur le fuseau des appareils qui
+exécutent Obsidian. Operon utilise l’heure locale du processus Desktop. La date de modification de la note suit la
+politique de dates des écritures gouvernées.
+
+Le mode sur disque refuse les tâches récurrentes, suivies par un minuteur ou
+reliées à d’autres tâches, ainsi que les transitions susceptibles de déclencher
+un déplacement, un archivage, un désépinglage ou une mise à jour de la
+numérotation des projets. La création de tâches-fichiers, le routage
+automatique, les modèles, les champs complexes et les propriétés non gérées
+exigent Desktop. Les dates-heures de début et de fin, l’estimation et toute
+mise à jour d’une tâche avec un début ou une fin de créneau enregistrés
+exigent aussi Desktop. Operon peut en déduire une date planifiée, une heure de
+fin et d’autres effets de workflow. Voir les [règles de planification d’Operon 4.6.0](https://github.com/hasanyilmaz/operon/blob/4.6.0/src/core/scheduling-rules.ts).
+Les profils de compatibilité signalent aussi cette exigence
+pour l’adoption (conversion des métadonnées Tasks), les notes quotidiennes ou
+hebdomadaires (routage et réalignement), les mises à jour par lot (plusieurs
+sources), les épingles (état du plugin), les relations (liens réciproques et
+agrégats), la récurrence (séries et occurrences suivantes), les déplacements et
+les conversions (plusieurs sources).
+
+Après le build, `node scripts/test-operon-headless-writes.mjs` compare les
+octets produits aux captures synthétiques du moteur d’écriture et du
+sérialiseur inline d’Operon 4.6.0. Les captures de tâches-fichiers utilisent le
+substitut YAML des tests amont. `stringifyYaml` d’Obsidian et la parité de bout
+en bout avec Desktop et le Bridge restent à vérifier. Comme Operon, le mode
+headless refuse un BOM avant le frontmatter d’une tâche-fichier avec
+`malformed-frontmatter`. Il conserve le BOM inline et les fins de ligne
+d’origine. Desktop peut réécrire des lignes modifiées ou du frontmatter en LF.
+
+### Banc de parité Operon
+
+Lancez `npm run build` puis `npm run test:operon-headless` pour exercer MCP sur un coffre synthétique avec un Bridge Local REST simulé. Pour une comparaison manuelle, ouvrez une copie jetable dans Desktop, activez Operon et le Bridge en lecture seule, puis attendez la fin de l’indexation. Ajoutez à la racine `operon-parity-copy.md` avec une seule ligne `operon-parity-copy: <nouvel UUID>`. Renseignez `OPERON_PARITY_LOCAL_REST_URL` avec l’adresse locale et `OPERON_PARITY_LOCAL_REST_KEY` avec sa clé, puis lancez la commande suivante.
+
+```bash
+node scripts/operon-headless-parity.mjs /chemin/vers/copie-jetable
+```
+
+Réservez `OPERON_PARITY_VERIFY_SSL=false` au certificat autosigné d’une adresse locale. Le script vérifie le marqueur via REST, utilise des caches temporaires privés, parcourt les pages d’`operon_list_tasks` des deux côtés et compare la configuration et la validation. Il vérifie la première page du finder, les relations à une profondeur de un pour dix tâches au plus et la première page de chaque filtre enregistré. Il compte à part les écarts de configuration connus et les comparaisons indisponibles. Il ignore les versions, les révisions, le type de source et le champ de transport `sourceMtime`. Un écart inattendu renvoie un code de sortie non nul. Gardez la copie stable pendant la comparaison.
 
 ## Validation
 
@@ -62,7 +262,9 @@ Le smoke serveur vérifie que :
 - `obsidian_runtime_maintenance refresh_all` fonctionne ;
 - le status runtime confirme la politique `readonly` ;
 - list/read/tasks passent sur le vault ;
-- le fallback local Bases est disponible.
+- la liste et le schéma des Bases sont disponibles localement. Les lignes d’une
+  Base nécessitent Obsidian et le Bases Bridge. En headless, `bases_query` exige
+  `property_only: true` pour [parcourir les propriétés des notes Markdown en cache](../OPERATIONS.fr.md#dépendances-requises).
 
 ## Écritures guarded
 
@@ -71,7 +273,7 @@ Seulement après validation du profil serveur en lecture seule :
 1. Passer une copie ou un vault dédié en `OBSIDIAN_RUNTIME_MODE=headless-guarded`.
 2. Garder `MCP_WRITE_MODE=guarded`.
 3. Créer uniquement un nouveau brouillon sandbox.
-4. Exiger `expectedHash` ou `expectedMtime` pour les modifications suivantes.
+4. Sceller les modifications suivantes avec les outils de patch gouvernés.
 5. Confirmer que hash périmé et path traversal sont bloqués.
 
 Avant un test d'écriture, créer un snapshot du vault dédié :
@@ -86,14 +288,182 @@ Le snapshot ne remplace pas une vraie sauvegarde, mais donne un rollback local r
 
 Seulement après le palier `headless-guarded`, passer une copie ou un vault dédié en `OBSIDIAN_RUNTIME_MODE=headless-filesystem`.
 
-1. Pour move/delete, exiger `expectedHash` ou `expectedMtime`.
-2. Pour tags, limiter le contrat au texte Markdown : `tags` dans le frontmatter YAML, `#tags` inline et index local depuis le cache.
-3. Pour batch frontmatter, garder le dry-run par défaut et n’autoriser que `set`.
-4. Pour Bases, limiter le contrat aux fichiers `.base` YAML et aux propriétés frontmatter des notes.
-5. Pour Canvas, limiter le contrat à la structure JSON Canvas : create, ajout de nœud texte, connexion de nœuds, validation.
-6. Valider avec `npm run smoke:headless-filesystem`.
+1. Utiliser les opérations gouvernées ci-dessous. Les outils de compatibilité exigent `expectedHash` ou `expectedMtime`.
+2. Les outils filesystem Bases créent et configurent les fichiers `.base` YAML. Pour éditer les propriétés d’une ligne, utilisez le patch frontmatter gouverné. `bases_upsert_rows` exige le mode live.
+   `bases_query.filter` accepte les tables de propriétés comme `{"status":"open"}`
+   et les groupes `and`, `or` et `not` contenant des tables ou des expressions
+   simples. Un nœud non pris en charge ou une chaîne à la racine renvoie
+   `VALIDATION_ERROR`. [Voir la syntaxe du filtre](../plugins/obsidian-bases-bridge/README.md#requêtes-query).
+3. Pour Canvas, limiter le contrat à la structure JSON Canvas : create, ajout de nœud texte, connexion de nœuds, validation.
+4. Valider avec `npm run smoke:headless-filesystem`.
+
+Voir [Modes runtime](../OPERATIONS.fr.md#modes-runtime) pour l’ordre des écritures
+sur un même fichier, la détection des conflits et le risque de concurrence
+avec d’autres processus.
 
 Ne jamais utiliser cette phase pour modifier des notes de production existantes tant que le profil serveur n’a pas son propre rollback et monitoring.
+
+## Écritures Markdown gouvernées
+
+`headless-guarded` expose `obsidian_text_patch_*`, `obsidian_frontmatter_patch_*`,
+`obsidian_note_create_*` et `obsidian_list_pending_operations` dans les profils
+qui permettent d’écrire. `headless-filesystem` ajoute `obsidian_note_replace_*`
+et `obsidian_operation_revert_*`. Les familles de notes reprennent les mêmes
+appels plan, apply, status et recover qu’en live. La création utilise plan,
+apply et status.
+Les ajouts directs, la recherche avec remplacement et l’édition directe du
+frontmatter et des tags sont réservés au mode live. En headless, utilisez les
+patches gouvernés. L’édition directe du frontmatter par lot est retirée.
+
+Le plan lie le coffre et le SHA-256 des octets lus sur disque, ou l’absence du
+chemin pour une création. Apply réutilise la référence scellée et la clé
+d’idempotence. L’autorité filesystem sérialise les processus qui partagent le
+verrou local. Pour une note existante, elle synchronise le fichier temporaire
+et échange son nom avec celui de la cible en un appel système. La voie Linux
+utilise `renameat2(RENAME_EXCHANGE)` et la voie macOS `renamex_np(RENAME_SWAP)`
+sur les volumes compatibles. Le chemin reste présent pendant l’échange.
+Une création utilise un lien physique exclusif et préserve une cible existante.
+
+Le plan vérifie l’échange atomique avec deux fichiers temporaires vides dans le
+dossier cible et les retire avant de rendre la main. Si la plateforme ou le volume
+ne permet pas l’échange atomique, le remplacement est refusé par défaut. Sous Windows, une lecture concurrente a observé une
+absence pendant un appel `ReplaceFileW` réussi avec sauvegarde. Windows refuse
+donc aussi le remplacement par défaut. Sur un coffre sans synchronisation
+bidirectionnelle active, l’option `MCP_HEADLESS_ALLOW_TRANSIENT_ABSENCE=true`
+autorise l’ancienne séquence de déplacement puis de publication exclusive.
+**Ne pas utiliser cette option avec une synchronisation bidirectionnelle active.**
+Cette séquence expose une absence. Sous Windows, elle réessaie les erreurs de
+partage pendant environ trois secondes et revérifie le hash à chaque tentative.
+
+Le contrôle final compare les octets déplacés au hash scellé et relit le fichier publié. Le reçu
+identifie `headless-filesystem`. Si une édition externe a été déplacée et que la
+cible contient encore le fichier temporaire inchangé, un second échange atomique
+rétablit l’édition et clôt l’opération en `conflict`. Le journal conserve la
+version préparée. Si une autre écriture intervient autour du second échange,
+le journal garde les versions disponibles. Le motif
+`headless_displaced_edit` signale un reçu `outcome_unknown` quand le fichier
+préparé est encore en place ou quand le second échange a lui-même déplacé une
+édition et que la cible rétablie est intacte. En mode `full`,
+utilisez `obsidian_operation_revert_plan/apply` avec la référence du plan initial
+pour rétablir l’édition déplacée octet pour octet. Le retour arrière lie le hash
+observé. Si une édition plus récente est déjà dans la note, l’opération se clôt
+en `conflict` et garde les versions au journal sans proposer de retour arrière. Un programme qui
+garde l’ancien fichier ouvert peut encore l’écrire après son dernier contrôle.
+Si le retour arrière remplace une autre édition concurrente, le statut et le
+plan l’indiquent dans `replacesConcurrentEdit` avec son SHA-256 et son horodatage
+d’observation. L’heure de modification du fichier est fournie lorsqu’elle est
+disponible. Pour rétablir l’édition remplacée, passez le `planRef` du retour
+arrière appliqué à `obsidian_operation_revert_plan`. Le nouveau plan vérifie
+le hash de la version en place avant de la remplacer.
+
+Placez le cache partagé hors du coffre. Le journal est créé à côté du cache
+par défaut, d’après l’identité du coffre quel que soit le mode headless, ou
+dans le répertoire d’état local si le cache est dans le coffre. Le verrou par
+coffre est dans l’état local indépendamment du chemin du journal. Les processus
+qui coopèrent partagent cet état. `MCP_HEADLESS_GOVERNED_JOURNAL_PATH` accepte
+un chemin absolu hors du coffre. Le journal conserve les versions antérieures
+et les divergences traitées pendant 30 jours. Protégez-le comme les données du coffre.
+Si le verrou du chemin reste occupé pendant 15 secondes, apply renvoie le motif
+réessayable `headless_vault_lock_busy`. Le statut indique `failed` et la tentative
+n’a effectué aucune écriture. Une fois le verrou libéré, utilisez un nouveau
+plan et une nouvelle clé d’idempotence.
+
+Gardez les réglages `.obsidian` disponibles avec la liste des extensions
+actives et les réglages de Frontmatter Date Manager. L’autorité lit les noms
+de propriétés, le format local pris en charge (minute ou seconde) et les
+règles d’exclusion dans l’ordre. Elle respecte les dossiers Templates et
+Templater. La création prend l’heure de l’application pour une note neuve, ou la date
+de naissance du fichier quand une note existante n’a pas encore ce champ.
+Définissez `OPTIMIKE_VAULT_TIMEZONE` sur le fuseau IANA des appareils qui
+éditent le coffre. Réglez le `TZ` du processus sur le même fuseau. Un fuseau
+déclaré dans l’extension doit également correspondre. Si vous utilisez le lecteur
+Operon headless, réglez `OPERON_TIMEZONE` sur la même valeur. `TZ` seul ne suffit
+pas à valider la politique. L’autorité écrit les
+dates YAML sans guillemets et respecte le périmètre de détection des changements,
+l’exclusion de Canvas.md et le réglage Excalidraw. Une édition pendant l’intervalle
+minimal est appliquée et conserve la date de modification précédente.
+L’agent ne fournit aucune des valeurs gérées par l’extension. Des réglages
+absents ou non pris en charge ferment la voie d’écriture.
+Le compilateur headless valide le YAML local et préserve le BOM et les fins
+de ligne. En live, Desktop fournit la sérialisation YAML et les types natifs.
+
+Après une interruption, appelez status avec la référence d’origine. Il peut
+clore une écriture jamais publiée ou nettoyer le lien temporaire après une
+création. Une interruption pendant l’échange natif laisse un fichier complet
+à la cible. Le démarrage réconcilie aussi son fichier temporaire journalisé avant
+de servir les outils et retire les fichiers de sonde vides dont le nom correspond
+exactement au motif, à la racine et dans les dossiers visibles. Avec l’ancienne séquence activée, le démarrage et le premier statut
+rétablissent un original absent depuis sa sauvegarde par un lien exclusif et
+signalent un conflit. Une écriture déjà
+préparée ne se rejoue pas. Pour annuler une écriture terminée, planifiez un
+retour arrière en
+indiquant le chemin et la référence d’origine, puis appliquez ce nouveau plan.
+Le hash doit toujours correspondre au résultat de l’écriture d’origine.
+Une note existante retrouve son contenu antérieur avec la politique de dates
+en vigueur. Annuler une création rétablit l’absence du chemin et exige
+`MCP_WRITE_MODE=full` ainsi qu’un journal sur le même système de fichiers.
+
+### Déplacement et corbeille gouvernés
+
+En `headless-filesystem`, avec le cache filesystem et `MCP_WRITE_MODE=full`,
+appeler `obsidian_note_move_plan` avec les chemins exacts de départ et d’arrivée
+et une clé d’idempotence. Il inspecte les liens Markdown indexés et les embeds
+de pièces jointes. Il préserve la syntaxe et les libellés déjà présents, y
+compris dans les scalaires YAML. Il ajuste les liens sortants de la note
+déplacée si leur cible change, et refuse une opération qui détournerait un
+lien résolu depuis une autre note. L’aperçu est plafonné. Au-delà de 100 notes
+à réécrire ou de 100 sources de backlinks pour une suppression, le plan renvoie
+`headless_backlink_limit`. La vérification de sécurité examine séparément
+jusqu’à 1 000 notes candidates, y compris les liens vers le nom de destination.
+Au-delà, elle renvoie `headless_backlink_inspection_limit`. Les plans utilisent
+le même découpage que l’index des liens. Si une source incomplète peut affecter
+les chemins du plan, l’outil renvoie `headless_link_coverage_incomplete`.
+Un déplacement avec `alwaysUpdateLinks: false` reste possible. Le plan sonde la
+création exclusive de liens physiques avant de sceller l’opération. Appliquer
+avec la clé d’origine. Un plan périmé renvoie `headless_plan_stale`.
+
+`app.json` pilote l’actualisation via `alwaysUpdateLinks` et la forme des chemins
+via `newLinkFormat`. `useMarkdownLinks` concerne les liens générés. Le
+déplacement conserve les wikilinks et liens Markdown dans leur syntaxe
+d’origine. Voir les [réglages d’Obsidian](https://obsidian.md/help/settings#files-and-links).
+
+Appeler `obsidian_note_delete_plan` pour examiner les liens entrants. S’il en
+existe, soumettre un nouveau plan avec `acknowledgeBacklinks: true` après les
+avoir examinés. L’application déplace le fichier dans un emplacement libre
+sous `.trash` par défaut. Le MCP accepte aussi `trashFolder` ou `trashFolderPath`
+comme chemin local de remplacement. Il refuse les valeurs explicites
+`trashOption: "system"` et `trashOption: "none"`. Sans ce réglage, le MCP choisit
+la corbeille du coffre pour fournir une destination restaurable sans accès à
+la corbeille système. [Obsidian Desktop utilise par défaut la corbeille système](https://obsidian.md/help/manage-notes).
+
+Les deux opérations actualisent les chemins touchés dans le cache et l’index.
+Le reçu de vérification s’appuie sur une relecture. Les appels de statut
+suivants rendent la preuve de fin d’opération avec `cache: "recorded"` et
+`postflightSource: "recorded"`. Après une interruption,
+appeler `*_status` puis `*_recover` avec la même référence et clé si
+`recoveryAllowed` est vrai. Si une édition externe empêche la reprise,
+`abandonAllowed` permet d’appeler `*_recover` avec `action: "abandon"`.
+Le verrou est libéré pour une réparation manuelle. Le reçu conserve
+`nextAction: "manual_repair"` et fournit dans `repairProofs` les chemins,
+empreintes SHA-256 et éditions inverses. Les plages UTF-16 visent le fichier
+réécrit, de la fin vers le début. Vérifier `afterSha256` avant de les appliquer.
+Le journal privé conserve le texte d’avant dans `headless_file_operations.payload.rewrites`.
+Sans effet publié, l’opération se règle en conflit et libère son verrou. La
+reprise ou l’abandon supprime les fichiers de préparation encore accessibles.
+
+La sonde des liens physiques utilise ses propres fichiers temporaires sur le
+même système de fichiers et peut renvoyer `hard_links_unsupported`. Un seul
+balayage tourne en arrière-plan au démarrage. La reprise vérifie la racine du
+coffre et les dossiers sur les chemins du plan. Une ancienne sonde avec un seul
+lien est conservée. Le statut liste ces chemins dans
+`probeCleanup.orphanedLegacyProbes` pour examen manuel. Chaque remplacement est atomique. Les autres
+processus ne partagent pas les verrous, et plusieurs remplacements peuvent
+être visibles en cours d’opération. Ce parcours s’applique à un coffre copié
+ou dédié. L’[ADR](adr/ADR-External-Reference-Integrity.md#vault-only-moves)
+précise la distinction avec le déplacement de documents externes.
+
+`operational` privilégie ces outils. Le profil `full` conserve également les
+anciens outils directs dont le contrôle hash/mtime porte sur un seul fichier.
 
 ## Décision go/no-go serveur
 

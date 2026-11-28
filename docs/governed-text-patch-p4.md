@@ -57,6 +57,67 @@ window can be reconciled; every other body or frontmatter drift remains
 fail-closed. Cache data is refreshed after an independently established commit
 and is never CAS evidence.
 
+## Import one offline proposal
+
+Before going offline, capture the vault-relative path and the `sha256` returned
+by the authenticated Bridge read `POST /extensions/obsidian-atomic-write-bridge/notes/read`
+with `contractVersion: 1` and the target `path`. This hashes the text read by
+Obsidian, whose handling of a UTF-8 BOM can differ from hashing raw file bytes.
+Capture the live Atomic Write `bindingFingerprint` from that read or from
+`backend.bindingFingerprint` in `GET /extensions/obsidian-atomic-write-bridge/status`.
+A detailed receipt for an existing governed
+plan also reports its binding and the hash of its sealed before state.
+
+Pass the version 1 JSON directly as the arguments to `obsidian_text_patch_plan`
+when the authority is back. Replace both sample digests with the captured values.
+
+```json
+{
+  "path": "Projects/Example.md",
+  "idempotencyKey": "optimike:proposal:v1:example-01",
+  "operations": [{ "op": "append_body", "text": "Follow up on the draft.\n" }],
+  "proposal": {
+    "version": 1,
+    "bindingFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "baseSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+}
+```
+
+The suffix of the reserved key is the proposal ID (1–64 lowercase ASCII
+letters, digits or hyphens, starting with a letter or digit). Use a fresh ID
+for a different intent, even on another note. Version 1 takes only body
+operations, with the usual task protection and separately announced native
+frontmatter normalization. Import reads the live note and writes only to the
+operation journal. It refuses notes that require creation-date preparation or
+whose active creation-date requirements cannot be verified. A wrong binding
+is refused and can be retried on the original authority.
+
+| Result | What to do |
+| --- | --- |
+| `phase: "planned"` | Review the receipt. Use `obsidian_text_patch_apply` with its `planRef` and the same key when authorized. |
+| `outcome: "conflict"` | The first read differs from the proposed base, or the sealed plan conflicted on apply. Re-read the target and make a new proposal with a fresh ID if the patch is still wanted. |
+| `proposal_changed_during_seal` or `target_not_found` | Retry the same proposal when its original base or target is available. These refusals do not reserve the ID. |
+| `proposal_date_preparation_locked` | Resolve the earlier date-preparation lock before retrying. |
+| `outcome: "committed"` | The same plan already applied. |
+| `phase: "applying"` or `outcome: "outcome_unknown"` | Call `obsidian_text_patch_status`, then use `obsidian_text_patch_recover` on that same reference and key if required. |
+| `reason: "expired_with_trace"` or `"receipt_purged"` | The result includes the terminal outcome alongside the original reference and digest in `trace`. The retained ID prevents a second admission until the trace is purged. |
+
+Submitting the same proposal after a lost response returns the same plan and
+its current state. A changed patch, base, target or binding under the same ID
+is refused. The same SQLite transaction records the plan and the association.
+Journal maintenance purges conflicts without a plan after
+`MCP_OBSIDIAN_PROPOSAL_CONFLICT_RETENTION_DAYS` (default 90 days from the
+conflict). Terminal plan traces are eligible for purge after
+`MCP_OBSIDIAN_PROPOSAL_TRACE_RETENTION_DAYS` (default 365 days from the
+terminal outcome), once the plan receipt is purged. Both settings accept
+1–3650 days. Unresolved operations keep their trace while their plan exists.
+The trace stores the ID, path, binding, hashes, key and outcome. Keep the full
+receipt separately if needed after retention. Once the trace is purged, a
+fresh import must pass the live checks again, and the original ID no longer
+guarantees deduplication. Use the same journal for import and the existing
+apply, status and recover tools.
+
 ## Optional apply confirmation (elicitation)
 
 Off by default. When it is on, `obsidian_text_patch_apply` asks the MCP client

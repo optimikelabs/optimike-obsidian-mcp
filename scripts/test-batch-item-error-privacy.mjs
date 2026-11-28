@@ -18,14 +18,6 @@ const backendMessageMarker = "P0-BATCH-BACKEND-MESSAGE-192c";
 
 const cases = [
   {
-    toolName: "obsidian_batch_frontmatter",
-    operation: "obsidian_batch_frontmatter:item",
-    params: {
-      filePath: `${callerPathMarker}.md`,
-      set: { confidential: callerPathMarker },
-    },
-  },
-  {
     toolName: "obsidian_admin_filesystem",
     operation: "obsidian_admin_filesystem:item",
     params: {
@@ -81,7 +73,9 @@ const source = readFileSync(
   path.join(process.cwd(), "src/mcp-server/server.ts"),
   "utf8",
 );
-for (const { toolName, operation } of cases) {
+assert.doesNotMatch(source, /"obsidian_batch_frontmatter"/u, "The retired direct batch editor must stay unregistered");
+assert.doesNotMatch(source, /"bases_upsert_rows"/u, "Base row upsert must stay unregistered in headless");
+for (const { toolName, operation } of cases.filter(({ toolName }) => toolName === "obsidian_admin_filesystem")) {
   const toolOffset = source.indexOf(`\"${toolName}\"`);
   assert.ok(toolOffset >= 0, `${toolName} must remain registered`);
   const nextToolOffset = source.indexOf("server.registerTool(", toolOffset + 1);

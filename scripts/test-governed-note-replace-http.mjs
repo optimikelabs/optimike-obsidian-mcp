@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-import "./test-support/isolated-state.mjs";
+import { isolatedStateEnv } from "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { startHttpTestBackend } from "./test-support/http-backend.mjs";
 import { createHash } from "node:crypto";
 import {
   existsSync,
@@ -13,9 +13,9 @@ import {
   rmSync,
 } from "node:fs";
 import http from "node:http";
-import { createServer } from "node:net";
 import { nativeFormatFixture } from "./fixtures/native-frontmatter-format.mjs";
 import path from "node:path";
+import { getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
 const modern = process.env.MCP_TEST_PROTOCOL_ERA === "modern";
 const { Client } = await import(
   modern
@@ -202,40 +202,6 @@ class FakeAtomicWriteServer {
   }
 }
 
-async function unusedPort() {
-  const server = createServer();
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const address = server.address();
-  assert.ok(address && typeof address === "object");
-  const port = address.port;
-  await new Promise((resolve, reject) =>
-    server.close((error) => (error ? reject(error) : resolve())),
-  );
-  return port;
-}
-
-async function waitForHealth(url, child) {
-  // Shared CI runners can need more than five seconds to start a freshly
-  // built Node process. Keep the poll interval short but give startup a
-  // bounded 15-second window before declaring a product failure.
-  for (let attempt = 0; attempt < 300; attempt += 1) {
-    if (child.exitCode !== null) {
-      throw new Error(`HTTP MCP exited before health check: ${child.exitCode}`);
-    }
-    try {
-      const response = await fetch(url);
-      if (response.ok) return;
-    } catch {
-      // Startup race.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error("Timed out waiting for HTTP MCP health.");
-}
-
 function parse(result) {
   const text = result.content
     .filter((block) => block.type === "text")
@@ -250,8 +216,8 @@ function parse(result) {
   return payload;
 }
 
-async function startClient(url, name) {
-  const transport = new StreamableHTTPClientTransport(new URL(url));
+async function startClient(url, name, options) {
+  const transport = new StreamableHTTPClientTransport(new URL(url), options);
   const client = new Client(
     { name, version: "1.0.0" },
     {
@@ -294,21 +260,20 @@ const journalPath = path.join(root, "note-replace.sqlite");
 mkdirSync(logsPath, { recursive: true });
 const fake = new FakeAtomicWriteServer();
 await fake.listen();
-const port = await unusedPort();
 let stderr = "";
 let stdout = "";
-const backend = spawn(process.execPath, ["dist/index.js"], {
-  cwd: process.cwd(),
-  env: {
-    ...process.env,
-    NODE_ENV: "test",
-    MCP_TRANSPORT_TYPE: "http",
+let httpBackend;
+let backend;
+let first;
+let second;
+let third;
+let lostClient;
+try {
+  httpBackend = await startHttpTestBackend({
     MCP_PROTOCOL_MODE: modern ? "dual" : "legacy",
-    MCP_HTTP_HOST: "127.0.0.1",
-    MCP_HTTP_PORT: String(port),
-    MCP_HTTP_PORT_RETRIES: "0",
     MCP_LOG_LEVEL: "error",
     MCP_WRITE_MODE: "full",
+    MCP_VAULT_INSTRUCTIONS: "enforce",
     MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH: journalPath,
     LOGS_DIR: logsPath,
     OBSIDIAN_RUNTIME_MODE: "live",
@@ -321,23 +286,17 @@ const backend = spawn(process.execPath, ["dist/index.js"], {
     OBSIDIAN_STARTUP_RETRY_DELAY_MS: "10",
     SEMANTIC_SEARCH_PREWARM: "false",
     ENABLE_QUERY_EMBEDDING: "false",
-  },
-  stdio: ["ignore", "pipe", "pipe"],
-});
-backend.stdout.on("data", (chunk) => {
-  stdout += chunk.toString("utf8");
-});
-backend.stderr.on("data", (chunk) => {
-  stderr += chunk.toString("utf8");
-});
-
-const baseUrl = `http://127.0.0.1:${port}`;
-const mcpUrl = `${baseUrl}/mcp`;
-let first;
-let second;
-let third;
-try {
-  await waitForHealth(`${baseUrl}/healthz`, backend);
+  }, {
+    cwd: root,
+    inheritedEnv: {
+      ...getDefaultEnvironment(),
+      APPDATA: isolatedStateEnv().LOCALAPPDATA,
+    },
+    onStdout: (chunk) => { stdout += chunk; },
+    onStderr: (chunk) => { stderr += chunk; },
+  });
+  backend = httpBackend.child;
+  const mcpUrl = (await httpBackend.ready()) + "/mcp";
   first = await startClient(mcpUrl, "governed-http-first");
   const tools = await first.client.listTools();
   assert.equal(
@@ -448,7 +407,7 @@ try {
     false,
   );
 
-  const textPatchPlan = await call(third, "obsidian_text_patch_plan", {
+  const proposal = {
     path: FIXTURE_PATH,
     operations: [
       {
@@ -457,8 +416,37 @@ try {
         replacement: "patched-over-http",
       },
     ],
-    idempotencyKey: "http-cross-session-text-patch",
+    idempotencyKey: "optimike:proposal:v1:http-cross-session",
+    proposal: {
+      version: 1,
+      bindingFingerprint: fake.bindingFingerprint,
+      baseSha256: sha256(fake.content),
+    },
+  };
+  let dropResponse = false;
+  lostClient = await startClient(mcpUrl, "governed-http-lost-response", {
+    fetch: async (input, init) => {
+      const response = await fetch(input, init);
+      if (dropResponse && init?.method === "POST") {
+        dropResponse = false;
+        await response.arrayBuffer();
+        throw new Error("Proposal import response lost");
+      }
+      return response;
+    },
   });
+  dropResponse = true;
+  await assert.rejects(call(lostClient, "obsidian_text_patch_plan", proposal), /Proposal import response lost/u);
+  await lostClient.close();
+  lostClient = undefined;
+  assert.equal(fake.content, nextContent);
+  assert.equal(fake.casRequests, 1);
+  const pendingTextPatch = await call(third, "obsidian_list_pending_operations", { limit: 100 });
+  const imported = pendingTextPatch.operations.find((item) => item.operationKind === "obsidian.text.patch");
+  assert.equal(imported?.state, "planned", "the first import sealed a plan before its response was lost");
+  assert.equal(imported.nextAction, "apply");
+  const textPatchPlan = await call(third, "obsidian_text_patch_plan", proposal);
+  assert.equal(textPatchPlan.planRef, imported.planRef);
   assert.equal(textPatchPlan.phase, "planned");
   assert.equal(JSON.stringify(textPatchPlan).includes(SECRET), false);
 
@@ -469,29 +457,9 @@ try {
     planRef: textPatchPlan.planRef,
   });
   assert.equal(textPatchStatus.phase, "planned");
-  const pendingTextPatch = await call(
-    first,
-    "obsidian_list_pending_operations",
-    { limit: 100 },
-  );
-  const textPatchItem = pendingTextPatch.operations.find(
-    (item) => item.planRef === textPatchPlan.planRef,
-  );
-  assert.deepEqual(
-    {
-      operationKind: textPatchItem?.operationKind,
-      state: textPatchItem?.state,
-      nextAction: textPatchItem?.nextAction,
-    },
-    {
-      operationKind: "obsidian.text.patch",
-      state: "planned",
-      nextAction: "apply",
-    },
-  );
   const textPatchCommit = await call(first, "obsidian_text_patch_apply", {
     planRef: textPatchPlan.planRef,
-    idempotencyKey: "http-cross-session-text-patch",
+    idempotencyKey: proposal.idempotencyKey,
   });
   assert.equal(textPatchCommit.outcome, "committed");
   assert.equal(fake.casRequests, 2);
@@ -533,13 +501,14 @@ try {
   }
 
   console.log(
-    `PASS: one process-wide governed note runtime carried sealed note-replacement and text-patch plans across real HTTP MCP sessions, committed once per plan, replayed safely, and terminated deterministically (${process.platform}).`,
+    `PASS: one process-wide governed note runtime carried sealed note replacement and an imported proposal across HTTP MCP sessions, recovered the lost import response, committed once per plan, and terminated deterministically (${process.platform}).`,
   );
 } finally {
   await first?.close();
   await second?.close();
   await third?.close();
-  if (backend.exitCode === null && backend.signalCode === null) {
+  await lostClient?.close();
+  if (backend?.pid && backend.exitCode === null && backend.signalCode === null) {
     const forcedExit = new Promise((resolve) =>
       backend.once("exit", () => resolve()),
     );

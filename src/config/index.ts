@@ -152,9 +152,19 @@ const EnvSchema = z
     OBSIDIAN_CACHE_SOURCE: z
       .enum(["auto", "rest", "filesystem"])
       .default("auto"),
+    OBSIDIAN_SYNC_HEARTBEAT_FILE: z.string().refine(path.isAbsolute).optional(),
+    OBSIDIAN_SYNC_CURRENT_SECONDS: z.coerce.number().int().positive().safe().default(180),
+    OBSIDIAN_SYNC_STALL_SECONDS: z.coerce.number().int().positive().safe().default(600),
+    OBSIDIAN_SYNC_WRITE_MAX_AGE_SECONDS: z.coerce.number().int().positive().safe().optional(),
     OBSIDIAN_CACHE_CONCURRENCY: z.coerce.number().int().positive().default(8),
+    OBSIDIAN_LINK_LARGE_NOTE_BYTES: z.coerce.number().int().min(4096).max(1024 * 1024).default(256 * 1024),
+    OBSIDIAN_LINK_SECTION_BYTES: z.coerce.number().int().min(1024).max(128 * 1024).default(64 * 1024),
+    OBSIDIAN_LINK_MAX_REFERENCES: z.coerce.number().int().positive().max(32768).default(8192),
+    OBSIDIAN_LINK_BATCH_BYTES: z.coerce.number().int().min(4096).max(1024 * 1024).default(256 * 1024),
     OBSIDIAN_VAULT_EXCLUDE_PATTERNS: z.string().optional(),
     OBSIDIAN_SHARED_CACHE_DB_PATH: z.string().optional(),
+    MCP_HEADLESS_GOVERNED_JOURNAL_PATH: z.string().refine(path.isAbsolute).optional(),
+    MCP_HEADLESS_ALLOW_TRANSIENT_ABSENCE: z.enum(["true", "false"]).default("false"),
     OBSIDIAN_CONTENT_HOT_CACHE_LIMIT: z.coerce
       .number()
       .int()
@@ -239,6 +249,8 @@ const EnvSchema = z
       .max(300_000)
       .default(30_000),
     MCP_OBSIDIAN_PLANNED_RETENTION_DAYS: z.coerce.number().int().min(0).max(3650).default(30),
+    MCP_OBSIDIAN_PROPOSAL_CONFLICT_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(90),
+    MCP_OBSIDIAN_PROPOSAL_TRACE_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(365),
     MCP_OBSIDIAN_NOTE_REPLACE_PROFILE_ID: z
       .string()
       .regex(
@@ -266,6 +278,11 @@ const EnvSchema = z
       .positive()
       .default(25),
     MCP_PROTECTED_FRONTMATTER_KEYS: z.string().default("création,modification"),
+    OPERON_TIMEZONE: z.string().trim().optional().refine(value => {
+      if (!value) return true;
+      try { new Intl.DateTimeFormat("en", { timeZone: value }); return true; }
+      catch { return false; }
+    }, "OPERON_TIMEZONE must be a recognized time zone"),
     OPERON_MUTATIONS_ENABLED: z
       .string()
       .transform((val) => val.toLowerCase() === "true")
@@ -545,6 +562,7 @@ export const config = {
   oauthJwksUri: env.OAUTH_JWKS_URI,
   obsidianApiKey: env.OBSIDIAN_API_KEY,
   obsidianRuntimeMode: env.OBSIDIAN_RUNTIME_MODE,
+  operonTimeZone: env.OPERON_TIMEZONE || undefined,
   obsidianBaseUrl: env.OBSIDIAN_BASE_URL,
   obsidianVerifySsl: env.OBSIDIAN_VERIFY_SSL,
   obsidianCacheRefreshIntervalMin: env.OBSIDIAN_CACHE_REFRESH_INTERVAL_MIN,
@@ -552,7 +570,17 @@ export const config = {
   obsidianEnableCache: env.OBSIDIAN_ENABLE_CACHE,
   obsidianApiSearchTimeoutMs: env.OBSIDIAN_API_SEARCH_TIMEOUT_MS,
   obsidianCacheSource: env.OBSIDIAN_CACHE_SOURCE,
+  upstreamSyncHeartbeatFile: env.OBSIDIAN_SYNC_HEARTBEAT_FILE,
+  upstreamSyncCurrentSeconds: env.OBSIDIAN_SYNC_CURRENT_SECONDS,
+  upstreamSyncStallSeconds: env.OBSIDIAN_SYNC_STALL_SECONDS,
+  upstreamSyncWriteMaxAgeSeconds: env.OBSIDIAN_SYNC_WRITE_MAX_AGE_SECONDS,
   obsidianCacheConcurrency: env.OBSIDIAN_CACHE_CONCURRENCY,
+  obsidianLinkExtraction: {
+    largeNoteBytes: env.OBSIDIAN_LINK_LARGE_NOTE_BYTES,
+    sectionBytes: env.OBSIDIAN_LINK_SECTION_BYTES,
+    maxReferences: env.OBSIDIAN_LINK_MAX_REFERENCES,
+    batchBytes: env.OBSIDIAN_LINK_BATCH_BYTES,
+  },
   obsidianVaultExcludePatterns: parseVaultExcludePatterns(
     env.OBSIDIAN_VAULT_EXCLUDE_PATTERNS,
   ),
@@ -614,9 +642,17 @@ export const config = {
       "optimike-obsidian-mcp",
       `obsidian-note-replace-${noteReplaceProfileId}.sqlite`,
     ),
+  headlessGovernedJournalPath: env.MCP_HEADLESS_GOVERNED_JOURNAL_PATH,
+  headlessAllowTransientAbsence: env.MCP_HEADLESS_ALLOW_TRANSIENT_ABSENCE === "true",
+  headlessGovernedStateDirectory: path.join(
+    process.env.LOCALAPPDATA || process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state"),
+    "optimike-obsidian-mcp", "headless-governed",
+  ),
   obsidianNoteReplaceExecutionLeaseMs:
     env.MCP_OBSIDIAN_NOTE_REPLACE_EXECUTION_LEASE_MS,
   obsidianPlannedRetentionMs: env.MCP_OBSIDIAN_PLANNED_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+  obsidianProposalConflictRetentionMs: env.MCP_OBSIDIAN_PROPOSAL_CONFLICT_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+  obsidianProposalTraceRetentionMs: env.MCP_OBSIDIAN_PROPOSAL_TRACE_RETENTION_DAYS * 24 * 60 * 60 * 1000,
   obsidianBaseFormulaJournalPath:
     env.MCP_OBSIDIAN_BASE_FORMULA_JOURNAL_PATH ||
     path.join(

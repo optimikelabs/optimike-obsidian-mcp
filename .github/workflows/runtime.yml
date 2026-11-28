@@ -37,6 +37,22 @@ jobs:
           printf 'Changed files:\n%s\n' "${files:-<unknown>}"
           echo "code=$code" | tee -a "$GITHUB_OUTPUT"
 
+  native-headless-darwin:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: node scripts/test-headless-governed-notes.mjs
+      - run: node scripts/test-operon-headless-writes.mjs
+
   runtime:
     needs: changes
     if: ${{ !cancelled() }}
@@ -75,6 +91,10 @@ jobs:
         run: node scripts/test-governed-frontmatter-model.mjs
       - if: env.RUN_SUITE == 'true'
         run: npm run test:runtime
+      - if: env.RUN_SUITE == 'true'
+        run: node scripts/test-operon-headless-writes.mjs
+      - if: env.RUN_SUITE == 'true'
+        run: npm run test:semantic-index-producer
       - if: env.RUN_SUITE == 'true'
         run: npm run test:external-roots
       - if: env.RUN_SUITE == 'true'

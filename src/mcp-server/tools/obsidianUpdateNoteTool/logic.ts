@@ -12,6 +12,7 @@ import {
   retryWithDelay,
 } from "../../../utils/index.js";
 import { assertWriteAllowed } from "../../../services/writePolicy.js";
+import { prependMarkdownBody } from "../../../services/obsidianFrontmatterFormat.js";
 
 // ====================================================================================
 // Schema Definitions for Input Validation
@@ -519,7 +520,7 @@ export const processObsidianUpdateNote = async (
       // Combine content based on the mode.
       const newContent =
         mode === "prepend"
-          ? contentString + existingContent
+          ? prependMarkdownBody(existingContent, contentString)
           : existingContent + contentString;
       writtenContentForStats = newContent;
       logger.debug(

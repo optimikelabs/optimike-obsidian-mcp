@@ -12,6 +12,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { SignJWT } from "jose";
+import toolCatalog from "../evals/tool-catalog.v1.json" with { type: "json" };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const jwtSecret =
@@ -300,9 +301,14 @@ try {
   const fullNames = toolNames(fullList);
   const legacyNames = toolNames(legacyList);
 
-  assert.equal(standardNames.length, 9);
-  assert.equal(tasksNames.length, 14);
-  assert.equal(fullNames.length, 50);
+  for (const [profile, names] of [["standard", standardNames], ["tasks", tasksNames], ["full", fullNames]]) {
+    assert.deepEqual(names, toolCatalog.profiles[profile].modes["headless-readonly"], `${profile} HTTP catalogue`);
+  }
+  for (const names of [standardNames, tasksNames, fullNames]) {
+    for (const name of ["obsidian_get_frontmatter", "obsidian_note_links"]) {
+      assert.ok(names.includes(name), `headless HTTP profile lost ${name}`);
+    }
+  }
   for (const name of ["operon_set_pinned", "operon_update_tasks"]) {
     assert.ok(fullNames.includes(name));
     assert.ok(!standardNames.includes(name));
@@ -459,37 +465,8 @@ try {
     );
   }
 
-  for (const snapshotSafe of [
-    "operon_status",
-    "operon_get_configuration",
-    "operon_list_tasks",
-    "operon_get_task",
-    "operon_query_tasks",
-    "operon_validate",
-  ]) {
-    assert.ok(
-      tasksNames.includes(snapshotSafe),
-      `headless tasks lost ${snapshotSafe}`,
-    );
-  }
-  for (const liveOnly of [
-    "operon_query_saved_filter",
-    "operon_get_diagnostics",
-    "operon_find_tasks",
-    "operon_resolve_task",
-    "operon_get_relationships",
-    "operon_build_context",
-    "operon_get_timer_state",
-    "operon_create_task",
-    "operon_update_task",
-    "operon_transition_task",
-    "operon_list_pending_recoveries",
-    "operon_recover_mutation",
-  ]) {
-    assert.ok(
-      !tasksNames.includes(liveOnly),
-      `headless tasks exposed ${liveOnly}`,
-    );
+  for (const tool of tasksList.result.tools.filter((tool) => tool.name.startsWith("operon_"))) {
+    assert.equal(tool.annotations?.readOnlyHint, true, tool.name);
   }
 
   const mismatchPost = await protocolRequest({
@@ -532,7 +509,7 @@ try {
   );
 
   const sameSessionStillWorks = await call(standard, baseUrl, "tools/list");
-  assert.equal(toolNames(sameSessionStillWorks).length, 9);
+  assert.deepEqual(toolNames(sameSessionStillWorks), standardNames);
 
   const unknown = await fetch(new URL("/mcp/nope", baseUrl), {
     method: "POST",

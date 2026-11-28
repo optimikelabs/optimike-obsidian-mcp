@@ -1,17 +1,30 @@
-import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { ProtocolError, type McpServer } from "@modelcontextprotocol/server";
 import { ErrorHandler, publicMcpToolErrorPayload } from "../utils/index.js";
-import { withActiveToolName } from "../utils/internal/activeTool.js";
+import type { McpError } from "../types-global/errors.js";
+import { toolInvocation, withActiveToolName } from "../utils/internal/activeTool.js";
 import { activeHttpRequestId } from "./transports/httpRequestState.js";
 
-// These are request-local provenance flags, never protocol sessions or grants.
-const toolInvocation = new AsyncLocalStorage<{ applicationError: boolean }>();
 const sdkBoundaries = new WeakSet<McpServer>();
 const applicationBoundaries = new WeakSet<McpServer>();
 
 type Callback = (...args: any[]) => any;
 type Registrar = (...args: any[]) => any;
+
+function publicInputFailure(error: McpError) {
+  return {
+    content: [{
+      type: "text" as const,
+      text: JSON.stringify(publicMcpToolErrorPayload(error, {
+        operation: "mcpSdkToolErrorBoundary",
+        toolName: "mcp_sdk",
+        params: undefined,
+        requestId: activeHttpRequestId(),
+      })),
+    }],
+    isError: true,
+  };
+}
 
 function opaqueSdkFailure() {
   const requestId = activeHttpRequestId() ?? randomUUID();
@@ -41,7 +54,8 @@ function opaqueSdkFailure() {
 /**
  * Install before any tools. Uses only public SDK registration APIs; no access
  * to createToolError, _registeredTools or _toolHandlersInitialized. The SDK's
- * input/output validation and unknown/disabled-tool failures are untrusted.
+ * raw validation and unknown/disabled-tool failures are untrusted. Input
+ * schemas can retain an application-owned, sanitized validation error.
  * An application callback's deliberately returned error is distinguished by
  * request-local provenance, retaining governed recovery metadata unchanged.
  */
@@ -69,6 +83,8 @@ export function installMcpSdkToolErrorPrivacyBoundary(server: McpServer): void {
         toolInvocation.run({ applicationError: false }, async () => {
           try {
             const result = await callback(...callbackArgs);
+            const inputError = toolInvocation.getStore()?.inputError;
+            if (inputError) return publicInputFailure(inputError);
             if (
               result?.isError === true &&
               !toolInvocation.getStore()?.applicationError
@@ -77,6 +93,8 @@ export function installMcpSdkToolErrorPrivacyBoundary(server: McpServer): void {
             }
             return result;
           } catch (error) {
+            const inputError = toolInvocation.getStore()?.inputError;
+            if (inputError) return publicInputFailure(inputError);
             if (server.server.getNegotiatedProtocolVersion() === "2026-07-28") {
               // Modern unknown/disabled tools are protocol errors, not tool
               // execution errors. Preserve that distinction without echoing the

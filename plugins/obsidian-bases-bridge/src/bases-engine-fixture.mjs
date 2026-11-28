@@ -1,10 +1,12 @@
 // Synthetic stand-in for Obsidian's `base:query` CLI handler, for Bridge tests.
 //
-// Like the native handler it reads the Base through `vault.cachedRead`, keeps
-// the rows matching the global and view filters, applies the view limit and
-// returns rows keyed by column display name, with null for empty cells.
+// The fixture reads through `vault.cachedRead`, applies the fixture's filters
+// and limit, and returns cells keyed by column display name.
 // Filters support `file.inFolder("X")` and `{ and: [...] }` only. Formula
-// results come from a per-expression table instead of a real parser.
+// results come from a per-expression table. Sorting, grouping and general
+// parsing are outside this simulation.
+import nativeCapture from "./fixtures/bases-native-1.15.1.json" with { type: "json" };
+
 export const PARSE_ERRORS = new Set(['if(file.name == "x", 1', '"unterminated + file.name']);
 
 function evaluateExpression(expression, row, table) {
@@ -16,7 +18,7 @@ function evaluateExpression(expression, row, table) {
   if (expression === "oobbCanaryMissingFunction()") {
     return "unknownFunctionValue" in table
       ? table.unknownFunctionValue
-      : "Error: Unknown function oobbCanaryMissingFunction.";
+      : nativeCapture.unknownFunction;
   }
   if (PARSE_ERRORS.has(expression)) return null;
   const compute = table[expression];
@@ -28,6 +30,8 @@ function matches(filter, row) {
   if (typeof filter === "string") {
     const list = /^\[(.*)\]\.contains\(file\.path\)$/s.exec(filter);
     if (list) return JSON.parse(`[${list[1]}]`).includes(row.path);
+    const suffix = /^file\.path\.endsWith\("([^"]*)"\)$/.exec(filter);
+    if (suffix) return row.path.endsWith(suffix[1]);
     const folder = /^file\.inFolder\("(.*)"\)$/.exec(filter);
     if (!folder) throw new Error(`fixture does not support filter ${filter}`);
     return row.path.startsWith(`${folder[1]}/`);

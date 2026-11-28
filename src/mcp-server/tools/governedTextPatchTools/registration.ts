@@ -16,6 +16,7 @@ import {
 } from "../../toolAnnotations.js";
 import {
   GovernedTextPatchRuntime,
+  TextPatchProposalSchema,
   type GovernedTextPatchPlanInput,
 } from "../../../services/textPatchProjectionRuntime.js";
 import type { GovernedNoteReplaceRuntime } from "../governedNoteReplaceTools/runtime.js";
@@ -68,7 +69,29 @@ const PlanSchema = z.object({
     .min(1)
     .max(256)
     .describe("Caller-owned key binding one canonical text patch intent."),
+  proposal: TextPatchProposalSchema.optional().describe(
+    "Import one offline body patch. Use idempotencyKey optimike:proposal:v1:<id> and supply the expected live Atomic Write binding and SHA-256 of the original note. Only imports may use this key prefix. Omit frontmatterOperations. Import never prepares creation dates or applies the patch.",
+  ),
 });
+
+const [AppendOperation, PrependOperation, ReplaceOperation] = OperationSchema.options;
+const StrictProposalPlanSchema = PlanSchema.extend({
+  operations: z.array(z.discriminatedUnion("op", [
+    AppendOperation.strict(),
+    PrependOperation.strict(),
+    ReplaceOperation.strict(),
+  ])).min(1).max(32),
+}).strict();
+
+// Existing plans retain their parser. Imports must reject unknown fields
+// before the ordinary plan schema can strip them.
+const PlanInputSchema = z.preprocess((value, context) => {
+  if (value && typeof value === "object" && Object.hasOwn(value, "proposal") &&
+      !StrictProposalPlanSchema.safeParse(value).success) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid offline text patch proposal." });
+  }
+  return value;
+}, PlanSchema);
 
 const ApplySchema = z.object({
   ...GovernedResponseFields,
@@ -148,9 +171,9 @@ export async function registerGovernedTextPatchTools(
   server.registerTool(
     "obsidian_text_patch_plan",
     {
-      description:
+      description: noteRuntime.isFilesystem ? "Seal one bounded body text patch, optionally with frontmatterOperations, using the on-disk SHA-256 and vault identity. The headless filesystem authority maintains configured dates." :
         "Plan one bounded body text patch, optionally combined with frontmatterOperations, of an existing Markdown note. Noncanonical existing frontmatter is normalized in the sealed plan and announced in frontmatterFormat.normalization; type issues are warnings. After normalization the plan preserves bytes outside authorized body and frontmatter ranges, binds the before proof and vault identity, and does not apply the requested patch. Templates and date-manager-excluded paths are never dated. Otherwise missing creation dates may be prepared by the active vault date manager and any preparation normalization is reported. If preparation is unavailable or fails its preconditions, the plan is refused; ask the vault owner to resolve the missing date. A Bridge that cannot prove the added creation date refuses with date_preparation_bridge_upgrade_required before any change (ask the vault owner to update the Atomic Write Bridge); date_preparation_unverified names the failed check in preparationCheck.",
-      inputSchema: mcpSchema(PlanSchema.shape),
+      inputSchema: mcpSchema(PlanInputSchema),
       annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,
     },
     async (params: GovernedTextPatchPlanInput) =>

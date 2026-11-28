@@ -9,6 +9,7 @@ import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { parse as parseYaml } from "yaml";
+import nativeCapture from "../plugins/obsidian-bases-bridge/src/fixtures/bases-native-1.15.1.json" with { type: "json" };
 
 const sha256 = (value) =>
   createHash("sha256").update(value, "utf8").digest("hex");
@@ -17,22 +18,20 @@ const bindingFingerprint = sha256("governed-base-mcp-fixture");
 let yaml =
   "formulas:\n  score: old\nviews:\n  - type: table\n    name: Préservée\n";
 let writes = 0;
+let queryRequests = 0;
+let queryPayload;
+let filterVersion;
 
-// Replay of the Bases Bridge engine routes. Statuses follow the live check of
-// 2026-11-20; an older Bridge (engine off) answers 404.
+// Replay of the Bases Bridge engine routes. Formula checks use the 1.15.1
+// capture; transport failures and row counts are simulated.
 let engineEnabled = false;
 // The Bases list itself fails when the Bases Bridge is absent (404) or broken.
 let basesListStatus = 200;
 const ENGINE_RESULTS = new Map([
-  ["fooBar(file.name)", ["runtime_error", 'Error: Unknown function "fooBar"']],
-  ["fooBar(1)", ["runtime_error", 'Error: Unknown function "fooBar"']],
-  ['if(file.name == "x", 1', ["syntax_error", 'Error: Expected ")"']],
-  ["formula.inexistante + 1", ["runtime_error", 'Error: Unknown formula "inexistante"']],
-  ["file.name.round()", ["runtime_error", "Error: round is not a function"]],
-  ["file.name.lowr()", ["runtime_error", "Error: lowr is not a function"]],
-  ["file.name.LOWER()", ["runtime_error", "Error: LOWER is not a function"]],
-  ["file.toString.foo()", ["runtime_error", "Error: foo is not a function"]],
-  ["note.champ_inexistant_zz", ["all_null"]],
+  ...Object.entries(nativeCapture.formulaChecks),
+  // The casing regressions combine calls beyond the captured expressions.
+  ["file.name.LOWER() + fooBar(1)", ["runtime_error", 'Error: Cannot find function "fooBar"']],
+  ["NUMBER(1) + file.name.ROUND()", ["runtime_error", 'Error: Cannot find function "ROUND" on type String']],
 ]);
 // Registry as the Bridge sends it: generic value methods on `Any`, and
 // `doc: null` for functions without a description.
@@ -55,7 +54,7 @@ function engineEvaluate(source) {
       status,
       rows: 2,
       errorRows: message ? 2 : 0,
-      nullRows: status === "all_null" ? 2 : 0,
+      nullRows: status === "all_null" || status === "syntax_error" ? 2 : 0,
       samples: message ? [{ path: "Canary/row.md", message }] : [],
     };
   }
@@ -188,6 +187,20 @@ const server = http.createServer((req, res) => {
         bases: [fixturePath, "Canary/Missing.base"].map((path) => ({ id: path, name: path, path })),
       });
     }
+    if (req.method === "POST" && url.pathname === `/bases/${encodeURIComponent(fixturePath)}/query`) {
+      queryRequests += 1;
+      const request = queryPayload = await body(req);
+      if (request.view === "Engine unavailable") {
+        return json(res, 503, { error: { reasonCode: "base_query_selection_unavailable" } });
+      }
+      if (request.view !== "Older Bridge") {
+        return json(res, 200, { source: "engine", filterVersion, total: 0, page: 1, rows: [], warnings: [] });
+      }
+      return json(res, 200, {
+        source: "fallback", evaluate: request.evaluate, total: 1, page: 1,
+        rows: [{ file: { path: "Canary/Approximate.md" }, props: {} }],
+      });
+    }
     json(res, 404, { error: "fixture route not found" });
   })().catch((error) => json(res, 500, { error: String(error) }));
 });
@@ -249,6 +262,49 @@ function parsed(result) {
 
 try {
   await client.connect(transport);
+  for (const [filter, node] of [
+    ['status == "open"', "filter"],
+    [{ not: { status: { unsupported: "open" } } }, "filter.not.property[0]"],
+  ]) {
+    const result = await client.callTool({
+      name: "bases_query",
+      arguments: { base_id: fixturePath, filter },
+    });
+    const response = parsed(result);
+    assert.equal(result.isError, true, JSON.stringify(response));
+    assert.equal(response.error.code, "VALIDATION_ERROR");
+    assert.equal(response.error.details.filterNode, node);
+    assert.equal(queryRequests, 0);
+  }
+  const propertyFilter = { status: { in: ["open", "pending"] } };
+  const queryWithPropertyFilter = () => client.callTool({
+    name: "bases_query",
+    arguments: { base_id: fixturePath, filter: propertyFilter },
+  });
+  const legacy = await queryWithPropertyFilter();
+  assert.equal(legacy.isError, true);
+  assert.equal(parsed(legacy).error.details.reasonCode, "base_query_filter_bridge_upgrade_required");
+  filterVersion = 1;
+  const supported = await queryWithPropertyFilter();
+  assert.equal(supported.isError, false);
+  assert.deepEqual(queryPayload.filter, propertyFilter);
+  assert.deepEqual(parsed(supported).rows, []);
+
+  for (const query of [
+    { view: "Older Bridge", evaluate: false },
+    { view: "Older Bridge", evaluate: true },
+    { view: "Engine unavailable", evaluate: false },
+  ]) {
+    const result = await client.callTool({
+      name: "bases_query",
+      arguments: { base_id: fixturePath, ...query },
+    });
+    assert.equal(result.isError, true);
+    const payload = parsed(result);
+    assert.equal(payload.error.code, "SERVICE_UNAVAILABLE");
+    assert.equal(payload.error.details.reasonCode, "base_query_selection_unavailable");
+    assert.equal(payload.rows, undefined);
+  }
   const tools = await client.listTools();
   assert.deepEqual(
     tools.tools
@@ -356,7 +412,8 @@ try {
     assert.deepEqual(check.docs, ["https://help.obsidian.md/bases/functions", "https://help.obsidian.md/bases/syntax"]);
     assert.deepEqual(check.formulas.map((formula) => formula.name), ["score"], "the pre-existing legacy error is not blamed");
     const [formula] = check.formulas;
-    assert.deepEqual(formula.messages, [ENGINE_RESULTS.get(expression)[1]]);
+    const [, sample] = ENGINE_RESULTS.get(expression);
+    assert.deepEqual(formula.messages, sample ? [sample] : []);
     assert.equal(formula.previousStatus, "ok");
     return formula;
   };
@@ -374,16 +431,17 @@ try {
   const missingFormula = await refusal("bases_formula_patch_plan", "formula.inexistante + 1", "engine-refuse-3");
   assert.deepEqual(missingFormula.unknownFunctions, []);
 
-  const wrongType = await refusal("bases_formula_patch_plan", "file.name.round()", "engine-refuse-4");
-  assert.deepEqual(wrongType.unknownFunctions, [{ name: "round", on: "String", definedOn: ["Number"] }]);
-  assert.equal(wrongType.validFunctions.on, "String");
-  assert.ok(wrongType.validFunctions.names.includes("lower") && wrongType.validFunctions.names.includes("toString"));
-
   const nearMiss = await refusal("bases_config_patch_plan", "file.name.lowr()", "engine-refuse-5");
   assert.deepEqual(nearMiss.suggestions, ["lower"]);
 
-  const caseOnly = await refusal("bases_formula_patch_plan", "file.name.LOWER()", "engine-refuse-6");
-  assert.equal(caseOnly.suggestions[0], "lower", "a case-only typo suggests the exact name first");
+  const mixed = await refusal("bases_formula_patch_plan", "file.name.LOWER() + fooBar(1)", "engine-refuse-6");
+  assert.deepEqual(mixed.unknownFunctions, unknownGlobal.unknownFunctions, "LOWER is a known String method");
+  assert.deepEqual(mixed.suggestions, unknownGlobal.suggestions, "suggestions address the unknown global call");
+
+  const wrongType = await refusal("bases_formula_patch_plan", "NUMBER(1) + file.name.ROUND()", "engine-refuse-4");
+  assert.deepEqual(wrongType.unknownFunctions, [{ name: "ROUND", on: "String", definedOn: ["Number"] }]);
+  assert.equal(wrongType.validFunctions.on, "String");
+  assert.ok(wrongType.validFunctions.names.includes("lower") && wrongType.validFunctions.names.includes("toString"));
 
   const prototypeKey = await refusal("bases_formula_patch_plan", "file.toString.foo()", "engine-refuse-7");
   assert.deepEqual(
@@ -396,9 +454,9 @@ try {
   assert.equal(yaml, before);
   assert.equal(await pendingCount(), pendingBefore, "a refused plan seals nothing");
 
-  const accepted = { op: "set_formula", name: "score", expression: '"ok " + file.name' };
+  const accepted = { op: "set_formula", name: "score", expression: "file.name.LOWER()" };
   const verified = parsed(await plan("bases_formula_patch_plan", [accepted], "engine-accept-1"));
-  assert.equal(verified.phase, "planned", "a pre-existing engine error does not block");
+  assert.equal(verified.phase, "planned", "1.15.1 accepts LOWER() and a pre-existing engine error does not block");
   assert.deepEqual(verified.engineCheck, { status: "verified", obsidianVersion: "1.15.1" });
 
   const allNull = parsed(
@@ -464,7 +522,7 @@ try {
     [["score", "ok"], ["legacy", "runtime_error"]],
     "one Base lists every formula",
   );
-  assert.equal(one.formulas[1].message, 'Error: Unknown function "fooBar"');
+  assert.equal(one.formulas[1].message, 'Error: Cannot find function "fooBar"');
 
   const all = await read("bases_check");
   assert.deepEqual(all.summary, {

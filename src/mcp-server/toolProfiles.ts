@@ -1,5 +1,6 @@
 import {
   TOOL_GROUP_IDS,
+  TOOL_REGISTRATION_MODES,
   compileToolSurface,
   getToolSurfaceEntry,
   governedLifecycleRoles,
@@ -18,6 +19,13 @@ export const TOOL_PROFILE_IDS = [
 ] as const;
 
 export type ToolProfileId = (typeof TOOL_PROFILE_IDS)[number];
+
+export const TOOL_PROFILE_MODE_CAPABILITY = "optimike.tool-profile-mode";
+
+export function profileModeFromCapability(capability: unknown): ToolRegistrationMode | undefined {
+  if (typeof capability !== "object" || capability === null || !("registrationMode" in capability)) return undefined;
+  return TOOL_REGISTRATION_MODES.find(mode => mode === capability.registrationMode);
+}
 
 export interface ToolProfileDefinition {
   id: ToolProfileId;
@@ -58,14 +66,21 @@ const TASK_GROUPS = [
 ] as const satisfies readonly ToolGroupId[];
 
 const OPERON_LIVE_ONLY_READ_TOOLS = new Set([
-  "operon_query_saved_filter",
   "operon_get_diagnostics",
-  "operon_find_tasks",
-  "operon_resolve_task",
-  "operon_get_relationships",
   "operon_build_context",
   "operon_get_timer_state",
-  "operon_list_pending_recoveries",
+]);
+
+const OPERON_FILESYSTEM_READ_TOOLS = new Set([
+  "operon_query_saved_filter",
+  "operon_find_tasks",
+  "operon_get_relationships",
+  "operon_resolve_task",
+]);
+
+const OPERON_FILESYSTEM_MUTATION_TOOLS = new Set([
+  "operon_create_task", "operon_update_task", "operon_transition_task",
+  "operon_list_pending_recoveries", "operon_recover_mutation",
 ]);
 
 export const TOOL_PROFILES: Readonly<
@@ -88,7 +103,7 @@ export const TOOL_PROFILES: Readonly<
   tasks: {
     id: "tasks",
     description:
-      "Task-focused work: note context, Markdown Tasks compatibility, the complete Operon MCP contract when the Desktop Bridge is configured, and only the snapshot-safe Operon read subset in non-live runtimes.",
+      "Task-focused work: note context, Markdown Tasks compatibility, the complete Operon MCP contract when the Desktop Bridge is configured, and read-only Operon tools over the synchronized vault in headless modes.",
     groups: TASK_GROUPS,
     preferCanonicalAlternatives: true,
   },
@@ -151,18 +166,19 @@ function lifecycleRolesByFamily(
   return lifecycleByFamily;
 }
 
-function lifecycleIsComplete(family: string, roles: ReadonlySet<string>): boolean {
-  const required = governedLifecycleRoles(family);
+function lifecycleIsComplete(family: string, roles: ReadonlySet<string>, headlessFilesystem: boolean): boolean {
+  const required = governedLifecycleRoles(family, headlessFilesystem);
   return roles.size === required.length && required.every((role) => roles.has(role));
 }
 
 function hideIncompleteGovernedFamilies(
   entries: readonly ToolSurfaceEntry[],
+  headlessFilesystem: boolean,
 ): readonly ToolSurfaceEntry[] {
   const lifecycleByFamily = lifecycleRolesByFamily(entries);
   const completeFamilies = new Set(
     [...lifecycleByFamily]
-      .filter(([family, roles]) => lifecycleIsComplete(family, roles))
+      .filter(([family, roles]) => lifecycleIsComplete(family, roles, headlessFilesystem))
       .map(([family]) => family),
   );
 
@@ -173,9 +189,10 @@ function hideIncompleteGovernedFamilies(
 
 function assertGovernedFamiliesAtomic(
   entries: readonly ToolSurfaceEntry[],
+  headlessFilesystem: boolean,
 ): void {
   for (const [family, roles] of lifecycleRolesByFamily(entries)) {
-    if (!lifecycleIsComplete(family, roles)) {
+    if (!lifecycleIsComplete(family, roles, headlessFilesystem)) {
       throw new Error(
         `Tool profile exposes an incomplete governed lifecycle for ${family}: ${[...roles].sort().join(", ")}.`,
       );
@@ -184,7 +201,7 @@ function assertGovernedFamiliesAtomic(
 }
 
 function operonLiveForRegistrationMode(
-  registrationMode: ToolRegistrationMode,
+  registrationMode: ToolRegistrationMode | undefined,
 ): boolean {
   return registrationMode === "live" || registrationMode === "hybrid-live";
 }
@@ -192,8 +209,12 @@ function operonLiveForRegistrationMode(
 function modernRuntimeAvailable(
   entry: ToolSurfaceEntry,
   operonLive: boolean,
+  operonFilesystem: boolean,
+  filesystemWrites: boolean,
 ): boolean {
+  if (OPERON_FILESYSTEM_MUTATION_TOOLS.has(entry.name)) return operonLive || filesystemWrites;
   if (entry.group === "tasks.operon.write") return operonLive;
+  if (OPERON_FILESYSTEM_READ_TOOLS.has(entry.name)) return operonLive || operonFilesystem;
   if (
     entry.group === "tasks.operon.read" &&
     OPERON_LIVE_ONLY_READ_TOOLS.has(entry.name)
@@ -205,18 +226,20 @@ function modernRuntimeAvailable(
 
 interface FinalizeProfileEntriesOptions {
   tolerateIncompleteRegistration?: boolean;
+  operonFilesystem?: boolean;
 }
 
 function finalizeProfileEntries(
   definition: ToolProfileDefinition,
   entries: readonly ToolSurfaceEntry[],
   operonLive: boolean,
+  headlessFilesystem: boolean,
   options: FinalizeProfileEntriesOptions = {},
 ): readonly ToolSurfaceEntry[] {
   let selected =
     definition.id === "full" || definition.id === "operational"
       ? entries
-      : entries.filter((entry) => modernRuntimeAvailable(entry, operonLive));
+      : entries.filter((entry) => modernRuntimeAvailable(entry, operonLive, options.operonFilesystem ?? false, headlessFilesystem));
 
   // A concrete McpServer registers tools one at a time. During that transient
   // construction phase a governed family is necessarily incomplete. Keep the
@@ -224,7 +247,7 @@ function finalizeProfileEntries(
   // reconciliation. Static profile compilation remains strict and will still
   // fail on an actually incomplete catalogue.
   if (options.tolerateIncompleteRegistration) {
-    selected = hideIncompleteGovernedFamilies(selected);
+    selected = hideIncompleteGovernedFamilies(selected, headlessFilesystem);
   }
 
   if (definition.preferCanonicalAlternatives) {
@@ -233,7 +256,7 @@ function finalizeProfileEntries(
   if (definition.id === "operational") {
     selected = selected.filter((entry) => entry.name !== "bases_upsert_config");
   }
-  assertGovernedFamiliesAtomic(selected);
+  assertGovernedFamiliesAtomic(selected, headlessFilesystem);
   return [...selected].sort((left, right) =>
     left.name.localeCompare(right.name),
   );
@@ -254,6 +277,8 @@ export function compileToolProfile({
     definition,
     entries,
     operonLiveForRegistrationMode(registrationMode),
+    registrationMode === "headless-filesystem",
+    { operonFilesystem: registrationMode.startsWith("headless-") },
   );
 }
 
@@ -266,6 +291,7 @@ export function compileToolProfileNames(
 export interface SelectAvailableToolProfileInput {
   profile: ToolProfileId;
   availableNames: readonly string[];
+  registrationMode?: ToolRegistrationMode;
 }
 
 /**
@@ -274,10 +300,8 @@ export interface SelectAvailableToolProfileInput {
  * profile contract with real registration rather than predicting availability.
  *
  * `full` intentionally preserves unknown future names as the explicit complete surface.
- * Modern profiles fail closed on unknown names and hide Operon tools whose
- * service contract is statically live-only. Presence of the governed note
- * family is used as the concrete live/hybrid marker because it is registered
- * before Operon in live-capable server construction and is absent headlessly.
+ * Modern profiles fail closed on unknown names. Live-only Operon tools require
+ * an explicit live registration mode, independently of the tools present.
  *
  * Registration is incremental, so a governed quartet may be transiently
  * incomplete while the server factory is still constructing the instance. In
@@ -286,6 +310,7 @@ export interface SelectAvailableToolProfileInput {
 export function selectAvailableToolProfileNames({
   profile,
   availableNames,
+  registrationMode,
 }: SelectAvailableToolProfileInput): readonly string[] {
   const uniqueNames = [...new Set(availableNames)];
   if (profile === "full") {
@@ -298,9 +323,11 @@ export function selectAvailableToolProfileNames({
     .map((name) => getToolSurfaceEntry(name))
     .filter((entry): entry is ToolSurfaceEntry => Boolean(entry))
     .filter((entry) => groups.has(entry.group));
-  const operonLive = uniqueNames.includes("obsidian_note_replace_plan");
+  const operonLive = operonLiveForRegistrationMode(registrationMode);
 
-  return finalizeProfileEntries(definition, entries, operonLive, {
+  const headlessFilesystem = registrationMode === "headless-filesystem";
+  return finalizeProfileEntries(definition, entries, operonLive, headlessFilesystem, {
     tolerateIncompleteRegistration: true,
+    operonFilesystem: registrationMode?.startsWith("headless-"),
   }).map((entry) => entry.name);
 }

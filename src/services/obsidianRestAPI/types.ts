@@ -83,19 +83,20 @@ export type AtomicWriteStatusResponse = {
   frontmatterFormat?: { contractVersion: 1; supported: boolean };
   datePreparation?: { contractVersion: 1; supported: true; fileStatProvenance?: { contractVersion: 1 } };
   effectFence?: { contractVersion: 1; supported: true; epoch: string; requireFence: boolean; legacyQuiescent: boolean };
-  noteCreate?: { supported: boolean; enabled: boolean; bindingFingerprint?: string };
+  noteCreate?: { supported: boolean; enabled: boolean; bindingFingerprint?: string; exclusiveCreate?: boolean };
   nativeMove?: { supported: boolean; enabled: boolean; bindingFingerprint?: string };
   ok: true;
   contractVersion: 1;
   plugin: { id: string; version: string };
   lifecycle?: BridgeLifecycleStatus;
   backend: {
-    kind: "obsidian-vault-process";
+    kind: "obsidian-vault-process" | "headless-filesystem";
     bindingFingerprint: string;
     atomicCas: true;
     writeEnabled: boolean;
     canvasAtomicCas?: true;
     canvasWriteEnabled?: boolean;
+    headlessReplacement?: "exchange" | "transient-absence" | "unavailable";
   };
   limits: { markdownOnly: true };
   settlement?: {
@@ -222,16 +223,17 @@ export type NoteLinkObservation = {
   linkPath: string;
   subpath: string;
   resolution:
-    | { status: "resolved"; targetPath: string }
+    | { status: "resolved"; targetPath: string; ambiguous?: true }
     | { status: "unresolved" };
   subpathValidation: NoteSubpathValidation;
   provenance:
     | "metadataCache.links"
     | "metadataCache.embeds"
-    | "metadataCache.frontmatterLinks";
+    | "metadataCache.frontmatterLinks"
+    | "filesystem";
 };
 
-export type NoteLinksResponse = {
+export type NoteLinksResponse = NoteLinksProjection & {
   ok: true;
   contractVersion: 1;
   path: string;
@@ -258,6 +260,39 @@ export type NoteLinksResponse = {
     backlinks: "metadataCache.resolvedLinks";
     unresolved: "metadataCache.unresolvedLinks";
   };
+};
+
+export type FilesystemNoteLinksResponse = NoteLinksProjection & {
+  ok: true;
+  contractVersion: 1;
+  path: string;
+  backend: { kind: "filesystem"; bindingFingerprint: string };
+  indexCoverage?: {
+    reason: "bounded_large_note_extraction";
+    sourceComplete: boolean;
+    backlinksComplete: boolean;
+    limitedSourceCount: number;
+  };
+  cache: {
+    available: true;
+    consistency: "best_effort_non_atomic_snapshot";
+    freshness: {
+      status: "unknown";
+      observedAt: string;
+      observedFileMtimeMs: number;
+      reason: "filesystem_cache_may_lag_disk";
+    };
+  };
+  provenance: {
+    sourceMetadata: "filesystem";
+    resolution: "filesystem";
+    subpath: "unavailable";
+    backlinks: "filesystem";
+    unresolved: "filesystem";
+  };
+};
+
+export type NoteLinksProjection = {
   outgoing: NoteLinkObservation[];
   unresolved: Array<{ linkText: string; count: number }>;
   backlinks: Array<{ sourcePath: string; count: number }>;
@@ -487,7 +522,7 @@ export interface BaseSchemaResponse {
  */
 export interface BaseQueryRequest {
   view?: string;
-  filter?: Record<string, unknown>;
+  filter?: unknown;
   sort?: Array<{
     prop: string;
     dir?: "asc" | "desc";
@@ -513,11 +548,13 @@ export interface BaseQueryRow {
  * Response payload emitted by the query endpoint.
  */
 export interface BaseQueryResponse {
+  filterVersion?: number;
   total: number;
   page: number;
   rows: BaseQueryRow[];
   evaluate?: boolean;
   source?: "engine" | "fallback" | "local-fallback";
+  mode?: "property-scan";
   limitations?: string[];
 }
 

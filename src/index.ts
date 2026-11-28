@@ -4,6 +4,7 @@
 import { ServerType } from "@hono/node-server";
 import { McpServer } from "@modelcontextprotocol/server";
 import type { StdioServerHandle } from "@modelcontextprotocol/server/stdio";
+import { once } from "node:events";
 import { config, environment } from "./config/index.js"; // This loads .env via dotenv.config()
 import { initializeAndStartServer } from "./mcp-server/server.js";
 import { requestContextService, retryWithDelay } from "./utils/index.js";
@@ -11,6 +12,7 @@ import { logger, McpLogLevel } from "./utils/internal/logger.js"; // Import logg
 // Import Services
 import { ObsidianRestApiService } from "./services/obsidianRestAPI/index.js";
 import { VaultCacheService } from "./services/obsidianRestAPI/vaultCache/index.js"; // Import VaultCacheService
+import { getLexicalIndex } from "./services/rankedVaultSearch.js";
 import { prewarmSemanticSearch } from "./mcp-server/tools/semanticSearchTool/registration.js";
 import {
   createGovernedNoteReplaceRuntime,
@@ -157,6 +159,16 @@ const shutdown = async (signal: string) => {
  * and registers signal handlers for graceful shutdown and error handling.
  */
 const start = async () => {
+  // A forked HTTP fixture can distinguish module loading from startup and
+  // wait for this process's listener before sending its first request.
+  const reportHttpStartup =
+    environment === "test" &&
+    config.mcpTransportType === "http" &&
+    process.connected;
+  if (reportHttpStartup) {
+    process.send?.({ httpStartup: "initializing" }, () => {});
+  }
+
   // --- Logger Initialization (Moved here AFTER config/dotenv is loaded) ---
   const validMcpLogLevels: McpLogLevel[] = [
     "debug",
@@ -340,13 +352,14 @@ const start = async () => {
       obsidianService,
       vaultCacheService,
     );
+    await governedNoteReplaceRuntime?.restoreInterruptedFilesystemReplacements();
     governedBaseFormulaRuntime =
       createGovernedBaseFormulaRuntime(obsidianService);
     governedCanvasRuntime = createGovernedCanvasRuntime(obsidianService);
     logger.info(
       governedNoteReplaceRuntime
         ? "Governed note-replacement runtime is enabled and process-shared."
-        : "Governed note-replacement runtime is unavailable without a shared live Obsidian REST service.",
+        : "Governed note runtime is unavailable in this runtime mode.",
       startupContext,
     );
     logger.info("Shared services instantiated.", startupContext);
@@ -417,6 +430,15 @@ const start = async () => {
         .then(() => {
           // Once the initial build is done, start the periodic refresh
           vaultCacheService?.startPeriodicRefresh();
+          if (vaultCacheService?.isReady()) {
+            void getLexicalIndex(vaultCacheService).catch((error: unknown) => {
+              logger.error(
+                "Background ranked-search index preparation failed.",
+                error instanceof Error ? error : new Error("Non-Error rejection"),
+                { ...startupContext, operation: "RankedSearchPrebuild" },
+              );
+            });
+          }
         })
         .catch((cacheBuildError) => {
           // Log errors during the background build process
@@ -508,6 +530,14 @@ const start = async () => {
       await shutdown("unhandledRejection");
       // Similar logic as uncaughtException: shutdown handles its exit codes.
     });
+    if (reportHttpStartup && httpServerInstance) {
+      if (!httpServerInstance.listening) {
+        await once(httpServerInstance, "listening");
+      }
+      if (process.connected) {
+        process.send?.({ httpStartup: "listening" }, () => {});
+      }
+    }
   } catch (error) {
     // Handle critical startup errors (already logged by ErrorHandler or caught above)
     // Log the final failure context, including error details, before exiting

@@ -12,6 +12,34 @@ Plugin compagnon pour **optimike-obsidian-mcp**. Il ajoute une vue headless « B
 
 La CI exécute les tests, construit le plugin et publie ces deux fichiers installables. Le package MCP vérifie également qu’ils sont bien présents avant distribution.
 
+## Capture native utilisée par les tests
+
+La [fixture synthétique](src/fixtures/bases-native-1.15.1.json) est un extrait
+d’une capture sous Obsidian **1.15.1** avec Bases actif. Le banc a lancé
+Obsidian Desktop avec un profil temporaire, un coffre de notes synthétiques
+et le fuseau `Europe/Paris`. Après vérification du profil, du coffre et de
+son indexation, il a figé l’horloge JavaScript au `2026-03-29T00:30:00.000Z`.
+
+- Pour Top et Label, le banc a appelé le handler `base:query` avec le
+  chemin de la Base, le nom de la vue et `format: "json"`. Ces deux cas
+  utilisent `Notes/a.md`, `Notes/b.md`, `Notes/c.md` et `Other/z.md`,
+  les formules `link(file, file.name)` et `file.name + "!"`, et une vue
+  limitée à deux notes dans `Notes`. Label ajoute le nom de colonne `Label`.
+- Pour les diagnostics, le banc a appelé les fonctions du Bridge sur quatre
+  notes `Data/Diag/a.md` à `Data/Diag/d.md` avec le même handler natif.
+  La fixture conserve les statuts et les échantillons projetés par le Bridge.
+  Les cas du rejeu MCP reprennent les messages des cellules natives et les
+  statuts correspondants. Par exemple, `file.name.LOWER()` donne des noms de
+  notes et une formule vide donne `all_null`.
+
+La capture UTC du même banc a donné les mêmes valeurs pour les cas retenus.
+Pour actualiser la référence, refaire une capture avec la version cible dans
+un profil isolé, puis examiner les écarts. Depuis la racine,
+`npm run check:bases-bridge` compare le handler simulé à la référence 1.15.1.
+`npm run test:governed-base` lance aussi ces tests et utilise la fixture
+pour le rejeu MCP. Les compteurs d’appels, les pannes injectées et les limites
+de pagination testent le comportement du Bridge en simulation.
+
 ## Endpoints exposés
 
 Préfixe officiel (recommandé) :
@@ -157,39 +185,64 @@ est `bases_formula_patch_*`, pas l’envoi de YAML arbitraire.
 ## Requêtes (`/query`)
 
 `POST /bases/:id/query` accepte `view`, `filter`, `sort`, `limit`, `page` et
-`evaluate`. `source` dit d’où viennent les lignes et les valeurs :
+`evaluate`. Le filtre de requête est un objet JSON. Une table de propriétés
+comme `{"status":"open","priority":{"gte":2}}` exige que chaque condition soit
+vraie. Les valeurs acceptées sont les scalaires, les tableaux non vides de scalaires
+(une valeur suffit) et les objets d’opérateurs `eq`, `ne`, `in`,
+`contains`, `gt`, `gte`, `lt` et `lte`. Les groupes `and` et `or`
+prennent un tableau non vide, et `not` prend un seul nœud. Pour une expression,
+mettez les chaînes entre guillemets, par exemple `{"and":["status == \"open\""]}`.
+Utilisez une table quand le nom de la propriété contient des espaces.
+`in` exige au moins une valeur. Avec le moteur actif, une table peut
+comparer le texte d'un résultat `formula.*` à un nombre ou un booléen.
+Les résultats de formule renvoyés restent au format texte.
 
-- `evaluate: true` → `source: "engine"`. Le moteur d’Obsidian (même chemin que
-  `/engine/evaluate`, avec les mêmes canaris) sélectionne d’abord les lignes de
-  la vue, sans calculer de colonne de formule : filtres globaux et de vue, tri
-  et limite de la vue (une formule sur laquelle la vue filtre ou trie est
-  calculée par le moteur, comme quand Obsidian affiche la vue). `filter` et
-  `sort` de la requête s’appliquent ensuite côté Bridge, puis la pagination.
-  Le moteur ne calcule les formules que pour les lignes de la page demandée, à
-  partir des octets exacts de la Base décrits par `baseSnapshot`. Seuls un
-  `filter` ou un `sort` de la requête sur `formula.*` font calculer toutes les
-  lignes, par lots de 100 entre lesquels Obsidian reprend la main, jusqu’à
-  1 000 lignes ; au-delà, les conditions et tris sur formule sont ignorés (les
-  autres conditions filtrent toujours) et `formula_filter_not_evaluated:too_many_rows:<lignes>:1000` le
-  signale : réduisez les lignes avec une vue ou un filtre sans formule. `computed`
-  et les clés de formule de `props` portent ces valeurs, sous la forme texte que
-  rend le moteur (`null` si vide). Mesuré par le Bridge sur 8 000 notes liées :
-  une page de 50 lignes 0,45 s, Obsidian répondant en 0,2 s au plus ; un filtre
-  et un tri sur formule sur 820 lignes 2,5 s, Obsidian bloqué 1,2 s au plus
-  par lot ; toutes les lignes d’un coup bloquaient Obsidian 15,9 s.
-- `evaluate: false`, ou moteur indisponible → `source: "fallback"`. Le Bridge
-  sélectionne les lignes avec ses filtres supportés et ne calcule aucune
-  formule : les clés de formule sont absentes de `props`, `computed` est absent.
-  Si `evaluate` était demandé, chaque formule est signalée dans `warnings`
-  (`formula_not_evaluated:<nom>:<raison>`). Un filtre ou un tri sur
-  `formula.*` est signalé et ignoré : une condition sur formule dans un `and`
-  est retirée, un `or` ou un `not` qui en contient une garde toutes les lignes. Quand la vue a une limite plus petite que le nombre
-  de lignes, seules les premières lignes dans l’ordre du Bridge sont gardées
-  et `view_limit_applied_with_bridge_order:<limite>` le signale : cet ordre
-  peut différer du tri d’Obsidian.
+Le Bridge valide tout le filtre avant de sélectionner les lignes. Une chaîne
+à la racine ou un nœud non pris en charge renvoie HTTP 400 et
+`error.code: "INVALID_PARAMS"`. `error.node` indique la position du nœud,
+avec des indices à partir de zéro. Dans le MCP, l’erreur correspondante
+est `VALIDATION_ERROR`. Les tables de propriétés sont prises en charge à
+partir de Bases Bridge 1.3.1, avec `filterVersion: 1` dans la réponse REST.
 
-L’ancien évaluateur de formules interne au Bridge est retiré : aucune valeur
-de formule ne vient plus d’une approximation.
+Avec le Bridge 1.3.2, les deux modes transmettent au moteur d’Obsidian les
+filtres globaux, les filtres de vue, le tri et la limite de la vue
+(`source: "engine"`). Le moteur évalue les formules nécessaires aux
+filtres ou au tri de la vue. Le Bridge applique ensuite `filter` et `sort` de
+la requête, puis la pagination. `baseSnapshot` décrit les octets exacts de la
+Base fournis au moteur.
+
+Dans la capture Obsidian 1.15.1, les tris ascendant et descendant sur
+`note.priority` et le tri descendant sur `file.name` ont tous renvoyé les
+notes dans l’ordre `a`, `b`, `c`, `d`. Utilisez le tri de la requête pour
+ordonner les lignes sélectionnées par le moteur.
+
+- `evaluate: true` renvoie les valeurs de formule des lignes de la page dans
+  `computed` et dans les clés de formule de `props`, sous la forme texte que
+  rend le moteur (`null` si vide).
+- `evaluate: false` omet ces champs et évite le calcul des colonnes de résultat.
+
+Dans les deux modes, un `filter` ou un `sort` de la requête sur `formula.*`
+nécessite les valeurs de toutes les lignes, par lots de 100 jusqu’à 1 000
+lignes. Au-delà, le Bridge ignore les conditions et tris sur formule et émet
+`formula_filter_not_evaluated:too_many_rows:<lignes>:1000`. Les autres critères
+s’appliquent toujours.
+
+Sur 8 000 notes liées avec `evaluate: true`, une page de 50 lignes prenait
+0,45 s, avec une réponse d’Obsidian en 0,2 s au plus. Un filtre et un tri sur
+formule sur 820 lignes prenaient 2,5 s, avec un blocage d’Obsidian de 1,2 s au
+plus par lot. Le calcul de toutes les lignes en une fois bloquait Obsidian
+pendant 15,9 s.
+
+Une sélection impossible renvoie HTTP 503 (`base_query_selection_unavailable`).
+Si un fichier sélectionné disparaît pendant la requête, le Bridge renvoie
+HTTP 503 avec `base_query_row_disappeared` et `retryable: true`.
+Une vue inconnue renvoie HTTP 404 (`base_view_not_found`). Si seules les
+colonnes de résultat ne peuvent pas être calculées après la sélection, les
+lignes sont renvoyées avec `formula_not_evaluated:<nom>:<raison>`.
+
+Installez ensemble le MCP et le Bridge de la même release. Le lecteur gouverné
+demande explicitement son [instantané de sélection](../../docs/base-row-patch-m5.md#sealed-selection)
+sur la route qualifiée du Bridge.
 
 ## Upsert robuste
 

@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
+import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
   ErrorHandler,
@@ -17,7 +18,8 @@ import { mcpSchema } from "../../mcpSchema.js";
 
 export async function registerObsidianNoteLinksTool(
   server: McpServer,
-  obsidianService: ObsidianRestApiService,
+  obsidianService: ObsidianRestApiService | undefined,
+  vaultCache?: VaultCacheService,
 ): Promise<void> {
   const toolName = "obsidian_note_links";
   const registrationContext: RequestContext =
@@ -33,7 +35,7 @@ export async function registerObsidianNoteLinksTool(
         toolName,
         {
           description:
-            "Observe the bounded semantic neighborhood of one Markdown note from Obsidian Desktop public MetadataCache APIs. Returns outgoing links, embeds and frontmatter links with actual resolution; requested subpaths with honest anchor validation; unresolved aggregates; resolved backlinks; truncation; provenance; and cache-freshness limits. Read-only and no graph-preservation claim.",
+            "Read outgoing links, embeds, frontmatter links, unresolved counts, and backlinks for one Markdown note. Live uses Obsidian Desktop MetadataCache. Headless resolves Markdown destinations in the shared filesystem cache and reports requested anchor validation as unknown. Returns provenance, freshness limits, and independent result limits.",
           inputSchema: mcpSchema(ObsidianNoteLinksInputSchema.shape),
           annotations: READ_ONLY_TOOL_ANNOTATIONS,
         },
@@ -48,6 +50,7 @@ export async function registerObsidianNoteLinksTool(
             params,
             context,
             obsidianService,
+            vaultCache,
           );
           return {
             content: [

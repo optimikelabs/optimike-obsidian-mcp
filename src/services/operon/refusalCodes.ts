@@ -24,6 +24,24 @@ export const OPERON_REFUSAL_MESSAGES = {
     "The vault owner declined this plan in Obsidian. Do not retry it without a new decision.",
   operon_index_not_settled:
     "Operon's index is still settling. Wait a few seconds, then retry the same request.",
+  operon_filesystem_cache_unavailable:
+    "Headless Operon reads require the shared vault cache.",
+  operon_filesystem_cache_partial:
+    "The shared vault cache is incomplete. Retry when it is ready.",
+  operon_filesystem_configuration_invalid:
+    "The synchronized Operon plugin data is unreadable or uses an unsupported format.",
+  operon_filesystem_configuration_missing:
+    "Operon data.json is absent from this vault copy.",
+  operon_filesystem_filter_unsupported:
+    "This filter uses semantics unavailable in headless mode. Query it through the Desktop Bridge.",
+  operon_filesystem_live_required:
+    "This Operon operation or task shape requires the live Obsidian Desktop Bridge.",
+  "malformed-frontmatter":
+    "Operon cannot edit this file task because its YAML frontmatter is malformed or starts with a BOM.",
+  operon_filesystem_mutation_snapshot_incomplete:
+    "A complete Operon filesystem snapshot with valid frontmatter and workflow configuration is required to plan a mutation.",
+  operon_filesystem_duplicate_id:
+    "Multiple filesystem sources declare this Operon ID. Use operon_validate to inspect the duplicate.",
 } as const;
 
 export type OperonRefusalCode = keyof typeof OPERON_REFUSAL_MESSAGES;
@@ -35,7 +53,7 @@ export const OPERON_REFUSAL_CODES = Object.freeze(
 /** Bridge `error.code` values that are forwarded as public reason codes. */
 export const PUBLIC_OPERON_BRIDGE_REFUSAL_CODES: ReadonlySet<string> = new Set(
   OPERON_REFUSAL_CODES.filter(
-    (code) => code !== "operon_mutation_outcome_uncertain",
+    (code) => code !== "operon_mutation_outcome_uncertain" && !code.startsWith("operon_filesystem_"),
   ),
 );
 
