@@ -199,6 +199,14 @@ type PublicRuntimeStatus = {
   ok: boolean;
   transport: string;
   runtimeMode: string;
+  headlessRead?: {
+    source: "filesystem";
+    upstreamSync: "unknown";
+    refreshOrigin?: "startup-snapshot" | "process-refresh";
+    lastSuccessfulRefreshStartedAt: number | null;
+    refreshing: boolean;
+    newestFileMtimeMs: number | null;
+  };
   runtime: {
     packageVersion: string;
     nodeVersion: string;
@@ -496,6 +504,8 @@ export function projectPublicRuntimeStatus(
   const dist = asRecord(runtime.dist);
   const degradedMode = asRecord(value.degradedMode);
   const writePolicy = asRecord(value.writePolicy);
+  const runtimeMode = allowedValue(value.runtimeMode, PUBLIC_RUNTIME_MODES) ?? "unknown";
+  const headlessRead = asRecord(value.headlessRead);
   const readOnlyTools = Array.isArray(degradedMode.readOnlyWhenRestUnavailable)
     ? degradedMode.readOnlyWhenRestUnavailable
     : [];
@@ -503,8 +513,21 @@ export function projectPublicRuntimeStatus(
   return {
     ok: booleanOr(value.ok, true),
     transport: allowedValue(value.transport, PUBLIC_TRANSPORTS) ?? "unknown",
-    runtimeMode:
-      allowedValue(value.runtimeMode, PUBLIC_RUNTIME_MODES) ?? "unknown",
+    runtimeMode,
+    ...(runtimeMode.startsWith("headless-") ? {
+      headlessRead: {
+        source: "filesystem" as const,
+        upstreamSync: "unknown" as const,
+        refreshOrigin: allowedValue(headlessRead.refreshOrigin, [
+          "startup-snapshot",
+          "process-refresh",
+        ] as const),
+        lastSuccessfulRefreshStartedAt:
+          optionalNumber(headlessRead.lastSuccessfulRefreshStartedAt) ?? null,
+        refreshing: booleanOr(headlessRead.refreshing),
+        newestFileMtimeMs: optionalNumber(headlessRead.newestFileMtimeMs) ?? null,
+      },
+    } : {}),
     runtime: {
       packageVersion: publicVersion(runtime.packageVersion) ?? "unknown",
       nodeVersion: publicVersion(runtime.nodeVersion) ?? "unknown",
@@ -628,6 +651,8 @@ export async function collectRuntimeStatus(
   vaultCacheService: VaultCacheService | undefined,
   options: RuntimeStatusOptions = {},
 ): Promise<Record<string, unknown>> {
+  const headless = config.obsidianRuntimeMode.startsWith("headless-");
+  const refresh = headless ? vaultCacheService?.getRefreshEvidence() : undefined;
   const semanticCache = config.smartEnvDir ? getSemanticCacheService() : null;
   const sharedDb = readDbCounts();
   const integrity =
@@ -641,6 +666,14 @@ export async function collectRuntimeStatus(
     transport: config.mcpTransportType,
     runtimeMode: config.obsidianRuntimeMode,
     runtime: collectRuntimeFingerprint(),
+    ...(headless ? {
+      headlessRead: {
+        refreshing: refresh?.refreshing ?? false,
+        refreshOrigin: refresh?.refreshOrigin,
+        lastSuccessfulRefreshStartedAt: refresh?.lastSuccessfulRefreshStartedAt ?? null,
+        newestFileMtimeMs: vaultCacheService?.getNewestFileMtimeMs() ?? null,
+      },
+    } : {}),
     sharedCache: {
       ...(vaultCacheService?.getStats() ?? {
         dbPath: config.obsidianSharedCacheDbPath,

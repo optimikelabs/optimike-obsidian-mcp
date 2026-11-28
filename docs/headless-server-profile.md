@@ -30,6 +30,43 @@ OBSIDIAN_VAULT_EXCLUDE_PATTERNS="tmp/**,**/tmp/**,**/screenshots/**,**/*screensh
 SEMANTIC_SEARCH_PREWARM=false
 ```
 
+## Note read provenance
+
+In all three headless modes, `obsidian_runtime_status` identifies the runtime
+mode and reports `headlessRead.source: "filesystem"`. The server reads
+from its local filesystem cache without a live Obsidian connection.
+`headlessRead.refreshing` shows whether a scan is queued or running.
+`headlessRead.newestFileMtimeMs` is the latest modification time among indexed
+Markdown files in this process's index, or `null` for an empty index.
+`sharedCache.lastRefreshAt` is the completion time of the last successful
+refresh known to that index. `headlessRead.lastSuccessfulRefreshStartedAt`
+records when that scan began. It is `null` when start evidence is unavailable,
+including older SQLite snapshots. `headlessRead.refreshOrigin` identifies the evidence as
+`"process-refresh"` or `"startup-snapshot"`, loaded from SQLite at startup.
+Each process keeps its own checkpoint across other servers' scans.
+Timestamps use milliseconds since the Unix epoch.
+
+`obsidian_read_note`, `obsidian_list_notes` and `obsidian_global_search`
+include one `provenance` object on successful reads and cache availability
+errors when the headless cache is enabled, including in compact mode.
+It contains `source: "filesystem"`, `refreshOrigin` when known,
+`lastSuccessfulRefreshStartedAt`, and `lastRefreshAt`. `partial: true`
+means results may be incomplete. It also appears when a cold-cache request
+waits for a full scan. `refreshing: true` flags refresh activity during the
+request, including a scan that finishes before the reply.
+
+Use `now − lastSuccessfulRefreshStartedAt` for the window of disk changes
+a scan may have missed because of timing, including immediately after a
+restart that reuses its SQLite snapshot. A file can change after its own
+read and before the scan completes. Files may be observed at different times,
+and this window describes scan timing only.
+
+MCP status, note reads, `/readyz` and `/statusz` report
+`upstreamSync: "unknown"`. HTTP status retains its existing `source`
+classification and adds `readSource: "filesystem"` for the headless read
+path. `freshnessScope: "local-cache"` limits HTTP age and staleness fields to
+the local cache. Upstream synchronization health requires separate evidence.
+
 ## Validation
 
 ```bash

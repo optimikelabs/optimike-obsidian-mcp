@@ -32,6 +32,48 @@ OBSIDIAN_VAULT_EXCLUDE_PATTERNS="tmp/**,**/tmp/**,**/screenshots/**,**/*screensh
 SEMANTIC_SEARCH_PREWARM=false
 ```
 
+## Provenance des lectures de notes
+
+Dans les trois modes headless, `obsidian_runtime_status` indique le mode
+d’exécution et renvoie `headlessRead.source: "filesystem"`. Le serveur
+lit depuis son cache local sans connexion à Obsidian Desktop.
+`headlessRead.refreshing` signale un scan en attente ou en cours.
+`headlessRead.newestFileMtimeMs` contient la date de modification la plus
+récente parmi les fichiers Markdown indexés par ce processus, ou `null` si
+l’index est vide. `sharedCache.lastRefreshAt` indique la fin du dernier
+rafraîchissement réussi connu de cet index.
+`headlessRead.lastSuccessfulRefreshStartedAt` indique son début. Ce champ
+vaut `null` si le début est inconnu, notamment avec un ancien état SQLite.
+`headlessRead.refreshOrigin`
+indique s’il provient de ce processus (`"process-refresh"`) ou de l’état
+SQLite chargé au démarrage (`"startup-snapshot"`). Chaque processus conserve
+son propre repère pendant les scans des autres serveurs. Les dates sont
+exprimées en millisecondes depuis l’époque Unix.
+
+`obsidian_read_note`, `obsidian_list_notes` et `obsidian_global_search`
+renvoient un objet `provenance` pour les lectures réussies et les erreurs de
+disponibilité lorsque le cache headless est activé, y compris en mode
+compact. Il contient `source: "filesystem"`, `refreshOrigin` quand
+l’origine est connue, `lastSuccessfulRefreshStartedAt` et `lastRefreshAt`.
+`partial: true` signifie que les résultats peuvent être incomplets.
+Ce champ apparaît aussi quand une requête attend la fin du premier scan.
+`refreshing: true` signale une activité de rafraîchissement pendant la
+requête, même si le scan se termine avant la réponse.
+
+La fenêtre `maintenant − lastSuccessfulRefreshStartedAt` couvre les
+modifications sur disque que le scan a pu manquer en raison de son
+déroulement, y compris juste après un redémarrage qui réutilise l’état
+SQLite. Un fichier peut changer entre sa lecture et la fin du scan. Les
+fichiers peuvent être observés à des moments différents. Cette fenêtre
+décrit uniquement le déroulement du scan.
+
+Le statut MCP, les lectures de notes, `/readyz` et `/statusz` indiquent
+`upstreamSync: "unknown"`. Le statut HTTP conserve la classification
+`source` et ajoute `readSource: "filesystem"` pour les lectures headless.
+`freshnessScope: "local-cache"` limite les indicateurs HTTP d’âge et de
+péremption au cache local. L’état de la synchronisation amont se vérifie
+séparément.
+
 ## Validation
 
 ```bash
