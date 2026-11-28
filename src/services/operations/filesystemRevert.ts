@@ -1,12 +1,11 @@
 import { z } from "zod/v3";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { assertWriteAllowed } from "../writePolicy.js";
-import { HEADLESS_VAULT_LOCK_BUSY, isHeadlessVaultLockBusy, operationDigest, type OperationReceipt, type OperationOutcome } from "./contract.js";
+import { FILESYSTEM_REVERT_PLAN_PREFIX as PREFIX, HEADLESS_VAULT_LOCK_BUSY, isHeadlessVaultLockBusy, operationDigest, type OperationReceipt, type OperationOutcome } from "./contract.js";
 import { FILESYSTEM_AUTHORITY, type FilesystemNoteBackend } from "./filesystemNoteBackend.js";
 import { ObsidianNoteReplaceConcurrencyError, displacedFilesystemEdit, replacedConcurrentEdit, type ObsidianNoteReplacePlan, type ObsidianNoteReplaceJournal } from "./obsidianNoteReplaceJournal.js";
 
 const KIND = "obsidian.operation.revert";
-const PREFIX = "obsidian-operation-revert:v1:";
 const SOURCES = new Map([
   ["obsidian-note-replace:v1:", undefined],
   ["obsidian-note-create:v1:", "obsidian.note.create"],
@@ -46,6 +45,14 @@ export class FilesystemRevert {
     const source = this.journal.get(operationId(input.operationRef, prefix));
     if (!source?.filesystem || source.path !== input.path ||
         source.projection?.kind !== SOURCES.get(prefix)) refuse("The headless operation does not match the target.");
+    const key = "optimike:projection:v1:revert:" + operationDigest(input.idempotencyKey);
+    const identity = operationDigest({ path: input.path, sourceOperationId: source.operationId });
+    const replay = this.journal.getByIdempotencyKey(key);
+    if (replay) {
+      if (replay.idempotencyIdentity !== identity) refuse("The idempotency key belongs to a different revert.");
+      return this.status(PREFIX + replay.operationId);
+    }
+    if (source.filesystem.restoredByPlanRef) refuse("The displaced edit has already been restored.");
     const divergent = source.status === "outcome_unknown" ? source.filesystem.divergentObservation : undefined;
     const displaced = displacedFilesystemEdit(source);
     const undoConcurrentRestore = prefix === PREFIX && source.status === "committed" &&
@@ -62,13 +69,6 @@ export class FilesystemRevert {
     if (!afterSha256) refuse("The filesystem has no after proof against which to seal the revert.");
     const restoreAbsence = source.projection?.kind === "obsidian.note.create";
     if (!restoreAbsence && before === undefined) refuse("The operation has no retained before image.");
-    const key = "optimike:projection:v1:revert:" + operationDigest(input.idempotencyKey);
-    const identity = operationDigest({ path: input.path, sourceOperationId: source.operationId });
-    const replay = this.journal.getByIdempotencyKey(key);
-    if (replay) {
-      if (replay.idempotencyIdentity !== identity) refuse("The idempotency key belongs to another revert.");
-      return this.status(PREFIX + replay.operationId);
-    }
     const restoresAfterDivergence = divergent !== undefined || undoConcurrentRestore;
     this.authorize("plan", source.path, restoreAbsence || restoresAfterDivergence, before?.length);
     const sealed = await this.backend.sealRevert(source.path, restoreAbsence ? undefined : before, afterSha256, restoreDisplaced);
@@ -80,7 +80,8 @@ export class FilesystemRevert {
       path: source.path, idempotencyKey: key, idempotencyIdentity: identity,
       beforeSha256: afterSha256, afterSha256: sealed.afterSha256, nextContent: sealed.content,
       bindingFingerprint: sealed.bindingFingerprint,
-      filesystem: { policyDigest: sealed.policyDigest, beforeContent: sealed.before, replacesConcurrentEdit },
+      filesystem: { policyDigest: sealed.policyDigest, beforeContent: sealed.before, replacesConcurrentEdit,
+        ...(divergent ? { displacedSourceOperationId: source.operationId } : {}) },
       requestDigest: operationDigest({ identity, before: afterSha256, after: sealed.afterSha256,
         policy: sealed.policyDigest, binding: sealed.bindingFingerprint }),
       projection: { contractVersion: 1, kind: KIND, publicIdempotencyKey: input.idempotencyKey, intentDigest: identity,
@@ -94,7 +95,10 @@ export class FilesystemRevert {
     let row = this.require(ref);
     if (row.status === "applying" || row.status === "outcome_unknown") {
       if (await this.backend.revertPublished(row)) {
-        try { row = this.journal.commitAfterVerifiedProof(row.operationId, ["applying", "outcome_unknown"]); }
+        row = this.require(ref);
+        try {
+          if (row.status !== "committed") row = this.journal.commitAfterVerifiedProof(row.operationId, ["applying", "outcome_unknown"]);
+        }
         catch (error) { if (!(error instanceof ObsidianNoteReplaceConcurrencyError)) throw error; row = this.require(ref); }
       }
     }
@@ -152,6 +156,7 @@ export class FilesystemRevert {
       ...(committed ? { afterProof: { kind: row.projection!.proof.restoreAbsence ? "observed-path-absence" : "note-sha256",
         digest: row.filesystem?.stagedSha256 ?? row.afterSha256 } } : {}),
       ...(concurrentEdit ? { replacesConcurrentEdit: concurrentEdit } : {}),
+      ...(row.filesystem?.restoredByPlanRef ? { restoredByPlanRef: row.filesystem.restoredByPlanRef } : {}),
       phase, outcome: phase === "terminal" ? row.status as OperationOutcome : null,
       admittedAt: row.createdAt, updatedAt: row.updatedAt,
       ...(phase === "terminal" ? { terminalAt: row.updatedAt } : {}),

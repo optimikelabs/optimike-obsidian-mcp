@@ -649,6 +649,7 @@ function receipt(
               : "not_started",
     },
     ...(concurrentEdit ? { replacesConcurrentEdit: concurrentEdit } : {}),
+    ...(plan.filesystem?.restoredByPlanRef ? { restoredByPlanRef: plan.filesystem.restoredByPlanRef } : {}),
     admittedAt: plan.createdAt,
     updatedAt: plan.updatedAt,
     ...(terminal ? { terminalAt: plan.updatedAt } : {}),

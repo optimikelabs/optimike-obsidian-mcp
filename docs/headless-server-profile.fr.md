@@ -149,6 +149,12 @@ d’observation. L’heure de modification du fichier est fournie lorsqu’elle 
 disponible. Pour rétablir l’édition remplacée, passez le `planRef` du retour
 arrière appliqué à `obsidian_operation_revert_plan`. Le nouveau plan vérifie
 le hash de la version en place avant de la remplacer.
+Une restauration confirmée clôt l’opération source en `conflict`. Son statut
+renvoie `restoredByPlanRef` à la place de l’avis de restauration en attente.
+
+Avec le profil `tasks`, si le backend partagé ne publie pas son mode
+d’exécution, le proxy stdio masque les outils Operon réservés au live et signale
+la mise à niveau dans le statut et sur stderr.
 
 Placez le cache partagé hors du coffre. Le journal est créé à côté du cache
 par défaut, d’après l’identité du coffre quel que soit le mode headless, ou

@@ -4,6 +4,7 @@ import { McpError } from "../../types-global/errors.js";
 
 export const OPERATION_RUNTIME_CONTRACT_VERSION = 1 as const;
 export const HEADLESS_VAULT_LOCK_BUSY = "headless_vault_lock_busy";
+export const FILESYSTEM_REVERT_PLAN_PREFIX = "obsidian-operation-revert:v1:";
 
 export function isHeadlessVaultLockBusy(error: unknown) {
   return error instanceof McpError && error.details?.reasonCode === HEADLESS_VAULT_LOCK_BUSY;
@@ -50,6 +51,7 @@ export type OperationReceipt = {
   beforeProof: OperationProof;
   afterProof?: OperationProof;
   replacesConcurrentEdit?: ConcurrentEditReplacement;
+  restoredByPlanRef?: string;
   postflight: {
     source?: "filesystem-reread";
     reason?: "modified_time_settlement" | "headless_atomic_exchange_unavailable" | "headless_displaced_edit" | typeof HEADLESS_VAULT_LOCK_BUSY;
