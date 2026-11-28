@@ -32,6 +32,107 @@ OBSIDIAN_VAULT_EXCLUDE_PATTERNS="tmp/**,**/tmp/**,**/screenshots/**,**/*screensh
 SEMANTIC_SEARCH_PREWARM=false
 ```
 
+## Provenance des lectures de notes
+
+Dans les trois modes headless, `obsidian_runtime_status` indique le mode
+d’exécution et renvoie `headlessRead.source: "filesystem"`. Le serveur
+lit depuis son cache local sans connexion à Obsidian Desktop.
+`headlessRead.refreshing` signale un scan en attente ou en cours.
+`headlessRead.newestFileMtimeMs` contient la date de modification la plus
+récente parmi les fichiers Markdown indexés par ce processus, ou `null` si
+l’index est vide. `sharedCache.lastRefreshAt` indique la fin du dernier
+rafraîchissement réussi connu de cet index.
+`headlessRead.lastSuccessfulRefreshStartedAt` indique son début. Ce champ
+vaut `null` si le début est inconnu, notamment avec un ancien état SQLite.
+`headlessRead.refreshOrigin`
+indique s’il provient de ce processus (`"process-refresh"`) ou de l’état
+SQLite chargé au démarrage (`"startup-snapshot"`). Chaque processus conserve
+son propre repère pendant les scans des autres serveurs. Les dates sont
+exprimées en millisecondes depuis l’époque Unix.
+
+`obsidian_read_note`, `obsidian_list_notes` et `obsidian_global_search`
+renvoient un objet `provenance` pour les lectures réussies et les erreurs de
+disponibilité lorsque le cache headless est activé, y compris en mode
+compact. Il contient `source: "filesystem"`, `refreshOrigin` quand
+l’origine est connue, `lastSuccessfulRefreshStartedAt` et `lastRefreshAt`.
+`partial: true` signifie que les résultats peuvent être incomplets.
+Ce champ apparaît aussi quand une requête attend la fin du premier scan.
+`refreshing: true` signale une activité de rafraîchissement pendant la
+requête, même si le scan se termine avant la réponse.
+
+La fenêtre `maintenant − lastSuccessfulRefreshStartedAt` couvre les
+modifications sur disque que le scan a pu manquer en raison de son
+déroulement, y compris juste après un redémarrage qui réutilise l’état
+SQLite. Un fichier peut changer entre sa lecture et la fin du scan. Les
+fichiers peuvent être observés à des moments différents. Cette fenêtre
+décrit uniquement le déroulement du scan.
+
+## Preuve de synchronisation amont
+
+Le statut runtime, la provenance des lectures et les deux endpoints HTTP
+exposent `upstreamSync`, `lastSuccessfulPullAt`, `lagSecondsUpperBound` et
+`evidenceSource`. Le champ HTTP `freshnessScope: "local-cache"` et les codes de
+readiness restent liés à la lecture locale. Comparez la dernière synchronisation
+au début du scan pour savoir si le cache MCP a observé ses changements.
+`lagSecondsUpperBound` arrondit à la seconde supérieure le temps écoulé depuis
+le **début** de la dernière synchronisation réussie. Cette borne porte sur
+l’âge de l’observation du coffre distant. Les modifications non envoyées par
+un appareil, les fichiers exclus et les appareils déconnectés échappent à
+cette mesure.
+
+| Signal | Donnée exploitable |
+| --- | --- |
+| Exécution ponctuelle de `ob sync` | Une sortie normale à zéro marque la fin de la passe, même sans téléchargement. Un code non nul, une interruption ou un délai dépassé marque un échec. |
+| `ob sync --continuous` | La présence du processus signale son exécution. Sa sortie ne prouve pas un pull réussi. |
+| `ob sync-status --json` | Configuration exploitable par programme, sans date documentée de dernier pull réussi ni repère côté serveur. |
+| Journaux CLI et Sync | Diagnostic humain, sans schéma stable de corrélation, de fin ou d’horodatage. |
+| Fichiers d’état internes et dates des notes | Aucun schéma stable ni date de pull documentés. Les fichiers répliqués peuvent conserver les dates d’origine. |
+
+Voir [Obsidian Headless Sync](https://obsidian.md/help/sync/headless),
+[la référence CLI](https://github.com/obsidianmd/obsidian-headless#commands) et
+[les conflits Sync](https://obsidian.md/help/sync/troubleshoot).
+
+Définissez `OBSIDIAN_SYNC_HEARTBEAT_FILE` avec un chemin absolu hors du coffre,
+dans un dossier contrôlé par l’opérateur. Le lecteur attend le
+[reçu JSON versionné](headless-server-profile.md#upstream-sync-evidence).
+Écrivez d’abord un fichier temporaire voisin, puis remplacez le reçu en une
+opération atomique. Le script livré crée un reçu privé. Utilisez le même
+compte dédié pour MCP et le script, ou des permissions qui donnent au compte
+MCP la lecture à chaque remplacement.
+
+Le reçu v2 contient `vaultBinding`, le SHA-256 du chemin réel absolu du coffre
+en UTF-8, sans retour à la ligne. Un reçu d’un autre coffre ou un ancien reçu
+sans empreinte donne `unknown`. Utilisez des dates ISO UTC avec millisecondes.
+L’état du reçu est `running`
+au démarrage, `ok` après réussite, ou `error` après échec. Conservez le dernier
+`lastSuccessfulPull` au démarrage et en cas d’échec, ou laissez `null` jusqu’à
+la première réussite. Le backend renvoie `unknown` si la preuve est absente,
+illisible, datée dans le futur, incohérente ou si aucun pull réussi n’a été
+observé. Le délai `OBSIDIAN_SYNC_STALL_SECONDS` (600 par défaut) donne
+`stalled` si le reçu n’est plus actualisé. Un reçu récent signalant un échec
+donne `error`. Sinon, un pull réussi dans la fenêtre
+`OBSIDIAN_SYNC_CURRENT_SECONDS` (180 par défaut) donne `current`, puis
+`lagging` au-delà. Une exécution en cours peut conserver l’état établi par
+la dernière passe réussie.
+
+`OBSIDIAN_SYNC_WRITE_MAX_AGE_SECONDS` active le garde-fou d’écriture
+optionnel. Une écriture headless renvoie `upstream_sync_write_blocked` face
+à un état `unknown`, `stalled`, `error` ou à un pull trop ancien. L’erreur
+inclut `upstreamSync` et le code `syncWriteRefusal`. Les
+lectures, les simulations et les préconditions existantes restent
+applicables. Le statut runtime et `/statusz` authentifié listent les chemins
+relatifs des `syncConflictFiles` indexés, selon le motif Markdown daté
+d’Obsidian, avec une limite de 100 et le total `syncConflictCount`. La fusion
+automatique par défaut d’Obsidian ne crée aucun fichier de conflit. Une liste
+vide indique seulement qu’aucun fichier indexé ne correspond au motif.
+`/readyz` public ne contient aucun nom de note.
+
+Le script livré `scripts/obsidian-sync-heartbeat.mjs` exécute une passe du CLI
+avec un délai maximal et écrit le reçu. Planifiez-le sous le compte ayant
+déjà exécuté `ob sync-setup`. Utilisez un seul service Sync par coffre, en
+`pull-only` pour une réplique en lecture seule. Voir les
+[exemples de déploiement](../OPERATIONS.fr.md#services-sync-et-index-sémantique-headless).
+
 ## Validation
 
 ```bash

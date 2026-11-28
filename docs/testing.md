@@ -120,7 +120,7 @@ a skipped smoke do not establish live qualification.
 
 ## Local checks and heavy suites
 
-Use Node as required by `package.json` (currently `>=22.12.0`). Install with
+Use Node as required by `package.json` (currently `>=22.13.0`). Install with
 `npm ci` when the selected command needs dependencies; plugin checks need their
 own locked install, e.g. `npm --prefix plugins/obsidian-operon-bridge ci`.
 

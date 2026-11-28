@@ -12,6 +12,9 @@ import {
 } from "./httpProtection.js";
 import { httpErrorHandler } from "./httpErrorHandler.js";
 import { getHttpRequestState } from "./httpRequestState.js";
+import { readUpstreamSync, type UpstreamSyncEvidence } from "../../services/upstreamSyncEvidence.js";
+import { externalSemanticGenerationConfigured } from "../../services/externalSemanticGeneration.js";
+import { readSemanticIndexStatus } from "../../services/semanticIndexStatus.js";
 
 export type ReadinessState = "ready" | "degraded" | "critical";
 export type ResponseProvenance =
@@ -36,13 +39,15 @@ export type HealthSnapshot = {
   timestamp: string;
   processStartedAt: string;
   runtimeMode: string;
-  provenance: {
+  provenance: Partial<UpstreamSyncEvidence> & {
     source: ResponseProvenance;
     origin: "obsidian_api" | "filesystem" | "cache" | "snapshot" | "unknown";
     observedAt: string | null;
     freshnessMs: number | null;
     stale: boolean;
     freshnessKnown: boolean;
+    readSource?: "filesystem";
+    freshnessScope?: "local-cache";
   };
   dependencies: {
     obsidianDesktop: HealthDependency;
@@ -246,6 +251,7 @@ export function buildHealthSnapshot(
   const runtimeMode = normalizeRuntimeMode(
     options.runtimeMode ?? process.env.OBSIDIAN_RUNTIME_MODE,
   );
+  const headless = runtimeMode.startsWith("headless");
   const vaultPath = options.vaultPath ?? process.env.OBSIDIAN_VAULT;
   const cacheSource =
     options.cacheSource ?? process.env.OBSIDIAN_CACHE_SOURCE ?? "";
@@ -320,12 +326,11 @@ export function buildHealthSnapshot(
   // A recent direct probe is stronger evidence than a cache whose last
   // successful refresh came from REST. In particular, a fresh failed probe
   // must immediately withdraw live-read and mutation capability.
-  const liveObserved = directLiveKnown
-    ? directLiveObserved
-    : cacheLiveObserved;
+  const liveObserved =
+    !headless && (directLiveKnown ? directLiveObserved : cacheLiveObserved);
   const filesystemObserved =
     origin === "filesystem" ||
-    runtimeMode.startsWith("headless") ||
+    headless ||
     cacheSource.toLowerCase().includes("filesystem");
   const filesystemReads = filesystemObserved && vaultAvailable && cacheReady;
   const usableFallback =
@@ -342,7 +347,6 @@ export function buildHealthSnapshot(
   } else if (cacheReady && cacheHasData) provenance = "cache";
   else if (cacheReady && origin === "snapshot") provenance = "snapshot";
 
-  const headless = runtimeMode.startsWith("headless");
   const reasons: string[] = [];
   let state: ReadinessState;
 
@@ -419,8 +423,8 @@ export function buildHealthSnapshot(
   if (!filesystemReads) unavailable.push("filesystem-reads");
   if (!cacheReady) unavailable.push("cache-reads");
   if (!mutationCapable) unavailable.push("mutations");
-  const selectDirectProvenance =
-    directLiveObserved || (liveApiTimestampInvalid && !cacheHasData);
+  const selectDirectProvenance = !headless &&
+    (directLiveObserved || (liveApiTimestampInvalid && !cacheHasData));
   const selectedObservedAtMs = selectDirectProvenance
     ? liveApiObservedAtMs
     : cacheObservedAtMs;
@@ -448,6 +452,11 @@ export function buildHealthSnapshot(
       freshnessMs: selectedFreshnessMs,
       stale: selectedStale,
       freshnessKnown: selectedFreshnessMs !== null,
+      ...(headless ? {
+        readSource: "filesystem",
+        freshnessScope: "local-cache",
+        upstreamSync: "unknown",
+      } : {}),
     },
     dependencies: {
       obsidianDesktop: {
@@ -641,13 +650,21 @@ export function createHttpObservability(options: HealthOptions = {}) {
       endpoint: "/mcp",
     });
 
-  const readinessHandler = (c: Context) => {
+  const observedSnapshot = async () => {
     const snapshot = healthSnapshot();
+    if (snapshot.runtimeMode.startsWith("headless-")) {
+      Object.assign(snapshot.provenance, await readUpstreamSync());
+    }
+    return snapshot;
+  };
+
+  const readinessHandler = async (c: Context) => {
+    const snapshot = await observedSnapshot();
     return snapshot.ready ? c.json(snapshot, 200) : c.json(snapshot, 503);
   };
 
-  const statusHandler = (c: Context) => {
-    const snapshot = healthSnapshot();
+  const statusHandler = async (c: Context) => {
+    const snapshot = await observedSnapshot();
     const controls = {
       sessions: options.getSessionStats?.() ?? null,
       admission: httpAdmissionController.getSnapshot(),
@@ -656,7 +673,14 @@ export function createHttpObservability(options: HealthOptions = {}) {
         clientIdentities: authenticatedIdentityLimiter.getStats(),
       },
     };
-    return c.json({ ...snapshot, controls });
+    return c.json({
+      ...snapshot,
+      ...(snapshot.runtimeMode.startsWith("headless-") && {
+        ...(options.vaultCacheService?.getSyncConflicts() ?? { syncConflictFiles: [], syncConflictCount: 0 }),
+      }),
+      ...(externalSemanticGenerationConfigured() && { semanticIndex: await readSemanticIndexStatus() }),
+      controls,
+    });
   };
 
   return {

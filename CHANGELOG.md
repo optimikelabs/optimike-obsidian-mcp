@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `smart_semantic_search` can read a published external Smart Env v3 generation selected by `SMART_ENV_GENERATION_POINTER`. Searches switch on the next request, keep notes and sections in the same generation, and report the generation ID. See the [publication contract](docs/semantic-vector-cache-encoding.md#external-smart-env-v3-generations).
+- Headless note reads, listings, search and status distinguish local cache freshness from upstream Sync evidence. An optional heartbeat records the last successful pull, exposes stalled or failed sync, and can guard filesystem writes. Authenticated status lists indexed Sync conflict files.
+- The standalone semantic index producer has a polling service mode with incremental embeddings, an exclusive producer lock, retry backoff and atomic publication. External semantic search and runtime status expose the generation, build time and observed pending changes.
+- Headless Sync receipts are bound to the vault path. Status caps the conflict list and reports the full count. The semantic service recovers abandoned producer leases, keeps a reader grace period before pruning, and requires one-use authorization for deletions beyond its configured limit.
+- The semantic service caps generations, carries forward a changing note's last published vectors, and keeps running through Windows file contention or a damaged retirement ledger. Status reports blocked pruning or ledger recovery, and the producer waits at capacity until it can reclaim a slot. Node.js 22.13.0 or later is required.
+
 ## [3.23.1] - 2026-11-26
 
 No Bridge change: Atomic Write Bridge 0.10.0, Operon Bridge 0.9.9 and Bases Bridge 1.3.0 ship unchanged in the bundle of this release. See the [English](docs/releases/3.23.1.md) and [French](docs/releases/3.23.1.fr.md) release notes.

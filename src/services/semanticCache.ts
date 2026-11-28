@@ -16,6 +16,10 @@ import {
   type SmartBlockRef,
 } from "./smartEnvV3.js";
 import { applyWalSizeLimit } from "./sqliteWal.js";
+import {
+  readExternalSemanticGeneration,
+  type ExternalSemanticGeneration,
+} from "./externalSemanticGeneration.js";
 
 type SemanticManifestRow = {
   smart_env_dir: string;
@@ -139,6 +143,18 @@ CREATE TABLE IF NOT EXISTS semantic_section_tags (
 `;
 
 let semanticCacheServiceSingleton: SemanticCacheService | null = null;
+let externalCache: { key: string; service: SemanticCacheService } | undefined;
+let externalCacheDb: DatabaseSync | undefined;
+
+function openCacheDb(dbPath: string): DatabaseSync {
+  const db = new DatabaseSync(dbPath);
+  db.exec("PRAGMA busy_timeout = 5000;");
+  db.exec("PRAGMA journal_mode = WAL;");
+  db.exec("PRAGMA synchronous = NORMAL;");
+  applyWalSizeLimit(db);
+  db.exec(SCHEMA_SQL);
+  return db;
+}
 
 // The cache is derived data. Version its source signature with the row encoding
 // so an older release rebuilds from the source rather than reading an encoding
@@ -307,19 +323,36 @@ export class SemanticCacheService {
   private sectionSnapshot: SemanticSectionSnapshot | null = null;
   private sectionSnapshotLoadedAt = 0;
   private pendingSections: Promise<SemanticSectionSnapshot> | null = null;
+  private pendingExternalIndex?: ReturnType<typeof readExternalSemanticGeneration>;
 
   constructor(
     private readonly smartEnvDir: string,
-    dbPath: string,
+    database: string | DatabaseSync,
     ttlMs: number,
+    private readonly external?: ExternalSemanticGeneration,
   ) {
-    this.db = new DatabaseSync(dbPath);
-    this.db.exec("PRAGMA busy_timeout = 5000;");
-    this.db.exec("PRAGMA journal_mode = WAL;");
-    this.db.exec("PRAGMA synchronous = NORMAL;");
-    applyWalSizeLimit(this.db);
-    this.db.exec(SCHEMA_SQL);
+    this.db = typeof database === "string" ? openCacheDb(database) : database;
     this.ttlMs = Number.isFinite(ttlMs) ? Math.max(ttlMs, 0) : 60000;
+  }
+
+  private scanSource(includeSections = false): Promise<SmartEnvSourceState> {
+    if (!this.external) return scanSmartEnvSourceState(this.smartEnvDir, includeSections);
+    const { cacheKey, sourceFileCount } = this.external;
+    return Promise.resolve({
+      signature: cacheKey,
+      sectionSignature: includeSections ? cacheKey : undefined,
+      fileCount: sourceFileCount,
+    });
+  }
+
+  private async loadExternalIndex(generation: ExternalSemanticGeneration) {
+    this.pendingExternalIndex ??= readExternalSemanticGeneration(generation);
+    const pending = this.pendingExternalIndex;
+    try {
+      return await pending;
+    } finally {
+      if (this.pendingExternalIndex === pending) this.pendingExternalIndex = undefined;
+    }
   }
 
   public async getSnapshot(
@@ -370,7 +403,8 @@ export class SemanticCacheService {
   } | null {
     if (this.loadStartedAt === null) return null;
     const manifest = this.readManifest();
-    const own = manifest && manifest.smart_env_dir === this.smartEnvDir;
+    const own = manifest && manifest.smart_env_dir === this.smartEnvDir &&
+      (!this.external || manifest.source_signature === this.external.cacheKey);
     return {
       startedAt: this.loadStartedAt,
       persistedVectorCount: own ? Number(manifest.vector_count) || 0 : 0,
@@ -389,7 +423,7 @@ export class SemanticCacheService {
         operation: "SemanticCacheService.getSnapshot",
       });
 
-    const sourceState = await scanSmartEnvSourceState(this.smartEnvDir);
+    const sourceState = await this.scanSource();
     if (generation !== this.refreshGeneration)
       return this.refreshSnapshot(context);
 
@@ -464,7 +498,7 @@ export class SemanticCacheService {
       requestContextService.createRequestContext({
         operation: "SemanticCacheService.getSectionSnapshot",
       });
-    const sourceState = await scanSmartEnvSourceState(this.smartEnvDir, true);
+    const sourceState = await this.scanSource(true);
     const signature = sourceState.sectionSignature!;
     if (generation !== this.refreshGeneration)
       return this.refreshSections(context);
@@ -514,6 +548,7 @@ export class SemanticCacheService {
 
   // The single source read of a section refresh (notes included on request).
   private loadSectionSource(includeNotes: boolean) {
+    if (this.external) return this.loadExternalIndex(this.external);
     return readSmartEnvV3(this.smartEnvDir, {
       blocks: true,
       notes: includeNotes,
@@ -573,6 +608,26 @@ export class SemanticCacheService {
     return row ?? null;
   }
 
+  // The tables keep one persisted generation. Another server process can
+  // publish between reading the manifest and reading its rows.
+  private readPinnedRows<T>(
+    manifest: SemanticManifestRow | SemanticSectionManifestRow,
+    readManifest: () => (SemanticManifestRow | SemanticSectionManifestRow) | null,
+    read: () => T,
+  ): T {
+    if (!this.external) return read();
+    this.db.exec("BEGIN");
+    try {
+      const current = readManifest();
+      if (current?.source_signature !== manifest.source_signature ||
+          current.smart_env_dir !== manifest.smart_env_dir)
+        throw new Error("The persisted semantic generation changed");
+      return read();
+    } finally {
+      this.db.exec("ROLLBACK");
+    }
+  }
+
   /**
    * The cache keeps section references only. Vectors are read again from the
    * block vector file whose mtime and size the signature covers; a row that
@@ -583,37 +638,11 @@ export class SemanticCacheService {
     context: RequestContext,
   ): Promise<SemanticSectionSnapshot | null> {
     try {
-      const refs = (
-        this.db
-          .prepare(
-            `SELECT note_path, block_key, line_start, line_end, file_index, read_hash
-             FROM semantic_sections ORDER BY ord ASC`,
-          )
-          .all() as Array<{
-          note_path: string;
-          block_key: string;
-          line_start: number;
-          line_end: number;
-          file_index: number;
-          read_hash: string;
-        }>
-      ).map(
-        (row): SmartBlockRef => ({
-          notePath: row.note_path,
-          blockKey: row.block_key,
-          lineStart: row.line_start,
-          lineEnd: row.line_end,
-          fileIndex: row.file_index,
-          readHash: row.read_hash,
-        }),
+      const { refs, tagsByNote } = this.readPinnedRows(
+        manifest,
+        () => this.readSectionManifest(),
+        () => this.loadSectionRows(manifest),
       );
-      if (refs.length !== manifest.section_count)
-        throw new Error("Section cache row count mismatch");
-      const tagsByNote = new Map<string, string[]>();
-      for (const row of this.db
-        .prepare("SELECT note_path, tags_json FROM semantic_section_tags")
-        .all() as Array<{ note_path: string; tags_json: string }>)
-        tagsByNote.set(row.note_path, JSON.parse(row.tags_json) as string[]);
       const rows = refs.length
         ? await readSmartBlockVectors(
             smartBlockVectorFile(this.smartEnvDir, manifest.fingerprint),
@@ -638,6 +667,47 @@ export class SemanticCacheService {
       );
       return null;
     }
+  }
+
+  private loadSectionRows(manifest: SemanticSectionManifestRow) {
+    const external = this.external?.manifest;
+    const refs = (
+      this.db
+        .prepare(
+          `SELECT note_path, block_key, line_start, line_end, file_index, read_hash
+           FROM semantic_sections ORDER BY ord ASC`,
+        )
+        .all() as Array<{
+        note_path: string;
+        block_key: string;
+        line_start: number;
+        line_end: number;
+        file_index: number;
+        read_hash: string;
+      }>
+    ).map(
+      (row): SmartBlockRef => ({
+        notePath: row.note_path,
+        blockKey: row.block_key,
+        lineStart: row.line_start,
+        lineEnd: row.line_end,
+        fileIndex: row.file_index,
+        readHash: row.read_hash,
+      }),
+    );
+    if (refs.length !== manifest.section_count ||
+        (external && (refs.length !== external.vectors.sections.count ||
+          manifest.fingerprint !== external.fingerprint ||
+          manifest.model !== external.model.model_key ||
+          manifest.dim !== external.model.dimensions ||
+          refs.some((ref, i) => ref.fileIndex !== i))))
+      throw new Error("Invalid cached section manifest or references");
+    const tagsByNote = new Map<string, string[]>();
+    for (const row of this.db
+      .prepare("SELECT note_path, tags_json FROM semantic_section_tags")
+      .all() as Array<{ note_path: string; tags_json: string }>)
+      tagsByNote.set(row.note_path, JSON.parse(row.tags_json) as string[]);
+    return { refs, tagsByNote };
   }
 
   private persistSections(
@@ -779,7 +849,7 @@ export class SemanticCacheService {
     dominantDimension?: number;
   }> {
     const generation = this.refreshGeneration;
-    const sourceState = await scanSmartEnvSourceState(this.smartEnvDir);
+    const sourceState = await this.scanSource();
     const manifest = this.readManifest();
     const snapshot =
       manifest &&
@@ -819,7 +889,9 @@ export class SemanticCacheService {
     const pending = {
       generation,
       signature,
-      promise: loadSmartEnv(this.smartEnvDir),
+      promise: this.external
+        ? this.loadExternalIndex(this.external).then((index) => index.notes)
+        : loadSmartEnv(this.smartEnvDir),
     };
     this.pendingSource = pending;
     try {
@@ -835,7 +907,7 @@ export class SemanticCacheService {
       enabled: Boolean(this.smartEnvDir),
       smartEnvDir: this.smartEnvDir,
       ttlMs: this.ttlMs,
-      manifest: manifest
+      manifest: manifest && (!this.external || manifest.source_signature === this.external.cacheKey)
         ? {
             sourceSignature: manifest.source_signature,
             sourceFileCount: manifest.source_file_count,
@@ -925,7 +997,7 @@ export class SemanticCacheService {
     context?: RequestContext,
   ): SemanticCacheSnapshot | null {
     try {
-      return this.loadSnapshotFromDb(manifest);
+      return this.readPinnedRows(manifest, () => this.readManifest(), () => this.loadSnapshotFromDb(manifest));
     } catch {
       logger.warning(
         "Semantic cache rows are unreadable; rebuilding from .smart-env.",
@@ -957,6 +1029,13 @@ export class SemanticCacheService {
       model: row.model ?? undefined,
       vec: decodeCachedVector(row.vec_json, row.dim),
     }));
+    const external = this.external?.manifest;
+    if (external && (items.length !== external.vectors.notes.count ||
+        manifest.dominant_model !== external.model.model_key ||
+        manifest.dominant_dim !== external.model.dimensions ||
+        items.some((item) => item.model !== external.model.model_key ||
+          item.vec.length !== external.model.dimensions || !item.vec.every(Number.isFinite))))
+      throw new Error("Cached note vectors do not match the semantic generation");
 
     return {
       sourceSignature: manifest.source_signature,
@@ -1045,7 +1124,17 @@ export class SemanticCacheService {
   }
 }
 
-export function getSemanticCacheService(): SemanticCacheService {
+export function getSemanticCacheService(generation?: ExternalSemanticGeneration): SemanticCacheService {
+  if (generation) {
+    if (externalCache?.key !== generation.cacheKey) {
+      externalCacheDb ??= openCacheDb(config.obsidianSharedCacheDbPath);
+      externalCache = {
+        key: generation.cacheKey,
+        service: new SemanticCacheService(generation.directory, externalCacheDb, 0, generation),
+      };
+    }
+    return externalCache.service;
+  }
   if (!config.smartEnvDir) {
     throw new Error("SMART_ENV_DIR is not configured");
   }

@@ -30,6 +30,112 @@ OBSIDIAN_VAULT_EXCLUDE_PATTERNS="tmp/**,**/tmp/**,**/screenshots/**,**/*screensh
 SEMANTIC_SEARCH_PREWARM=false
 ```
 
+## Note read provenance
+
+In all three headless modes, `obsidian_runtime_status` identifies the runtime
+mode and reports `headlessRead.source: "filesystem"`. The server reads
+from its local filesystem cache without a live Obsidian connection.
+`headlessRead.refreshing` shows whether a scan is queued or running.
+`headlessRead.newestFileMtimeMs` is the latest modification time among indexed
+Markdown files in this process's index, or `null` for an empty index.
+`sharedCache.lastRefreshAt` is the completion time of the last successful
+refresh known to that index. `headlessRead.lastSuccessfulRefreshStartedAt`
+records when that scan began. It is `null` when start evidence is unavailable,
+including older SQLite snapshots. `headlessRead.refreshOrigin` identifies the evidence as
+`"process-refresh"` or `"startup-snapshot"`, loaded from SQLite at startup.
+Each process keeps its own checkpoint across other servers' scans.
+Timestamps use milliseconds since the Unix epoch.
+
+`obsidian_read_note`, `obsidian_list_notes` and `obsidian_global_search`
+include one `provenance` object on successful reads and cache availability
+errors when the headless cache is enabled, including in compact mode.
+It contains `source: "filesystem"`, `refreshOrigin` when known,
+`lastSuccessfulRefreshStartedAt`, and `lastRefreshAt`. `partial: true`
+means results may be incomplete. It also appears when a cold-cache request
+waits for a full scan. `refreshing: true` flags refresh activity during the
+request, including a scan that finishes before the reply.
+
+Use `now − lastSuccessfulRefreshStartedAt` for the window of disk changes
+a scan may have missed because of timing, including immediately after a
+restart that reuses its SQLite snapshot. A file can change after its own
+read and before the scan completes. Files may be observed at different times,
+and this window describes scan timing only.
+
+## Upstream Sync evidence
+
+Runtime status, note provenance and both HTTP status endpoints expose
+`upstreamSync`, `lastSuccessfulPullAt`, `lagSecondsUpperBound` and
+`evidenceSource`. Existing HTTP `freshnessScope: "local-cache"` and readiness
+codes still describe the local serving path. A successful Sync run does not
+imply the MCP cache has refreshed. Compare the last pull with the start of the
+local scan. `lagSecondsUpperBound` rounds up the elapsed seconds since the
+successful run **started**, bounding the age of the observation of the remote
+vault. It cannot bound the time for unsent changes from a user's devices,
+excluded files or a disconnected device.
+
+| Evidence | What the adapter can use |
+| --- | --- |
+| One-shot `ob sync` process | A normal zero exit records completion of a sync pass, including passes with no downloads. Nonzero exit, termination and timeout record failure. |
+| `ob sync --continuous` | Process liveness only. Its exit does not attest to a successful pull. |
+| `ob sync-status --json` | Machine-readable configuration, without a documented last successful pull or remote watermark. |
+| CLI and Sync logs | Diagnostic output without a stable correlation, completion or timestamp schema for ingestion. |
+| Internal state files and file mtimes | No documented stable state schema or pull timestamp. Replicated files can preserve source times. |
+
+See [Obsidian Headless Sync](https://obsidian.md/help/sync/headless),
+[CLI reference](https://github.com/obsidianmd/obsidian-headless#commands) and
+[Sync conflicts](https://obsidian.md/help/sync/troubleshoot).
+
+Set `OBSIDIAN_SYNC_HEARTBEAT_FILE` to an absolute path outside the vault, in an
+operator-controlled directory. The reader supports the following versioned
+receipt. Write a sibling temporary file and atomically replace the configured
+file. The bundled wrapper creates a private receipt. Run it and MCP under the
+same dedicated account, or use platform permissions that allow the MCP
+account to read each replacement.
+
+```json
+{
+  "version": 2,
+  "vaultBinding": "<64 lowercase hex digits: SHA-256 of the UTF-8 real vault path>",
+  "heartbeatAt": "2026-01-02T03:04:07.000Z",
+  "state": "ok",
+  "lastSuccessfulPull": {
+    "startedAt": "2026-01-02T03:04:00.000Z",
+    "completedAt": "2026-01-02T03:04:07.000Z"
+  }
+}
+```
+
+Compute `vaultBinding` from the canonical absolute path returned by `realpath`,
+with no trailing newline. Receipts for another vault and legacy unbound receipts
+yield `unknown`. Use UTC ISO timestamps with milliseconds. State is `running` at the start,
+`ok` after success or `error` after failure. Retain the previous successful
+pull during a run and after a failure, or use `null` until the first success.
+The backend reports `unknown` for missing, malformed, future or out-of-order
+evidence, and when a healthy wrapper has no successful pull yet. A heartbeat
+older than `OBSIDIAN_SYNC_STALL_SECONDS` (600 by default) yields `stalled`.
+A fresh heartbeat reporting failure yields `error`. Otherwise a recorded pull
+within `OBSIDIAN_SYNC_CURRENT_SECONDS` (180 by default) yields `current`.
+An older pull yields `lagging`. A running sync can retain the state established
+by its previous successful pass.
+
+Set `OBSIDIAN_SYNC_WRITE_MAX_AGE_SECONDS` to enable the optional headless
+write guard. A filesystem write refuses with `upstream_sync_write_blocked`
+when the evidence is `unknown`, `stalled`, `error`, or past that age limit.
+The error details include `upstreamSync` and a `syncWriteRefusal` code.
+Reads and dry runs continue, and existing write permission and preconditions
+still apply. Runtime status and authenticated `/statusz` list indexed,
+vault-relative `syncConflictFiles` matching Obsidian's dated Markdown conflict
+names, capped at 100, and `syncConflictCount` for the full indexed count.
+Obsidian's default automatic merge does not create conflict files. An empty
+list only means the cache contains no matching files. Public `/readyz` contains
+no filenames.
+
+The packaged `scripts/obsidian-sync-heartbeat.mjs` runs the configured Obsidian CLI
+once, with a timeout, and writes this receipt. Schedule it for the vault
+under the account that has already completed `ob sync-setup`. Run only one
+Sync service per vault. Use pull-only for a read-only replica. Follow the
+[service deployment examples](../OPERATIONS.md#headless-sync-and-semantic-services).
+
 ## Validation
 
 ```bash

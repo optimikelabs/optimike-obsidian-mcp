@@ -1,8 +1,14 @@
+import "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { test, after } from "node:test";
+import { promisify } from "node:util";
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport, McpServer } from "@modelcontextprotocol/server";
 const root = mkdtempSync(path.join(os.tmpdir(), "optimike-cache-freshness-"));
 Object.assign(process.env, {
   OBSIDIAN_RUNTIME_MODE: "headless-readonly",
@@ -16,6 +22,15 @@ const { VaultCacheService } = await import(
   "../dist/services/obsidianRestAPI/vaultCache/service.js"
 );
 const { config } = await import("../dist/config/index.js");
+const { heartbeatFileSource, observeUpstreamSync } = await import("../dist/services/upstreamSyncEvidence.js");
+const { syncVaultBinding } = await import("../dist/services/syncVaultBinding.js");
+const { VaultFileService } = await import("../dist/services/vaultFileService.js");
+const { registerObsidianReadNoteTool } = await import(
+  "../dist/mcp-server/tools/obsidianReadNoteTool/index.js"
+);
+const { collectRuntimeStatus, projectPublicRuntimeStatus } = await import(
+  "../dist/services/runtimeState.js"
+);
 const context = {
   requestId: "cache-freshness-test",
   timestamp: new Date(0).toISOString(),
@@ -24,6 +39,99 @@ const context = {
 let fetches = 0;
 let fail = false;
 let content = "old";
+
+test("upstream Sync requires ordered, recent heartbeat evidence", async () => {
+  const file = path.join(root, "sync-heartbeat.json");
+  const binding = await syncVaultBinding(root);
+  const now = Date.parse("2026-01-01T00:10:00.000Z");
+  const at = seconds => new Date(now - seconds * 1000).toISOString();
+  const read = (expectedBinding = binding) =>
+    observeUpstreamSync(heartbeatFileSource(file), { currentSeconds: 60, stallSeconds: 120 }, expectedBinding, () => now);
+  const put = (state, heartbeat, started, completed) => fs.writeFile(file, JSON.stringify({
+    version: 2, vaultBinding: binding, state, heartbeatAt: at(heartbeat),
+    lastSuccessfulPull: started === null ? null : { startedAt: at(started), completedAt: at(completed) },
+  }));
+  assert.equal((await read()).upstreamSync, "unknown");
+  await fs.writeFile(file, "{invalid-json");
+  assert.equal((await read()).upstreamSync, "unknown");
+  await put("ok", 5, 30, 5);
+  assert.deepEqual(await read(), {
+    upstreamSync: "current", lastSuccessfulPullAt: at(5), lagSecondsUpperBound: 30, evidenceSource: "heartbeat-file",
+  });
+  const otherVault = path.join(root, "other-vault");
+  await fs.mkdir(otherVault);
+  assert.equal((await read(await syncVaultBinding(otherVault))).upstreamSync, "unknown");
+  await fs.rmdir(otherVault);
+  await put("running", 5, 90, 80);
+  assert.equal((await read()).upstreamSync, "lagging");
+  await put("running", 121, 140, 130);
+  assert.equal((await read()).upstreamSync, "stalled");
+  await put("error", 5, 30, 20);
+  assert.equal((await read()).upstreamSync, "error");
+  await put("running", 5, null);
+  assert.equal((await read()).upstreamSync, "unknown");
+  await put("ok", -1, 30, 10);
+  assert.equal((await read()).upstreamSync, "unknown");
+  await put("ok", 5, 10, 20);
+  assert.equal((await read()).upstreamSync, "unknown");
+});
+
+test("one-shot Sync wrapper preserves the last receipt when the next CLI pass fails", async t => {
+  const sandbox = await fs.mkdtemp(path.join(os.tmpdir(), "optimike-sync-wrapper-"));
+  t.after(() => fs.rm(sandbox, { recursive: true, force: true }));
+  const vault = path.join(sandbox, "vault");
+  const heartbeat = path.join(sandbox, "heartbeat.json");
+  const cli = path.join(sandbox, "obsidian-cli-fixture.mjs");
+  await fs.mkdir(vault);
+  const resolvedVault = await fs.realpath(vault);
+  const run = (output = heartbeat) => promisify(execFile)(process.execPath, [
+    "scripts/obsidian-sync-heartbeat.mjs", "--ob-cli", cli, "--vault", vault, "--heartbeat", output,
+  ], { env: { ...process.env, EXPECTED_VAULT: resolvedVault }, timeout: 10_000 });
+  await fs.writeFile(cli, `const args = process.argv.slice(2);
+    process.exitCode = JSON.stringify(args) === JSON.stringify(["sync", "--path", process.env.EXPECTED_VAULT]) ? 0 : 2;`);
+  await assert.rejects(run(path.join(vault, "heartbeat.json")), /heartbeat must be outside the vault/u);
+  await run();
+  const first = JSON.parse(await fs.readFile(heartbeat, "utf8"));
+  assert.equal(first.state, "ok");
+  assert.equal(first.vaultBinding, await syncVaultBinding(vault));
+  assert.ok(first.lastSuccessfulPull.startedAt <= first.lastSuccessfulPull.completedAt);
+  await fs.writeFile(cli, "process.exitCode = 1;");
+  await assert.rejects(run(), /did not complete successfully/u);
+  const next = JSON.parse(await fs.readFile(heartbeat, "utf8"));
+  assert.equal(next.state, "error");
+  assert.deepEqual(next.lastSuccessfulPull, first.lastSuccessfulPull);
+  assert.deepEqual(await fs.readdir(vault), []);
+});
+
+test("a missing receipt blocks move and delete only when the guard is enabled", async t => {
+  const vault = await fs.mkdtemp(path.join(os.tmpdir(), "optimike-sync-guard-"));
+  t.after(() => fs.rm(vault, { recursive: true, force: true }));
+  const settings = {
+    obsidianRuntimeMode: config.obsidianRuntimeMode, obsidianVaultPath: config.obsidianVaultPath,
+    upstreamSyncHeartbeatFile: config.upstreamSyncHeartbeatFile, upstreamSyncWriteMaxAgeSeconds: config.upstreamSyncWriteMaxAgeSeconds,
+  };
+  Object.assign(config, {
+    obsidianRuntimeMode: "headless-filesystem", obsidianVaultPath: vault,
+    upstreamSyncHeartbeatFile: path.join(vault, "missing.json"), upstreamSyncWriteMaxAgeSeconds: 300,
+  });
+  try {
+    const target = path.join(vault, "Before.md");
+    await fs.writeFile(target, "Synthetic note");
+    const files = new VaultFileService(vault);
+    const { hash: expectedHash } = await files.read("Before.md", context);
+    const absent = error => error.details?.reasonCode === "upstream_sync_write_blocked" &&
+      error.details.upstreamSync === "unknown" && error.details.syncWriteRefusal === "evidence_unavailable";
+    await assert.rejects(files.moveFile("Before.md", "Other/After.md", context, { expectedHash }), absent);
+    await assert.rejects(files.deleteFile("Before.md", context, { expectedHash }), absent);
+    assert.deepEqual(await fs.readdir(vault), ["Before.md"]);
+    config.upstreamSyncWriteMaxAgeSeconds = undefined;
+    await files.moveFile("Before.md", "After.md", context, { expectedHash });
+    await files.deleteFile("After.md", context, { expectedHash });
+    assert.deepEqual(await fs.readdir(vault), []);
+  } finally {
+    Object.assign(config, settings);
+  }
+});
 const rest = {
   getFileContent: async (file) => {
     fetches++;
@@ -45,6 +153,179 @@ after(async () => {
   else cache.db.close();
   rmSync(root, { recursive: true, force: true });
 });
+
+async function connectReadNote(t, obsidianService, vaultCacheService) {
+  const server = new McpServer({ name: "cache-read-test", version: "0" });
+  const client = new Client({ name: "cache-read-client", version: "0" });
+  t.after(async () => {
+    await client.close();
+    await server.close();
+  });
+  await registerObsidianReadNoteTool(server, obsidianService, vaultCacheService);
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  return client;
+}
+
+test("headless read reports the start of a cold scan that missed a concurrent edit", async (t) => {
+  const previousSource = config.obsidianCacheSource;
+  const previousDb = config.obsidianSharedCacheDbPath;
+  const previousConcurrency = config.obsidianCacheConcurrency;
+  config.obsidianCacheSource = "filesystem";
+  config.obsidianSharedCacheDbPath = path.join(root, "first-read.sqlite");
+  config.obsidianCacheConcurrency = 1;
+  const instance = new VaultCacheService(undefined);
+  const note = "FirstRead.md";
+  const notePath = path.join(root, note);
+  const lastPath = path.join(root, "ZLastRead.md");
+  writeFileSync(notePath, "filesystem fixture");
+  writeFileSync(lastPath, "last file");
+  const scanStartedAt = 1_800_000_000_000;
+  const editedAt = scanStartedAt + 1000;
+  const scanFinishedAt = editedAt + 1000;
+  let now = scanStartedAt;
+  t.mock.method(Date, "now", () => now);
+  const scanning = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const stat = fs.stat;
+  t.mock.method(fs, "stat", async (filePath, options) => {
+    if (filePath === lastPath) {
+      scanning.resolve();
+      await release.promise;
+    }
+    return stat(filePath, options);
+  });
+
+  const status = async () => projectPublicRuntimeStatus(await collectRuntimeStatus(instance));
+  let read;
+  try {
+    const client = await connectReadNote(t, undefined, instance);
+    const cold = await status();
+    assert.equal(cold.sharedCache.lastRefreshAt, undefined);
+    assert.equal(cold.headlessRead.refreshing, false);
+    assert.equal(cold.headlessRead.newestFileMtimeMs, null);
+
+    read = client.callTool({ name: "obsidian_read_note", arguments: { filePath: note } });
+    await Promise.race([scanning.promise, read]);
+    const duringScan = await status();
+    assert.equal(duringScan.headlessRead.refreshing, true);
+    assert.equal(duringScan.sharedCache.lastRefreshAt, undefined);
+    assert.equal(duringScan.headlessRead.lastSuccessfulRefreshStartedAt, null);
+
+    now = editedAt;
+    writeFileSync(notePath, "edited during the scan");
+    utimesSync(notePath, editedAt / 1000, editedAt / 1000);
+    now = scanFinishedAt;
+    release.resolve();
+    const result = await read;
+    assert.equal(result.isError, false);
+    const payload = JSON.parse(result.content[0].text);
+    assert.equal(payload.content, "filesystem fixture");
+    const completed = await status();
+    assert.equal(completed.sharedCache.lastRefreshAt, scanFinishedAt);
+    assert.equal(completed.headlessRead.lastSuccessfulRefreshStartedAt, scanStartedAt);
+    assert.deepEqual(payload.provenance, {
+      source: "filesystem",
+      upstreamSync: "unknown",
+      lastSuccessfulPullAt: null,
+      lagSecondsUpperBound: null,
+      evidenceSource: null,
+      lastRefreshAt: scanFinishedAt,
+      lastSuccessfulRefreshStartedAt: scanStartedAt,
+      refreshOrigin: "process-refresh",
+      refreshing: true,
+      partial: true,
+    });
+    await instance.close();
+    const restarted = new VaultCacheService(undefined);
+    try {
+      const evidence = restarted.getRefreshEvidence();
+      assert.equal(evidence.refreshOrigin, "startup-snapshot");
+      assert.equal(evidence.lastRefreshAt, scanFinishedAt);
+      assert.equal(evidence.lastSuccessfulRefreshStartedAt, scanStartedAt);
+    } finally {
+      await restarted.close();
+    }
+  } finally {
+    release.resolve();
+    await read?.catch(() => undefined);
+    await instance.close();
+    config.obsidianCacheSource = previousSource;
+    config.obsidianSharedCacheDbPath = previousDb;
+    config.obsidianCacheConcurrency = previousConcurrency;
+  }
+});
+
+test("live note reads preserve the existing response body", async (t) => {
+  const previousMode = config.obsidianRuntimeMode;
+  config.obsidianRuntimeMode = "live";
+  try {
+    const client = await connectReadNote(t, rest, cache);
+    const result = await client.callTool({
+      name: "obsidian_read_note",
+      arguments: { filePath: "Note.md" },
+    });
+    assert.equal(result.isError, false);
+    assert.deepEqual(JSON.parse(result.content[0].text), { content });
+    const status = projectPublicRuntimeStatus(await collectRuntimeStatus(cache));
+    assert.equal("headlessRead" in status, false);
+  } finally {
+    config.obsidianRuntimeMode = previousMode;
+  }
+});
+
+test("another server's scan cannot advance the checkpoint of this process's index", async (t) => {
+  const previous = {
+    obsidianCacheSource: config.obsidianCacheSource,
+    obsidianSharedCacheDbPath: config.obsidianSharedCacheDbPath,
+    obsidianVaultPath: config.obsidianVaultPath,
+  };
+  const vault = mkdtempSync(path.join(root, "shared-index-"));
+  Object.assign(config, {
+    obsidianCacheSource: "filesystem",
+    obsidianSharedCacheDbPath: path.join(root, "shared-index.sqlite"),
+    obsidianVaultPath: vault,
+  });
+  const note = path.join(vault, "Note.md");
+  let now = 1_800_000_000_000;
+  t.mock.method(Date, "now", () => now);
+  function changeReplica(seconds) {
+    writeFileSync(note, "filesystem fixture");
+    utimesSync(note, seconds, seconds);
+    now += 1000;
+  }
+  function assertCheckpoint(cache, lastRefreshAt, mtime, refreshOrigin) {
+    assert.equal(cache.getRefreshEvidence().lastRefreshAt, lastRefreshAt);
+    assert.equal(cache.getRefreshEvidence().lastSuccessfulRefreshStartedAt, lastRefreshAt);
+    assert.equal(cache.getRefreshEvidence().refreshOrigin, refreshOrigin);
+    assert.equal(cache.getStats().lastRefreshAt, lastRefreshAt);
+    assert.equal(cache.getNewestFileMtimeMs(), mtime * 1000);
+  }
+
+  const writer = new VaultCacheService(undefined);
+  let reader;
+  try {
+    changeReplica(1_700_000_001);
+    await writer.refreshCache(true);
+    const startupRefresh = now;
+    reader = new VaultCacheService(undefined);
+    changeReplica(1_700_000_002);
+    await writer.refreshCache(true);
+    assertCheckpoint(reader, startupRefresh, 1_700_000_001, "startup-snapshot");
+
+    await reader.refreshCache(true);
+    const localRefresh = now;
+    changeReplica(1_700_000_003);
+    await writer.refreshCache(true);
+    assertCheckpoint(reader, localRefresh, 1_700_000_002, "process-refresh");
+  } finally {
+    await reader?.close();
+    await writer.close();
+    Object.assign(config, previous);
+  }
+});
+
 test("REST incremental updates cannot read excluded notes", async () => {
   const before = fetches;
   await cache.updateCacheForFile("Private/secret.md", context);
@@ -276,12 +557,15 @@ test("incomplete refresh survives restart and cannot advance successful-refresh 
   try {
     await instance.refreshCache(true);
     const successfulAt = instance.getStats().lastRefreshAt;
+    const { lastSuccessfulRefreshStartedAt: startedAt } = instance.getRefreshEvidence();
     fail = true;
     await new Promise(resolve => setTimeout(resolve, 10));
     await instance.refreshCache(true);
     assert.equal(instance.getStats().lastRefreshAt, successfulAt);
+    assert.equal(instance.getRefreshEvidence().lastSuccessfulRefreshStartedAt, startedAt);
     await instance.close();
     instance = new VaultCacheService(rest);
+    assert.equal(instance.getRefreshEvidence().lastSuccessfulRefreshStartedAt, startedAt);
     assert.equal(instance.isReady(), false);
     assert.equal(instance.getStats().freshness, "uncertain");
     assert.equal(instance.getStats().lastRefreshFailedFiles, 1);

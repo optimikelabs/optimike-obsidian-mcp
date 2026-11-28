@@ -8,10 +8,17 @@ import { warmSharedTaskCache } from "../mcp-server/tools/tasksShared/logic.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import { RequestContext, requestContextService } from "../utils/index.js";
 import { getSemanticCacheService } from "./semanticCache.js";
+import {
+  externalSemanticGenerationConfigured,
+  resolveExternalSemanticGeneration,
+  type ExternalSemanticGeneration,
+} from "./externalSemanticGeneration.js";
 import { getWritePolicyStatus } from "./writePolicy.js";
 import { attestVaultFilesystemTarget } from "./externalReferences/backendVaultAdapter.js";
 import { inspectAssetPolicy } from "./assets/assetPolicyDiscovery.js";
 import type { VaultCacheService } from "./obsidianRestAPI/vaultCache/index.js";
+import { isSyncConflictPath, readUpstreamSync, SYNC_CONFLICT_LIMIT, unknownUpstreamSync, upstreamSyncSchema, type UpstreamSyncEvidence } from "./upstreamSyncEvidence.js";
+import { collectSemanticIndexStatus, publicSemanticIndexSchema } from "./semanticIndexStatus.js";
 
 const PROCESS_STARTED_AT_MS = Math.round(Date.now() - process.uptime() * 1000);
 
@@ -199,6 +206,15 @@ type PublicRuntimeStatus = {
   ok: boolean;
   transport: string;
   runtimeMode: string;
+  headlessRead?: UpstreamSyncEvidence & {
+    source: "filesystem";
+    syncConflictFiles: string[];
+    syncConflictCount: number;
+    refreshOrigin?: "startup-snapshot" | "process-refresh";
+    lastSuccessfulRefreshStartedAt: number | null;
+    refreshing: boolean;
+    newestFileMtimeMs: number | null;
+  };
   runtime: {
     packageVersion: string;
     nodeVersion: string;
@@ -226,6 +242,7 @@ type PublicRuntimeStatus = {
   };
   sharedCache: PublicSharedCacheStatus;
   semanticCache: PublicSemanticCacheStatus;
+  semanticIndex?: Awaited<ReturnType<typeof collectSemanticIndexStatus>>;
   degradedMode: {
     readOnlyToolCount: number;
     writeToolsRequireApi: boolean;
@@ -281,6 +298,9 @@ type PublicSharedCacheStatus = {
 
 type PublicSemanticCacheStatus = {
   enabled: boolean;
+  source?: "external";
+  generationId?: string;
+  reasonCode?: "semantic_index_unavailable";
   ttlMs?: number;
   manifest: null | {
     sourceFileCount: number;
@@ -466,6 +486,13 @@ function projectPublicSemanticCacheStatus(
 
   return {
     enabled: booleanOr(semanticCache.enabled),
+    ...(semanticCache.source === "external"
+      ? {
+          source: "external" as const,
+          generationId: typeof semanticCache.generationId === "string" ? semanticCache.generationId : undefined,
+          reasonCode: allowedValue(semanticCache.reasonCode, ["semantic_index_unavailable"] as const),
+        }
+      : {}),
     ttlMs: optionalNumber(semanticCache.ttlMs),
     manifest:
       manifestValue && typeof manifestValue === "object"
@@ -496,6 +523,8 @@ export function projectPublicRuntimeStatus(
   const dist = asRecord(runtime.dist);
   const degradedMode = asRecord(value.degradedMode);
   const writePolicy = asRecord(value.writePolicy);
+  const runtimeMode = allowedValue(value.runtimeMode, PUBLIC_RUNTIME_MODES) ?? "unknown";
+  const headlessRead = asRecord(value.headlessRead);
   const readOnlyTools = Array.isArray(degradedMode.readOnlyWhenRestUnavailable)
     ? degradedMode.readOnlyWhenRestUnavailable
     : [];
@@ -503,8 +532,26 @@ export function projectPublicRuntimeStatus(
   return {
     ok: booleanOr(value.ok, true),
     transport: allowedValue(value.transport, PUBLIC_TRANSPORTS) ?? "unknown",
-    runtimeMode:
-      allowedValue(value.runtimeMode, PUBLIC_RUNTIME_MODES) ?? "unknown",
+    runtimeMode,
+    ...(runtimeMode.startsWith("headless-") ? {
+      headlessRead: {
+        source: "filesystem" as const,
+        ...upstreamSyncSchema.catch(unknownUpstreamSync).parse(headlessRead),
+        syncConflictFiles: Array.isArray(headlessRead.syncConflictFiles)
+          ? headlessRead.syncConflictFiles.filter((entry): entry is string =>
+            typeof entry === "string" && isSyncConflictPath(entry)).slice(0, SYNC_CONFLICT_LIMIT)
+          : [],
+        syncConflictCount: numberOr(headlessRead.syncConflictCount),
+        refreshOrigin: allowedValue(headlessRead.refreshOrigin, [
+          "startup-snapshot",
+          "process-refresh",
+        ] as const),
+        lastSuccessfulRefreshStartedAt:
+          optionalNumber(headlessRead.lastSuccessfulRefreshStartedAt) ?? null,
+        refreshing: booleanOr(headlessRead.refreshing),
+        newestFileMtimeMs: optionalNumber(headlessRead.newestFileMtimeMs) ?? null,
+      },
+    } : {}),
     runtime: {
       packageVersion: publicVersion(runtime.packageVersion) ?? "unknown",
       nodeVersion: publicVersion(runtime.nodeVersion) ?? "unknown",
@@ -533,7 +580,7 @@ export function projectPublicRuntimeStatus(
             }
           : {}),
         vaultConfigured: Boolean(config.obsidianVaultPath),
-        semanticCacheConfigured: Boolean(config.smartEnvDir),
+        semanticCacheConfigured: Boolean(config.smartEnvDir) || externalSemanticGenerationConfigured(),
         queryEmbeddingEnabled: config.enableQueryEmbedding,
         cacheSource: config.obsidianCacheSource,
         writeMode: config.mcpWriteMode,
@@ -542,6 +589,7 @@ export function projectPublicRuntimeStatus(
     },
     sharedCache: projectPublicSharedCacheStatus(value.sharedCache),
     semanticCache: projectPublicSemanticCacheStatus(value.semanticCache),
+    semanticIndex: publicSemanticIndexSchema.optional().catch(undefined).parse(value.semanticIndex),
     degradedMode: {
       readOnlyToolCount: readOnlyTools.length,
       writeToolsRequireApi: booleanOr(degradedMode.writeToolsRequireApi),
@@ -624,11 +672,47 @@ export function projectPublicRuntimeMaintenanceResult(
   };
 }
 
+async function collectSemanticCacheStatus(): Promise<{
+  semanticCache: Record<string, unknown>;
+  externalGeneration?: ExternalSemanticGeneration;
+}> {
+  if (!externalSemanticGenerationConfigured()) {
+    return {
+      semanticCache: config.smartEnvDir
+        ? getSemanticCacheService().getStats()
+        : { enabled: false, smartEnvDir: config.smartEnvDir },
+    };
+  }
+  try {
+    const externalGeneration = await resolveExternalSemanticGeneration();
+    if (!externalGeneration) throw new Error("External semantic generation is unavailable");
+    return {
+      externalGeneration,
+      semanticCache: {
+        ...getSemanticCacheService(externalGeneration).getStats(),
+        source: "external",
+        generationId: externalGeneration.id,
+      },
+    };
+  } catch {
+    return {
+      semanticCache: {
+        enabled: true,
+        source: "external",
+        reasonCode: "semantic_index_unavailable",
+      },
+    };
+  }
+}
+
 export async function collectRuntimeStatus(
   vaultCacheService: VaultCacheService | undefined,
   options: RuntimeStatusOptions = {},
-): Promise<Record<string, unknown>> {
-  const semanticCache = config.smartEnvDir ? getSemanticCacheService() : null;
+): Promise<Record<string, unknown> & { externalGeneration?: ExternalSemanticGeneration }> {
+  const semanticStatus = await collectSemanticCacheStatus();
+  const headless = config.obsidianRuntimeMode.startsWith("headless-");
+  const upstreamSync = headless ? await readUpstreamSync() : undefined;
+  const refresh = headless ? vaultCacheService?.getRefreshEvidence() : undefined;
   const sharedDb = readDbCounts();
   const integrity =
     options.includeIntegrity && vaultCacheService
@@ -641,6 +725,16 @@ export async function collectRuntimeStatus(
     transport: config.mcpTransportType,
     runtimeMode: config.obsidianRuntimeMode,
     runtime: collectRuntimeFingerprint(),
+    ...(headless ? {
+      headlessRead: {
+        ...upstreamSync,
+        ...(vaultCacheService?.getSyncConflicts() ?? { syncConflictFiles: [], syncConflictCount: 0 }),
+        refreshing: refresh?.refreshing ?? false,
+        refreshOrigin: refresh?.refreshOrigin,
+        lastSuccessfulRefreshStartedAt: refresh?.lastSuccessfulRefreshStartedAt ?? null,
+        newestFileMtimeMs: vaultCacheService?.getNewestFileMtimeMs() ?? null,
+      },
+    } : {}),
     sharedCache: {
       ...(vaultCacheService?.getStats() ?? {
         dbPath: config.obsidianSharedCacheDbPath,
@@ -650,12 +744,10 @@ export async function collectRuntimeStatus(
       ...sharedDb,
       integrity,
     },
-    semanticCache: semanticCache
-      ? semanticCache.getStats()
-      : {
-          enabled: false,
-          smartEnvDir: config.smartEnvDir,
-        },
+    ...semanticStatus,
+    ...(externalSemanticGenerationConfigured() ? {
+      semanticIndex: await collectSemanticIndexStatus(semanticStatus.externalGeneration),
+    } : {}),
     degradedMode: {
       readOnlyWhenRestUnavailable: [
         "obsidian_read_note",
@@ -688,23 +780,31 @@ export async function runRuntimeMaintenance(
     );
   }
 
-  const semanticCache = config.smartEnvDir ? getSemanticCacheService() : null;
+  if (action === "integrity_check")
+    return collectRuntimeStatus(vaultCacheService, { includeIntegrity: true, context });
+
+  const needsSemanticCache = action === "refresh_semantic_cache" || action === "refresh_all";
+  const externalGeneration = needsSemanticCache
+    ? await resolveExternalSemanticGeneration().catch(() => {
+        throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "The external semantic index is unavailable.", {
+          ...context, reasonCode: "semantic_index_unavailable",
+        });
+      })
+    : undefined;
+  const semanticCache = needsSemanticCache && (externalGeneration || config.smartEnvDir)
+    ? getSemanticCacheService(externalGeneration)
+    : null;
+  const semanticStats = () => ({
+    ...(semanticCache?.getStats() ?? { enabled: false }),
+    ...(externalGeneration ? { source: "external", generationId: externalGeneration.id } : {}),
+  });
 
   switch (action) {
-    case "integrity_check":
-      return collectRuntimeStatus(vaultCacheService, {
-        includeIntegrity: true,
-        context,
-      });
     case "run_maintenance":
       return {
         action,
         sharedCache: vaultCacheService?.runMaintenance(),
-        semanticCache: semanticCache
-          ? semanticCache.getStats()
-          : {
-              enabled: false,
-            },
+        semanticCache: (await collectSemanticCacheStatus()).semanticCache,
       };
     case "checkpoint_wal":
       return {
@@ -729,7 +829,7 @@ export async function runRuntimeMaintenance(
       await semanticCache.getSnapshot(context);
       return {
         action,
-        semanticCache: semanticCache.getStats(),
+        semanticCache: semanticStats(),
       };
     case "refresh_tasks_cache":
       return {
@@ -745,11 +845,7 @@ export async function runRuntimeMaintenance(
       return {
         action,
         sharedCache: vaultCacheService!.getStats(),
-        semanticCache: semanticCache
-          ? semanticCache.getStats()
-          : {
-              enabled: false,
-            },
+        semanticCache: semanticStats(),
         tasksCache: await warmSharedTaskCache(vaultCacheService),
       };
     default:

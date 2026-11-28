@@ -1,6 +1,6 @@
 # Standalone semantic index producer
 
-Use Node 22.12 or later and a BitNet bridge that exposes its encoding identity at
+Use Node 22.13.0 or later and a BitNet bridge that exposes its encoding identity at
 `GET /health`. Run the installed `optimike-semantic-index` command. From a
 checkout, run `npm run build` and use `node scripts/semantic-index-producer.mjs`.
 
@@ -52,7 +52,7 @@ The manifest and CLI output
 list skipped paths or blocks with their reasons, including invalid UTF-8
 and paths the strict reader cannot load. Filesystem read errors abort the run.
 
-Each run rechecks the full source inventory and source hashes before publication.
+A one-shot run rechecks the full source inventory and source hashes before publication.
 Incremental runs only request embeddings for inputs absent from the active
 generation, keyed by the exact UTF-8 input and encoding profile. Vault identity,
 I/O errors, source changes detected during the build and changes in bridge
@@ -125,6 +125,66 @@ bootstrap mode. Verification-only uses the producer lock and can create the inde
 It does not encode the remaining rows or publish a generation.
 The queued counts are measured before the encoder can refuse an item for length.
 
+## Service mode
+
+Run `optimike-semantic-index service` with the same vault, index, encoding and
+selection options as a one-shot build. The service polls Markdown inventory
+every 15 seconds by default (`--poll-ms`) and debounces new changes
+(`--debounce-ms`, default 5 seconds). Continuous changes cannot keep deferring
+the start of a build. Metadata-only changes to a known file are checked by
+content hash before counting pending work. Unchanged polls do not contact
+the embedder.
+
+The producer verifies the vault identity and the content of newly included notes
+before publication. If a note changes during the build, the service carries
+forward its last published vectors and hashes, or leaves it out if it has no
+published version. Its changes remain pending. If a build has no stable changes
+to publish, `source_drift` waits for the debounce and retries. A 64 MiB in-memory
+cache reuses encodings from recent attempts by exact input hash and encoding
+profile until eviction or restart. Embedding errors use exponential backoff capped
+at five minutes. An encoding profile change requires an offline `--rebuild`.
+
+Content-identical renames are matched one-to-one against new paths when applying
+the deletion limit. A changed breadcrumb can still require new embeddings.
+If the limit is exceeded, the service reports `deletion_guard`. After checking
+that the losses are intentional, place a file named `ALLOW_DELETIONS` beside
+`CURRENT` with the current generation ID followed by a newline. The service
+consumes a matching marker before allowing one build to exceed the limit. If that
+build fails, a new authorization is required. `--allow-deletions` remains a
+one-shot option.
+
+`SERVICE.json` records an expiring inventory observation against the exact
+published generation and is refreshed during encoding. MCP runtime status and
+authenticated `/statusz` expose `semanticIndex.generation`, `builtAt`,
+`pendingChanges`, `lastError` and `coverage`. External searches report
+`generation_id`, `indexGeneration`, `indexBuiltAt` and `staleNotes`. The count
+reflects additions, content changes and removals in the latest valid poll.
+It can lag recent disk writes. Missing or expired observations yield `null`
+for the count and last error.
+Status writes retry transient file sharing errors and leave the producer running
+if publication remains blocked. The service quarantines and rebuilds corrupt
+retirement metadata and keeps the three newest quarantine files. If a file
+lock prevents recovery, it pauses new builds and reports
+`semanticIndex.maintenanceWarning: "retirements_recovery_blocked"` until it can
+retry successfully. A successful repair reports `retirements_rebuilt` for the
+rest of that service run, unless another maintenance issue takes precedence.
+
+The service keeps `CURRENT` plus two recent retired generations by default
+(`--keep-generations`) and caps total generations at four (`--max-generations`).
+At capacity the producer waits until it can remove a retired generation before
+building again. If an open handle blocks removal after grace, the service
+records that generation, reports `generation_prune_blocked` and retries on
+later polls. It starts no extra generation while at or above the cap. An
+existing index already above the cap may remain there while files are locked.
+Grace defaults to 60 seconds (`--reader-grace-seconds`), since
+each new query opens `CURRENT` and only requests already in flight can need the
+retired generation. Set grace above the longest reader request for your
+deployment. Each generation contains full vector files, even for unchanged
+vectors. Allow disk space for that many complete indexes. Use the pointer for
+service readers and a separately retained copy for readers fixed to a directory.
+
+See [service deployment](../OPERATIONS.md#headless-sync-and-semantic-services).
+
 ## Publication and recovery
 
 - `<index>/CURRENT` contains the active generation ID and a newline.
@@ -134,23 +194,25 @@ The queued counts are measured before the encoder can refuse an item for length.
   The external reader requires at least one note. An empty corpus blocks
   publication and leaves any previous pointer in place.
 - The producer validates the staged generation and publishes it by renaming a
-  sibling temporary pointer over `CURRENT`. A failed run can leave an unpublished
-  directory. The previous pointer remains readable until replacement.
+  sibling temporary pointer over `CURRENT`. A failed run preserves the previous pointer.
   Windows can reject replacement while another process holds the pointer open.
   Close that handle and rerun the producer. Readers should close the pointer as
   soon as they have copied the generation ID.
 - A changed encoding profile requires an explicit `--rebuild`. The rebuild
   encodes every row and still checks the new model identity, source binding and
   source consistency. To index a different vault, use a different index root.
-- A killed producer can leave `.producer.lock` with its PID and start time.
-  Confirm the owning invocation is gone and prevent another producer from
-  starting before removing that lock. A complete published generation remains
-  readable through `CURRENT`.
-- Keep the current and previous generations. Older generations and
-  `.staging-*` or `.CURRENT-*` leftovers can be removed with producers stopped
-  and readers drained, including readers pinned to a concrete generation path.
-  The producer performs no automatic pruning because readers may still hold a
-  previously published path.
+- Use a machine-local filesystem that supports hard links and SQLite locking.
+  A single producer holds the SQLite lock and renews its
+  `.producer.lock` receipt every 10 seconds. After a forced exit, a new process
+  takes over an expired receipt after 30 seconds once it proves that the owner
+  PID is gone or belongs to a different process or boot. An unverifiable owner
+  still blocks takeover. SIGINT and SIGTERM interrupt encoding and release
+  the lease without changing an unpublished pointer.
+- A refused build removes its sealed but unpublished generation. A forced
+  exit may leave staging or pointer work files, which the next producer
+  cleans up. With the service stopped, older retired generations can be pruned
+  manually after readers drain. Stop the service before changing `CURRENT`
+  to roll back.
 
 On a server configured with `SMART_ENV_DIR`, set it to the concrete published
 generation directory at startup, `OBSIDIAN_VAULT` to the corresponding vault,

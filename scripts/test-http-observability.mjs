@@ -340,6 +340,26 @@ assert.equal(headless.provenance.source, "filesystem");
 assert.equal(headless.dependencies.obsidianDesktop.required, false);
 assert.equal(headless.capabilities.mutations, false);
 
+const headlessWithRestSnapshot = buildHealthSnapshot({
+  now: () => now,
+  runtimeMode: "headless-filesystem",
+  vaultPath,
+  writeMode: "guarded",
+  vaultCacheService: cache({
+    status: "ready",
+    lastRefreshAt: now - 5000,
+    refreshSource: "rest",
+    cachedFileCount: 3,
+  }),
+});
+assert.equal(headlessWithRestSnapshot.provenance.source, "cache");
+assert.equal(headlessWithRestSnapshot.provenance.readSource, "filesystem");
+assert.equal(headlessWithRestSnapshot.provenance.freshnessMs, 5000);
+assert.equal(headlessWithRestSnapshot.provenance.freshnessScope, "local-cache");
+assert.equal(headlessWithRestSnapshot.provenance.upstreamSync, "unknown");
+assert.equal(headlessWithRestSnapshot.capabilities.liveObsidianReads, false);
+assert.equal(headlessWithRestSnapshot.capabilities.mutations, false);
+
 const degradedCache = buildHealthSnapshot({
   now: () => now,
   runtimeMode: "headless-readonly",
