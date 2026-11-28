@@ -1,5 +1,6 @@
 import './test-support/isolated-state.mjs';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { after, test } from 'node:test';
@@ -133,6 +134,7 @@ test('matching frontmatter keeps the exact response, including cached property o
   assert.equal(text, JSON.stringify({
     content: { ...restNote, tags: ['current', 'inline'] },
     stats: JSON.parse(text).stats,
+    sha256: createHash('sha256').update(restNote.content, 'utf8').digest('hex'),
   }, null, 2));
   assert.equal(await call('obsidian_get_frontmatter', { key: 'custom' }), JSON.stringify({
     success: true,

@@ -85,11 +85,11 @@ test("local Bases match date strings and return the written datetime offset", as
   const basePath = path.join(root, baseId);
   fs.writeFileSync(basePath, "views: []\n");
   try {
-    const content = ["---", ...dateFields, "---", ""].join("\n");
+    const content = ["\uFEFF---", ...dateFields, "---", ""].join("\r\n");
     await fixture(async ({ cache }) => {
       const result = await new LocalBasesService(cache).queryBase(
         baseId,
-        { filter: { day: dateProperties.day } },
+        { property_only: true, filter: { day: dateProperties.day } },
         context,
       );
       assert.equal(result.rows.length, 1);
