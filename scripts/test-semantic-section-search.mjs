@@ -140,6 +140,7 @@ await mkdir(path.join(source, "smart_sources"));
 await mkdir(path.join(source, "smart_blocks"));
 await writeFile(path.join(root, "Notes", "Alpha.md"), alpha, "utf8");
 await writeFile(path.join(root, "Other", "Beta.md"), beta, "utf8");
+await writeFile(path.join(root, "Other", "Incoherent.md"), "Obsolete chronometer.", "utf8");
 await writeFile(path.join(root, "Notes", "Coil.md"), "---\naliases: [Bobine, Coils]\n---\n\`\`\`js\nrelay.pulse();\n\`\`\`\n", "utf8");
 await mkdir(path.join(root, ".obsidian"));
 await writeFile(path.join(root, ".obsidian", "Private.md"), "# Spectrometer", "utf8");
@@ -330,6 +331,22 @@ try {
   );
   assert.equal((await runtimeStatus()).capability.reasonCode, "ready");
 
+  const readEntry = vaultCache.getEntry.bind(vaultCache);
+  const listEntries = vaultCache.getEntriesByPrefix.bind(vaultCache);
+  let metadataReads = 0;
+  let incoherentReads = 0;
+  vaultCache.getEntriesByPrefix = (...args) => {
+    metadataReads++;
+    return listEntries(...args);
+  };
+  vaultCache.getEntry = async (file) => {
+    const entry = await readEntry(file);
+    if (entry && file === "/Other/Incoherent.md") {
+      incoherentReads++;
+      return { ...entry, hash: "mismatched-version" };
+    }
+    return entry;
+  };
   const appIndex = getLexicalIndex(vaultCache);
   assert.equal(getLexicalIndex(vaultCache), appIndex, "concurrent cold readers wait for the same build");
   const rankedCall = async (args) => {
@@ -351,6 +368,21 @@ try {
   assert.deepEqual(folder.results.map(({ path }) => path), ["Notes/Diagnostics.md"]);
   const date = await rankedCall({ modified_since: "2024-01-01", modified_until: "2024-12-31" });
   assert.deepEqual(date.results.map(({ path }) => path), ["Other/Spectrometer.md"]);
+  assert.equal(metadataReads, 1, "warm ranked calls skip metadata enumeration");
+  assert.equal((await appIndex).documents.has("Other/Incoherent.md"), false);
+  const shardOf = (p) => Number.parseInt(smartTextHash(p), 36) % 32;
+  let neighbor = 0;
+  while (shardOf(`/Other/Neighbor-${neighbor}.md`) !== shardOf("/Other/Incoherent.md")) neighbor++;
+  await writeFile(path.join(root, "Other", `Neighbor-${neighbor}.md`), "A neighboring cache entry.", "utf8");
+  await vaultCache.rebuildFromSource();
+  await getLexicalIndex(vaultCache);
+  assert.equal(incoherentReads, 1, "editing the same shard does not retry an unchanged incoherent entry");
+  vaultCache.getEntry = readEntry;
+  vaultCache.getEntriesByPrefix = listEntries;
+  await writeFile(path.join(root, "Other", "Incoherent.md"), "Updated chronometer.", "utf8");
+  await vaultCache.rebuildFromSource();
+  assert.equal((await getLexicalIndex(vaultCache)).documents.has("Other/Incoherent.md"), true,
+    "a revised entry is eligible for indexing again");
 
   const lexical = await callSearch(client, "ranked", "Comment commander les BÔBINES ?");
   assert.equal(lexical[0].path, "Notes/Coil.md", "accent folding and plural stemming reach a YAML alias");

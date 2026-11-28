@@ -120,8 +120,14 @@ type LexicalHit = LexicalDocument & { score: number; matchCount: number };
 // Each term's postings are consecutive (document ID, term frequency) pairs.
 // The offsets and all pairs for a field share two typed arrays.
 type PostingField = { terms: Map<string, number>; offsets: Uint32Array; pairs: Uint32Array };
-type Shard = { documents: LexicalDocument[]; lengths: Uint32Array; fields: PostingField[] };
-export type LexicalIndex = { documents: Map<string, LexicalDocument>; shards: Shard[] };
+type Shard = {
+  entries: CacheIndexEntry[];
+  rejected: Map<string, CacheIndexEntry>;
+  documents: LexicalDocument[];
+  lengths: Uint32Array;
+  fields: PostingField[];
+};
+export type LexicalIndex = { generation: number; documents: Map<string, LexicalDocument>; shards: Shard[] };
 type IndexState = { current?: LexicalIndex; pending?: Promise<LexicalIndex> };
 const indexes = new WeakMap<VaultCacheService, IndexState>();
 const shardCount = 32;
@@ -148,18 +154,20 @@ async function buildShard(
   previous: Shard | undefined,
   normalizedTerms: Map<string, string | undefined>,
 ): Promise<Shard> {
-  if (previous?.documents.length === entries.length && entries.every((entry, i) => {
-    const prev = previous.documents[i]!.entry;
-    return entry.path === prev.path && entry.hash === prev.hash && entry.mtime === prev.mtime && entry.ctime === prev.ctime;
-  })) return previous;
+  if (previous?.entries.length === entries.length &&
+      entries.every((entry, i) => entry === previous.entries[i])) return previous;
 
+  const rejected = new Map<string, CacheIndexEntry>();
   const documents: LexicalDocument[] = [];
   const lengths = new Uint32Array(entries.length * fieldCount);
   const postings = Array.from({ length: fieldCount }, () => new Map<string, number[]>());
   for (const [i, entry] of entries.entries()) {
     if (i % 32 === 0) await yieldToEventLoop();
-    const cached = await cache.getEntry(entry.path);
-    if (cached?.hash !== entry.hash) continue;
+    const cached = previous?.rejected.get(entry.path) === entry ? undefined : await cache.getEntry(entry.path);
+    if (cached?.hash !== entry.hash) {
+      rejected.set(entry.path, entry);
+      continue;
+    }
     const notePath = entry.path.replace(/^\//u, "");
     const { metadata, fields } = indexNote(cached.content, notePath);
     const id = documents.length;
@@ -183,7 +191,7 @@ async function buildShard(
       }
     });
   }
-  return { documents, lengths, fields: postings.map(packPostings) };
+  return { entries, rejected, documents, lengths, fields: postings.map(packPostings) };
 }
 
 async function refreshIndex(cache: VaultCacheService, previous?: LexicalIndex): Promise<LexicalIndex> {
@@ -194,6 +202,7 @@ async function refreshIndex(cache: VaultCacheService, previous?: LexicalIndex): 
   if (!cache.isReady()) {
     throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Ranked search requires a ready vault cache.");
   }
+  const generation = cache.getMetadataGeneration();
   const groups: CacheIndexEntry[][] = Array.from({ length: shardCount }, () => []);
   for (const entry of cache.getEntriesByPrefix()) {
     if (entry.path.toLowerCase().endsWith(".md")) {
@@ -206,10 +215,10 @@ async function refreshIndex(cache: VaultCacheService, previous?: LexicalIndex): 
   for (const [i, entries] of groups.entries()) {
     shards.push(await buildShard(cache, entries, previous?.shards[i], normalizedTerms));
   }
-  if (previous && shards.every((shard, i) => shard === previous.shards[i])) return previous;
+  if (previous && shards.every((shard, i) => shard === previous.shards[i])) return { ...previous, generation };
   const documents = new Map<string, LexicalDocument>();
   for (const shard of shards) for (const doc of shard.documents) documents.set(doc.path, doc);
-  return { documents, shards };
+  return { generation, documents, shards };
 }
 
 export function getLexicalIndex(cache: VaultCacheService | undefined): Promise<LexicalIndex> {
@@ -222,8 +231,19 @@ export function getLexicalIndex(cache: VaultCacheService | undefined): Promise<L
     indexes.set(cache, state);
   }
   const indexState = state;
-  return indexState.pending ??= refreshIndex(cache, indexState.current)
-    .then((index) => indexState.current = index)
+  if (indexState.pending) return indexState.pending;
+  if (cache.isReady() && indexState.current?.generation === cache.getMetadataGeneration()) {
+    return Promise.resolve(indexState.current);
+  }
+  return indexState.pending = (async () => {
+    // A writer can change metadata while a shard yields between batches.
+    // Keep one builder and only publish a snapshot from a stable revision.
+    let index: LexicalIndex;
+    do {
+      index = await refreshIndex(cache, indexState.current);
+    } while (!cache.isReady() || index.generation !== cache.getMetadataGeneration());
+    return indexState.current = index;
+  })()
     .finally(() => { indexState.pending = undefined; });
 }
 
