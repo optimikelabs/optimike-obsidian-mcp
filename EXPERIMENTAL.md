@@ -25,10 +25,11 @@ This branch leaves `main` and the individual pull requests unaffected.
 | [#224](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/224) | `99b2afbc6ba6f9c2b54eb80fa12576fde13af82e` | The producer can bootstrap an external generation from compatible Smart Connections vectors and reproduce the 4.7.2 selection rules |
 | [#238](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/238) | `7a1065bba590fdd2d633bb7ec805c9de9b7d09ab` | Regex search anchors match each line in live and headless modes |
 | [#239](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/239) | `2f42c5da8dacd4e0527e0a699aa9c54d264bafb9` | Bases Bridge 1.3.2 uses native row selection in both live query modes and omits formula columns with `evaluate: false` |
-| [#240](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/240) | `fa9571a813e899c698aa9a2ea022bb326473dd84` | Headless frontmatter and SQLite note links, background link indexing, cross-process text cache invalidation, and improved wikilink parsing |
+| [#240](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/240) | `6f69fb15a1476c84509e781c997dda02e2750670` | Headless frontmatter and SQLite note links. The background parser runs in a worker, splits large notes at block boundaries, and tracks completeness per source under revision `v10:` |
 | [#241](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/241) | `0ab243287b173d10da8411be546a64bb5ac97895` | Live compact listings and global search report `diskPath` when a unique physical spelling uses NBSP or narrow NBSP. Search accepts up to 500 result files per page |
 | [#242](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/242) | `c6ac776c0f0fe8527bfede421312c8f7de7317c6` | Vault-bound Sync evidence and optional write guard, plus the incremental semantic indexing service with leases, bounded retention, and status |
 | [#244](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/244) | `dc6e7a12519942e5719827c9c3ec4784eb9086c2` | Reads and validates Operon tasks from Markdown and synchronized settings in all three headless modes, with filesystem provenance and local saved filters |
+| [#246](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/246) | `5b3edb76c2003e1370a448190f61aa4ac866cef9` | Ranked BM25 search over cached Markdown and hybrid search with lexical, note, and section signals |
 | [#247](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/247) | `9cdf0af6e82f56373c88e66f7d7c8c682f90c43e` | Retries Operon `GET /status` once after a socket reset, with fixture connection cleanup |
 
 Run the read-only profile first. Test filesystem writes on a separate,
@@ -46,6 +47,17 @@ The optional Sync guard runs before filesystem effects, inside the existing
 write locks. It preserves the hash rechecks and create-if-absent behavior.
 Exact disk reads retain their independent observation time. Semantic service
 status comes from the current generation and its expiring observation.
+
+The #240 update merges cleanly. The #246 merge keeps the SQLite checkpoint
+and inventory in one read transaction, increments the BM25 generation when
+the visible inventory changes, and preserves hot-content and link-index
+invalidation. Global search retains live `diskPath`, multiline regex and the
+500-file page limit alongside ranked scoring and ranked snippets.
+
+The BM25 index warms after the text cache. A first ranked request waits for
+the index. Hybrid search can fall back to lexical results and uses compatible
+note and section vectors when available. The worker's link extraction limits
+can leave individual sources incomplete.
 
 The #244 merge keeps the exact tool sets from the shared catalogue in the
 HTTP, stdio proxy, and static profile tests. The `tasks` catalogue includes
