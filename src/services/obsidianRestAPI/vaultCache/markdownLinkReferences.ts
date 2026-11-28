@@ -17,7 +17,13 @@ const htmlTag = /^<(\/?)([a-z][\w:-]*)(?=[\s/>])(?:"[^"]*"|'[^']*'|[^<>"'])*>$/i
 type Span = { start: number; end: number };
 
 function parseMarkdown(source: string) {
-  return fromMarkdown(source, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] });
+  // The email tokenizer repeatedly scans long ordinary text runs. Email
+  // addresses are external to the vault graph. Keep URL tokenization so dollar
+  // signs inside bare URLs are not mistaken for math delimiters.
+  return fromMarkdown(source, {
+    extensions: [gfm(), { disable: { null: ["emailAutolink"] } }],
+    mdastExtensions: [gfmFromMarkdown()],
+  });
 }
 
 function* walk(root: Nodes): IterableIterator<{ node: Nodes; parent: Nodes }> {

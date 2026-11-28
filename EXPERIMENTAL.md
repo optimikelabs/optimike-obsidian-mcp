@@ -71,6 +71,9 @@ stale metadata detection. The headless link index and its inventory are
 published with the successful refresh checkpoint. Hidden notes remain
 excluded by default, with explicit reinclusions supported. Link resolution
 uses the filesystem snapshot. Heading and block validation requires Desktop.
+The index skips the GFM bare-email tokenizer, which stalled the replica's
+initial scan on large notes. The graph still indexes vault links and keeps
+bare URL handling for inline math detection.
 
 ## Add another change
 

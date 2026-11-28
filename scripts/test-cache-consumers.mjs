@@ -31,6 +31,7 @@ test('currency and dollars in link destinations do not open or close math',()=>{
 });
 test('dollars in autolinks and wikilinks are literal, and formulas still hide links',()=>{
  const samples = [
+  ['name+alias@example.com [[V]] [mail](mailto:name@example.com) [[After]]',['V','After']],
   ['https://e.com/$a [[V]] https://e.com/$b',['V']],
   ['<https://e.com/$a> [[V]] <https://e.com/$b>',['V']],
   ['[[Budget $5k]] then [[V]] and [[Tax$]]',['Budget $5k','V','Tax$']],
