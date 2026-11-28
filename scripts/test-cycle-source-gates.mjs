@@ -28,7 +28,7 @@ try {
   const result = JSON.parse(ok.stdout);
   assert.equal(result.releaseAuthorized, false); assert.equal(result.localDesktopTestsExecuted, false);
   for (const mutate of [
-    () => { const p="docs/cycle-20260920/cycle.json", v=JSON.parse(originals.get(p));v.expectedSurface.crossRuntime++;write(p, JSON.stringify(v)); },
+    () => { const p="docs/cycle-20260920/cycle.json", v=JSON.parse(originals.get(p));v.expectedSurface.headlessGovernedRevert.pop();write(p, JSON.stringify(v)); },
     () => { const p="docs/cycle-20260920/cycle.json", v=JSON.parse(originals.get(p));v.finalGate.secureRead="PASS";write(p, JSON.stringify(v)); },
     () => { const p="docs/cycle-20260920/cycle.json", v=JSON.parse(originals.get(p));delete v.finalGate.m1InstalledFixPreserved;write(p, JSON.stringify(v)); },
     () => { const p="docs/cycle-20260920/cycle.json", v=JSON.parse(originals.get(p));v.milestones[2].base="main";write(p, JSON.stringify(v)); },

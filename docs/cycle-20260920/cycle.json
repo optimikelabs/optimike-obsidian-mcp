@@ -74,7 +74,12 @@
     }
   ],
   "expectedSurface": {
-    "crossRuntime": 110,
+    "headlessGovernedRevert": [
+      "obsidian_operation_revert_plan",
+      "obsidian_operation_revert_apply",
+      "obsidian_operation_revert_status",
+      "obsidian_operation_revert_recover"
+    ],
     "liveProfiles": {
       "standard": 32,
       "authoring": 56,

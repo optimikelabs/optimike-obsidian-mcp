@@ -144,7 +144,10 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
         if (!allowAbsent || !absent(error)) throw error;
         return path.join(await realpath(path.dirname(target)), path.basename(target));
       });
-      if (actual !== target) {
+      // Windows can report a different spelling for the drive or vault root.
+      // Only the vault-relative spelling affects the exclusion rules.
+      const actualRelative = path.relative(this.root, actual).split(path.sep).join("/");
+      if (actualRelative !== relative) {
         throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Use the existing vault path with its exact spelling.");
       }
       return target;

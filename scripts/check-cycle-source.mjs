@@ -77,9 +77,7 @@ const defaultCrossRuntimeNames = new Set(registrationModes.flatMap(registrationM
 const configuredCrossRuntimeNames = new Set(registrationModes.flatMap(registrationMode =>
   compileToolNames({ registrationMode, availableStaticRequirements: ["vault-cache", "asset-policy"] }),
 ));
-assert.equal(cycle.expectedSurface.crossRuntime, defaultCrossRuntimeNames.size,
-  "Cycle surface records the default-off cross-runtime contract");
-assert.equal(TOOL_SURFACE_REGISTRY.length, configuredCrossRuntimeNames.size,
+assert.deepEqual(configuredCrossRuntimeNames, new Set(TOOL_SURFACE_REGISTRY.map(entry => entry.name)),
   "Conditional registry union must remain exhaustively reachable when optional requirements are present");
 assert.deepEqual(
   [...configuredCrossRuntimeNames].filter(name => !defaultCrossRuntimeNames.has(name)).sort(),
@@ -97,11 +95,18 @@ for (const family of cycle.expectedSurface.threeMemberFamilies) {
   assert.deepEqual(governedLifecycleRoles(family), ["plan", "apply", "status"]);
 }
 const nonLiveModes = ["hybrid-degraded", "headless-readonly", "headless-guarded", "headless-filesystem"];
-for (const registrationMode of nonLiveModes) {
-  const nonLive = compileToolNames({ registrationMode, availableStaticRequirements: ["vault-cache"] });
+for (const registrationMode of ["live", ...nonLiveModes]) {
+  const names = compileToolNames({ registrationMode, availableStaticRequirements: ["vault-cache"] });
   for (const m of cycle.milestones) {
-    for (const name of m.tools) assert.ok(!nonLive.includes(name), `${name} must remain live-only; leaked into ${registrationMode}`);
+    const expected = registrationMode === "live" || (m.id === "M4" &&
+      ["headless-guarded", "headless-filesystem"].includes(registrationMode)) ? m.tools : [];
+    assert.deepEqual(names.filter(name => m.tools.includes(name)).sort(), [...expected].sort(),
+      `${m.id} has an unexpected surface in ${registrationMode}`);
   }
+  const reverts = names.filter(name => name.startsWith("obsidian_operation_revert_")).sort();
+  assert.deepEqual(reverts, registrationMode === "headless-filesystem"
+    ? [...cycle.expectedSurface.headlessGovernedRevert].sort() : [],
+  `Governed revert has an unexpected surface in ${registrationMode}`);
 }
 assert.deepEqual(json("evals/tool-catalog.v1.json"), buildCatalog(), "Regenerate stale tool catalogue");
 const requiredContracts = [

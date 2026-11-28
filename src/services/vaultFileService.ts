@@ -426,7 +426,9 @@ export class VaultFileService {
     await this.assertNewFileName(filePath, absolutePath);
     if (!beforePublish) await mkdir(parent, { recursive: true });
     await this.assertRealPathInsideVault(parent, context);
-    const tempPath = path.join(parent, `.mcp-write-${randomBytes(16).toString("hex")}.tmp`);
+    const tempPath = beforePublish
+      ? path.join(parent, `.mcp-write-${randomBytes(16).toString("hex")}.tmp`)
+      : `${absolutePath}.${randomBytes(8).toString("hex")}.tmp`;
     try {
       if (beforePublish) {
         const mode = snapshotHash === undefined ? 0o600 : (await stat(absolutePath)).mode & 0o777;
