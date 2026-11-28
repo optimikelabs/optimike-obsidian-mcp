@@ -1,6 +1,5 @@
 import type { McpServer, RegisteredTool } from "@modelcontextprotocol/server";
 import { currentToolProfileContext } from "./toolProfileContext.js";
-import { config } from "../config/index.js";
 import {
   parseToolProfileId,
   selectAvailableToolProfileNames,
@@ -32,6 +31,7 @@ export function resolveToolProfile(raw?: string): ToolProfileId {
 export function installToolProfileRegistrationGate(
   server: McpServer,
   profile: ToolProfileId = resolveToolProfile(),
+  operonFilesystem = false,
 ): void {
   if (profile === "full") return;
 
@@ -46,7 +46,7 @@ export function installToolProfileRegistrationGate(
       selectAvailableToolProfileNames({
         profile,
         availableNames: [...handles.keys()],
-        operonFilesystem: config.obsidianRuntimeMode.startsWith("headless-"),
+        operonFilesystem,
       }),
     );
 

@@ -1,6 +1,7 @@
 
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -176,9 +177,12 @@ try {
         assert.equal(single.task.properties.sample, true);
         assert.equal((await read("get_task", { operonId: "root001" })).task.properties, undefined);
         const finder = await read("find_tasks", { project: { mode: "tree" } });
+        assert.equal(finder.result.contractVersion, 1);
         assert.equal(finder.result.rows.find(row => row.task.identity.operonId === "root001").treeTaskCount, 2);
         const relations = await read("get_relationships", { operonId: "child01", depth: 2 });
         assert.ok(relations.result.relationships.derived.some(edge => edge.kind === "blocking" && edge.targetOperonId === "child02"));
+        assert.equal(relations.result.tasks.find(task => task.identity.operonId === "child01").sourceRevision.contentDigest,
+          createHash("sha256").update("\ufeff" + notes).digest("hex"));
         const saved = await read("query_saved_filter", { filterSetId: dueFilter.id, scopePath: notesPath });
         assert.deepEqual(saved.tasks.map(task => task.operonId), ["child01"]);
         const refused = await read("query_saved_filter", { filterSetId: runtimeFilter.id }, true);

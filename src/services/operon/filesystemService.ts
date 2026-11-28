@@ -28,8 +28,9 @@ type ParsedFile = {
   hash: string;
   mtime: number;
   ctime: number;
-  markdown: ReturnType<typeof parseOperonMarkdown>;
-  tasks: { task: OperonTask; sourceDigest: string; tierExpiresAt: number }[];
+  invalidFrontmatter: boolean;
+  sourceDigest: string;
+  tasks: { task: OperonTask; tierExpiresAt: number }[];
 };
 
 function unavailable(reasonCode: string, message: string): never {
@@ -119,23 +120,24 @@ export class FilesystemOperonService {
           continue;
         }
         const markdown = parseOperonMarkdown(content.content, path, configuration);
-        const lines = markdown.tasks.length ? content.content.replace(/^\uFEFF/u, "").split(/\r\n|\n|\r/u) : [];
-        parsed = { hash: entry.hash, mtime: entry.mtime, ctime: entry.ctime, markdown, tasks: markdown.tasks.map(raw => {
+        parsed = { hash: entry.hash, mtime: entry.mtime, ctime: entry.ctime,
+          invalidFrontmatter: markdown.invalidFrontmatter,
+          sourceDigest: markdown.tasks.length ? digest(content.content) : "",
+          tasks: markdown.tasks.map(raw => {
           const task = { ...projectFilesystemTask(raw, path, entry, configuration, now), operonVersion: version };
           const terminalDate = task.dates.completed ?? task.dates.cancelled;
           return {
             task,
-            sourceDigest: digest(raw.line === null ? content.content : lines[raw.line - 1]),
             tierExpiresAt: terminalDate && task.tier === "warm" ? Date.parse(terminalDate) + 90 * 86_400_000 : Infinity,
           };
         }) };
       }
       next.set(path, parsed);
-      if (parsed.markdown.invalidFrontmatter) invalidFrontmatter.push(path);
+      if (parsed.invalidFrontmatter) invalidFrontmatter.push(path);
       for (const item of parsed.tasks) {
         const task = now > item.tierExpiresAt ? { ...item.task, tier: "cold" as const } : item.task;
         tasks.push(task);
-        sourceDigests.set(task, item.sourceDigest);
+        sourceDigests.set(task, parsed.sourceDigest);
       }
     }
     const changed = previous !== this.files || next.size !== previous.size ||
@@ -266,7 +268,7 @@ export class FilesystemOperonService {
       ok: true, operation, ...view.provenance, stale, contractVersion, capabilities, limitations, operonVersion, bridgeVersion,
       result: {
         ok: true, kind: operation === "finder" ? "task-finder-result" : "relationship-result",
-        contractVersion, requestId: randomUUID(), freshness: {
+        contractVersion: 1, requestId: randomUUID(), freshness: {
           source: "source-file", coherence: view.provenance.partial ? "settling" : "unverified",
           observedAt: view.snapshot.snapshotAt, settled: !view.provenance.partial,
         },
