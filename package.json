@@ -198,7 +198,7 @@
     "test:headless-long-run": "node scripts/long-run-headless-server.mjs",
     "snapshot:vault": "node scripts/snapshot-vault.mjs",
     "check:vault-exclusions": "node scripts/check-vault-exclusion-policy.mjs",
-    "test:runtime": "npm run build && npm run test:operon-startup-order-offline && npm run test:operon-headless && npm run smoke:headless-readonly && npm run smoke:hybrid-unavailable && npm run smoke:hybrid-api-available && npm run smoke:headless-guarded && npm run smoke:headless-filesystem && npm run smoke:headless-status && npm run test:local-rest-api-compat",
+    "test:runtime": "npm run build && npm run test:operon-startup-order-offline && npm run test:operon-headless && npm run smoke:headless-readonly && npm run smoke:hybrid-unavailable && npm run smoke:hybrid-api-available && npm run smoke:headless-guarded && npm run smoke:headless-filesystem && node scripts/test-headless-note-operations.mjs && npm run smoke:headless-status && npm run test:local-rest-api-compat",
     "audit:production": "npm audit --omit=dev --audit-level=high",
     "verify:code": "npm run audit:production && npm run build",
     "test:semantic-index-producer": "node --test scripts/test-semantic-index-producer.mjs",

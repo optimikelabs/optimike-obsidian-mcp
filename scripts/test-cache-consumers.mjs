@@ -386,6 +386,22 @@ test('restart resumes a committed partial link index without exposing it',()=>li
  assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Z.md',count:1}]);
 }));
 
+test('restart rebuilds a stale v10 link projection from unchanged note content',()=>linkFixture(async f=>{
+ await f.cache.buildVaultCache();
+ await f.cache.linkIndexRun;
+ const {largeNoteBytes,sectionBytes,maxReferences}=config.obsidianLinkExtraction;
+ f.cache.db.prepare(`
+  UPDATE markdown_link_files
+  SET hash = ? || (SELECT hash FROM file_cache WHERE path = '/A.md')
+  WHERE path = '/A.md';
+ `).run(`v10:${largeNoteBytes}:${sectionBytes}:${maxReferences}:`);
+ f.cache.db.exec("DELETE FROM markdown_link_refs WHERE source = '/A.md'");
+ await f.reopen();
+ await assert.rejects(f.read(),isIndexPending);
+ await f.cache.linkIndexRun;
+ assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1}]);
+}));
+
 test('an indexing error rolls back the whole batch and a later link request retries it',()=>linkFixture(async f=>{
  f.write('Z.md','[[Target]]');
  f.cache.db.exec(`

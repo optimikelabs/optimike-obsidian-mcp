@@ -61,7 +61,7 @@ function publicIssuePath(
 export function parseToolInput<S extends z.ZodTypeAny>(
   schema: S,
   input: unknown,
-  authorMessages: ReadonlySet<string>,
+  authorMessages?: ReadonlySet<string>,
 ): z.output<S> {
   try {
     return schema.parse(input);
@@ -74,7 +74,7 @@ export function parseToolInput<S extends z.ZodTypeAny>(
           // Zod's default messages can echo enum values and unknown keys. Even
           // custom refinements may interpolate caller content: require a closed
           // author-written message, never copy arbitrary ZodError.message.
-          message: authorMessages.has(issue.message)
+          message: authorMessages?.has(issue.message)
             ? issue.message
             : "Invalid value for this field.",
         }),

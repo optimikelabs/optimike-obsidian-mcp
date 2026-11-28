@@ -154,18 +154,19 @@ function lifecycleRolesByFamily(
   return lifecycleByFamily;
 }
 
-function lifecycleIsComplete(family: string, roles: ReadonlySet<string>): boolean {
-  const required = governedLifecycleRoles(family);
+function lifecycleIsComplete(family: string, roles: ReadonlySet<string>, headlessFilesystem: boolean): boolean {
+  const required = governedLifecycleRoles(family, headlessFilesystem);
   return roles.size === required.length && required.every((role) => roles.has(role));
 }
 
 function hideIncompleteGovernedFamilies(
   entries: readonly ToolSurfaceEntry[],
+  headlessFilesystem: boolean,
 ): readonly ToolSurfaceEntry[] {
   const lifecycleByFamily = lifecycleRolesByFamily(entries);
   const completeFamilies = new Set(
     [...lifecycleByFamily]
-      .filter(([family, roles]) => lifecycleIsComplete(family, roles))
+      .filter(([family, roles]) => lifecycleIsComplete(family, roles, headlessFilesystem))
       .map(([family]) => family),
   );
 
@@ -176,9 +177,10 @@ function hideIncompleteGovernedFamilies(
 
 function assertGovernedFamiliesAtomic(
   entries: readonly ToolSurfaceEntry[],
+  headlessFilesystem: boolean,
 ): void {
   for (const [family, roles] of lifecycleRolesByFamily(entries)) {
-    if (!lifecycleIsComplete(family, roles)) {
+    if (!lifecycleIsComplete(family, roles, headlessFilesystem)) {
       throw new Error(
         `Tool profile exposes an incomplete governed lifecycle for ${family}: ${[...roles].sort().join(", ")}.`,
       );
@@ -217,6 +219,7 @@ function finalizeProfileEntries(
   definition: ToolProfileDefinition,
   entries: readonly ToolSurfaceEntry[],
   operonLive: boolean,
+  headlessFilesystem: boolean,
   options: FinalizeProfileEntriesOptions = {},
 ): readonly ToolSurfaceEntry[] {
   let selected =
@@ -230,7 +233,7 @@ function finalizeProfileEntries(
   // reconciliation. Static profile compilation remains strict and will still
   // fail on an actually incomplete catalogue.
   if (options.tolerateIncompleteRegistration) {
-    selected = hideIncompleteGovernedFamilies(selected);
+    selected = hideIncompleteGovernedFamilies(selected, headlessFilesystem);
   }
 
   if (definition.preferCanonicalAlternatives) {
@@ -239,7 +242,7 @@ function finalizeProfileEntries(
   if (definition.id === "operational") {
     selected = selected.filter((entry) => entry.name !== "bases_upsert_config");
   }
-  assertGovernedFamiliesAtomic(selected);
+  assertGovernedFamiliesAtomic(selected, headlessFilesystem);
   return [...selected].sort((left, right) =>
     left.name.localeCompare(right.name),
   );
@@ -260,6 +263,7 @@ export function compileToolProfile({
     definition,
     entries,
     operonLiveForRegistrationMode(registrationMode),
+    registrationMode === "headless-filesystem",
     { operonFilesystem: registrationMode.startsWith("headless-") },
   );
 }
@@ -309,7 +313,9 @@ export function selectAvailableToolProfileNames({
     .filter((entry) => groups.has(entry.group));
   const operonLive = uniqueNames.includes("obsidian_note_replace_plan");
 
-  return finalizeProfileEntries(definition, entries, operonLive, {
+  const headlessFilesystem = uniqueNames.some(name =>
+    name === "obsidian_move_note" || name === "obsidian_note_move_recover" || name === "obsidian_note_delete_recover");
+  return finalizeProfileEntries(definition, entries, operonLive, headlessFilesystem, {
     tolerateIncompleteRegistration: true,
     operonFilesystem,
   }).map((entry) => entry.name);

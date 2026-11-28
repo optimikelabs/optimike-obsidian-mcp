@@ -2,13 +2,14 @@ import type { Definition, Nodes } from "mdast";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfm } from "micromark-extension-gfm";
 import { gfmFromMarkdown } from "mdast-util-gfm";
+import { isPair, parseDocument, Scalar, visit } from "yaml";
 import { readMarkdownFrontmatter } from "../../readMarkdownFrontmatter.js";
 import type { NoteLinkObservation } from "../types.js";
 
 export type MarkdownLinkReference = Pick<
   NoteLinkObservation,
   "kind" | "linkText" | "linkPath" | "subpath" | "original" | "displayText" | "frontmatterKey" | "position"
->;
+> & { edit?: Span & { syntax: "wiki" | "markdown" | "definition" | "yaml"; quote?: string } };
 
 const scheme = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/iu;
 const htmlTag = /^<(\/?)([a-z][\w:-]*)(?=[\s/>])(?:"[^"]*"|'[^']*'|[^<>"'])*>$/iu;
@@ -43,7 +44,7 @@ function* wikiLinks(
   source: string,
   isBlocked?: (start: number, end: number) => boolean,
 ): IterableIterator<Span & { embed: boolean; target: Span; alias?: Span }> {
-  const opener = /(?<!\\)(!)?\[\[([^\[\]\r\n|]+)(\]\]|\|)/gu;
+  const opener = /(?<!\\)(!)?\[\[([^\[\]\r\n|]+?)(\]\]|\\?\|)/gu;
   const terminator = /(?<!\\)!?\[\[|\]\]|[\r\n]/gu;
   let match: RegExpExecArray | null;
   while ((match = opener.exec(source)) !== null) {
@@ -53,7 +54,7 @@ function* wikiLinks(
     const target = { start: targetStart, end: targetStart + match[2].length };
     let alias: Span | undefined;
     let end = opener.lastIndex;
-    if (match[3] === "|") {
+    if (match[3].endsWith("|")) {
       terminator.lastIndex = end;
       const close = terminator.exec(source);
       if (!close) return;
@@ -252,7 +253,7 @@ function displayLabel(node: Nodes): string {
   return "alt" in node ? node.alt ?? "" : "";
 }
 
-function collectMarkdownLinks(body: string) {
+function collectMarkdownLinks(body: string, editable: boolean, bodyOffset: number) {
   // Only inspect the unmasked tree if a comment delimiter might be inside
   // code, an HTML element or math. In plain Markdown we can mask before parsing.
   const needsOpaqueSpans = /[`<$\t]| {4}|~~~/u;
@@ -282,6 +283,7 @@ function collectMarkdownLinks(body: string) {
         if (isOpaque(start, start + 1)) continue;
         const reference = makeReference(node.type === "image" ? "embed" : "link",
           node.url, body.slice(start, end), displayLabel(node), true);
+        if (reference && editable) reference.edit = { start: start + bodyOffset, end: end + bodyOffset, syntax: "markdown" };
         if (reference) located.push({ start, end, reference });
         blocked.push({ start, end });
         continue;
@@ -305,6 +307,8 @@ function collectMarkdownLinks(body: string) {
     if (!definition) continue;
     const reference = makeReference(node.type === "imageReference" ? "embed" : "link",
       definition.url, body.slice(start, end), displayLabel(node), true);
+    if (reference && editable) reference.edit = { start: definition.position!.start.offset! + bodyOffset,
+      end: definition.position!.end.offset! + bodyOffset, syntax: "definition" };
     if (reference) located.push({ start, end, reference });
   }
   return { source, comments, blocked, located };
@@ -312,11 +316,13 @@ function collectMarkdownLinks(body: string) {
 
 export function extractMarkdownLinkReferences(
   content: string,
-  { forceMarkdownTree = false, readFrontmatter = true, wikiOnly = false, maxReferences = Infinity } = {},
+  { forceMarkdownTree = false, readFrontmatter = true, wikiOnly = false, maxReferences = Infinity, editable = false } = {},
 ): MarkdownLinkReference[] {
-  const { body, frontmatter } = readFrontmatter
+  const { body: rawBody, frontmatter } = readFrontmatter
     ? readMarkdownFrontmatter(content)
     : { body: content, frontmatter: {} };
+  const body = rawBody.replace(/^\uFEFF/u, "");
+  const bodyOffset = content.length - body.length;
   const references: MarkdownLinkReference[] = [];
   for (const [key, value] of Object.entries(frontmatter)) {
     const pending = [value];
@@ -337,9 +343,44 @@ export function extractMarkdownLinkReferences(
     }
   }
 
+  if (editable && references.length && bodyOffset) {
+    const yamlStart = content.indexOf("\n") + 1;
+    const yamlEnd = content.lastIndexOf("\n---", bodyOffset - 4) + 1;
+    const yaml = content.slice(yamlStart, yamlEnd);
+    const candidates = new Map<string, NonNullable<MarkdownLinkReference["edit"]>[]>();
+    visit(parseDocument(yaml), {
+      Scalar(key, node, ancestors) {
+        if (key === "key" || typeof node.value !== "string" || !node.range) return;
+        const property = ancestors.find(isPair)?.key;
+        if (!(property instanceof Scalar) || typeof property.value !== "string") return;
+        const quoted = node.type === Scalar.QUOTE_SINGLE || node.type === Scalar.QUOTE_DOUBLE;
+        const start = node.range[0] + Number(quoted);
+        const raw = yaml.slice(start, node.range[1] - Number(quoted));
+        const decoded = [...wikiLinks(node.value)];
+        const literal = [...wikiLinks(raw)];
+        if (decoded.length !== literal.length) return;
+        for (const [index, match] of literal.entries()) {
+          const rawLink = raw.slice(match.start, match.end);
+          const parsedLink = node.value.slice(decoded[index].start, decoded[index].end);
+          if ((node.type === Scalar.QUOTE_SINGLE ? rawLink.replace(/''/gu, "'") : rawLink) !== parsedLink) continue;
+          const id = JSON.stringify([property.value, parsedLink]);
+          const entries = candidates.get(id) ?? [];
+          const offset = yamlStart + start + match.start;
+          entries.push({ start: offset, end: offset + match.end - match.start,
+            syntax: "yaml", quote: node.type === Scalar.QUOTE_SINGLE ? "'" : node.type === Scalar.QUOTE_DOUBLE ? '"' : undefined });
+          candidates.set(id, entries);
+        }
+      },
+    });
+    for (const reference of references) {
+      const id = JSON.stringify([reference.frontmatterKey, reference.original]);
+      reference.edit = candidates.get(id)?.shift();
+    }
+  }
+
   if (!body.includes("[")) return references;
   const { source, comments, blocked, located } = !wikiOnly && (forceMarkdownTree || needsMarkdownTree.test(body))
-    ? collectMarkdownLinks(body)
+    ? collectMarkdownLinks(body, editable, bodyOffset)
     : { ...(body.includes("%%") ? maskComments(body, []) : { source: body, comments: [] }), blocked: [], located: [] };
 
   const isBlocked = spanFilter(blocked.sort((a, b) => a.start - b.start));
@@ -347,12 +388,12 @@ export function extractMarkdownLinkReferences(
   for (const { start, end, embed, target, alias } of wikiLinks(source, isBlocked)) {
     const reference = makeReference(embed ? "embed" : "link", slice(target), body.slice(start, end), alias && slice(alias));
     if (reference) {
+      if (editable) reference.edit = { start: start + bodyOffset, end: end + bodyOffset, syntax: "wiki" };
       located.push({ start, end, reference });
       if (wikiOnly && located.length >= maxReferences) break;
     }
   }
 
-  const bodyOffset = content.length - body.length;
   const lineBreaks = content.matchAll(/\r\n?|\n/gu);
   let nextBreak = lineBreaks.next();
   let line = 0;

@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Headless Sync receipts are bound to the vault path. Status caps the conflict list and reports the full count. The semantic service recovers abandoned producer leases, keeps a reader grace period before pruning, and requires one-use authorization for deletions beyond its configured limit.
 - The semantic service caps generations, carries forward a changing note's last published vectors, and keeps running through Windows file contention or a damaged retirement ledger. Status reports blocked pruning or ledger recovery, and the producer waits at capacity until it can reclaim a slot. Node.js 22.13.0 or later is required.
 - Read Operon tasks in all three headless modes from synchronized Markdown and plugin settings. The shared vault cache supplies inline and file tasks, workflow IDs, dates and stored relationships. Reads report filesystem provenance and cache completeness. Supported saved filters run locally, and active timer state still requires Desktop. A synthetic parity check exercises the live REST and headless MCP paths.
+- Governed move and trash in `headless-filesystem` with full write mode. Move plans seal indexed backlink rewrites for notes and attachments. Trash plans report backlinks and require acknowledgement when links exist. Both support exact-plan recovery, refresh the shared filesystem link index and retain completion evidence. An abandoned move provides inverse edits for manual repair.
 
 ## [3.23.1] - 2026-11-26
 

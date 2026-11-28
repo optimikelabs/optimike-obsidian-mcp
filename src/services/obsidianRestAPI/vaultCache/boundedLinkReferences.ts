@@ -256,6 +256,7 @@ function* sections(content: string, sectionSize: number, hardLimit: number, regi
 export function extractBoundedLinkSource(
   content: string,
   { sectionBytes, maxReferences }: LinkExtractionOptions = defaultLinkExtraction,
+  editable = false,
 ): BoundedLinkExtraction {
   const references: MarkdownLinkReference[] = [];
   const hardLimit = 4 * sectionBytes;
@@ -270,9 +271,14 @@ export function extractBoundedLinkSource(
       readFrontmatter: start.offset === 0 && !wikiOnly,
       wikiOnly,
       maxReferences: maxReferences - references.length + 1,
+      editable,
     });
     for (const reference of parsed) {
       if (references.length === maxReferences) return { references, complete: false };
+      if (reference.edit) {
+        reference.edit.start += start.offset;
+        reference.edit.end += start.offset;
+      }
       if (reference.position) {
         for (const point of [reference.position.start, reference.position.end]) {
           point.offset += start.offset;
@@ -285,6 +291,14 @@ export function extractBoundedLinkSource(
   // Reference-style Markdown may depend on a definition in another section.
   if (sectionCount > 1 && /^ {0,3}\[[^\]\r\n]+\]:/mu.test(content)) complete = false;
   return { references, complete };
+}
+
+export function extractIndexedLinkSource(
+  content: string, bytes: number, options: LinkExtractionOptions, editable = false,
+): BoundedLinkExtraction {
+  return bytes > options.largeNoteBytes
+    ? extractBoundedLinkSource(content, options, editable)
+    : { references: extractMarkdownLinkReferences(content, { editable }), complete: true };
 }
 
 export function extractLargeLinkSource(content: string): MarkdownLinkReference[] {

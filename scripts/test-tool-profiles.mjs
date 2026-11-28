@@ -139,10 +139,23 @@ for (const profile of TOOL_PROFILE_IDS) {
     for (const [family, roles] of lifecycleFamilies) {
       assert.deepEqual(
         roles.sort(),
-        ["note-move", "note-delete", "note-create", "base-create", "canvas-create", "base-rows"].includes(family) ? ["apply", "plan", "status"] : ["apply", "plan", "recover", "status"],
+        ["note-create", "base-create", "canvas-create", "base-rows"].includes(family) ||
+          (["note-move", "note-delete"].includes(family) && registrationMode !== "headless-filesystem")
+          ? ["apply", "plan", "status"] : ["apply", "plan", "recover", "status"],
         `${profile}/${registrationMode} exposes a partial ${family} lifecycle`,
       );
     }
+  }
+}
+
+const filesystemOperationNames = ["move", "delete"].flatMap(kind =>
+  ["plan", "apply", "status", "recover"].map(role => `obsidian_note_${kind}_${role}`));
+for (const mode of ["hybrid-degraded", "headless-readonly", "headless-guarded", "headless-filesystem"]) {
+  for (const requirements of [[], WITH_CACHE]) {
+    const names = compileToolProfileNames({ profile: "full", registrationMode: mode, availableStaticRequirements: requirements });
+    assert.deepEqual(names.filter(name => filesystemOperationNames.includes(name)),
+      mode === "headless-filesystem" && requirements.length ? filesystemOperationNames.slice().sort() : [],
+      `${mode}: filesystem operations require both the filesystem mode and cache`);
   }
 }
 

@@ -32,6 +32,8 @@ import { normalizeVaultSlashes, toVaultPath } from "../../../utils/obsidian/obsi
 import type { FilesystemNoteLinksResponse } from "../types.js";
 import { CacheEventSupervisor } from "./eventSupervisor.js";
 import { MarkdownLinkIndex } from "./markdownLinkIndex.js";
+import { extractIndexedLinkSource } from "./boundedLinkReferences.js";
+import { foldedPath, readVaultAppSettings } from "../../operations/headlessVaultFiles.js";
 import { MarkdownLinkWorker } from "./markdownLinkWorker.js";
 import {
   applyWalSizeLimit,
@@ -737,6 +739,90 @@ export class VaultCacheService {
     return this.dataVersion.get()!.data_version as number;
   }
 
+  /** Refresh from disk before using the index to admit a filesystem mutation. */
+  public async readFilesystemMoveInventory(filePath: string, destination: string | undefined, limit: number) {
+    await this.refreshCache();
+    return this.filesystemMoveInventory(filePath, destination, limit);
+  }
+
+  private async filesystemMoveInventory(filePath: string, destination: string | undefined, limit: number) {
+    await this.linkIndexRun;
+    if (!this.markdownLinks || !this.verifyFilesystemIndex(false)) {
+      throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "The filesystem link inventory is incomplete.");
+    }
+    this.db.exec("BEGIN");
+    try {
+      if (!this.verifyFilesystemIndex(false)) {
+        throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "The filesystem link inventory is changing.");
+      }
+      const inventory = this.markdownLinks.moveInventory("/" + filePath, destination ? "/" + destination : undefined, limit);
+      if (!inventory.complete) {
+        throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The operation requires complete backlink coverage.",
+          { reasonCode: "headless_link_coverage_incomplete" });
+      }
+      this.db.exec("COMMIT");
+      return inventory;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  public extractFilesystemLinkSource(content: string, bytes: number, editable = false) {
+    return extractIndexedLinkSource(content, bytes, this.linkExtraction, editable);
+  }
+
+  public async readFilesystemResolutionTargets(): Promise<string[]> {
+    const targets: string[] = [];
+    const context = requestContextService.createRequestContext({ operation: "readFilesystemResolutionTargets" });
+    const markdown = await this.listAllMarkdownFilesFromFilesystem(context, targets);
+    return markdown.concat(targets);
+  }
+
+  public async refreshFilesystemMovePaths(paths: readonly string[], trashFolder: string): Promise<void> {
+    const root = getVaultRoot();
+    const links = this.markdownLinks;
+    if (!root || !links) throw new Error("filesystem_index_unavailable");
+    const context = requestContextService.createRequestContext({ operation: "refreshFilesystemMovePaths" });
+    await this.serializeCacheWrite(async () => {
+      for (const relative of new Set(paths)) {
+        const filePath = "/" + relative;
+        const trash = foldedPath(relative).startsWith(foldedPath(trashFolder) + "/");
+        const markdown = relative.toLowerCase().endsWith(".md");
+        if (markdown && !trash) {
+          try {
+            const row = await this.readCacheRow(filePath, "filesystem", context);
+            this.upsertRow(row);
+            continue;
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException)?.code !== "ENOENT" &&
+                !(error instanceof McpError && error.code === BaseErrorCode.NOT_FOUND)) throw error;
+          }
+        }
+        const present = !markdown && !trash && await fs.lstat(path.join(root, relative))
+          .then(stat => stat.isFile(), (error: NodeJS.ErrnoException) => {
+            if (error.code === "ENOENT") return false;
+            throw error;
+          });
+        if (markdown) this.deleteRow(filePath);
+        links.updatePathTarget(filePath, present);
+      }
+      this.checkedFilesystemVersion = undefined;
+    });
+    await this.linkIndexRun;
+    if (!links.coversCache(this.acceptFilesystemSource)) {
+      this.scheduleFilesystemLinkIndex();
+      await this.linkIndexRun;
+      if (!links.coversCache(this.acceptFilesystemSource)) throw new Error("filesystem_index_unavailable");
+    }
+  }
+
+  public allowsHeadlessOperationSource(relativePath: string): boolean {
+    return this.allowsHiddenLinkPath(relativePath) &&
+      !this.technicalExclusions.ignores(relativePath) &&
+      !isVaultPathExcluded(relativePath, this.vaultExclusionMatcher);
+  }
+
   private verifyFilesystemIndex(remember = true): boolean {
     if (!this.markdownLinks) return false;
     // SQLite advances this value for other connections' commits, including
@@ -1174,7 +1260,8 @@ export class VaultCacheService {
               const vaultRoot = getVaultRoot();
               if (!vaultRoot) return "failed";
               const stats = await fs.stat(path.join(vaultRoot, filePath.slice(1)));
-              if (cachedEntry.mtime === Math.round(stats.mtimeMs) && cachedEntry.size === stats.size) {
+              if (cachedEntry.mtime === Math.round(stats.mtimeMs) && cachedEntry.size === stats.size &&
+                  (config.obsidianRuntimeMode !== "headless-filesystem" || cachedEntry.ctime === Math.round(stats.ctimeMs))) {
                 return "skipped";
               }
             }
@@ -1601,6 +1688,11 @@ export class VaultCacheService {
     }
 
     const markdownFiles: string[] = [];
+    let trashFolder: string | undefined;
+    if (config.obsidianRuntimeMode === "headless-filesystem") {
+      try { trashFolder = foldedPath(readVaultAppSettings(vaultRoot).trashFolder); }
+      catch { /* Mutation planning checks app.json separately and fails closed. */ }
+    }
     const walk = async (directory: string): Promise<void> => {
       let entries: Dirent[];
       try {
@@ -1621,6 +1713,7 @@ export class VaultCacheService {
         const relativePath = normalizeVaultRelativePath(
           path.relative(vaultRoot, path.join(directory, entry.name)),
         );
+        if (trashFolder && foldedPath(relativePath) === trashFolder) continue;
         if (pathTargets && !this.allowsHiddenLinkPath(relativePath, entry.isDirectory())) continue;
         const excluded = isVaultPathExcluded(relativePath, this.vaultExclusionMatcher, entry.isDirectory());
         const fullPath = path.join(directory, entry.name);

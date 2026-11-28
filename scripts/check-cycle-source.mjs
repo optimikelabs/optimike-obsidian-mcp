@@ -101,7 +101,8 @@ const milestoneNames = new Set(cycle.milestones.flatMap(({ tools }) => tools));
 for (const registrationMode of nonLiveModes) {
   const nonLive = compileToolNames({ registrationMode, availableStaticRequirements: ["vault-cache"] });
   assert.deepEqual(nonLive.filter((name) => milestoneNames.has(name)),
-    registrationMode.startsWith("headless-") ? expectedMilestoneTools.M2 : [], registrationMode);
+    registrationMode === "headless-filesystem" ? [...expectedMilestoneTools.M2, ...expectedMilestoneTools.M3].sort()
+      : registrationMode.startsWith("headless-") ? expectedMilestoneTools.M2 : [], registrationMode);
   const withoutCache = compileToolNames({ registrationMode, availableStaticRequirements: [] });
   assert.deepEqual(withoutCache.filter((name) => milestoneNames.has(name)), [], `${registrationMode} without cache`);
 }

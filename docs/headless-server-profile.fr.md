@@ -26,7 +26,7 @@ L’index filesystem se règle avec `OBSIDIAN_LINK_LARGE_NOTE_BYTES` (262144 par
 - Le backend filesystem lit le cache partagé, qui peut contenir du Markdown actualisé via Local REST. Après une mise à jour REST, seules les lignes dont l’empreinte a changé sont réindexées, sans rouvrir les notes du coffre. Un changement de racine ou de périmètre d’exclusions impose un nouvel inventaire sur disque.
 - Garder le cache MCP hors du vault synchronisé.
 - Utiliser les exclusions pour le bruit opérationnel, sans prétendre qu’elles bloquent les téléchargements Obsidian Sync.
-- Ne pas promettre la parité Desktop. Move/delete, tags frontmatter ou inline, batch frontmatter, écritures Bases minimales, validation de format et helpers Canvas minimaux existent comme fonctions filesystem/locales bornées, pas comme comportement Obsidian Desktop.
+- Ne pas promettre la parité Desktop. Tags frontmatter ou inline, batch frontmatter, écritures Bases minimales, validation de format et helpers Canvas minimaux existent comme fonctions filesystem/locales bornées, pas comme comportement Obsidian Desktop.
 
 ## Environnement
 
@@ -230,7 +230,7 @@ Le snapshot ne remplace pas une vraie sauvegarde, mais donne un rollback local r
 
 Seulement après le palier `headless-guarded`, passer une copie ou un vault dédié en `OBSIDIAN_RUNTIME_MODE=headless-filesystem`.
 
-1. Pour move/delete, exiger `expectedHash` ou `expectedMtime`.
+1. Utiliser les opérations gouvernées ci-dessous. Les outils de compatibilité exigent `expectedHash` ou `expectedMtime`.
 2. Pour tags, limiter le contrat au texte Markdown : `tags` dans le frontmatter YAML, `#tags` inline et index local depuis le cache.
 3. Pour batch frontmatter, garder le dry-run par défaut et n’autoriser que `set`.
 4. Pour Bases, limiter le contrat aux fichiers `.base` YAML et aux propriétés frontmatter des notes.
@@ -246,6 +246,68 @@ sur un même fichier, la détection des conflits et le risque de concurrence
 avec d’autres processus.
 
 Ne jamais utiliser cette phase pour modifier des notes de production existantes tant que le profil serveur n’a pas son propre rollback et monitoring.
+
+### Déplacement et corbeille gouvernés
+
+En `headless-filesystem`, avec le cache filesystem et `MCP_WRITE_MODE=full`,
+appeler `obsidian_note_move_plan` avec les chemins exacts de départ et d’arrivée
+et une clé d’idempotence. Il inspecte les liens Markdown indexés et les embeds
+de pièces jointes. Il préserve la syntaxe et les libellés déjà présents, y
+compris dans les scalaires YAML. Il ajuste les liens sortants de la note
+déplacée si leur cible change, et refuse une opération qui détournerait un
+lien résolu depuis une autre note. L’aperçu est plafonné. Au-delà de 100 notes
+à réécrire ou de 100 sources de backlinks pour une suppression, le plan renvoie
+`headless_backlink_limit`. La vérification de sécurité examine séparément
+jusqu’à 1 000 notes candidates, y compris les liens vers le nom de destination.
+Au-delà, elle renvoie `headless_backlink_inspection_limit`. Les plans utilisent
+le même découpage que l’index des liens. Si une source incomplète peut affecter
+les chemins du plan, l’outil renvoie `headless_link_coverage_incomplete`.
+Un déplacement avec `alwaysUpdateLinks: false` reste possible. Le plan sonde la
+création exclusive de liens physiques avant de sceller l’opération. Appliquer
+avec la clé d’origine. Un plan périmé renvoie `headless_plan_stale`.
+
+`app.json` pilote l’actualisation via `alwaysUpdateLinks` et la forme des chemins
+via `newLinkFormat`. `useMarkdownLinks` concerne les liens générés. Le
+déplacement conserve les wikilinks et liens Markdown dans leur syntaxe
+d’origine. Voir les [réglages d’Obsidian](https://obsidian.md/help/settings#files-and-links).
+
+Appeler `obsidian_note_delete_plan` pour examiner les liens entrants. S’il en
+existe, soumettre un nouveau plan avec `acknowledgeBacklinks: true` après les
+avoir examinés. L’application déplace le fichier dans un emplacement libre
+sous `.trash` par défaut. Le MCP accepte aussi `trashFolder` ou `trashFolderPath`
+comme chemin local de remplacement. Il refuse les valeurs explicites
+`trashOption: "system"` et `trashOption: "none"`. Sans ce réglage, le MCP choisit
+la corbeille du coffre pour fournir une destination restaurable sans accès à
+la corbeille système. [Obsidian Desktop utilise par défaut la corbeille système](https://obsidian.md/help/manage-notes).
+
+Les deux opérations actualisent les chemins touchés dans le cache et l’index.
+Le reçu de vérification s’appuie sur une relecture. Les appels de statut
+suivants rendent la preuve de fin d’opération avec `cache: "recorded"` et
+`postflightSource: "recorded"`. Après une interruption,
+appeler `*_status` puis `*_recover` avec la même référence et clé si
+`recoveryAllowed` est vrai. Si une édition externe empêche la reprise,
+`abandonAllowed` permet d’appeler `*_recover` avec `action: "abandon"`.
+Le verrou est libéré pour une réparation manuelle. Le reçu conserve
+`nextAction: "manual_repair"` et fournit dans `repairProofs` les chemins,
+empreintes SHA-256 et éditions inverses. Les plages UTF-16 visent le fichier
+réécrit, de la fin vers le début. Vérifier `afterSha256` avant de les appliquer.
+Le journal privé conserve le texte d’avant dans `headless_file_operations.payload.rewrites`.
+Sans effet publié, l’opération se règle en conflit et libère son verrou. La
+reprise ou l’abandon supprime les fichiers de préparation encore accessibles.
+
+La sonde des liens physiques utilise ses propres fichiers temporaires sur le
+même système de fichiers et peut renvoyer `hard_links_unsupported`. Un seul
+balayage tourne en arrière-plan au démarrage. La reprise vérifie la racine du
+coffre et les dossiers sur les chemins du plan. Une ancienne sonde avec un seul
+lien est conservée. Le statut liste ces chemins dans
+`probeCleanup.orphanedLegacyProbes` pour examen manuel. Chaque remplacement est atomique. Les autres
+processus ne partagent pas les verrous, et plusieurs remplacements peuvent
+être visibles en cours d’opération. Ce parcours s’applique à un coffre copié
+ou dédié. L’[ADR](adr/ADR-External-Reference-Integrity.md#vault-only-moves)
+précise la distinction avec le déplacement de documents externes.
+
+`operational` privilégie ces outils. Le profil `full` conserve également les
+anciens outils directs dont le contrôle hash/mtime porte sur un seul fichier.
 
 ## Décision go/no-go serveur
 

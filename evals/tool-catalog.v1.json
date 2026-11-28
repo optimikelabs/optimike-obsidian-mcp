@@ -6,12 +6,12 @@
     "vault-cache",
     "asset-policy"
   ],
-  "toolCount": 113,
+  "toolCount": 115,
   "classificationCounts": {
     "canonical-unique": 51,
     "alias-redundant": 0,
     "compatibility-historical": 1,
-    "governed-operation": 45,
+    "governed-operation": 47,
     "diagnostic": 11,
     "administration": 5
   },
@@ -427,7 +427,15 @@
       "obsidian_manage_frontmatter",
       "obsidian_manage_tags",
       "obsidian_move_note",
+      "obsidian_note_delete_apply",
+      "obsidian_note_delete_plan",
+      "obsidian_note_delete_recover",
+      "obsidian_note_delete_status",
       "obsidian_note_links",
+      "obsidian_note_move_apply",
+      "obsidian_note_move_plan",
+      "obsidian_note_move_recover",
+      "obsidian_note_move_status",
       "obsidian_read_note",
       "obsidian_runtime_maintenance",
       "obsidian_runtime_status",
@@ -583,6 +591,10 @@
           "obsidian_list_notes",
           "obsidian_manage_frontmatter",
           "obsidian_note_links",
+          "obsidian_note_move_apply",
+          "obsidian_note_move_plan",
+          "obsidian_note_move_recover",
+          "obsidian_note_move_status",
           "obsidian_read_note",
           "obsidian_runtime_status",
           "obsidian_search_replace",
@@ -761,6 +773,10 @@
           "obsidian_manage_frontmatter",
           "obsidian_manage_tags",
           "obsidian_note_links",
+          "obsidian_note_move_apply",
+          "obsidian_note_move_plan",
+          "obsidian_note_move_recover",
+          "obsidian_note_move_status",
           "obsidian_read_note",
           "obsidian_runtime_status",
           "obsidian_search_replace",
@@ -1348,7 +1364,15 @@
           "obsidian_manage_frontmatter",
           "obsidian_manage_tags",
           "obsidian_move_note",
+          "obsidian_note_delete_apply",
+          "obsidian_note_delete_plan",
+          "obsidian_note_delete_recover",
+          "obsidian_note_delete_status",
           "obsidian_note_links",
+          "obsidian_note_move_apply",
+          "obsidian_note_move_plan",
+          "obsidian_note_move_recover",
+          "obsidian_note_move_status",
           "obsidian_read_note",
           "obsidian_runtime_maintenance",
           "obsidian_runtime_status",
@@ -1782,15 +1806,21 @@
           "list_all_tasks",
           "obsidian_admin_filesystem",
           "obsidian_batch_frontmatter",
-          "obsidian_delete_note",
           "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
           "obsidian_manage_canvas",
           "obsidian_manage_frontmatter",
           "obsidian_manage_tags",
-          "obsidian_move_note",
+          "obsidian_note_delete_apply",
+          "obsidian_note_delete_plan",
+          "obsidian_note_delete_recover",
+          "obsidian_note_delete_status",
           "obsidian_note_links",
+          "obsidian_note_move_apply",
+          "obsidian_note_move_plan",
+          "obsidian_note_move_recover",
+          "obsidian_note_move_status",
           "obsidian_read_note",
           "obsidian_runtime_maintenance",
           "obsidian_runtime_status",
@@ -3546,16 +3576,12 @@
         "headless-filesystem"
       ],
       "profiles": [
-        "full",
-        "operational"
+        "full"
       ],
       "profileModes": {
         "full": [
           "live",
           "hybrid-live",
-          "headless-filesystem"
-        ],
-        "operational": [
           "headless-filesystem"
         ]
       },
@@ -3564,6 +3590,7 @@
         "tools": [
           "obsidian_note_delete_apply",
           "obsidian_note_delete_plan",
+          "obsidian_note_delete_recover",
           "obsidian_note_delete_status"
         ]
       },
@@ -3571,9 +3598,7 @@
         "tools": [
           "obsidian_delete_note"
         ],
-        "modes": [
-          "headless-filesystem"
-        ]
+        "modes": []
       }
     },
     {
@@ -4141,16 +4166,27 @@
         "headless-filesystem"
       ],
       "profiles": [
-        "full",
-        "operational"
+        "full"
       ],
       "profileModes": {
         "full": [
           "headless-filesystem"
-        ],
-        "operational": [
-          "headless-filesystem"
         ]
+      },
+      "replacement": {
+        "family": "note-move",
+        "tools": [
+          "obsidian_note_move_apply",
+          "obsidian_note_move_plan",
+          "obsidian_note_move_recover",
+          "obsidian_note_move_status"
+        ]
+      },
+      "fallback": {
+        "tools": [
+          "obsidian_move_note"
+        ],
+        "modes": []
       }
     },
     {
@@ -4277,7 +4313,8 @@
       "annotationClass": "governed-mutation",
       "registrationModes": [
         "live",
-        "hybrid-live"
+        "hybrid-live",
+        "headless-filesystem"
       ],
       "profiles": [
         "full",
@@ -4286,14 +4323,26 @@
       "profileModes": {
         "full": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "operational": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ]
       },
-      "lifecycleRole": "apply"
+      "lifecycleRole": "apply",
+      "availabilityRules": [
+        {
+          "modes": [
+            "headless-filesystem"
+          ],
+          "requires": [
+            "vault-cache"
+          ]
+        }
+      ]
     },
     {
       "name": "obsidian_note_delete_plan",
@@ -4305,7 +4354,8 @@
       "annotationClass": "governed-plan",
       "registrationModes": [
         "live",
-        "hybrid-live"
+        "hybrid-live",
+        "headless-filesystem"
       ],
       "profiles": [
         "full",
@@ -4314,14 +4364,61 @@
       "profileModes": {
         "full": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "operational": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ]
       },
-      "lifecycleRole": "plan"
+      "lifecycleRole": "plan",
+      "availabilityRules": [
+        {
+          "modes": [
+            "headless-filesystem"
+          ],
+          "requires": [
+            "vault-cache"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "obsidian_note_delete_recover",
+      "canonicalName": "obsidian_note_delete_recover",
+      "classification": "governed-operation",
+      "group": "notes.direct.admin",
+      "family": "note-delete",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-mutation",
+      "registrationModes": [
+        "headless-filesystem"
+      ],
+      "profiles": [
+        "full",
+        "operational"
+      ],
+      "profileModes": {
+        "full": [
+          "headless-filesystem"
+        ],
+        "operational": [
+          "headless-filesystem"
+        ]
+      },
+      "lifecycleRole": "recover",
+      "availabilityRules": [
+        {
+          "modes": [
+            "headless-filesystem"
+          ],
+          "requires": [
+            "vault-cache"
+          ]
+        }
+      ]
     },
     {
       "name": "obsidian_note_delete_status",
@@ -4333,7 +4430,8 @@
       "annotationClass": "read-only",
       "registrationModes": [
         "live",
-        "hybrid-live"
+        "hybrid-live",
+        "headless-filesystem"
       ],
       "profiles": [
         "full",
@@ -4342,14 +4440,26 @@
       "profileModes": {
         "full": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "operational": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ]
       },
-      "lifecycleRole": "status"
+      "lifecycleRole": "status",
+      "availabilityRules": [
+        {
+          "modes": [
+            "headless-filesystem"
+          ],
+          "requires": [
+            "vault-cache"
+          ]
+        }
+      ]
     },
     {
       "name": "obsidian_note_links",
@@ -4433,7 +4543,8 @@
       "annotationClass": "governed-mutation",
       "registrationModes": [
         "live",
-        "hybrid-live"
+        "hybrid-live",
+        "headless-filesystem"
       ],
       "profiles": [
         "standard",
@@ -4444,22 +4555,36 @@
       "profileModes": {
         "standard": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "authoring": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "full": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "operational": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ]
       },
-      "lifecycleRole": "apply"
+      "lifecycleRole": "apply",
+      "availabilityRules": [
+        {
+          "modes": [
+            "headless-filesystem"
+          ],
+          "requires": [
+            "vault-cache"
+          ]
+        }
+      ]
     },
     {
       "name": "obsidian_note_move_plan",
@@ -4471,7 +4596,8 @@
       "annotationClass": "governed-plan",
       "registrationModes": [
         "live",
-        "hybrid-live"
+        "hybrid-live",
+        "headless-filesystem"
       ],
       "profiles": [
         "standard",
@@ -4482,22 +4608,79 @@
       "profileModes": {
         "standard": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "authoring": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "full": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "operational": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ]
       },
-      "lifecycleRole": "plan"
+      "lifecycleRole": "plan",
+      "availabilityRules": [
+        {
+          "modes": [
+            "headless-filesystem"
+          ],
+          "requires": [
+            "vault-cache"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "obsidian_note_move_recover",
+      "canonicalName": "obsidian_note_move_recover",
+      "classification": "governed-operation",
+      "group": "notes.governed",
+      "family": "note-move",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-mutation",
+      "registrationModes": [
+        "headless-filesystem"
+      ],
+      "profiles": [
+        "standard",
+        "authoring",
+        "full",
+        "operational"
+      ],
+      "profileModes": {
+        "standard": [
+          "headless-filesystem"
+        ],
+        "authoring": [
+          "headless-filesystem"
+        ],
+        "full": [
+          "headless-filesystem"
+        ],
+        "operational": [
+          "headless-filesystem"
+        ]
+      },
+      "lifecycleRole": "recover",
+      "availabilityRules": [
+        {
+          "modes": [
+            "headless-filesystem"
+          ],
+          "requires": [
+            "vault-cache"
+          ]
+        }
+      ]
     },
     {
       "name": "obsidian_note_move_status",
@@ -4509,7 +4692,8 @@
       "annotationClass": "read-only",
       "registrationModes": [
         "live",
-        "hybrid-live"
+        "hybrid-live",
+        "headless-filesystem"
       ],
       "profiles": [
         "standard",
@@ -4520,22 +4704,36 @@
       "profileModes": {
         "standard": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "authoring": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "full": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ],
         "operational": [
           "live",
-          "hybrid-live"
+          "hybrid-live",
+          "headless-filesystem"
         ]
       },
-      "lifecycleRole": "status"
+      "lifecycleRole": "status",
+      "availabilityRules": [
+        {
+          "modes": [
+            "headless-filesystem"
+          ],
+          "requires": [
+            "vault-cache"
+          ]
+        }
+      ]
     },
     {
       "name": "obsidian_note_replace_apply",

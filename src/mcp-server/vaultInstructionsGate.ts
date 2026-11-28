@@ -747,7 +747,8 @@ function planRevealedTargets(
   family: string,
   receipt: Record<string, any> | undefined,
 ): VaultInstructionsTarget[] | "indeterminate" {
-  if (family !== "obsidian_note_move") return [];
+  if (family !== "obsidian_note_move" && family !== "obsidian_note_delete") return [];
+  if (family === "obsidian_note_delete" && receipt?.affectedPaths === undefined) return [];
   const affected = receipt?.affectedPaths;
   if (!Array.isArray(affected)) return "indeterminate";
   const targets: VaultInstructionsTarget[] = [];

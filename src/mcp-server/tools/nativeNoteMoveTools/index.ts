@@ -1,14 +1,19 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod/v3";
-import type { NativeNoteMoveOperationAdapter } from "../../../services/operations/nativeNoteMoveOperationAdapter.js";
 import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
 import {
   GOVERNED_PLAN_TOOL_ANNOTATIONS,
   GOVERNED_MUTATION_TOOL_ANNOTATIONS,
   READ_ONLY_TOOL_ANNOTATIONS,
 } from "../../toolAnnotations.js";
-import { mcpSchema } from "../../mcpSchema.js";
+import { mcpSchema, mcpSchemaWithPublicValidation } from "../../mcpSchema.js";
 import { NOTE_NAME_RULES_DESCRIPTION } from "../../../services/noteNameRules.js";
+
+const HEADLESS_DESCRIPTIONS = {
+  plan: "Seal a headless file move and its indexed backlink rewrites without writing to the vault. Inspect the capped preview before applying. Requires MCP_WRITE_MODE=full.",
+  apply: "Apply the sealed move only after rechecking the graph and every affected file. Reuse the plan key. After a lost reply, inspect status and recover the same plan if requested.",
+  status: "Read the recorded headless move and its completion evidence. If interrupted, reconcile it against the filesystem.",
+};
 
 const Plan = z
   .object({
@@ -16,13 +21,13 @@ const Plan = z
       .string()
       .min(1)
       .max(1024)
-      .describe("Exact vault-relative Markdown source path."),
+      .describe("Exact vault-relative source path. Live requires Markdown. Headless also accepts attachments."),
     destinationPath: z
       .string()
       .min(1)
       .max(1024)
       .describe(
-        "Exact absent Markdown destination; its parent must already exist. Must satisfy the shared note name rules (see the tool description); the source may keep a legacy name.",
+        "Exact absent destination of the same file type; its parent must already exist. Must satisfy the shared note name rules (see the tool description); the source may keep a legacy name.",
       ),
     idempotencyKey: z.string().min(1).max(256),
   })
@@ -62,13 +67,18 @@ async function run(toolName: string, operation: () => Promise<unknown>) {
 }
 export function registerNativeNoteMoveTools(
   server: McpServer,
-  runtime: NativeNoteMoveOperationAdapter | undefined,
+  runtime: {
+    plan: (input: z.infer<typeof Plan>) => Promise<unknown>;
+    apply: (ref: string, key: string) => Promise<unknown>;
+    status: (ref: string) => Promise<unknown>;
+    recover?: (ref: string, key: string, action?: "resume" | "abandon") => Promise<unknown>;
+  } | undefined,
 ): void {
   if (!runtime) return;
   server.registerTool(
     "obsidian_note_move_plan",
     {
-      description:
+      description: runtime.recover ? HEADLESS_DESCRIPTIONS.plan :
         `Seal one native Markdown move and its bounded observed semantic neighborhood without moving a note. Requires MCP_WRITE_MODE=full and the independent native-move Bridge grant. No global graph transaction or source-content CAS. Unknown/truncated neighborhoods are refused; graph effects outside the sealed neighborhood are not certified. ${NOTE_NAME_RULES_DESCRIPTION}`,
       inputSchema: mcpSchema(Plan.shape),
       annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,
@@ -79,9 +89,9 @@ export function registerNativeNoteMoveTools(
   server.registerTool(
     "obsidian_note_move_apply",
     {
-      description:
+      description: runtime.recover ? HEADLESS_DESCRIPTIONS.apply :
         "Dispatch only the exact sealed native rename once. Native completion does not mean graph verification. Inspect graph_postflight with status after a lost reply; never manufacture a new move request to retry an uncertain effect.",
-      inputSchema: mcpSchema(Apply.shape),
+      inputSchema: runtime.recover ? mcpSchemaWithPublicValidation(Apply.shape) : mcpSchema(Apply.shape),
       annotations: GOVERNED_MUTATION_TOOL_ANNOTATIONS,
     },
     (params) =>
@@ -93,9 +103,9 @@ export function registerNativeNoteMoveTools(
   server.registerTool(
     "obsidian_note_move_status",
     {
-      description:
+      description: runtime.recover ? HEADLESS_DESCRIPTIONS.status :
         "Read/reconcile the durable move outcome and separately observe graph_postflight without executing a rename. Backend restart can leave an unacknowledged move indeterminate; no recover/undo tool exists for this V1.",
-      inputSchema: mcpSchema(Status.shape),
+      inputSchema: runtime.recover ? mcpSchemaWithPublicValidation(Status.shape) : mcpSchema(Status.shape),
       annotations: READ_ONLY_TOOL_ANNOTATIONS,
     },
     (params) =>
@@ -103,4 +113,20 @@ export function registerNativeNoteMoveTools(
         runtime.status(Status.parse(params).planRef),
       ),
   );
+  if (runtime.recover) {
+    const recover = runtime.recover;
+    const Recovery = Apply.extend({ action: z.enum(["resume", "abandon"]).optional() });
+    server.registerTool(
+      "obsidian_note_move_recover",
+      {
+        description: "Resume the same headless plan when recoveryAllowed, or use action=abandon when abandonAllowed to release the reservation for manual repair. Reuse the original idempotency key.",
+        inputSchema: mcpSchemaWithPublicValidation(Recovery.shape),
+        annotations: GOVERNED_MUTATION_TOOL_ANNOTATIONS,
+      },
+      (params) => run("obsidian_note_move_recover", () => {
+        const p = Recovery.parse(params);
+        return recover(p.planRef, p.idempotencyKey, p.action);
+      }),
+    );
+  }
 }

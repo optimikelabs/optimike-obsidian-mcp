@@ -20,7 +20,7 @@ Any connection lets an AI read a vault. Optimike Obsidian MCP matters when your 
 | Have your rules applied | Before each write, the AI is pointed to the `AGENTS.md` files that apply, from Claude, ChatGPT or Codex; a strict mode refuses the write until it has read them. |
 | Find the right passage | Semantic search returns the passage that answers, with its lines. |
 
-These guarantees apply to governed writes: Obsidian open and the Atomic Write Bridge plugin, whose writes stay off until you enable them in its settings. If your AI only reads your vault, file access or a lighter MCP is enough.
+Live governed writes use the Atomic Write Bridge plugin, whose writes stay off until you enable them in its settings. On a copied or dedicated vault, headless move and trash have their own [governed filesystem workflow](docs/headless-server-profile.md#governed-move-and-trash). If your AI only reads your vault, file access or a lighter MCP is enough.
 
 ## Capability map
 

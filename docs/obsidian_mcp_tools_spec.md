@@ -80,7 +80,9 @@ dependency of this MCP.
 - `obsidian_note_move_apply`: dispatch the sealed native FileManager rename once; requires the separate Bridge grant and `MCP_WRITE_MODE=full`.
 - `obsidian_note_move_status`: reconcile the durable outcome and separately observe `graph_postflight` without replaying a rename.
 
-The family is live/hybrid-live only and has no recover or undo operation. Missing native preference support is fail-closed; update-links OFF is admitted only for an empty observed neighborhood. Source-content CAS, an OS directory lock, open-editor behavior and a global graph transaction are not promised. See [the M3 contract](native-note-move-m3.md).
+The native implementation runs in live/hybrid-live and has no recover or undo operation. Missing native preference support is fail-closed; update-links OFF is admitted only for an empty observed neighborhood. Source-content CAS, an OS directory lock, open-editor behavior and a global graph transaction are not promised. See [the M3 contract](native-note-move-m3.md).
+
+In `headless-filesystem`, the same three tool names use an indexed filesystem plan, and `obsidian_note_move_recover` resumes or abandons that plan. See the [headless move and trash contract](headless-server-profile.md#governed-move-and-trash).
 
 ## Core Notes
 

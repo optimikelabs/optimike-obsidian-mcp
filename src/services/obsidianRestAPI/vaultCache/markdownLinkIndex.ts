@@ -1,16 +1,8 @@
-import path from "node:path";
+import { basenameKey, MarkdownLinkResolver } from "./markdownLinkResolver.js";
 import type { DatabaseSync } from "node:sqlite";
 import type { FilesystemNoteLinksResponse, NoteLinkObservation, NoteLinksProjection } from "../types.js";
-import { defaultLinkExtraction, extractBoundedLinkSource } from "./boundedLinkReferences.js";
-import { extractMarkdownLinkReferences, type MarkdownLinkReference } from "./markdownLinkReferences.js";
-
-function markdownPath(linkPath: string): string {
-  return linkPath.toLowerCase().endsWith(".md") ? linkPath : linkPath + ".md";
-}
-
-function basenameKey(linkPath: string): string {
-  return path.posix.basename(markdownPath(linkPath)).toLowerCase();
-}
+import { defaultLinkExtraction, extractIndexedLinkSource } from "./boundedLinkReferences.js";
+import type { MarkdownLinkReference } from "./markdownLinkReferences.js";
 
 /** A limited source can hide a syntactically plausible reference. Include
  * those destinations even when the bounded parse did not retain the link. */
@@ -20,7 +12,8 @@ function* potentialLinkPaths(content: string): IterableIterator<string> {
   )) {
     const raw = (match[1] ?? match[2] ?? match[3]).split("#", 1)[0].trim();
     if (match[1]) {
-      yield raw.replace(/%%[^\r\n]*?%%/gu, "").trim();
+      const tableAlias = match[1].endsWith("\\") && content[match.index + match[0].length] === "|";
+      yield (tableAlias ? raw.replace(/\\$/u, "") : raw).replace(/%%[^\r\n]*?%%/gu, "").trim();
     } else {
       try {
         yield decodeURIComponent(raw.replace(/\\([\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E])/gu, "$1"));
@@ -36,8 +29,7 @@ function coverage(total: number, returned: number) {
 }
 
 type LinkCount = { link_path: string; count: number };
-type Target = { path: string; ambiguous?: true };
-const INDEX_REVISION = "v10:";
+const INDEX_REVISION = "v11:";
 const MAX_CANDIDATE_PATHS = 32768;
 export type LinkIndexSource = { path: string; hash: string; skipParse?: true };
 type IndexedSource = LinkIndexSource & {
@@ -65,6 +57,7 @@ export class MarkdownLinkIndex {
   private readonly limitedIncoming;
   private readonly targetsByFoldedPath;
   private readonly filesByBasename;
+  private readonly resolver: MarkdownLinkResolver;
   private readonly revision;
 
   constructor(private readonly db: DatabaseSync, private readonly options = defaultLinkExtraction) {
@@ -176,6 +169,10 @@ export class MarkdownLinkIndex {
       SELECT path FROM markdown_link_files WHERE basename = ?
       UNION SELECT path FROM markdown_link_excluded_targets WHERE basename = ?
     `);
+    this.resolver = new MarkdownLinkResolver(
+      key => this.targetsByFoldedPath.iterate(key, key),
+      key => this.filesByBasename.iterate(key, key),
+    );
   }
 
   coversCache(acceptPath: (path: string) => boolean): boolean {
@@ -212,6 +209,15 @@ export class MarkdownLinkIndex {
     return last;
   }
 
+  updatePathTarget(filePath: string, present: boolean): void {
+    if (present) {
+      this.db.prepare("INSERT OR IGNORE INTO markdown_link_excluded_targets VALUES (?, ?, ?)")
+        .run(filePath, filePath.toLowerCase(), basenameKey(filePath));
+    } else {
+      this.db.prepare("DELETE FROM markdown_link_excluded_targets WHERE path = ?").run(filePath);
+    }
+  }
+
   replacePathTargets(paths: readonly string[]): void {
     this.db.exec("DELETE FROM markdown_link_excluded_targets");
     const insert = this.db.prepare("INSERT INTO markdown_link_excluded_targets VALUES (?, ?, ?)");
@@ -223,7 +229,7 @@ export class MarkdownLinkIndex {
     const basename = basenameKey(filePath);
     for (const row of this.limitedIncoming.iterate(basename, basename)) {
       const source = row.source as string;
-      if (!possibleSources.has(source) && this.resolve(source, row.link_path as string)?.path === filePath) {
+      if (!possibleSources.has(source) && this.resolver.resolve(source, row.link_path as string)?.path === filePath) {
         possibleSources.add(source);
       }
     }
@@ -254,9 +260,7 @@ export class MarkdownLinkIndex {
       const content = row.content as string;
       const result = sources[ordinal].skipParse
         ? { references: [], complete: false }
-        : (row.size as number) > this.options.largeNoteBytes
-          ? extractBoundedLinkSource(content, this.options)
-          : { references: extractMarkdownLinkReferences(content), complete: true };
+        : extractIndexedLinkSource(content, row.size as number, this.options);
       const source: IndexedSource = { ...sources[ordinal], ordinal, ...result };
       if (!source.complete) {
         source.possible = new Set();
@@ -311,48 +315,33 @@ export class MarkdownLinkIndex {
     }
   }
 
-  private explicitTarget(wanted: string): Target | undefined {
-    const folded = wanted.toLowerCase();
-    return this.chooseTarget(this.targetsByFoldedPath.iterate(folded, folded), wanted);
-  }
-
-  private chooseTarget(candidates: Iterable<Record<string, unknown>>, preferred?: string, suffix?: string): Target | undefined {
-    let best: string | undefined;
-    let bestRank = Infinity;
-    let matches = 0;
-    for (const row of candidates) {
-      const candidate = row.path as string;
-      if (suffix && !candidate.toLowerCase().endsWith(suffix)) continue;
-      const rank = candidate === preferred ? 0 : candidate.toLowerCase() === preferred?.toLowerCase() ? 1 : 2;
-      matches++;
-      if (!best || rank < bestRank || (rank === bestRank &&
-          (candidate.length < best.length || (candidate.length === best.length && candidate < best)))) {
-        best = candidate;
-        bestRank = rank;
+  moveInventory(target: string, destination: string | undefined, limit: number) {
+    const paths = this.db.prepare(`
+      SELECT path FROM markdown_link_files UNION SELECT path FROM markdown_link_excluded_targets ORDER BY path
+    `).all().map(row => row.path as string);
+    const sources = limit === 0 ? [] : this.db.prepare(`
+      SELECT DISTINCT refs.source FROM markdown_link_refs AS refs
+      JOIN markdown_link_files AS file ON file.path = refs.source
+      WHERE refs.basename IN (?, ?) AND file.complete = 1 ORDER BY refs.source LIMIT ?
+    `).all(basenameKey(target), basenameKey(destination ?? target), limit + 1).map(row => row.source as string);
+    const coverage = limit > 0 ? this.readIndexCoverage(target) : undefined;
+    let complete = coverage?.backlinksComplete !== false && (!destination || coverage?.sourceComplete !== false);
+    if (complete && destination && limit > 0) {
+      let after: MarkdownLinkResolver | undefined;
+      const basename = basenameKey(destination);
+      for (const row of this.limitedIncoming.iterate(basename, basename)) {
+        const source = row.source as string;
+        const linkPath = row.link_path as string;
+        const previous = this.resolver.resolve(source, linkPath);
+        if (!previous) continue;
+        after ??= MarkdownLinkResolver.fromPaths(paths.filter(file => file !== target).concat(destination));
+        if (after.resolve(source, linkPath)?.path === destination) {
+          complete = false;
+          break;
+        }
       }
     }
-    return best ? { path: best, ...(matches > 1 ? { ambiguous: true as const } : {}) } : undefined;
-  }
-
-  private resolve(source: string, linkPath: string): Target | undefined {
-    if (!linkPath) return { path: source };
-    const basename = basenameKey(linkPath);
-    const extension = path.posix.extname(linkPath).toLowerCase();
-    if (extension && extension !== ".md") {
-      const attachment = this.resolvePath(source, linkPath, basename);
-      if (attachment) return attachment;
-    }
-    return this.resolvePath(source, markdownPath(linkPath), basename);
-  }
-
-  private resolvePath(source: string, target: string, basename: string): Target | undefined {
-    if (target.startsWith("/")) return this.explicitTarget(path.posix.normalize(target));
-    const relative = path.posix.normalize(path.posix.join(path.posix.dirname(source).slice(1), target));
-    const local = relative.startsWith("../") ? undefined : "/" + relative;
-    if (target.startsWith("./") || target.startsWith("../")) return local ? this.explicitTarget(local) : undefined;
-    const normalized = path.posix.normalize(target);
-    if (normalized.startsWith("../")) return local ? this.explicitTarget(local) : undefined;
-    return this.chooseTarget(this.filesByBasename.iterate(basename, basename), local, "/" + normalized.toLowerCase());
+    return { paths, sources, complete };
   }
 
   read(filePath: string, limit: number): NoteLinksProjection {
@@ -366,7 +355,7 @@ export class MarkdownLinkIndex {
       SELECT reference FROM markdown_link_refs WHERE source = ? ORDER BY ordinal LIMIT ?
     `).iterate(filePath, limit)) {
       const reference = JSON.parse(row.reference as string) as MarkdownLinkReference;
-      const target = this.resolve(filePath, reference.linkPath);
+      const target = this.resolver.resolve(filePath, reference.linkPath);
       outgoing.push({
         ...reference,
         resolution: target
@@ -384,7 +373,7 @@ export class MarkdownLinkIndex {
       SELECT link_path, CASE WHEN link_path = '' THEN link_text ELSE link_path END AS unresolved_key, count(*) AS count
       FROM markdown_link_refs WHERE source = ? GROUP BY link_path, unresolved_key ORDER BY unresolved_key
     `).iterate(filePath) as Iterable<LinkCount & { unresolved_key: string }>) {
-      if (this.resolve(filePath, row.link_path)) continue;
+      if (this.resolver.resolve(filePath, row.link_path)) continue;
       unresolvedTotal++;
       if (unresolved.length < limit) unresolved.push({ linkText: row.unresolved_key, count: row.count });
     }
@@ -406,7 +395,7 @@ export class MarkdownLinkIndex {
         source = row.path;
         count = 0;
       }
-      if (this.resolve(row.path, row.link_path)?.path === filePath) count += row.count;
+      if (this.resolver.resolve(row.path, row.link_path)?.path === filePath) count += row.count;
     }
     addBacklink();
 
