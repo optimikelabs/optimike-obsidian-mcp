@@ -87,10 +87,14 @@ note vectors are encoded again. A conservative UTF-8 size bound leaves room
 for tokenizer overhead. Unmatched, oversized or invalid rows enter the
 normal encoding path.
 
-Bootstrap uses the producer's note and block size rules. The verification
-report counts notes at or below the byte cutoff as exclusions. Published
-counts include only rows that the strict reader can load. When the note
-vector is omitted, its sections are omitted from the published generation.
+Bootstrap uses the section keys and range selection of Smart Connections
+4.7.2 with Smart Environment v3 selection policy 2. It reads the configured
+note and block minima, embedding toggle, heading exclusions, file and folder
+patterns, and recorded Git ignore rules. Explicit CLI minima override the
+settings. The generation stores the selection settings so incremental builds
+can reuse them on another machine. The verification report counts notes at or
+below the byte cutoff as exclusions. When the note vector is omitted, its
+sections are omitted from the published generation.
 
 Before encoding any remaining rows, the producer re-encodes a deterministic
 sample balanced across notes and sections where possible. The sample is 1%,

@@ -88,10 +88,14 @@ Si Smart Connections a des titres exclus, les notes sont réencodées. Une
 limite prudente en octets UTF-8 réserve une marge pour la tokenisation. Toute
 ligne incompatible, trop longue ou invalide passe par l’encodage normal.
 
-L’amorçage applique les seuils de taille du producteur aux notes et aux blocs.
-Le rapport compte les notes dont la taille en octets est inférieure ou égale
-au seuil parmi les exclusions. Les décomptes publiés portent sur les lignes
-que le lecteur strict peut charger. Si le vecteur d’une note est écarté,
+L’amorçage reprend les clés et la sélection par plages de Smart Connections
+4.7.2, avec la politique de sélection 2 de Smart Environment v3. Il lit les
+seuils des notes et des blocs, l’activation des vecteurs de blocs, les titres
+exclus, les motifs de fichiers et dossiers et les règles Git ignore
+enregistrées. Les seuils explicites de la CLI priment. La génération conserve
+les paramètres de sélection pour les réutiliser en incrémental sur une autre
+machine. Le rapport compte les notes dont la taille en octets est inférieure
+ou égale au seuil parmi les exclusions. Si le vecteur d’une note est écarté,
 ses sections sont également absentes de la génération publiée.
 
 Avant d’encoder le reste, le producteur réencode un échantillon déterministe,

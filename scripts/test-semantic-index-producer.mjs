@@ -459,7 +459,7 @@ if (process.getuid?.() > 0 && process.platform !== "win32") {
   });
 }
 
-async function smartEnvFixture(f, { maxTokens = 256 } = {}) {
+async function smartEnvFixture(f, { maxTokens = 256, settings = {} } = {}) {
   const directory = path.join(f.root, "desktop");
   for (const sub of ["smart_sources", "smart_blocks", "embedding_models"]) {
     await mkdir(path.join(directory, sub), { recursive: true });
@@ -468,6 +468,7 @@ async function smartEnvFixture(f, { maxTokens = 256 } = {}) {
   const fingerprint = "mf_" + smartTextHash(JSON.stringify(profile));
   await writeFile(path.join(directory, "smart_env.json"), JSON.stringify({
     embedding_models: { default_model_key: "fixture" },
+    ...settings,
   }));
   await writeFile(path.join(directory, "embedding_models", "embedding_models.ajson"),
     '"embedding_models:fixture": ' + JSON.stringify(profile) + ',\n');
@@ -486,14 +487,21 @@ async function smartEnvFixture(f, { maxTokens = 256 } = {}) {
     const text = name === "excluded" ? "# Heading\n\nexcluded\n# Private\n\nRemoved from the input\n" : note(name);
     const relative = name + ".md";
     if (name !== "outside") await f.put(relative, text);
-    const block = name === "excluded" ? "# Heading\n\nexcluded" : text;
+    const block = text.split("\n").slice(2, name === "excluded" ? 3 : 4).join("\n");
     const source = {
       path: relative,
       ...addRow(notes, name + ":\n" + text, text),
-      blocks_data: { "#Heading": {
-        lines: [1, name === "excluded" ? 3 : 4],
-        ...addRow(sections, name + "\n" + block, block),
-      } },
+      block_embedding_selection: {
+        version: 2, min_chars: 0, max_input_chars: Math.floor(maxTokens * 3.7), source_key: relative,
+        requires_reimport: false,
+      },
+      blocks_data: {
+        "#Heading": { lines: [1, name === "excluded" ? 3 : 4], should_embed: false },
+        "#Heading#{1}": {
+          lines: [3, name === "excluded" ? 3 : 4], size: block.length, should_embed: true,
+          ...addRow(sections, name + " > Heading\n" + block, block),
+        },
+      },
     };
     if (name === "fresh") {
       source.blocks_data["#Retired"] = { lines: [1, 4], ...addRow(sections, "retired", block) };
@@ -523,6 +531,8 @@ test("bootstrap imports fresh rows and encodes stale, transformed and tombstoned
   const loaded = await f.load(receipt.generation);
   assert.equal(loaded.notes.length, 4);
   assert.ok(f.requests.every(row => !row.input.includes("Removed from the input")));
+  assert.ok(loaded.blocks.refs.some(row => row.notePath === "fresh.md" && row.blockKey === "#Heading#{1}"));
+  assert.ok(!loaded.blocks.refs.some(row => row.notePath === "fresh.md" && row.blockKey === "#Heading"));
   f.requests.length = 0;
   const incremental = await f.run("--exclude-heading", "Private");
   assert.equal(incremental.encoded, 0);
@@ -600,14 +610,44 @@ test("bootstrap verification-only measures coverage without encoding misses or p
   await f.put("invalid.md", Buffer.from([0xff]));
   const receipt = await f.run("bootstrap", "--from-smart-env", desktop, "--verify-only", "--max-samples", "38");
   assert.deepEqual(receipt.imported, { notes: 3, sections: 3 });
-  assert.deepEqual(receipt.toEncode, { notes: 1, sections: 7 });
+  assert.deepEqual(receipt.toEncode, { notes: 1, sections: 2 });
   assert.deepEqual(receipt.sectionSelection, {
-    shared: 3, smartEnvOnly: 1, producerOnly: 7, smartEnvOutsideCorpus: 1,
+    shared: 3, smartEnvOnly: 1, producerOnly: 2, smartEnvOutsideCorpus: 1,
   });
   assert.deepEqual(receipt.excludedNotes, { invalidPath: 0, invalidUtf8: 1, belowMinSize: 0 });
   assert.equal(f.requests.length, 6);
   await assert.rejects(f.current(), { code: "ENOENT" });
   assert.deepEqual(await readdir(path.join(f.index, "generations")), []);
+});
+
+test("bootstrap and its refresh mirror Smart Environment exclusions and Desktop fence keys", async t => {
+  const f = await fixture(t);
+  const desktop = await smartEnvFixture(f, { settings: {
+    smart_sources: { file_exclusions_list: ["deleted.md"], folder_exclusions_list: ["hidden-*"] },
+    smart_blocks: { embed_blocks: true, min_chars: 0 },
+  } });
+  await mkdir(path.join(f.vault, "hidden-archive"));
+  await f.put("hidden-archive/keep.md", note("Excluded by folder glob"));
+  await f.put("ignore#hash.md", note("Excluded by key syntax"));
+  await f.put("fenced.md", "# Outer\n~~~\n# Desktop heading\nVisible content\n~~~");
+  const receipt = await f.run("bootstrap", "--from-smart-env", desktop);
+  const loaded = await f.load(receipt.generation);
+  assert.deepEqual(loaded.notes.map(row => row.notePath), ["changed.md", "excluded.md", "fenced.md", "fresh.md"]);
+  assert.ok(loaded.blocks.refs.some(row => row.notePath === "fenced.md" && row.blockKey === "#Desktop heading#{1}"));
+  assert.ok(f.requests.every(row => !/^(?:hidden-archive\/|ignore#hash\.md|deleted\.md)/u.test(row.source_path)));
+  f.requests.length = 0;
+  const refresh = await f.run();
+  assert.equal(refresh.encoded, 0);
+  assert.equal(f.requests.length, 0);
+});
+
+test("bootstrap honors disabled block embedding even when the store still has block vectors", async t => {
+  const f = await fixture(t);
+  const desktop = await smartEnvFixture(f, { settings: { smart_blocks: { embed_blocks: false } } });
+  const receipt = await f.run("bootstrap", "--from-smart-env", desktop);
+  assert.equal(receipt.notes, 4);
+  assert.equal(receipt.sections, 0);
+  assert.ok(f.requests.every(row => row.entity_kind === "source"));
 });
 
 test("bootstrap stops when the bridge serves the sample from its cache", async t => {

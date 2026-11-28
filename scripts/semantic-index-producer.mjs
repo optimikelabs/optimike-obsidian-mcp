@@ -6,6 +6,7 @@ import { parseArgs } from "node:util";
 import { modelFingerprint, smartTextHash } from "../dist/services/smartEnvV3.js";
 import { bitnetClient, isSha256 } from "./semantic-index/bitnet.mjs";
 import { scanBootstrap, verifyBootstrap } from "./semantic-index/bootstrap.mjs";
+import { exclusionMatcher, readSmartEnvSelection } from "./semantic-index/smart-env-selection.mjs";
 import {
   currentFile, jsonLine, readActiveGeneration, readManifest, readVector, sealGeneration, sourceFile,
   sourceLine, syncDirectory, validateGeneration, vectorFiles, writeSynced,
@@ -15,7 +16,7 @@ import { inventory, parserRevision, readSourceParts, resolveRoots, sha256, verif
 const help = `Usage: optimike-semantic-index --vault DIR --index DIR --endpoint ORIGIN
        --model ID --revision REV --model-sha256 SHA256 [--rebuild]
        [--exclude-path RELATIVE/PATH]... [--exclude-heading TITLE]...
-       [--min-note-chars 300] [--min-block-chars 300]
+       [--min-note-chars N] [--min-block-chars N]
        [--max-deletion-percent 10] [--max-deletions 50]
        [--allow-deletions]
 
@@ -23,11 +24,12 @@ const help = `Usage: optimike-semantic-index --vault DIR --index DIR --endpoint 
        --index DIR --endpoint ORIGIN --model ID --revision REV
        --model-sha256 SHA256 [--verify-only [--max-samples 20..40]]
        [--exclude-path RELATIVE/PATH]... [--exclude-heading TITLE]...
-       [--min-note-chars 300] [--min-block-chars 300]
+       [--min-note-chars N] [--min-block-chars N]
 
 Build and publish a Smart Environment v3 document index outside the vault.
-Bootstrap requires an index without CURRENT. --verify-only reports coverage
-and sample agreement without encoding the remaining rows or publishing.
+Bootstrap requires an index without CURRENT and adopts the source's Smart
+Environment selection settings. --verify-only reports coverage and sample
+agreement without encoding the remaining rows or publishing.
 `;
 
 async function withFiles(callback) {
@@ -144,7 +146,10 @@ async function build(options, vault, index, client, smartEnv) {
   const target = path.join(generations, id);
   const previous = await readActiveGeneration(index);
   if (smartEnv && previous) throw Error("Bootstrap requires an index without CURRENT");
-  const scan = await inventory(vault, options["exclude-path"]);
+  const smartEnvSelection = smartEnv ? await readSmartEnvSelection(smartEnv)
+    : previous?.manifest.chunking.smartEnvSelection;
+  const excludedByProfile = exclusionMatcher(smartEnvSelection);
+  const scan = await inventory(vault, options["exclude-path"], excludedByProfile);
   if (previous && previous.manifest.vaultBinding !== scan.binding) {
     throw Error("Vault root or volume differs from the active generation");
   }
@@ -164,18 +169,20 @@ async function build(options, vault, index, client, smartEnv) {
     }
   }
   guardDeletions(activePaths.filter(relative => !scan.files.has(relative)).length, "missing or reader-incompatible");
+  const profile = await client.profile();
   const chunking = {
-    version: "bitnet-markdown-v3",
+    version: smartEnvSelection ? "smart-env-v3-selection-v2" : "bitnet-markdown-v3",
     jsbrains: parserRevision,
     notes: "breadcrumb + full Markdown, removing excluded heading lines",
-    minNoteChars: options["min-note-chars"] || 300,
-    sections: "SmartBlock.should_embed selection outside frontmatter and excluded heading ranges",
-    minBlockChars: options["min-block-chars"],
+    minNoteChars: (options["min-note-chars"] ?? smartEnvSelection?.minNoteChars) || 300,
+    sections: smartEnvSelection ? "Smart Environment v3 range selection outside frontmatter and excluded headings"
+      : "SmartBlock.should_embed selection outside frontmatter and excluded heading ranges",
+    minBlockChars: options["min-block-chars"] ?? smartEnvSelection?.minBlockChars ?? 300,
     overLength: "skip inputs that exceed the BitNet context",
     excludedPaths: [...new Set(options["exclude-path"])].sort(),
-    excludedHeadings: [...new Set(options["exclude-heading"])].sort(),
+    excludedHeadings: [...new Set([...(smartEnvSelection?.headings ?? []), ...options["exclude-heading"]])].sort(),
+    ...(smartEnvSelection && { smartEnvSelection, blockMaxTokens: profile.model.max_tokens }),
   };
-  const profile = await client.profile();
   const lockHash = sha256(JSON.stringify({ ...profile, chunking }));
   const fingerprint = modelFingerprint(profile.model);
   if (previous && !options.rebuild && (previous.manifest.lockHash !== lockHash ||
@@ -202,6 +209,9 @@ async function build(options, vault, index, client, smartEnv) {
   async function verifyProfile() {
     if (sha256(JSON.stringify({ ...await client.profile(), chunking })) !== lockHash) {
       throw Error("BitNet identity changed during build");
+    }
+    if (smartEnv && JSON.stringify(await readSmartEnvSelection(smartEnv)) !== JSON.stringify(smartEnvSelection)) {
+      throw Error("Smart Environment selection settings changed during build");
     }
   }
   let imported;
@@ -245,7 +255,7 @@ async function build(options, vault, index, client, smartEnv) {
 
     await writeSynced(pending, id + "\n");
     await verifyProfile();
-    await verifySources(vault, options["exclude-path"], scan, hashes);
+    await verifySources(vault, options["exclude-path"], scan, hashes, excludedByProfile);
     try {
       await rename(pending, path.join(index, currentFile));
     } catch (error) {
@@ -278,8 +288,8 @@ async function main() {
     "allow-deletions": { type: "boolean" },
     "max-deletions": { type: "string", default: "50" },
     "max-deletion-percent": { type: "string", default: "10" },
-    "min-note-chars": { type: "string", default: "300" },
-    "min-block-chars": { type: "string", default: "300" },
+    "min-note-chars": { type: "string" },
+    "min-block-chars": { type: "string" },
     "from-smart-env": { type: "string" },
     "verify-only": { type: "boolean" },
     "max-samples": { type: "string" },
@@ -308,6 +318,7 @@ async function main() {
   if (options["exclude-heading"].some(title => !title.trim())) throw Error("Heading exclusions must be nonempty");
   for (const [key, max] of [["max-deletions", Number.MAX_SAFE_INTEGER], ["max-deletion-percent", 100],
     ["min-note-chars", Number.MAX_SAFE_INTEGER], ["min-block-chars", Number.MAX_SAFE_INTEGER]]) {
+    if (options[key] === undefined) continue;
     const value = Number(options[key]);
     if (!/^\d+$/u.test(options[key]) || !Number.isSafeInteger(value) || value > max) {
       throw Error(`--${key} must be an integer from 0 to ${max}`);
