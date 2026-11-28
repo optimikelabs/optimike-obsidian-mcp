@@ -48,6 +48,12 @@ export interface CacheIndexEntry {
 }
 
 type CacheRow = CacheIndexEntry & { content: string };
+type FileObservation = Pick<CacheIndexEntry, "mtime" | "size" | "hash">;
+type DirectFilesystemRead = CacheRow & { observedAt: string };
+
+function sameFileObservation(left: FileObservation, right: FileObservation): boolean {
+  return left.mtime === right.mtime && left.size === right.size && left.hash === right.hash;
+}
 type CacheRefreshSource = "rest" | "filesystem";
 type CacheReadinessStatus = "empty" | "building" | "ready" | "error";
 export type CacheUpdateResult =
@@ -153,6 +159,10 @@ export class VaultCacheService {
   private readonly hotCacheLimit = config.obsidianContentHotCacheLimit;
   private readonly obsidianService: ObsidianRestApiService | undefined;
   private readonly db: DatabaseSync;
+  private readonly directFilesystemReads = new Set<Promise<DirectFilesystemRead | undefined>>();
+  // Null records that more than one version was directly observed.
+  private readonly directFilesystemObservations = new Map<string, FileObservation | null>();
+  private acceptingDirectFilesystemReads = false;
   private readonly vaultExclusionMatcher = createVaultExclusionMatcher(
     config.obsidianVaultExcludePatterns,
   );
@@ -398,6 +408,81 @@ export class VaultCacheService {
       }
       return entry.path.startsWith(normalizedPrefix);
     });
+  }
+
+  /** Read one exact Markdown path while the filesystem cache is being built. */
+  public async readExactFilesystemNote(
+    filePath: string,
+    context: RequestContext,
+  ): Promise<DirectFilesystemRead | undefined> {
+    if (
+      !this.acceptingDirectFilesystemReads ||
+      config.obsidianRuntimeMode !== "headless-readonly" ||
+      this.closing ||
+      this.directFilesystemReads.size >= config.obsidianCacheConcurrency ||
+      filePath.includes("\\")
+    ) {
+      return undefined;
+    }
+
+    const root = getVaultRoot();
+    const normalized = normalizedCacheFilePath(filePath);
+    if (
+      !root ||
+      !normalized ||
+      isVaultPathExcluded(normalized, this.vaultExclusionMatcher)
+    ) {
+      return undefined;
+    }
+
+    const read = this.readExactFilesystemRow(root, normalized, context).then((row) => {
+      if (!row) return undefined;
+      const { mtime, size, hash } = row;
+      const previous = this.directFilesystemObservations.get(normalized);
+      if (previous === undefined) {
+        this.directFilesystemObservations.set(normalized, { mtime, size, hash });
+      } else if (previous && !sameFileObservation(previous, row)) {
+        this.directFilesystemObservations.set(normalized, null);
+      }
+      return { ...row, observedAt: new Date().toISOString() };
+    });
+    this.directFilesystemReads.add(read);
+    try {
+      return await read;
+    } finally {
+      this.directFilesystemReads.delete(read);
+    }
+  }
+
+  private async readExactFilesystemRow(
+    root: string,
+    normalized: string,
+    context: RequestContext,
+  ): Promise<CacheRow | undefined> {
+    // Match actual directory entries so case-insensitive filesystems, aliases,
+    // and alternate data streams cannot invent a match outside the inventory.
+    const segments = normalized.slice(1).split("/");
+    let directory = root;
+    let prefix = "";
+    try {
+      for (const [index, segment] of segments.entries()) {
+        prefix += "/" + segment;
+        if (isVaultPathExcluded(prefix, this.vaultExclusionMatcher)) {
+          return undefined;
+        }
+        const entry = (await fs.readdir(directory, { withFileTypes: true }))
+          .find((candidate) => candidate.name === segment);
+        const final = index === segments.length - 1;
+        if (!entry || (final ? !entry.isFile() : !entry.isDirectory())) {
+          return undefined;
+        }
+        directory = path.join(directory, segment);
+      }
+      return await this.readCacheRow(normalized, "filesystem", context);
+    } catch {
+      // The normal cache path owns fallback matching and the public refusal.
+      return undefined;
+    }
   }
 
   public async getEntry(filePath: string): Promise<CacheEntry | undefined> {
@@ -716,6 +801,7 @@ export class VaultCacheService {
     // Existing uncertainty cannot be discharged by an mtime/size-only scan.
     // Promote just that scan to content reproof; healthy periodic scans keep
     // their metadata optimization and SSE coverage remains a separate signal.
+    const allowDirectFilesystemReads = isInitialBuild;
     const previousState = this.readMetadataValue("refresh_state");
     isInitialBuild ||= this.lastRefreshError !== null || !this.isCacheReady ||
       (previousState !== "complete" && previousState !== "pending-events");
@@ -736,6 +822,8 @@ export class VaultCacheService {
       this.upsertMetadataValue("refresh_state", "building");
       const startTime = Date.now();
       const refreshSource = await this.pickRefreshSource();
+      this.acceptingDirectFilesystemReads =
+        allowDirectFilesystemReads && refreshSource === "filesystem";
       const remoteFiles =
         refreshSource === "filesystem"
           ? await this.listAllMarkdownFilesFromFilesystem(context)
@@ -850,6 +938,30 @@ export class VaultCacheService {
         }
       }
 
+      // Fence new reads and settle admitted ones before publishing readiness.
+      // Reopen files whose verified observations differ, inside this same scan.
+      this.acceptingDirectFilesystemReads = false;
+      if (this.directFilesystemReads.size) {
+        await Promise.all(this.directFilesystemReads);
+      }
+      const filesToRecheck = [];
+      for (const [filePath, observed] of this.directFilesystemObservations) {
+        const cached = this.metadataCache.get(filePath);
+        if (!observed || !cached || !sameFileObservation(observed, cached)) {
+          filesToRecheck.push(filePath);
+        }
+      }
+      if (filesToRecheck.length) {
+        // An admitted direct read only runs during an explicitly forced scan.
+        for (const outcome of await mapWithConcurrency(
+          filesToRecheck,
+          config.obsidianCacheConcurrency,
+          processFile,
+        )) {
+          outcomes.push(outcome);
+        }
+      }
+
       filesAdded += outcomes.filter((outcome) => outcome === "added").length;
       filesUpdated += outcomes.filter(
         (outcome) => outcome === "updated",
@@ -902,6 +1014,11 @@ export class VaultCacheService {
         this.isCacheReady = false;
       }
     } finally {
+      this.acceptingDirectFilesystemReads = false;
+      if (this.directFilesystemReads.size) {
+        await Promise.allSettled(this.directFilesystemReads);
+      }
+      this.directFilesystemObservations.clear();
       this.isBuilding = false;
     }
   }
