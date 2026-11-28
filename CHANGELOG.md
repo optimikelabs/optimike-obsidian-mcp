@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Replace existing governed notes without a transient absence on compatible
+  Linux and macOS filesystems. Other filesystems fail closed unless an operator
+  explicitly enables the legacy fallback for a vault without bidirectional sync.
+- Require the vault owner's explicit timezone and preserve the modification stamp
+  within the configured interval. Hide remaining direct Markdown editors in
+  headless and insert compatibility prepends below the YAML envelope.
 - Preserve the published and observed versions when a headless postflight
   detects a concurrent external edit. Keep the result uncertain and allow a
   separately sealed revert against the observed hash in full write mode.

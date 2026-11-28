@@ -53,8 +53,10 @@ export async function readFilesystemDatePolicy(readConfig: (path: string, option
     const raw = await json(".obsidian/plugins/frontmatter-date-manager/data.json");
     const fdm = settings.parse(raw);
     const processTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const explicitTimezone = fdm.timezone || process.env.TZ;
-    if (!explicitTimezone || Intl.DateTimeFormat("en", { timeZone: explicitTimezone }).resolvedOptions().timeZone !== processTimezone) unavailable();
+    const vaultTimezone = process.env.OPTIMIKE_VAULT_TIMEZONE?.trim();
+    const canonical = (timeZone: string) => Intl.DateTimeFormat("en", { timeZone }).resolvedOptions().timeZone;
+    if (!vaultTimezone || canonical(vaultTimezone) !== processTimezone ||
+        (fdm.timezone && canonical(fdm.timezone) !== processTimezone)) unavailable();
     const keys = [fdm.headerCreated, fdm.headerUpdated, ...(fdm.enableLastViewed ? [fdm.headerLastViewed ?? "viewed"] : [])];
     if (new Set(keys.map(normalizeDateKey)).size !== keys.length) unavailable();
     const templateFolders: string[] = [];
@@ -99,14 +101,20 @@ function properties(content: string): Record<string, unknown> {
 
 function managedNote(policy: FilesystemDatePolicy, path: string, content: string): boolean {
   return policy.managed(path) && Boolean(content.replace(/^\uFEFF/u, "").trim()) &&
-    (policy.fdm.trackExcalidraw || !properties(content)["excalidraw-plugin"]);
+    (policy.fdm.trackExcalidraw || !isDrawing(content));
+}
+
+function isDrawing(content: string) {
+  const marker = /^excalidraw-plugin[ \t]*:[ \t]*([^\r\n]*)/mu.exec(frontmatterEnvelope(content)?.yaml ?? "")?.[1];
+  const value = marker?.trim().replace(/^["']|["']$/gu, "");
+  return Boolean(value && value !== "false" && value !== "null");
 }
 
 function changesModification(policy: FilesystemDatePolicy, before: string | undefined, after: string) {
   if (before === undefined || !policy.fdm.enableContentHashCheck) return true;
   const body = (content: string) => {
     const envelope = frontmatterEnvelope(content);
-    return envelope ? content.slice(envelope.end).replace(/^---\r?\n?/u, "") : content.replace(/^\uFEFF/u, "");
+    return (envelope ? content.slice(envelope.end).replace(/^---\r?\n?/u, "") : content.replace(/^\uFEFF/u, "")).trimEnd();
   };
   const mode = policy.fdm.hashTrackingMode;
   if (mode !== "frontmatter" && body(before) !== body(after)) return true;
@@ -136,13 +144,12 @@ export function renderFilesystemDates(content: string, updates: FrontmatterPatch
   return compileFrontmatterPatch(content, updates, entries).nextContent;
 }
 
-function checkSaveInterval(policy: FilesystemDatePolicy, before: string | undefined, now: number) {
-  if (before === undefined) return;
+function saveIntervalElapsed(policy: FilesystemDatePolicy, before: string | undefined, now: number) {
+  if (before === undefined) return true;
   const previous = Object.entries(properties(before)).find(([key]) => normalizeDateKey(key) === normalizeDateKey(policy.fdm.headerUpdated))?.[1];
-  if (typeof previous !== "string" || !/^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d)?$/u.test(previous)) return;
-  if (now <= new Date(previous).getTime() + policy.fdm.minSecondsBetweenSaves * 1000) {
-    throw new McpError(BaseErrorCode.CONFLICT, "The date manager's minimum save interval has not elapsed.", { reasonCode: "headless_date_save_interval" });
-  }
+  if (typeof previous !== "string" || !/^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d)?$/u.test(previous)) return true;
+  const epoch = new Date(previous).getTime();
+  return !Number.isFinite(epoch) || now > epoch + policy.fdm.minSecondsBetweenSaves * 1000;
 }
 
 function timestamp(epochMs: number, seconds: boolean): string {
@@ -167,9 +174,8 @@ export function sealFilesystemDates(policy: FilesystemDatePolicy, path: string, 
   const fields = properties(original);
   const created = Object.entries(fields).find(([key]) => normalizeDateKey(key) === normalizeDateKey(fdm.headerCreated))?.[1];
   const setCreated = fdm.enableCreateTime && (created == null || created === "");
-  const setUpdated = changesModification(policy, source?.content, bom + next);
+  const setUpdated = changesModification(policy, source?.content, bom + next) && saveIntervalElapsed(policy, source?.content, now);
   if (!setCreated && !setUpdated) return bom + next;
-  if (setUpdated) checkSaveInterval(policy, source?.content, now);
   const fm = frontmatterEnvelope(bom + next);
   if (!fm) next = `---${eol}---${eol}${next}`;
   else if (fm.yaml.trim() === "{}") next = (bom + next).slice(bom.length, fm.start) + (bom + next).slice(fm.end);
@@ -185,8 +191,7 @@ export function sealFilesystemDates(policy: FilesystemDatePolicy, path: string, 
 /** The plan seals the field policy and allowed change; the filesystem effect
  * records the exact timestamped bytes just before publication. */
 export function materializeFilesystemDates(policy: FilesystemDatePolicy, path: string, content: string, now: number, before?: string) {
-  if (!managedNote(policy, path, content) || !changesModification(policy, before, content)) return content;
-  checkSaveInterval(policy, before, now);
+  if (!managedNote(policy, path, content) || !changesModification(policy, before, content) || !saveIntervalElapsed(policy, before, now)) return content;
   const value = timestamp(now, policy.fdm.dateFormat.endsWith(":ss"));
   const updates: FrontmatterPatchOperation[] = [{ op: "set", key: policy.fdm.headerUpdated, value }];
   if (before === undefined && policy.fdm.enableCreateTime) updates.push({ op: "set", key: policy.fdm.headerCreated, value });

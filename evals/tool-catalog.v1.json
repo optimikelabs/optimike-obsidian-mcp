@@ -6,9 +6,9 @@
     "vault-cache",
     "asset-policy"
   ],
-  "toolCount": 117,
+  "toolCount": 116,
   "classificationCounts": {
-    "canonical-unique": 51,
+    "canonical-unique": 50,
     "alias-redundant": 0,
     "compatibility-historical": 1,
     "governed-operation": 49,
@@ -372,7 +372,6 @@
       "obsidian_text_patch_plan",
       "obsidian_text_patch_recover",
       "obsidian_text_patch_status",
-      "obsidian_update_note",
       "obsidian_validate_format",
       "operon_adopt_task",
       "operon_build_context",
@@ -424,7 +423,6 @@
       "external_stat",
       "list_all_tasks",
       "obsidian_admin_filesystem",
-      "obsidian_batch_frontmatter",
       "obsidian_delete_note",
       "obsidian_frontmatter_patch_apply",
       "obsidian_frontmatter_patch_plan",
@@ -434,7 +432,6 @@
       "obsidian_list_notes",
       "obsidian_list_pending_operations",
       "obsidian_manage_canvas",
-      "obsidian_manage_tags",
       "obsidian_move_note",
       "obsidian_note_create_apply",
       "obsidian_note_create_plan",
@@ -454,7 +451,6 @@
       "obsidian_text_patch_plan",
       "obsidian_text_patch_recover",
       "obsidian_text_patch_status",
-      "obsidian_update_note",
       "obsidian_validate_format",
       "operon_adopt_task",
       "operon_build_context",
@@ -809,7 +805,6 @@
           "obsidian_list_notes",
           "obsidian_list_pending_operations",
           "obsidian_manage_canvas",
-          "obsidian_manage_tags",
           "obsidian_note_create_apply",
           "obsidian_note_create_plan",
           "obsidian_note_create_status",
@@ -1342,7 +1337,6 @@
           "obsidian_text_patch_plan",
           "obsidian_text_patch_recover",
           "obsidian_text_patch_status",
-          "obsidian_update_note",
           "obsidian_validate_format",
           "operon_adopt_task",
           "operon_build_context",
@@ -1394,7 +1388,6 @@
           "external_stat",
           "list_all_tasks",
           "obsidian_admin_filesystem",
-          "obsidian_batch_frontmatter",
           "obsidian_delete_note",
           "obsidian_frontmatter_patch_apply",
           "obsidian_frontmatter_patch_plan",
@@ -1404,7 +1397,6 @@
           "obsidian_list_notes",
           "obsidian_list_pending_operations",
           "obsidian_manage_canvas",
-          "obsidian_manage_tags",
           "obsidian_move_note",
           "obsidian_note_create_apply",
           "obsidian_note_create_plan",
@@ -1424,7 +1416,6 @@
           "obsidian_text_patch_plan",
           "obsidian_text_patch_recover",
           "obsidian_text_patch_status",
-          "obsidian_update_note",
           "obsidian_validate_format",
           "operon_adopt_task",
           "operon_build_context",
@@ -1857,7 +1848,6 @@
           "external_stat",
           "list_all_tasks",
           "obsidian_admin_filesystem",
-          "obsidian_batch_frontmatter",
           "obsidian_delete_note",
           "obsidian_frontmatter_patch_apply",
           "obsidian_frontmatter_patch_plan",
@@ -1867,7 +1857,6 @@
           "obsidian_list_notes",
           "obsidian_list_pending_operations",
           "obsidian_manage_canvas",
-          "obsidian_manage_tags",
           "obsidian_move_note",
           "obsidian_note_create_apply",
           "obsidian_note_create_plan",
@@ -3369,30 +3358,6 @@
       }
     },
     {
-      "name": "obsidian_batch_frontmatter",
-      "canonicalName": "obsidian_batch_frontmatter",
-      "classification": "canonical-unique",
-      "group": "metadata.direct.batch",
-      "family": "frontmatter-batch",
-      "surfaceClass": "direct",
-      "annotationClass": "destructive",
-      "registrationModes": [
-        "headless-filesystem"
-      ],
-      "profiles": [
-        "full",
-        "operational"
-      ],
-      "profileModes": {
-        "full": [
-          "headless-filesystem"
-        ],
-        "operational": [
-          "headless-filesystem"
-        ]
-      }
-    },
-    {
       "name": "obsidian_canvas_create_apply",
       "canonicalName": "obsidian_canvas_create_apply",
       "classification": "governed-operation",
@@ -4194,8 +4159,7 @@
       "annotationClass": "destructive",
       "registrationModes": [
         "live",
-        "hybrid-live",
-        "headless-filesystem"
+        "hybrid-live"
       ],
       "profiles": [
         "authoring",
@@ -4205,18 +4169,15 @@
       "profileModes": {
         "authoring": [
           "live",
-          "hybrid-live",
-          "headless-filesystem"
+          "hybrid-live"
         ],
         "full": [
           "live",
-          "hybrid-live",
-          "headless-filesystem"
+          "hybrid-live"
         ],
         "operational": [
           "live",
-          "hybrid-live",
-          "headless-filesystem"
+          "hybrid-live"
         ]
       }
     },
@@ -5369,9 +5330,7 @@
       "annotationClass": "destructive",
       "registrationModes": [
         "live",
-        "hybrid-live",
-        "headless-guarded",
-        "headless-filesystem"
+        "hybrid-live"
       ],
       "profiles": [
         "full"
@@ -5379,9 +5338,7 @@
       "profileModes": {
         "full": [
           "live",
-          "hybrid-live",
-          "headless-guarded",
-          "headless-filesystem"
+          "hybrid-live"
         ]
       },
       "replacement": {

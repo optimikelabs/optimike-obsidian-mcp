@@ -340,6 +340,7 @@ const start = async () => {
       obsidianService,
       vaultCacheService,
     );
+    await governedNoteReplaceRuntime?.restoreInterruptedFilesystemReplacements();
     governedBaseFormulaRuntime =
       createGovernedBaseFormulaRuntime(obsidianService);
     governedCanvasRuntime = createGovernedCanvasRuntime(obsidianService);

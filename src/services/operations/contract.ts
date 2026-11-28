@@ -43,7 +43,7 @@ export type OperationReceipt = {
   afterProof?: OperationProof;
   postflight: {
     source?: "filesystem-reread";
-    reason?: "modified_time_settlement";
+    reason?: "modified_time_settlement" | "headless_atomic_exchange_unavailable";
     checkAfter?: string;
     status:
       | "not_started"

@@ -77,6 +77,17 @@ export function frontmatterEnvelope(content: string): { start: number; end: numb
   return { start: opening[0].length, end: found.index, yaml: content.slice(opening[0].length, found.index) };
 }
 
+/** Direct prepend preserves the BOM and the frontmatter envelope. */
+export function prependMarkdownBody(content: string, prefix: string): string {
+  if (!prefix) return content;
+  const envelope = frontmatterEnvelope(content);
+  const close = envelope ? envelope.end + 3 : 0;
+  const newline = /^\r?\n/u.exec(content.slice(close))?.[0];
+  const offset = envelope ? close + (newline?.length ?? 0) : content.startsWith("\uFEFF") ? 1 : 0;
+  const separator = envelope && !newline ? (content.includes("\r\n") ? "\r\n" : "\n") : "";
+  return content.slice(0, offset) + separator + prefix + content.slice(offset);
+}
+
 export async function inspectNativeFrontmatter(backend: Pick<AtomicWriteBackend, "status" | "inspectFrontmatterFormat">, content: string, expectedBinding?: string) {
   let status;
   try { status = await backend.status(); } catch (error) {

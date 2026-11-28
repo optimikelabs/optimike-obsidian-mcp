@@ -15,6 +15,7 @@ import { createPolicyDigest, type NoteCreateApply, type NoteCreatePolicy } from 
 import type { AtomicWriteReadRequest, AtomicWriteCasRequest, AtomicWriteReadResponse, AtomicWriteStatusResponse } from "../obsidianRestAPI/types.js";
 import { frontmatterEnvelope } from "../obsidianFrontmatterFormat.js";
 import { operationDigest } from "./contract.js";
+import { ATOMIC_EXCHANGE_UNAVAILABLE, atomicExchangeUnavailable, nativeFilesystemExchange } from "./filesystemAtomicExchange.js";
 import { materializeFilesystemDates, normalizeDateKey, readFilesystemDatePolicy, renderFilesystemDates, sealFilesystemDates } from "./filesystemDatePolicy.js";
 import type { AtomicWriteBackend } from "./obsidianNoteReplaceOperationAdapter.js";
 import type { NoteCreateBackend } from "./noteCreateOperationAdapter.js";
@@ -129,7 +130,8 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
   private readonly context = requestContextService.createRequestContext({ operation: "HeadlessGovernedNote" });
 
   constructor(vaultRoot: string, journalPath: string, private readonly journal: ObsidianNoteReplaceJournal,
-    private readonly now = Date.now, private readonly afterPublish?: () => void) {
+    private readonly now = Date.now, private readonly afterPublish?: () => void,
+    private readonly getExchange = nativeFilesystemExchange) {
     this.root = realpathSync.native(vaultRoot);
     this.bindingFingerprint = vaultIdentity(this.root);
     this.writer = new VaultFileService(this.root);
@@ -192,7 +194,8 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
     const policy = await this.policy();
     return {
       ok: true, contractVersion: 1, plugin: { id: FILESYSTEM_AUTHORITY, version: "1.0.0" },
-      backend: { kind: FILESYSTEM_AUTHORITY, bindingFingerprint: this.bindingFingerprint, atomicCas: true, writeEnabled: config.mcpWriteMode !== "readonly" },
+      backend: { kind: FILESYSTEM_AUTHORITY, bindingFingerprint: this.bindingFingerprint, atomicCas: true, writeEnabled: config.mcpWriteMode !== "readonly",
+        headlessReplacement: this.getExchange() ? "exchange" : config.headlessAllowTransientAbsence ? "transient-absence" : "unavailable" },
       limits: { markdownOnly: true },
       noteCreate: { supported: true, exclusiveCreate: true, enabled: config.mcpWriteMode !== "readonly", bindingFingerprint: this.bindingFingerprint },
       frontmatterFormat: { contractVersion: 1, supported: true },
@@ -248,6 +251,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
   }
 
   async seal(relative: string, proposed: string, source: AtomicWriteReadResponse) {
+    this.requireReplacement();
     const policy = await this.policy();
     const snapshot = await this.snapshot(relative);
     if (snapshot.sha256 !== source.sha256) throw conflict("The note changed during plan preparation.");
@@ -273,11 +277,16 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
     return this.locks.run(this.pathLock(plan.path), () => this.verifyPublication(plan));
   }
 
-  async recoverStage(plan: ObsidianNoteReplacePlan) {
-    await this.locks.run(this.pathLock(plan.path), () => this.verifyPublication(plan, true));
+  async restoreInterruptedReplacements() {
+    for (const operationId of this.journal.interruptedFilesystemReplacements()) {
+      const plan = this.journal.get(operationId);
+      if (!plan || plan.bindingFingerprint !== this.bindingFingerprint) continue;
+      // A currently unavailable path can be reconciled when status is next called.
+      await this.matchesEffect(plan).catch(() => false);
+    }
   }
 
-  private async verifyPublication(plan: ObsidianNoteReplacePlan, restore = false) {
+  private async verifyPublication(plan: ObsidianNoteReplacePlan) {
     if (plan.bindingFingerprint !== this.bindingFingerprint) return false;
     const current = this.journal.get(plan.operationId);
     if (current?.status === "committed") return true;
@@ -288,7 +297,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
       if (staged.localStage && !staged.witnessesCleaned) await this.cleanupDivergence(current);
       return false;
     }
-    if (staged.localStage) return this.reconcileLocalStage(current, restore);
+    if (staged.localStage) return this.reconcileLocalStage(current);
     const observed = await this.diskSnapshot(plan.path).catch(error => { if (absent(error)) return undefined; throw error; });
     const sameIdentity = observed !== undefined && identity(observed.stat) === staged.stagedIdentity;
     if (sameIdentity && observed.sha256 === staged.stagedSha256) return true;
@@ -306,36 +315,51 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
     return { temp: prefix + ".tmp", backup: prefix + ".bak" };
   }
 
+  private requireReplacement() {
+    const exchange = this.getExchange();
+    if (!exchange && !config.headlessAllowTransientAbsence) throw atomicExchangeUnavailable();
+    return exchange;
+  }
+
+  private async readWitnesses(target: string, plan: ObsidianNoteReplacePlan) {
+    const { temp, backup } = this.witnesses(target, plan.operationId);
+    const proof = plan.filesystem!;
+    const temporary = await this.observe(temp);
+    if (proof.localStageMode === "exchange" && temporary && identity(temporary.stat) !== proof.stagedIdentity) {
+      return { temp, displacedPath: temp, stage: undefined, displaced: temporary };
+    }
+    return { temp, displacedPath: proof.localStageMode === "exchange" ? temp : backup,
+      stage: temporary, displaced: proof.localStageMode === "exchange" ? undefined : await this.observe(backup) };
+  }
+
   private async cleanupDivergence(plan: ObsidianNoteReplacePlan) {
     const proof = plan.filesystem!;
     const target = await this.target(plan.path, true, true);
-    const { temp, backup } = this.witnesses(target, plan.operationId);
-    const stage = await this.observe(temp);
-    const displaced = await this.observe(backup);
+    const { temp, displacedPath, stage, displaced } = await this.readWitnesses(target, plan);
     if (stage && identity(stage.stat) !== proof.stagedIdentity) return;
     if (displaced && displaced.sha256 !== proof.displacedObservation?.sha256) return;
     if (stage) await rm(temp, { force: true });
-    if (displaced) await rm(backup, { force: true });
+    if (displaced) await rm(displacedPath, { force: true });
     await syncDirectory(path.dirname(target));
     this.journal.confirmFilesystemWitnessCleanup(plan.operationId);
   }
 
-  private async reconcileLocalStage(plan: ObsidianNoteReplacePlan, restore: boolean) {
+  private async reconcileLocalStage(plan: ObsidianNoteReplacePlan) {
     const proof = plan.filesystem!;
     const target = await this.target(plan.path, true, true);
-    const { temp, backup } = this.witnesses(target, plan.operationId);
-    const stage = await this.observe(temp);
+    const witnesses = await this.readWitnesses(target, plan);
+    const { temp, displacedPath, stage } = witnesses;
     if (stage && identity(stage.stat) !== proof.stagedIdentity) throw conflict("The stage witness changed identity.");
-    let displaced = await this.observe(backup);
+    let displaced = witnesses.displaced;
     let observed = await this.observe(target);
     const stagedAtTarget = observed !== undefined && identity(observed.stat) === proof.stagedIdentity;
     const cleanup = async () => {
       if (stage) await rm(temp, { force: true });
-      if (displaced) await rm(backup, { force: true });
+      if (displaced) await rm(displacedPath, { force: true });
       await syncDirectory(path.dirname(target));
     };
     const recordDivergence = async () => {
-      if (displaced) displaced = await this.observe(backup) ?? displaced;
+      if (displaced) displaced = await this.observe(displacedPath) ?? displaced;
       this.journal.recordFilesystemDivergence(plan.operationId, observed ? evidence(observed) : null,
         displaced ? evidence(displaced) : undefined);
       await this.cleanupDivergence(this.journal.get(plan.operationId)!);
@@ -348,7 +372,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
         proof.backupVerified || plan.projection?.kind === "obsidian.note.create";
       if (!ownsLinks || observed!.sha256 !== proof.stagedSha256 || !backupMatches) return recordDivergence();
       if (displaced && !proof.backupVerified) this.journal.verifyFilesystemBackup(plan.operationId);
-      if (displaced && (await this.observe(backup))?.sha256 !== plan.beforeSha256) return recordDivergence();
+      if (displaced && (await this.observe(displacedPath))?.sha256 !== plan.beforeSha256) return recordDivergence();
       await cleanup();
       // Re-read after detaching our aliases. A new external file wins.
       observed = await this.observe(target);
@@ -357,12 +381,9 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
     }
     if (proof.publicationConfirmed) return recordDivergence();
     if (displaced) {
+      if (proof.localStageMode === "exchange") return recordDivergence();
       if (!observed) {
-        if (!restore) {
-          if (!proof.restorePending) this.journal.recordFilesystemRestorationNeeded(plan.operationId);
-          return false;
-        }
-        try { await link(backup, target); } catch (error) { if (!occupied(error)) throw error; }
+        try { await link(displacedPath, target); } catch (error) { if (!occupied(error)) throw error; }
         observed = await this.observe(target);
       }
       if (!observed || identity(observed.stat) !== identity(displaced.stat)) return recordDivergence();
@@ -381,6 +402,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
     });
     if (current.sha256 !== expectedHash) throw conflict("The note no longer matches the original operation's after proof.");
     const policy = await this.policy();
+    if (source !== undefined) this.requireReplacement();
     if (source === undefined) {
       const directory = filesystemJournalPath(this.root, this.removedDirectory);
       mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -492,6 +514,11 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
       const before = await this.observe(target);
       if (before?.sha256 !== expectedHash) throw conflict("The note changed since planning.");
       if (!before) await this.writer.assertNewFileName(relative, target);
+      const exchange = before ? this.getExchange() : undefined;
+      if (before && !exchange && !config.headlessAllowTransientAbsence) {
+        this.journal.settleUnpublishedFilesystem(plan.operationId, "failed", ATOMIC_EXCHANGE_UNAVAILABLE);
+        throw atomicExchangeUnavailable();
+      }
       const { temp, backup } = this.witnesses(target, plan.operationId);
       const attempt = plan.executionOwner!.attemptId;
       const file = await open(temp, "wx", before ? Number(before.stat.mode & 0o777n) : 0o600);
@@ -504,19 +531,42 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
         await file.close();
         await syncDirectory(path.dirname(target));
         if ((await this.policy()).digest !== policy.digest) throw conflict("The date policy changed after planning.");
-        this.journal.recordFilesystemStage(plan.operationId, attempt, identity(staged), sha256, content);
+        this.journal.recordFilesystemStage(plan.operationId, attempt, identity(staged), sha256, content,
+          exchange ? "exchange" : "legacy");
         journaled = true;
       } finally {
         await file.close();
         if (!journaled) await rm(temp, { force: true });
       }
-      if (before) {
+      const recheck = async () => {
+        if ((await this.diskSnapshot(relative).catch(error => { if (absent(error)) return undefined; throw error; }))?.sha256 !== expectedHash) {
+          throw conflict("The note changed before publication.");
+        }
+      };
+      let exchanged = false;
+      if (exchange) {
         try {
-          await renameWithPrecondition(target, backup, async () => {
-            if ((await this.diskSnapshot(relative).catch(error => { if (absent(error)) return undefined; throw error; }))?.sha256 !== expectedHash) {
-              throw conflict("The note changed before publication.");
-            }
-          });
+          await recheck();
+          exchange(target, temp);
+          exchanged = true;
+        } catch (error) {
+          const unavailable = error instanceof McpError && error.details?.reasonCode === ATOMIC_EXCHANGE_UNAVAILABLE;
+          if (!unavailable || !config.headlessAllowTransientAbsence) {
+            await rm(temp, { force: true });
+            this.journal.settleUnpublishedFilesystem(plan.operationId,
+              error instanceof McpError && error.code === BaseErrorCode.CONFLICT ? "conflict" : "failed",
+              unavailable ? ATOMIC_EXCHANGE_UNAVAILABLE : undefined);
+            throw error;
+          }
+          // A failed exchange leaves both names intact. Switch the journaled
+          // witness layout before using the explicitly permitted fallback.
+          const stage = await this.rawSnapshot(temp);
+          this.journal.recordFilesystemStage(plan.operationId, attempt, identity(stage.stat), sha256, content, "legacy");
+        }
+      }
+      if (before && !exchanged) {
+        try {
+          await renameWithPrecondition(target, backup, recheck);
         } catch (error) {
           await rm(temp, { force: true });
           this.journal.settleUnpublishedFilesystem(plan.operationId,
@@ -524,16 +574,18 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
           throw error;
         }
         if ((await this.rawSnapshot(backup)).sha256 !== expectedHash) {
-          await this.verifyPublication(plan, true);
+          await this.verifyPublication(plan);
           throw conflict("The displaced note changed before publication.");
         }
       }
-      try { await link(temp, target); } catch (error) {
-        if (!occupied(error)) throw error;
-        await this.verifyPublication(plan, true);
-        throw conflict("Another writer recreated the note before publication.");
+      if (!exchanged) {
+        try { await link(temp, target); } catch (error) {
+          if (!occupied(error)) throw error;
+          await this.verifyPublication(plan);
+          throw conflict("Another writer recreated the note before publication.");
+        }
+        await rm(temp);
       }
-      await rm(temp);
       this.journal.confirmFilesystemPublication(plan.operationId, attempt);
       await syncDirectory(path.dirname(target));
       this.afterPublish?.();

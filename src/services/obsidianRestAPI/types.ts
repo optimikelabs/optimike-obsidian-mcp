@@ -96,6 +96,7 @@ export type AtomicWriteStatusResponse = {
     writeEnabled: boolean;
     canvasAtomicCas?: true;
     canvasWriteEnabled?: boolean;
+    headlessReplacement?: "exchange" | "transient-absence" | "unavailable";
   };
   limits: { markdownOnly: true };
   settlement?: {

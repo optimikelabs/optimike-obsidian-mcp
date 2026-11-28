@@ -92,11 +92,6 @@ export class FilesystemRevert {
     if (recovery) {
       await this.status(ref);
       row = this.require(ref, key);
-      if (row.filesystem?.restorePending && row.filesystem.divergentObservation === undefined) {
-        this.authorize("recover", row.path, row.projection!.proof.restoresAfterDivergence === true, row.nextContent.length);
-        await this.backend.recoverStage(row);
-        return this.status(ref);
-      }
       // An effect whose publication point was reached is reconciled only.
       if (row.filesystem?.stagedIdentity) return this.receipt(row);
     }
@@ -139,9 +134,9 @@ export class FilesystemRevert {
       admittedAt: row.createdAt, updatedAt: row.updatedAt,
       ...(phase === "terminal" ? { terminalAt: row.updatedAt } : {}),
       applyAllowed: phase === "planned",
-      recoveryAllowed: row.status === "applying" || (row.status === "outcome_unknown" &&
-        row.filesystem?.divergentObservation === undefined && (!row.filesystem?.stagedIdentity || row.filesystem.restorePending === true)),
+      recoveryAllowed: row.status === "applying" || (row.status === "outcome_unknown" && !row.filesystem?.stagedIdentity),
       postflight: { status: committed ? "verified" : phase === "planned" ? "not_started" : "unverified",
+        ...(row.failure === "headless_atomic_exchange_unavailable" ? { reason: row.failure } : {}),
         ...(committed ? { source: "filesystem-reread" as const } : {}) },
     };
   }

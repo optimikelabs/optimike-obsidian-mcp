@@ -745,6 +745,7 @@ export type GovernedNoteReplacePlanView = {
 
 export class GovernedNoteReplaceRuntime {
   get isFilesystem(): boolean { return Boolean(this.backend.filesystem); }
+  restoreInterruptedFilesystemReplacements() { return this.backend.filesystem?.restoreInterruptedReplacements(); }
   filesystemStatus() { return this.backend.filesystem!.status(); }
   readonly noteCreate: NoteCreateOperationAdapter | undefined;
   readonly filesystemRevert: FilesystemRevert | undefined;

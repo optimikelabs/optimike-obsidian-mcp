@@ -13,7 +13,7 @@ This profile is for a dedicated server or copied Sync vault. It keeps the stable
 - Keep Optimike MCP in `headless-readonly` until list/read/search/tasks/Bases/status are green.
 - Keep MCP cache outside the synchronized vault.
 - Use vault exclusions for operational noise, but do not rely on them to stop Obsidian Sync downloads.
-- Do not claim Desktop parity. Move/delete, frontmatter or inline tags, batch frontmatter, minimal Bases writes, format validation, and minimal Canvas helpers exist as bounded filesystem/local features, not as Obsidian Desktop behavior.
+- Move/delete, minimal Bases writes, format validation and minimal Canvas helpers have bounded filesystem contracts.
 
 ## Environment
 
@@ -85,11 +85,9 @@ The snapshot is not a full backup strategy, but it gives a fast local rollback p
 Only after the `headless-guarded` step, switch a copied or dedicated vault to `OBSIDIAN_RUNTIME_MODE=headless-filesystem`.
 
 1. For move/delete, require `expectedHash` or `expectedMtime`.
-2. For tags, limit the contract to Markdown text: YAML frontmatter `tags`, inline `#tags`, and cache-backed local index.
-3. For batch frontmatter, keep dry-run as the default and allow only `set`.
-4. For Bases, limit the contract to `.base` YAML files and Markdown frontmatter properties.
-5. For Canvas, limit the contract to JSON Canvas structure: create, add text node, connect nodes, validate.
-6. Validate with `npm run smoke:headless-filesystem`.
+2. For Bases, limit the contract to `.base` YAML files and Markdown frontmatter properties.
+3. For Canvas, limit the contract to JSON Canvas structure: create, add text node, connect nodes, validate.
+4. Validate with `npm run smoke:headless-filesystem`.
 
 See [Runtime Modes](../OPERATIONS.md#runtime-modes) for same-file write ordering,
 conflict detection, and the remaining race with other processes.
@@ -103,20 +101,29 @@ Never use this phase to edit existing production notes until the server profile 
 profiles. `headless-filesystem` adds `obsidian_note_replace_*` and
 `obsidian_operation_revert_*`. Use the same plan, apply, status and recover
 calls as live for supported note families. Creation uses plan, apply and status.
-Direct search/replace and the single-property frontmatter tool are live-only.
+Direct append/prepend, search/replace, frontmatter and tag editors are live-only.
+Use governed text and frontmatter patches for those edits. Headless omits the
+direct batch frontmatter tool.
 
 Plans bind the vault and the SHA-256 of the bytes read from disk, or path
 absence for creation. Apply uses the sealed reference and idempotency key.
-The filesystem authority serializes cooperating processes on the same host. It
-syncs staged bytes, moves the current file to a same-directory backup and
-checks the backup hash. It publishes through an exclusive hard link. Readers
-can briefly see an absent path during a replacement. An edit in the last
-check-to-rename interval lands in the backup and causes a conflict. If an
-external writer recreates the path, the exclusive publication preserves it.
-On Windows, the authority retries `EPERM` and `EBUSY` for about three seconds
-and checks the hash again before each attempt.
+The filesystem authority serializes cooperating processes on the same host. For
+an existing note it fsyncs the stage and exchanges its name with the target in
+one filesystem call. This uses `renameat2(RENAME_EXCHANGE)` on supported Linux
+filesystems and `renamex_np(RENAME_SWAP)` on supported macOS filesystems. Readers
+always have a path to open during that exchange. Creation uses an exclusive
+hard link and never replaces an existing note.
 
-Postflight checks the backup again and re-reads the published file. Receipts
+If the host or filesystem cannot exchange names atomically, replacement is
+refused by default. Windows `ReplaceFileW` with a backup exposed a missing
+path to a concurrent reader, so Windows also defaults to refusal. For a vault
+without active bidirectional synchronization, you can explicitly set
+`MCP_HEADLESS_ALLOW_TRANSIENT_ABSENCE=true` to allow the legacy move-aside and
+exclusive-link sequence. **Do not use this option with active bidirectional
+synchronization.** That sequence has an observable absent path. Its Windows
+sharing-violation retries take about three seconds and recheck the sealed hash.
+
+Postflight verifies the displaced bytes against the sealed hash and re-reads the published file. Receipts
 identify `headless-filesystem`. When postflight detects a divergent version,
 the operation stays `outcome_unknown` and the journal retains the staged,
 displaced and observed versions available at verification. A process that
@@ -138,20 +145,22 @@ property names, the supported local-time format (minute or second precision)
 and ordered exclusion rules. It honors the core Templates and Templater
 folders. Managed creation uses the application timestamp on new notes and file birth
 time when initializing a missing creation property on an existing note.
-Set `TZ` explicitly if the plugin inherits the system timezone. If the plugin
-names a timezone, the process must use the same one. The authority writes
+Set `OPTIMIKE_VAULT_TIMEZONE` to the IANA timezone used by the devices that edit
+the vault. Set the server process `TZ` to the same zone. An explicit plugin zone
+must also agree. If you use the headless Operon reader, set its `OPERON_TIMEZONE`
+to the same value. Process `TZ` alone does not qualify the date policy. The authority writes
 plain YAML date scalars and respects the selected content hash scope, the
-Canvas.md exclusion and the drawing toggle. A write that would update the date
-inside the configured minimum interval is refused and can be planned again
-after the interval. Agents cannot supply manager-owned fields. Missing or
+Canvas.md exclusion and the drawing toggle. Edits inside the configured minimum
+interval still apply and preserve the existing modification timestamp. Agents cannot supply manager-owned fields. Missing or
 unsupported settings close the write path.
 The headless compiler validates local YAML and preserves BOM and line endings.
 Desktop provides native YAML serialization and metadata types in live mode.
 
 After an interrupted apply, call status on the original reference. It can
 settle a write that never published, or reclaim the staged hard link after
-creation. If a crash left the current note in its backup, recover restores it
-through an exclusive link and reports a conflict. A staged write never replays.
+creation. An interrupted native exchange leaves a complete file at the target.
+For the opt-in legacy sequence, startup and the first status restore a missing
+original through an exclusive link and report a conflict. A staged write never replays.
 To undo a committed write, plan a revert using its original plan reference
 and path, then apply the new plan. The current hash must match the original
 operation's after hash. Existing notes restore the retained content with

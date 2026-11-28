@@ -156,6 +156,7 @@ const EnvSchema = z
     OBSIDIAN_VAULT_EXCLUDE_PATTERNS: z.string().optional(),
     OBSIDIAN_SHARED_CACHE_DB_PATH: z.string().optional(),
     MCP_HEADLESS_GOVERNED_JOURNAL_PATH: z.string().refine(path.isAbsolute).optional(),
+    MCP_HEADLESS_ALLOW_TRANSIENT_ABSENCE: z.enum(["true", "false"]).default("false"),
     OBSIDIAN_CONTENT_HOT_CACHE_LIMIT: z.coerce
       .number()
       .int()
@@ -616,6 +617,7 @@ export const config = {
       `obsidian-note-replace-${noteReplaceProfileId}.sqlite`,
     ),
   headlessGovernedJournalPath: env.MCP_HEADLESS_GOVERNED_JOURNAL_PATH,
+  headlessAllowTransientAbsence: env.MCP_HEADLESS_ALLOW_TRANSIENT_ABSENCE === "true",
   headlessGovernedStateDirectory: path.join(
     process.env.LOCALAPPDATA || process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state"),
     "optimike-obsidian-mcp", "headless-governed",

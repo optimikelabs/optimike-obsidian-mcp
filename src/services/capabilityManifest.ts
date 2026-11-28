@@ -81,6 +81,7 @@ export type CapabilityReasonCode =
   | "semantic_query_unverified"
   | "bridge_unavailable"
   | "headless_date_policy_unavailable"
+  | "headless_atomic_exchange_unavailable"
   | "bridge_probe_timed_out"
   | "bridge_lifecycle_not_ready"
   | "bridge_contract_incompatible"
@@ -683,6 +684,10 @@ function atomicCapability(
   }
   const status = record(input.atomicWrite.value);
   const backend = record(status.backend);
+  if (headless && backend.headlessReplacement === "unavailable" &&
+      (id === "governed-note-write" || id === "governed-frontmatter-write")) {
+    return entry(input, id, false, false, "headless_atomic_exchange_unavailable", "use_live_runtime");
+  }
   const lifecycle = record(status.lifecycle);
   const lifecycleReady =
     lifecycle.state === undefined || lifecycle.state === "ready";

@@ -15,7 +15,7 @@ Ce profil sert à valider un serveur dédié ou une copie Sync. Il garde une pos
 - Garder Optimike MCP en `headless-readonly` tant que list/read/search/tasks/Bases/status ne sont pas verts.
 - Garder le cache MCP hors du vault synchronisé.
 - Utiliser les exclusions pour le bruit opérationnel, sans prétendre qu’elles bloquent les téléchargements Obsidian Sync.
-- Ne pas promettre la parité Desktop. Move/delete, tags frontmatter ou inline, batch frontmatter, écritures Bases minimales, validation de format et helpers Canvas minimaux existent comme fonctions filesystem/locales bornées, pas comme comportement Obsidian Desktop.
+- Le déplacement, la suppression, les écritures Bases, la validation de format et les outils Canvas minimaux suivent des contrats filesystem bornés.
 
 ## Environnement
 
@@ -87,11 +87,9 @@ Le snapshot ne remplace pas une vraie sauvegarde, mais donne un rollback local r
 Seulement après le palier `headless-guarded`, passer une copie ou un vault dédié en `OBSIDIAN_RUNTIME_MODE=headless-filesystem`.
 
 1. Pour move/delete, exiger `expectedHash` ou `expectedMtime`.
-2. Pour tags, limiter le contrat au texte Markdown : `tags` dans le frontmatter YAML, `#tags` inline et index local depuis le cache.
-3. Pour batch frontmatter, garder le dry-run par défaut et n’autoriser que `set`.
-4. Pour Bases, limiter le contrat aux fichiers `.base` YAML et aux propriétés frontmatter des notes.
-5. Pour Canvas, limiter le contrat à la structure JSON Canvas : create, ajout de nœud texte, connexion de nœuds, validation.
-6. Valider avec `npm run smoke:headless-filesystem`.
+2. Pour Bases, limiter le contrat aux fichiers `.base` YAML et aux propriétés frontmatter des notes.
+3. Pour Canvas, limiter le contrat à la structure JSON Canvas : create, ajout de nœud texte, connexion de nœuds, validation.
+4. Valider avec `npm run smoke:headless-filesystem`.
 
 Voir [Modes runtime](../OPERATIONS.fr.md#modes-runtime) pour l’ordre des écritures
 sur un même fichier, la détection des conflits et le risque de concurrence
@@ -107,22 +105,30 @@ qui permettent d’écrire. `headless-filesystem` ajoute `obsidian_note_replace_
 et `obsidian_operation_revert_*`. Les familles de notes reprennent les mêmes
 appels plan, apply, status et recover qu’en live. La création utilise plan,
 apply et status.
-La recherche avec remplacement directe et l’édition directe d’une propriété
-frontmatter sont réservées au mode live.
+Les ajouts directs, la recherche avec remplacement et l’édition directe du
+frontmatter et des tags sont réservés au mode live. En headless, utilisez les
+patches gouvernés. L’édition directe du frontmatter par lot est retirée.
 
 Le plan lie le coffre et le SHA-256 des octets lus sur disque, ou l’absence du
 chemin pour une création. Apply réutilise la référence scellée et la clé
 d’idempotence. L’autorité filesystem sérialise les processus qui partagent le
-verrou local. Elle synchronise le fichier temporaire, déplace le fichier
-courant vers une sauvegarde dans le même dossier et vérifie son hash. La
-publication utilise un lien physique exclusif. Le chemin peut être brièvement
-absent pendant le remplacement. Une édition arrivée juste avant le renommage
-reste dans la sauvegarde et produit un conflit. Si un programme recrée le
-fichier entre-temps, le lien exclusif le préserve. Sous Windows, l’autorité
-réessaie pendant environ trois secondes sur `EPERM` ou `EBUSY` et vérifie de
-nouveau le hash avant chaque tentative.
+verrou local. Pour une note existante, elle synchronise le fichier temporaire
+et échange son nom avec celui de la cible en un appel système. La voie Linux
+utilise `renameat2(RENAME_EXCHANGE)` et la voie macOS `renamex_np(RENAME_SWAP)`
+sur les volumes compatibles. Le chemin reste présent pendant l’échange.
+Une création utilise un lien physique exclusif et préserve une cible existante.
 
-Le contrôle final revérifie la sauvegarde et relit le fichier publié. Le reçu
+Si la plateforme ou le volume ne permet pas l’échange atomique, le remplacement
+est refusé par défaut. Sous Windows, une lecture concurrente a observé une
+absence pendant un appel `ReplaceFileW` réussi avec sauvegarde. Windows refuse
+donc aussi le remplacement par défaut. Sur un coffre sans synchronisation
+bidirectionnelle active, l’option `MCP_HEADLESS_ALLOW_TRANSIENT_ABSENCE=true`
+autorise l’ancienne séquence de déplacement puis de publication exclusive.
+**Ne pas utiliser cette option avec une synchronisation bidirectionnelle active.**
+Cette séquence expose une absence. Sous Windows, elle réessaie les erreurs de
+partage pendant environ trois secondes et revérifie le hash à chaque tentative.
+
+Le contrôle final compare les octets déplacés au hash scellé et relit le fichier publié. Le reçu
 identifie `headless-filesystem`. En cas de divergence observée, l’opération
 reste `outcome_unknown` et le journal conserve les versions disponibles lors
 de la vérification. Un programme qui garde l’ancien fichier ouvert peut
@@ -144,11 +150,14 @@ de propriétés, le format local pris en charge (minute ou seconde) et les
 règles d’exclusion dans l’ordre. Elle respecte les dossiers Templates et
 Templater. La création prend l’heure de l’application pour une note neuve, ou la date
 de naissance du fichier quand une note existante n’a pas encore ce champ.
-Définissez `TZ` si l’extension hérite du fuseau horaire du système. Si elle
-déclare un fuseau, le processus doit utiliser le même. L’autorité écrit les
+Définissez `OPTIMIKE_VAULT_TIMEZONE` sur le fuseau IANA des appareils qui
+éditent le coffre. Réglez le `TZ` du processus sur le même fuseau. Un fuseau
+déclaré dans l’extension doit également correspondre. Si vous utilisez le lecteur
+Operon headless, réglez `OPERON_TIMEZONE` sur la même valeur. `TZ` seul ne suffit
+pas à valider la politique. L’autorité écrit les
 dates YAML sans guillemets et respecte le périmètre de détection des changements,
-l’exclusion de Canvas.md et le réglage Excalidraw. Si une modification doit
-actualiser la date avant la fin de l’intervalle configuré, le plan est refusé.
+l’exclusion de Canvas.md et le réglage Excalidraw. Une édition pendant l’intervalle
+minimal est appliquée et conserve la date de modification précédente.
 L’agent ne fournit aucune des valeurs gérées par l’extension. Des réglages
 absents ou non pris en charge ferment la voie d’écriture.
 Le compilateur headless valide le YAML local et préserve le BOM et les fins
@@ -156,8 +165,10 @@ de ligne. En live, Desktop fournit la sérialisation YAML et les types natifs.
 
 Après une interruption, appelez status avec la référence d’origine. Il peut
 clore une écriture jamais publiée ou nettoyer le lien temporaire après une
-création. Si le fichier courant se trouve encore dans sa sauvegarde, recover
-le rétablit par un lien exclusif et signale un conflit. Une écriture déjà
+création. Une interruption pendant l’échange natif laisse un fichier complet
+à la cible. Avec l’ancienne séquence activée, le démarrage et le premier statut
+rétablissent un original absent depuis sa sauvegarde par un lien exclusif et
+signalent un conflit. Une écriture déjà
 préparée ne se rejoue pas. Pour annuler une écriture terminée, planifiez un
 retour arrière en
 indiquant le chemin et la référence d’origine, puis appliquez ce nouveau plan.

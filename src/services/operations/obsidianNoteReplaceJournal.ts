@@ -83,9 +83,9 @@ export type ObsidianNoteReplacePlan = {
     stagedContent?: string;
     publicationConfirmed?: true;
     localStage?: true;
+    localStageMode?: "exchange" | "legacy";
     backupVerified?: true;
     witnessesCleaned?: true;
-    restorePending?: true;
     displacedObservation?: { sha256: string; bytesBase64: string };
     // Private evidence. null means publication was followed by absence.
     divergentObservation?: { sha256: string; bytesBase64: string } | null;
@@ -720,9 +720,10 @@ export class ObsidianNoteReplaceJournal {
     return updated;
   }
 
-  recordFilesystemStage(operationId: string, attemptId: string, stagedIdentity: string, stagedSha256: string, stagedContent?: string): void {
+  recordFilesystemStage(operationId: string, attemptId: string, stagedIdentity: string, stagedSha256: string,
+    stagedContent?: string, localStageMode?: "exchange" | "legacy"): void {
     this.updateFilesystemAttempt(operationId, attemptId, { stagedIdentity, stagedSha256, stagedContent,
-      ...(stagedContent === undefined ? {} : { localStage: true }) });
+      ...(stagedContent === undefined ? {} : { localStage: true, localStageMode }) });
   }
 
   confirmFilesystemPublication(operationId: string, attemptId: string): void {
@@ -735,14 +736,19 @@ export class ObsidianNoteReplaceJournal {
       "headless_postflight_diverged", undefined, true, undefined, undefined, { divergentObservation: observation, displacedObservation });
   }
 
-  settleUnpublishedFilesystem(operationId: string, status: "conflict" | "failed"): void {
+  settleUnpublishedFilesystem(operationId: string, status: "conflict" | "failed", reason = "headless_not_published"): void {
     this.transitionInternal(operationId, ["applying", "outcome_unknown"], status,
-      "headless_not_published", undefined, true, undefined);
+      reason, undefined, true, undefined);
   }
 
-  recordFilesystemRestorationNeeded(operationId: string): void {
-    this.transitionInternal(operationId, ["applying", "outcome_unknown"], "outcome_unknown",
-      "headless_displaced_note_needs_restoration", undefined, true, undefined, undefined, { restorePending: true });
+  interruptedFilesystemReplacements(): string[] {
+    const rows = this.db.prepare(`SELECT operation_id FROM obsidian_note_replace_plans
+      WHERE status IN ('applying', 'outcome_unknown')
+        AND json_extract(payload_json, '$.filesystem.localStage') = 1
+        AND COALESCE(json_extract(payload_json, '$.filesystem.localStageMode'), 'legacy') = 'legacy'
+        AND COALESCE(json_extract(payload_json, '$.projection.kind'), '') <> 'obsidian.note.create'
+        AND json_type(payload_json, '$.filesystem.divergentObservation') IS NULL`).all();
+    return rows.map(row => String(row.operation_id));
   }
 
   verifyFilesystemBackup(operationId: string): void {

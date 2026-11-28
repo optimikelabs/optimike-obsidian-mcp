@@ -1,8 +1,8 @@
-import "./test-support/isolated-state.mjs";
+import { isolatedStateDirectory } from "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
 import { fork } from "node:child_process";
 import { once } from "node:events";
-import { renameSync, writeFileSync } from "node:fs";
+import { existsSync, renameSync, watch, writeFileSync } from "node:fs";
 import fsp, { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
@@ -46,6 +46,7 @@ async function injectAfterFilesystemEffect() {
   const { ObsidianNoteReplaceOperationAdapter } = await import("../dist/services/operations/obsidianNoteReplaceOperationAdapter.js");
   const { NoteCreateOperationAdapter } = await import("../dist/services/operations/noteCreateOperationAdapter.js");
   const { FilesystemRevert } = await import("../dist/services/operations/filesystemRevert.js");
+  const { nativeFilesystemExchange } = await import("../dist/services/operations/filesystemAtomicExchange.js");
   const journal = new ObsidianNoteReplaceJournal(state);
   if (mode === "crash-before-displacement") {
     const record = journal.recordFilesystemStage.bind(journal);
@@ -53,7 +54,7 @@ async function injectAfterFilesystemEffect() {
   }
   let renameAttempts = 0;
   const originalRename = fsp.rename;
-  if (["crash-after-displacement", "edit-at-displacement", "blocked-displacement"].includes(mode)) {
+  if (["crash-after-displacement", "crash-before-status", "edit-at-displacement", "blocked-displacement"].includes(mode)) {
     fsp.rename = async (source, destination) => {
       if (!String(destination).endsWith(".bak")) return originalRename(source, destination);
       if (mode === "edit-at-displacement") writeFileSync(source, interference);
@@ -62,7 +63,7 @@ async function injectAfterFilesystemEffect() {
         throw Object.assign(new Error("Synthetic sharing violation"), { code: "EPERM" });
       }
       await originalRename(source, destination);
-      if (mode === "crash-after-displacement") process.exit(89);
+      if (mode === "crash-after-displacement" || mode === "crash-before-status") process.exit(89);
     };
   }
   const originalLink = fsp.link;
@@ -89,7 +90,10 @@ async function injectAfterFilesystemEffect() {
     const external = path.join(vault, "Archive", ".external-replacement.tmp");
     writeFileSync(external, interference);
     renameSync(external, path.join(vault, postflightRace));
-  });
+  }, () => mode === "crash-after-exchange" ? (target, stage) => {
+    nativeFilesystemExchange()(target, stage);
+    process.exit(91);
+  } : undefined); // Other rename injections target the explicit legacy path.
   try {
     if (mode === "revert-plan-other-volume") {
       const before = await readFile(path.join(vault, "Created.md"));
@@ -164,16 +168,24 @@ async function checkDates() {
   assert.equal(materializeFilesystemDates(bodyOnly, "Note.md", withLabelEdit, time + 2000, edited), withLabelEdit);
   const excludedLabel = await loadPolicy({ frontmatterHashExcludeKeys: ["label"] });
   assert.equal(sealFilesystemDates(excludedLabel, "Note.md", withLabelEdit, time + 1000, source(edited)), withLabelEdit);
-  assert.throws(() => sealFilesystemDates(policy, "Note.md", withLabelEdit, time + 1000, source(edited)), /minimum save interval/u);
+  assert.equal(sealFilesystemDates(policy, "Note.md", withLabelEdit, time + 1000, source(edited)), withLabelEdit);
+  assert.equal(materializeFilesystemDates(policy, "Note.md", withLabelEdit, time + 1000, edited), withLabelEdit);
+  assert.equal(sealFilesystemDates(policy, "Note.md", edited + " \r\n", time + 60_000, source(edited)), edited + " \r\n");
   assert.equal(sealFilesystemDates(policy, "Note.md", "\n", time), "\n");
   const drawing = "---\nexcalidraw-plugin: parsed\n---\nDrawing.\n";
-  assert.equal(sealFilesystemDates(await loadPolicy({ trackExcalidraw: false }), "Drawing.md", drawing, time), drawing);
+  const noDrawings = await loadPolicy({ trackExcalidraw: false });
+  assert.equal(sealFilesystemDates(noDrawings, "Drawing.md", drawing, time), drawing);
+  assert.match(sealFilesystemDates(noDrawings, "Drawing.md", drawing.replace("parsed", '"false"'), time), /updated_at:/u);
+  assert.match(sealFilesystemDates(noDrawings, "Drawing.md", drawing.replace("parsed", "\nlabel: first"), time), /updated_at:/u);
   await assert.rejects(loadPolicy({ timezone: "Europe/Paris" }), { code: "SERVICE_UNAVAILABLE" });
   await assert.rejects(loadPolicy({ hashTrackingMode: "unknown" }), { code: "SERVICE_UNAVAILABLE" });
-  const timezone = process.env.TZ;
-  delete process.env.TZ;
+  const timezone = process.env.OPTIMIKE_VAULT_TIMEZONE;
+  delete process.env.OPTIMIKE_VAULT_TIMEZONE;
   try { await assert.rejects(loadPolicy(), { code: "SERVICE_UNAVAILABLE" }); }
-  finally { process.env.TZ = timezone; }
+  finally { process.env.OPTIMIKE_VAULT_TIMEZONE = timezone; }
+  process.env.OPTIMIKE_VAULT_TIMEZONE = "America/New_York";
+  try { await assert.rejects(loadPolicy(), { code: "SERVICE_UNAVAILABLE" }); }
+  finally { process.env.OPTIMIKE_VAULT_TIMEZONE = timezone; }
 }
 
 async function checkDivergenceRetention(directory) {
@@ -196,6 +208,106 @@ async function checkDivergenceRetention(directory) {
     now += 110;
     assert.equal(journal.get(plan.operationId), undefined, "Settled divergence follows terminal retention");
   } finally { journal.close(); }
+}
+
+function observePath(filename) {
+  let absent = 0, samples = 0, done = false;
+  process.once("message", () => { done = true; });
+  process.send("ready");
+  const sample = () => {
+    for (let i = 0; i < 128; i += 1) {
+      if (!existsSync(filename)) absent += 1;
+      samples += 1;
+    }
+    if (done) process.send({ absent, samples }, () => process.disconnect());
+    else setImmediate(sample);
+  };
+  sample();
+}
+
+async function checkAtomicExchange() {
+  const root = await mkdtemp(path.join(os.tmpdir(), "optimike-p9-"));
+  const vault = path.join(root, "vault");
+  const state = path.join(root, "journal.sqlite");
+  process.env.OBSIDIAN_VAULT = vault;
+  process.env.OBSIDIAN_RUNTIME_MODE = "headless-filesystem";
+  process.env.MCP_WRITE_MODE = "full";
+  process.env.MCP_HEADLESS_ALLOW_TRANSIENT_ABSENCE = "false";
+  await fixtures(vault);
+  const { FilesystemNoteBackend } = await import("../dist/services/operations/filesystemNoteBackend.js");
+  const { ObsidianNoteReplaceJournal } = await import("../dist/services/operations/obsidianNoteReplaceJournal.js");
+  const { ObsidianNoteReplaceOperationAdapter } = await import("../dist/services/operations/obsidianNoteReplaceOperationAdapter.js");
+  const { atomicExchangeUnavailable, nativeFilesystemExchange } = await import("../dist/services/operations/filesystemAtomicExchange.js");
+  const exchange = nativeFilesystemExchange();
+  assert.equal(typeof exchange, "function", "The CI filesystem needs a native exchange on this platform");
+  const journal = new ObsidianNoteReplaceJournal(state);
+  const filename = path.join(vault, raced);
+  let watcher, reader;
+  try {
+    let watcherAbsences = 0;
+    watcher = watch(path.dirname(filename), (_, name) => {
+      if (name === path.basename(filename) && !existsSync(filename)) watcherAbsences += 1;
+    });
+    reader = fork(new URL(import.meta.url), ["observe-exchange", filename], { stdio: ["ignore", "ignore", "inherit", "ipc"] });
+    const exit = once(reader, "exit");
+    const [ready] = await once(reader, "message");
+    assert.equal(ready, "ready");
+    const makeAdapter = (getExchange, afterPublish) => {
+      const backend = new FilesystemNoteBackend(vault, state, journal, () => time, afterPublish, getExchange);
+      return new ObsidianNoteReplaceOperationAdapter(backend, journal, undefined, { filesystem: backend });
+    };
+    const plain = makeAdapter();
+    let content;
+    for (let i = 0; i < 20; i += 1) {
+      content = initial.replace("Original body.", `Replacement ${i}.`);
+      const key = `p9-${i}`;
+      const planned = await plain.plan({ path: raced, idempotencyKey: key, nextContent: content });
+      assert.equal((await plain.apply(planned.planRef, key)).outcome, "committed");
+    }
+    const sampleResult = once(reader, "message");
+    reader.send("done");
+    const [{ absent, samples }] = await sampleResult;
+    assert.deepEqual(await exit, [0, null]);
+    watcher.close(); watcher = undefined;
+    assert.ok(samples >= 20);
+    assert.equal(absent, 0, "A separate process must never observe an absent note");
+    assert.equal(watcherAbsences, 0);
+    console.log(`p9: 20 replacements, ${samples} concurrent samples, ${absent} absent, ${watcherAbsences} watcher absences`);
+
+    const unavailable = makeAdapter(() => () => { throw atomicExchangeUnavailable(); });
+    const refused = await unavailable.plan({ path: raced, idempotencyKey: "unsupported-volume", nextContent: published });
+    const failure = await unavailable.apply(refused.planRef, "unsupported-volume");
+    assert.equal(failure.outcome, "failed");
+    assert.equal(failure.postflight.reason, "headless_atomic_exchange_unavailable");
+    assert.equal(await readFile(filename, "utf8"), content);
+
+    const racing = makeAdapter(() => (target, stage) => {
+      writeFileSync(target, interference);
+      exchange(target, stage);
+    });
+    const planned = await racing.plan({ path: raced, idempotencyKey: "at-exchange", nextContent: published });
+    const applied = await racing.apply(planned.planRef, "at-exchange");
+    assert.equal(applied.outcome, "outcome_unknown");
+    assert.equal(await readFile(filename, "utf8"), published);
+    const privateProof = journal.get(applied.operationId).filesystem;
+    assert.equal(privateProof.stagedContent, published);
+    assert.equal(Buffer.from(privateProof.displacedObservation.bytesBase64, "base64").toString(), interference);
+
+    const crashed = await plain.plan({ path: raced, idempotencyKey: "crash-exchange", nextContent: interference });
+    const worker = fork(new URL(import.meta.url), ["crash-after-exchange", vault, state, crashed.planRef, "crash-exchange"],
+      { stdio: ["ignore", "ignore", "inherit", "ipc"] });
+    assert.deepEqual(await once(worker, "exit"), [91, null]);
+    assert.equal(await readFile(filename, "utf8"), interference, "Native crash leaves the path present before journal confirmation");
+    assert.equal((await plain.status(crashed.planRef)).outcome, "committed");
+    assert.equal((await readdir(path.dirname(filename))).some(name => name.startsWith(".mcp-write-")), false);
+  } finally {
+    watcher?.close();
+    if (reader?.connected) {
+      const exit = once(reader, "exit"); reader.send("done"); await exit;
+    }
+    journal.close();
+    await rm(root, { recursive: true, force: true, maxRetries: 3 });
+  }
 }
 
 async function integration() {
@@ -223,10 +335,14 @@ async function integration() {
     SEMANTIC_SEARCH_PREWARM: "false",
     LOGS_DIR: logs,
     TZ: "UTC",
+    OPTIMIKE_VAULT_TIMEZONE: "UTC",
+    LOCALAPPDATA: isolatedStateDirectory,
+    MCP_HEADLESS_ALLOW_TRANSIENT_ABSENCE: "true",
   };
-  async function start(mode) {
+  async function start(mode, allowTransientAbsence = true) {
     const transport = new StdioClientTransport({
       command: process.execPath, args: ["dist/index.js"], env: { ...env, OBSIDIAN_RUNTIME_MODE: mode,
+        MCP_HEADLESS_ALLOW_TRANSIENT_ABSENCE: String(allowTransientAbsence),
         MCP_WRITE_MODE: mode === "headless-guarded" ? "guarded" : "full" },
     });
     const client = new Client({ name: "governed-headless-fixture", version: "1" });
@@ -268,7 +384,9 @@ async function integration() {
     };
     for (const client of [guarded, first]) {
       const tools = (await client.listTools()).tools.map(tool => tool.name);
-      assert.ok(!tools.includes("obsidian_search_replace") && !tools.includes("obsidian_manage_frontmatter"));
+      for (const hidden of ["obsidian_search_replace", "obsidian_manage_frontmatter", "obsidian_update_note", "obsidian_manage_tags", "obsidian_batch_frontmatter"]) {
+        assert.ok(!tools.includes(hidden), `${hidden} must be hidden in writable headless modes`);
+      }
     }
     const unread = await call(guarded, "text_patch_plan", patch(raced, "instructions-unread"), true);
     assert.match(unread.error.details.reasonCode, /^vault_instructions_/u);
@@ -354,6 +472,7 @@ async function integration() {
     for (const [mode, exit, outcome, bytes] of [
       ["crash-before-displacement", 88, "conflict", initial],
       ["crash-after-displacement", 89, "conflict", initial],
+      ["crash-before-status", 89, "conflict", initial],
       ["edit-at-displacement", 0, "conflict", interference],
       ["blocked-displacement", 0, "failed", initial],
       ["recreated-before-link", 0, "outcome_unknown", interference],
@@ -363,9 +482,15 @@ async function integration() {
       const planned = await call(first, "note_replace_plan", { path: interrupted, nextContent: published, idempotencyKey: mode });
       await inject(mode, planned.planRef, mode, exit);
       if (mode === "crash-after-displacement") {
-        const pending = await call(second, "note_replace_status", { planRef: planned.planRef });
-        assert.equal(pending.recoveryAllowed, true);
-        await assert.rejects(read(interrupted), { code: "ENOENT" }, "Status only observes the misplaced note");
+        await assert.rejects(read(interrupted), { code: "ENOENT" });
+        const restarted = await start("headless-filesystem");
+        assert.equal(await read(interrupted), initial, "Startup restores the displaced note without waiting for recover");
+        assert.equal((await call(restarted, "note_replace_status", { planRef: planned.planRef })).outcome, "conflict");
+      }
+      if (mode === "crash-before-status") {
+        await assert.rejects(read(interrupted), { code: "ENOENT" });
+        assert.equal((await call(second, "note_replace_status", { planRef: planned.planRef })).outcome, "conflict");
+        assert.equal(await read(interrupted), initial, "First status restores the displaced note");
       }
       const recovered = await call(second, "note_replace_recover", { planRef: planned.planRef, idempotencyKey: mode });
       assert.equal(recovered.outcome, outcome, mode);
@@ -420,6 +545,17 @@ async function integration() {
     const refusal = await call(first, "text_patch_plan", { ...patch("Note.md", "ambiguous"),
       operations: [{ op: "append_body", text: "\nAnother paragraph.\n" }] }, true);
     assert.equal(refusal.error.details.reasonCode, "headless_date_policy_unavailable");
+
+    if (process.platform === "win32") {
+      await writeFile(settingsPath, JSON.stringify(dateSettings));
+      const safe = await start("headless-filesystem", false);
+      await safe.callTool({ name: "obsidian_read_note", arguments: { filePath: "AGENTS.md" } });
+      const unavailable = await call(safe, "text_patch_plan", patch(raced, "no-atomic-exchange"), true);
+      assert.equal(unavailable.error.details.reasonCode, "headless_atomic_exchange_unavailable");
+      assert.equal((await capability(safe, "governed-note-write")).reasonCode, "headless_atomic_exchange_unavailable");
+      assert.equal((await capability(safe, "governed-note-create")).state, "ready");
+      assert.equal(await read(raced), initial);
+    }
   } finally {
     await Promise.all(liveClients.map(client => client.close()));
     await rm(root, { recursive: true, force: true, maxRetries: 3 });
@@ -427,10 +563,13 @@ async function integration() {
   }
 }
 
-if (process.argv[2]) await injectAfterFilesystemEffect();
+if (process.argv[2] === "observe-exchange") observePath(process.argv[3]);
+else if (process.argv[2]) await injectAfterFilesystemEffect();
 else {
   process.env.TZ = "UTC";
+  process.env.OPTIMIKE_VAULT_TIMEZONE = "UTC";
   await checkDates();
   await integration();
+  if (process.platform === "linux" || process.platform === "darwin") await checkAtomicExchange();
   console.log("PASS: headless governed lifecycles, cross-process CAS, crash observation, revert, and date policy");
 }
