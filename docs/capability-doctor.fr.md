@@ -43,8 +43,11 @@ que les lectures et écritures Operon. La recherche sémantique n’est utilisab
 que si son runtime d’index et l’embedder de requête sont activés et qu’une
 sonde live bornée charge au moins un vecteur valide depuis la source actuelle.
 `semantic_query_embedding_disabled` signale un switch
-`ENABLE_QUERY_EMBEDDING` volontairement coupé ; `semantic_index_unavailable`
-et `refresh_semantic_index` couvrent un index absent, vide, malformé ou périmé.
+`ENABLE_QUERY_EMBEDDING` volontairement coupé. `semantic_index_unavailable`
+recommande `refresh_semantic_index` en mode `SMART_ENV_DIR`. Avec une
+[génération externe](semantic-vector-cache-encoding.md#external-smart-env-v3-generations),
+il recommande `check_semantic_publication`. Vérifier le pointeur et la
+génération complète et compatible qu’il désigne, puis relancer la recherche.
 Une sonde qui dépasse son délai de 2,5 s signale `semantic_probe_timed_out`
 avec `retry_capability_probe`. `semantic_embedder_unavailable` et `configure_query_embedder`
 signalent séparément un provider de requête impossible à construire depuis la

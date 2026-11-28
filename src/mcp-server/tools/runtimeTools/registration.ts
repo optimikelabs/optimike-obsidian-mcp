@@ -94,6 +94,7 @@ export async function registerRuntimeTools(
         profile,
         registrationMode,
         runtimeStatus,
+        externalGeneration: runtimeStatus.externalGeneration,
         obsidianService,
         vaultCacheAvailable: Boolean(vaultCacheService),
         probes: capabilityProbes,

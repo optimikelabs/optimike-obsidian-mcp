@@ -469,7 +469,16 @@ At startup, the backend prewarms semantic search by loading the semantic snapsho
 The [standalone semantic index producer](docs/semantic-index-producer.md) builds
 Smart Environment v3 generations outside the vault without Obsidian Desktop.
 
+Optional [external generations](docs/semantic-vector-cache-encoding.md#external-smart-env-v3-generations)
+use the pointer and generation identity for cache freshness. A cold source
+load validates both vector files, including during notes-only search or prewarm.
+Use one semantic mode per shared SQLite cache. Give external-pointer and
+`SMART_ENV_DIR` backends separate `OBSIDIAN_SHARED_CACHE_DB_PATH` values to
+avoid repeated cold reads as their snapshots replace each other.
+
 ### Section search
+
+The loading behavior below applies to `SMART_ENV_DIR`.
 
 `granularity: sections` or `both` loads the section vectors on the first such query, never at prewarm: a runtime that only searches notes keeps its previous memory footprint. The section vectors stay in memory as one float32 array for the life of the process. The first cold load reads the Smart Connections source records once for both notes and sections; afterwards, the section references come from the shared store and only the vectors are read again from `smart_blocks/<model fingerprint>`. The section cache is refreshed when the source records, the active model or that block vector file (modification time or size) change, with the same TTL as notes. Each section result reads its note to verify its lines, even without `with_snippets`. Finding a moved section is bounded per request (200,000 hashed lines); past that bound, the remaining moved sections report `lines_verified: false` (a section still at its indexed lines stays verified). The search never looks past the end of the note.
 
@@ -681,6 +690,7 @@ Important environment variables:
 - `MCP_PROXY_START_TIMEOUT_MS`
 - `OBSIDIAN_VAULT`
 - `SMART_ENV_DIR`
+- `SMART_ENV_GENERATION_POINTER` and `SMART_ENV_QUERY_FINGERPRINT` for an optional [external semantic index](docs/semantic-vector-cache-encoding.md#external-smart-env-v3-generations), configured on the backend
 - `OBSIDIAN_BASE_URL`
 - `OBSIDIAN_API_KEY`
 - `MCP_EXTERNAL_ROOTS_FILE`
@@ -724,7 +734,7 @@ source documents.
 
 Check:
 
-- `SMART_ENV_DIR`
+- `SMART_ENV_DIR` or the [external generation pointer and fingerprint](docs/semantic-vector-cache-encoding.md#external-smart-env-v3-generations)
 - query embedding provider availability
 - runtime status via `obsidian_runtime_status`
 
