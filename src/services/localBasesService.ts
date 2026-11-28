@@ -1,6 +1,6 @@
 import path from "node:path";
 import { readdir, readFile } from "node:fs/promises";
-import { CORE_SCHEMA, load } from "js-yaml";
+import { load } from "js-yaml";
 import { config } from "./../config/index.js";
 import type { VaultCacheService } from "./obsidianRestAPI/vaultCache/index.js";
 import type {
@@ -14,6 +14,7 @@ import type {
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import type { RequestContext } from "../utils/index.js";
 import { compileLocalBaseFilter, isLocalBaseProperty } from "./localBaseFilter.js";
+import { readMarkdownFrontmatter } from "./readMarkdownFrontmatter.js";
 import {
   createVaultExclusionMatcher,
   isVaultPathExcluded,
@@ -53,17 +54,6 @@ function normalizeBaseId(baseId: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function extractFrontmatter(content: string): Record<string, unknown> {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/u);
-  if (!match) return {};
-  try {
-    const parsed = load(match[1], { schema: CORE_SCHEMA });
-    return isRecord(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
 }
 
 function readProperty(row: LocalBaseRow, prop: string): unknown {
@@ -259,7 +249,7 @@ export class LocalBasesService {
       if (!entry.path.endsWith(".md")) continue;
       const cacheEntry = await this.vaultCacheService.getEntry(entry.path);
       if (!cacheEntry) continue;
-      const frontmatter = extractFrontmatter(cacheEntry.content);
+      const { frontmatter } = readMarkdownFrontmatter(cacheEntry.content);
       rows.push({
         file: {
           path: entry.path,

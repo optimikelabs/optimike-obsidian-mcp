@@ -1,11 +1,11 @@
 import path from "node:path"; // Using POSIX path functions for vault path manipulation
-import { load } from "js-yaml";
 import { z } from "zod/v3";
 import {
   NoteJson,
   ObsidianRestApiService,
 } from "../../../services/obsidianRestAPI/index.js";
 import { extractInlineTags } from "../../../services/markdownTags.js";
+import { readMarkdownFrontmatter } from "../../../services/readMarkdownFrontmatter.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
@@ -416,8 +416,7 @@ export const processObsidianReadNote = async (
       // The formatted stats are provided in the top-level 'response.stats'.
       // Local REST's native tag list can include numeric PR references. Recompute
       // from the returned text using the same rules as the shared-cache path.
-      const normalizedContent = (noteJson.content ?? "").replace(/\r\n/g, "\n");
-      const { body } = extractFrontmatter(normalizedContent);
+      const { body } = readMarkdownFrontmatter(noteJson.content ?? "");
       response.content = { ...noteJson, tags: extractTags(noteJson.frontmatter ?? {}, body) };
       response.stats = formattedStat; // Always include formatted stat at top level for JSON format
       logger.debug(
@@ -482,7 +481,7 @@ function buildNoteJsonFromCache(
     size: number;
   },
 ): NoteJson {
-  const { frontmatter, body } = extractFrontmatter(entry.content);
+  const { frontmatter, body } = readMarkdownFrontmatter(entry.content);
   return {
     content: entry.content,
     frontmatter,
@@ -496,30 +495,7 @@ function buildNoteJsonFromCache(
   };
 }
 
-function extractFrontmatter(content: string): {
-  frontmatter: Record<string, any>;
-  body: string;
-} {
-  const match = content.match(/^---\n([\s\S]*?)\n---\n?/u);
-  if (!match) {
-    return { frontmatter: {}, body: content };
-  }
-
-  try {
-    const parsed = load(match[1]);
-    return {
-      frontmatter:
-        parsed && typeof parsed === "object" && !Array.isArray(parsed)
-          ? (parsed as Record<string, any>)
-          : {},
-      body: content.slice(match[0].length),
-    };
-  } catch {
-    return { frontmatter: {}, body: content.slice(match[0].length) };
-  }
-}
-
-function extractTags(frontmatter: Record<string, any>, body: string): string[] {
+function extractTags(frontmatter: Record<string, unknown>, body: string): string[] {
   const collected = new Set<string>();
   const frontmatterTags = frontmatter.tags;
   if (Array.isArray(frontmatterTags)) {
