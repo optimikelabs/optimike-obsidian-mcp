@@ -334,9 +334,26 @@ async function fixture(body){
   getFileContent:async p=>{if(fail)throw new Error('offline');return {path:p,content:files[p.replace(/^\//,'')],stat:{ctime:1,mtime:2,size:14}};}};
  let cache=new VaultCacheService(rest);
  try{await cache.refreshCache(true);await body({get cache(){return cache;},fail:()=>{fail=true;},
-  restart:async()=>{await cache.close();cache=new VaultCacheService(rest);},set:v=>{files=v;}});}
+  restart:async()=>{await cache.close();cache=new VaultCacheService(rest);},
+  openReader:()=>new VaultCacheService(rest),set:v=>{files=v;}});}
  finally{await cache.close();}
 }
+
+test('hybrid cache readers see a newer note committed by a separate REST connection',async()=>{
+ const previous=config.obsidianRuntimeMode;
+ config.obsidianRuntimeMode='hybrid';
+ try {
+  await fixture(async f=>{
+   const reader=f.openReader();
+   try {
+    assert.equal((await reader.getEntry('/One.md')).content,'- [ ] task-one');
+    f.set({'One.md':'- [ ] task-two'});
+    assert.deepEqual(await f.cache.updateFileVerified('One.md',context),{ok:true,disposition:'updated'});
+    assert.equal((await reader.getEntry('/One.md')).content,'- [ ] task-two');
+   } finally { await reader.close(); }
+  });
+ } finally { config.obsidianRuntimeMode=previous; }
+});
 
 for(const kind of ['tasks','bases','tasks-without-service'])test(kind+' refuses durable incomplete cache after failed reconciliation',()=>fixture(async f=>{
  f.cache.markEventWorkPending();await f.restart();f.fail();

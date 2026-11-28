@@ -449,14 +449,12 @@ export class VaultCacheService {
       isVaultPathExcluded(filePath, this.vaultExclusionMatcher)
     )
       return undefined;
-    if (this.markdownLinks) {
-      // This version changes for commits from another connection. Local
-      // writes invalidate their own entries in upsertRow and deleteRow.
-      const version = this.readDataVersion();
-      if (version !== this.hotCacheDataVersion) {
-        this.contentHotCache.clear();
-        this.hotCacheDataVersion = version;
-      }
+    // This version changes for commits from another connection. Local
+    // writes invalidate their own entries in upsertRow and deleteRow.
+    const version = this.readDataVersion();
+    if (version !== this.hotCacheDataVersion) {
+      this.contentHotCache.clear();
+      this.hotCacheDataVersion = version;
     }
     const cached = this.contentHotCache.get(filePath);
     if (cached) {
