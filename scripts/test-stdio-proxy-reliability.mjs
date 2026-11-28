@@ -243,6 +243,8 @@ const backend = createServer(async (request, response) => {
           },
           { name: "obsidian_text_patch_apply", description: "governed mutation fixture", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: false } },
           { name: "obsidian_frontmatter_patch_apply", description: "governed mutation fixture", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: false } },
+          { name: "operon_status", inputSchema: { type: "object" }, annotations: { readOnlyHint: true } },
+          { name: "operon_resolve_task", inputSchema: { type: "object" }, annotations: { readOnlyHint: true } },
           {
             name: "generation_probe",
             description: "generation-bound annotation fixture",
@@ -480,6 +482,21 @@ try {
     new URL("../dist/stdio-proxy.js", import.meta.url),
   );
 
+  const proxyEnv = {
+    OBSIDIAN_RUNTIME_MODE: "headless-readonly",
+    OBSIDIAN_VAULT: fixtureVault,
+    OBSIDIAN_ENABLE_CACHE: "false",
+    MCP_WRITE_MODE: "readonly",
+    SEMANTIC_SEARCH_PREWARM: "false",
+    MCP_TRANSPORT_TYPE: "stdio",
+    MCP_HTTP_HOST: "127.0.0.1",
+    MCP_HTTP_PORT: String(address.port),
+    MCP_TOOL_PROFILE: "full",
+    MCP_LOG_LEVEL: "error",
+    MCP_PROXY_START_TIMEOUT_MS: "5000",
+    MCP_PROXY_RETIRED_DRAIN_TIMEOUT_MS: "1000",
+    MCP_PROXY_REQUIRE_EXISTING_BACKEND: "true",
+  };
   transport = new StdioClientTransport({
     command: process.execPath,
     args: [proxyEntryPath, "--tool-profile", "full"],
@@ -487,21 +504,7 @@ try {
     // checkout. The proxy still targets the explicit fixture backend below.
     cwd: fixtureVault,
     stderr: "pipe",
-    env: {
-      OBSIDIAN_RUNTIME_MODE: "headless-readonly",
-      OBSIDIAN_VAULT: fixtureVault,
-      OBSIDIAN_ENABLE_CACHE: "false",
-      MCP_WRITE_MODE: "readonly",
-      SEMANTIC_SEARCH_PREWARM: "false",
-      MCP_TRANSPORT_TYPE: "stdio",
-      MCP_HTTP_HOST: "127.0.0.1",
-      MCP_HTTP_PORT: String(address.port),
-      MCP_TOOL_PROFILE: "full",
-      MCP_LOG_LEVEL: "error",
-      MCP_PROXY_START_TIMEOUT_MS: "5000",
-      MCP_PROXY_RETIRED_DRAIN_TIMEOUT_MS: "1000",
-      MCP_PROXY_REQUIRE_EXISTING_BACKEND: "true",
-    },
+    env: proxyEnv,
   });
   transport.stderr?.on("data", (chunk) => {
     const output = String(chunk);
@@ -524,7 +527,15 @@ try {
   );
   fixtureStage = "initial tools/list";
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 5);
+  assert.deepEqual(tools.tools.map(tool => tool.name).sort(), [
+    "generation_probe",
+    "mutation_probe",
+    "obsidian_frontmatter_patch_apply",
+    "obsidian_text_patch_apply",
+    "operon_resolve_task",
+    "operon_status",
+    "read_probe",
+  ]);
 
   fixtureStage = "generation-fence replay";
   await assert.rejects(
@@ -923,6 +934,33 @@ try {
     assert.doesNotMatch(JSON.stringify(result), /PRIVATE_NOTE|PRIVATE_BACKEND_MESSAGE/);
   }
   assert.equal(state.governedLossRequests, 2);
+
+  fixtureStage = "tasks profile with an older backend";
+  const tasksTransport = new StdioClientTransport({
+    command: process.execPath,
+    args: [proxyEntryPath, "--tool-profile", "tasks"],
+    cwd: fixtureVault,
+    stderr: "pipe",
+    env: proxyEnv,
+  });
+  const tasksClient = new Client({ name: "older-backend-profile-test", version: "0" });
+  const compatibilityMessage = /backend too old.*live Operon tools hidden/iu;
+  const compatibilityLogged = deferred();
+  let tasksStderr = "";
+  tasksTransport.stderr.on("data", chunk => {
+    tasksStderr += String(chunk);
+    if (compatibilityMessage.test(tasksStderr)) compatibilityLogged.resolve();
+  });
+  try {
+    await tasksClient.connect(tasksTransport);
+    const names = (await tasksClient.listTools()).tools.map(tool => tool.name);
+    assert.deepEqual(names, ["operon_status"]);
+    const status = await tasksClient.callTool({ name: "operon_status", arguments: {} });
+    assert.match(status.content.map(block => block.text).join("\n"), compatibilityMessage);
+    await awaitDeferred(compatibilityLogged, "older backend profile warning");
+  } finally {
+    await tasksClient.close();
+  }
 
   // Bootstrap failures must not dump the caught error, which can contain a
   // private configured path. The deliberately missing config path is the

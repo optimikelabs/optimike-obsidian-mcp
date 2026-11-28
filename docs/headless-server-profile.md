@@ -143,6 +143,12 @@ To restore the replaced edit later, pass the committed revert's `planRef` to
 `obsidian_operation_revert_plan`. The new plan checks the hash of the version
 currently installed before replacing it.
 A process holding an old file open can still write to it after its final check.
+A committed restore settles its source as `conflict` and the source status
+returns `restoredByPlanRef` in place of the pending restore warning.
+
+With the `tasks` profile, a stdio proxy whose shared backend lacks runtime-mode
+metadata hides live-only Operon tools and reports an upgrade warning in status
+and on stderr.
 
 Put the shared cache outside the vault. The default governed journal is next
 to it and uses the vault identity across writable modes. It falls back to local

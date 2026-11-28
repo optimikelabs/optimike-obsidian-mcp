@@ -59,7 +59,7 @@ async function holdVaultLock(filename) {
 async function injectAfterFilesystemEffect() {
   const [mode, vault, state, ref, key] = process.argv.slice(2);
   const { FilesystemNoteBackend } = await import("../dist/services/operations/filesystemNoteBackend.js");
-  const { ObsidianNoteReplaceJournal } = await import("../dist/services/operations/obsidianNoteReplaceJournal.js");
+  const { ObsidianNoteReplaceConcurrencyError, ObsidianNoteReplaceJournal } = await import("../dist/services/operations/obsidianNoteReplaceJournal.js");
   const { ObsidianNoteReplaceOperationAdapter } = await import("../dist/services/operations/obsidianNoteReplaceOperationAdapter.js");
   const { NoteCreateOperationAdapter } = await import("../dist/services/operations/noteCreateOperationAdapter.js");
   const { FilesystemRevert } = await import("../dist/services/operations/filesystemRevert.js");
@@ -142,13 +142,36 @@ async function injectAfterFilesystemEffect() {
     };
   };
   const backend = new FilesystemNoteBackend(vault, state, journal, () => time, () => {
-    if (mode === "crash-after-effect") process.exit(87);
+    if (mode === "crash-after-effect" || mode === "crash-after-restore") process.exit(87);
     if (mode !== "external-after-effect") return;
     const external = path.join(vault, "Archive", ".external-replacement.tmp");
     writeFileSync(external, interference);
     renameSync(external, path.join(vault, postflightRace));
   }, injectExchange); // Other rename injections target the explicit legacy path.
   try {
+    if (mode === "crash-after-restore") {
+      await new FilesystemRevert(backend, journal).apply(ref, key);
+      assert.fail("The restore publication crash was not reached");
+    }
+    if (mode === "restore-status-race") {
+      const commit = journal.commitAfterVerifiedProof.bind(journal);
+      let attempted = false;
+      journal.commitAfterVerifiedProof = (...args) => {
+        if (attempted) return commit(...args);
+        attempted = true;
+        const row = journal.get(args[0]);
+        if (row.status === "applying") {
+          journal.transition(row.operationId, ["applying"], "outcome_unknown",
+            "Fixture lease expired", row.executionOwner.attemptId);
+        }
+        assert.equal(journal.get(args[0]).status, "outcome_unknown");
+        throw new ObsidianNoteReplaceConcurrencyError();
+      };
+      const restored = await new FilesystemRevert(backend, journal).status(ref);
+      assert.equal(attempted, true);
+      assert.equal(restored.outcome, "committed");
+      return;
+    }
     if (mode === "revert-plan-other-volume") {
       const before = await readFile(path.join(vault, "Created.md"));
       await assert.rejects(new FilesystemRevert(backend, journal).plan({ path: "Created.md", operationRef: ref, idempotencyKey: key }), {
@@ -185,6 +208,7 @@ async function fixtures(vault) {
     [".obsidian/plugins/templater-obsidian/data.json", JSON.stringify({ templates_folder: "Snippets" })],
     ["AGENTS.md", "# Vault instructions\n\nUse a governed plan for every note write.\n"],
     ["Note.md", initial], [excluded, initial], [templated, initial],
+    ["Records.base", "views:\n  - type: table\n    name: Records\n"],
     ["Archive/Keep.md", initial], [raced, initial], [postflightRace, initial], [".hidden.md", initial],
     [interrupted, initial], [lockTimeout, initial],
   ]);
@@ -432,6 +456,10 @@ async function checkAtomicExchange() {
         const committed = await reverts.apply(plan.planRef, `revert-${key}`);
         assert.equal(committed.outcome, "committed", key);
         assert.equal(await readFile(filename, "utf8"), third, key);
+        const settled = await racing.status(source.planRef);
+        assert.equal(settled.restoredByPlanRef, committed.planRef, key);
+        assert.equal(settled.replacesConcurrentEdit, undefined, key);
+        assert.equal(settled.postflight.reason, undefined, key);
         const undo = idempotencyKey => reverts.plan({ path: raced, operationRef: committed.planRef, idempotencyKey });
         if (key === "E") {
           const stale = await undo("stale-revert-E");
@@ -593,10 +621,6 @@ async function integration() {
         assert.ok(!tools.includes(hidden), `${hidden} must be hidden in writable headless modes`);
       }
     }
-    const bypass = await first.callTool({ name: "bases_upsert_rows", arguments: { base_id: "Records.base",
-      operations: [{ file: "Note.md", set: { created_at: "1999-01-01T00:00:00", updated_at: "1999-01-01T00:00:00" } }] } });
-    assert.equal(bypass.isError, true);
-    assert.equal(await read("Note.md"), initial, "The retired direct Base row write cannot forge managed dates");
     const unread = await call(guarded, "text_patch_plan", patch(raced, "instructions-unread"), true);
     assert.match(unread.error.details.reasonCode, /^vault_instructions_/u);
     for (const client of [guarded, first, second]) {
@@ -606,6 +630,10 @@ async function integration() {
       assert.equal(Boolean(instructions.isError), false);
       assert.match(instructions.content[0].text, /Use a governed plan for every note write/u);
     }
+    const bypass = await first.callTool({ name: "bases_upsert_rows", arguments: { base_id: "Records.base",
+      operations: [{ file: "Note.md", set: { created_at: "1999-01-01T00:00:00", updated_at: "1999-01-01T00:00:00" } }] } });
+    assert.equal(bypass.isError, true);
+    assert.equal(await read("Note.md"), initial, "The retired direct Base row write cannot forge managed dates");
     const write = await capability(guarded, "governed-note-write");
     assert.equal(write.state, "ready");
     assert.ok(write.preferredTools.includes("obsidian_text_patch_plan"));
@@ -756,15 +784,24 @@ async function integration() {
     await writeFile(path.join(vault, postflightRace), published);
     assert.equal((await call(second, "note_replace_status", { planRef: changed.planRef })).outcome, "outcome_unknown");
     assert.equal((await call(first, "operation_revert_apply", { planRef: undoRace.planRef, idempotencyKey: "undo-postflight" })).outcome, "conflict");
-    await writeFile(path.join(vault, postflightRace), interference);
-    const undo = await call(first, "operation_revert_plan", { path: postflightRace, operationRef: changed.planRef, idempotencyKey: "undo-current-postflight" });
-    expectVerified(await call(first, "operation_revert_apply", { planRef: undo.planRef, idempotencyKey: "undo-current-postflight" }));
-    assert.equal(await read(postflightRace), initial);
     await rm(path.join(vault, postflightRace));
     const missingRevert = await call(first, "operation_revert_plan", { path: postflightRace,
       operationRef: changed.planRef, idempotencyKey: "deleted-note-revert" }, true);
     assert.equal(missingRevert.error.code, "CONFLICT");
     assert.equal(missingRevert.error.message, "The note no longer exists.");
+    await writeFile(path.join(vault, postflightRace), interference);
+    const undo = await call(first, "operation_revert_plan", { path: postflightRace, operationRef: changed.planRef, idempotencyKey: "undo-current-postflight" });
+    await inject("crash-after-restore", undo.planRef, "undo-current-postflight", 87);
+    await inject("restore-status-race", undo.planRef, "undo-current-postflight");
+    expectVerified(await call(first, "operation_revert_status", { planRef: undo.planRef }));
+    assert.equal(await read(postflightRace), initial);
+    const settled = await call(second, "note_replace_status", { planRef: changed.planRef });
+    assert.equal(settled.outcome, "conflict");
+    assert.equal(settled.restoredByPlanRef, undo.planRef);
+    assert.equal(settled.recoveryAllowed, false);
+    const replay = await call(second, "operation_revert_plan", { path: postflightRace, operationRef: changed.planRef, idempotencyKey: "undo-current-postflight" });
+    assert.equal(replay.planRef, undo.planRef);
+    assert.equal(replay.outcome, "committed");
     await checkDivergenceRetention(privateDirectory);
 
     const settingsPath = path.join(vault, ".obsidian/plugins/frontmatter-date-manager/data.json");

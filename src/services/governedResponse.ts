@@ -60,6 +60,8 @@ function compactReceipt(value: unknown, toolName: string): unknown {
     "applyAllowed",
     "recoveryAllowed",
     "recoveryRef",
+    "replacesConcurrentEdit",
+    "restoredByPlanRef",
     "confirmation",
   ]) {
     if (receipt[key] !== undefined) result[key] = receipt[key];

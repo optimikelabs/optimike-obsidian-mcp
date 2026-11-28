@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
-import { HEADLESS_VAULT_LOCK_BUSY, type OperationProof } from "./contract.js";
+import { FILESYSTEM_REVERT_PLAN_PREFIX, HEADLESS_VAULT_LOCK_BUSY, type OperationProof } from "./contract.js";
 import type {
   ModifiedTimeSettlementEvidence,
   ModifiedTimeSettlementPolicy,
@@ -92,6 +92,8 @@ export type ObsidianNoteReplacePlan = {
     // Private evidence. null means publication was followed by absence.
     divergentObservation?: { sha256: string; bytesBase64: string; modifiedAt?: string } | null;
     replacesConcurrentEdit?: import("./contract.js").ConcurrentEditReplacement;
+    displacedSourceOperationId?: string;
+    restoredByPlanRef?: string;
   };
   bindingFingerprint: string;
   status: ObsidianNoteReplaceStatus;
@@ -129,6 +131,7 @@ export function displacedFilesystemEdit(plan: ObsidianNoteReplacePlan) {
 }
 
 export function replacedConcurrentEdit(plan: ObsidianNoteReplacePlan) {
+  if (plan.filesystem?.restoredByPlanRef) return undefined;
   const observed = plan.filesystem?.divergentObservation;
   if (displacedFilesystemEdit(plan)) {
     return observed && observed.sha256 !== plan.filesystem?.stagedSha256
@@ -553,6 +556,10 @@ export class ObsidianNoteReplaceJournal {
   get(operationId: string): ObsidianNoteReplacePlan | undefined {
     this.maybeMarkInterruptedPlans();
     this.maybePurgeTerminalPlans();
+    return this.readPlan(operationId);
+  }
+
+  private readPlan(operationId: string): ObsidianNoteReplacePlan | undefined {
     const row = this.db
       .prepare(
         "SELECT payload_json FROM obsidian_note_replace_plans WHERE operation_id = ?",
@@ -1079,30 +1086,59 @@ export class ObsidianNoteReplaceJournal {
       ...(STABLE_TERMINAL.has(next) ? { nextContent: "" } : {}),
       ...(failure ? { failure } : { failure: undefined }),
     };
-    const placeholders = expected.map(() => "?").join(", ");
-    const result = this.db
-      .prepare(
-        `UPDATE obsidian_note_replace_plans
-         SET status = ?, payload_json = ?, updated_at = ?
-         WHERE operation_id = ? AND status IN (${placeholders})
-           AND payload_json = ?`,
-      )
-      .run(
-        next,
-        JSON.stringify(updated),
-        updated.updatedAt,
-        operationId,
-        ...expected,
-        JSON.stringify(current),
-      );
-    if (Number(result.changes) !== 1) {
-      throw new ObsidianNoteReplaceConcurrencyError();
+    const displacedSourceId = next === "committed" ? current.filesystem?.displacedSourceOperationId : undefined;
+    if (displacedSourceId) {
+      // A crash must expose both terminal rows or neither. Keep the original
+      // bytes and record the exact restore that resolved the divergence.
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.persistTransition(current, updated);
+        const source = this.readPlan(displacedSourceId);
+        if (source?.status === "outcome_unknown" && source.filesystem?.divergentObservation) {
+          this.persistTransition(source, {
+            ...source,
+            status: "conflict",
+            updatedAt: updated.updatedAt,
+            filesystem: {
+              ...source.filesystem,
+              restoredByPlanRef: FILESYSTEM_REVERT_PLAN_PREFIX + operationId,
+            },
+          });
+        }
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    } else {
+      this.persistTransition(current, updated);
     }
     if (STABLE_TERMINAL.has(next)) {
       this.walCheckpointRequired = true;
       this.checkpointSensitiveFrames();
     }
     return updated;
+  }
+
+  private persistTransition(current: ObsidianNoteReplacePlan, updated: ObsidianNoteReplacePlan): void {
+    const result = this.db
+      .prepare(
+        `UPDATE obsidian_note_replace_plans
+         SET status = ?, payload_json = ?, updated_at = ?
+         WHERE operation_id = ? AND status = ?
+           AND payload_json = ?`,
+      )
+      .run(
+        updated.status,
+        JSON.stringify(updated),
+        updated.updatedAt,
+        current.operationId,
+        current.status,
+        JSON.stringify(current),
+      );
+    if (Number(result.changes) !== 1) {
+      throw new ObsidianNoteReplaceConcurrencyError();
+    }
   }
 
   private assertOpen(): void {

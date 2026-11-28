@@ -163,6 +163,7 @@ type BackendClient = {
 };
 type BackendConnection = BackendClient & {
   generation: number;
+  registrationMode: ReturnType<typeof profileModeFromCapability>;
   sessionId: string;
   era: "legacy" | "modern";
   inFlight: number;
@@ -199,6 +200,7 @@ const packageInfo = JSON.parse(
 
 const packageName = packageInfo.name ?? "optimike-obsidian-mcp";
 const packageVersion = packageInfo.version ?? "0.0.0";
+const backendProfileWarning = "Backend too old or runtime mode unavailable; live Operon tools hidden. Upgrade the shared MCP backend.";
 const projectRoot = path.dirname(
   fileURLToPath(new URL("../package.json", import.meta.url)),
 );
@@ -982,9 +984,16 @@ async function createBackendConnection(): Promise<BackendConnection> {
     await client.close();
     throw new Error("Backend protocol era could not be verified.");
   }
+  const registrationMode = profileModeFromCapability(
+    client.getServerCapabilities()?.experimental?.[TOOL_PROFILE_MODE_CAPABILITY],
+  );
+  if (toolProfile === "tasks" && registrationMode === undefined) {
+    console.warn(`[${packageName}] ${backendProfileWarning}`);
+  }
   return {
     client,
     transport,
+    registrationMode,
     generation: ++backendGeneration,
     sessionId: randomUUID(), // Optimike generation binding, not Mcp-Session-Id.
     era,
@@ -1251,7 +1260,7 @@ async function filteredBackendTools(
     selectAvailableToolProfileNames({
       profile: toolProfile,
       availableNames: result.tools.map((tool) => tool.name),
-      registrationMode: profileModeFromCapability(backend.client.getServerCapabilities()?.experimental?.[TOOL_PROFILE_MODE_CAPABILITY]),
+      registrationMode: backend.registrationMode,
     }),
   );
   allowedToolNames = selected;
@@ -1622,10 +1631,20 @@ async function start() {
       const callBackend = (params: typeof request.params) =>
         withBackendRetry(
           "callTool",
-          (client) =>
-            relaying
+          async (client) => {
+            const result = await (relaying
               ? client.callTool(params, { allowInputRequired: true })
-              : client.callTool(params),
+              : client.callTool(params));
+            const registrationMode = profileModeFromCapability(
+              client.getServerCapabilities()?.experimental?.[TOOL_PROFILE_MODE_CAPABILITY],
+            );
+            if (!isInputRequiredResult(result) && toolProfile === "tasks" &&
+                registrationMode === undefined &&
+                ["operon_status", "obsidian_runtime_status"].includes(request.params.name)) {
+              return { ...result, content: [...(result.content ?? []), { type: "text" as const, text: backendProfileWarning }] };
+            }
+            return result;
+          },
           { replayNetworkFailure: { toolName: request.params.name } },
         );
       try {

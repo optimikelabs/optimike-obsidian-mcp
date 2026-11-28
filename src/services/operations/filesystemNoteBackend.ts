@@ -295,6 +295,19 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
     return this.locks.run(this.pathLock(plan.path), () => this.verifyPublication(plan));
   }
 
+  private async verifyPublicationAndSettleRestore(plan: ObsidianNoteReplacePlan) {
+    if (!await this.verifyPublication(plan)) return false;
+    if (plan.filesystem?.displacedSourceOperationId && this.journal.get(plan.operationId)?.status !== "committed") {
+      try {
+        this.journal.commitAfterVerifiedProof(plan.operationId, ["applying", "outcome_unknown"]);
+      } catch (error) {
+        // The lease sweep can advance the journal independently of the path lock.
+        if (!(error instanceof ObsidianNoteReplaceConcurrencyError)) throw error;
+      }
+    }
+    return true;
+  }
+
   async restoreInterruptedReplacements() {
     await this.cleanupExchangeProbes();
     for (const operationId of this.journal.interruptedFilesystemReplacements()) {
@@ -594,7 +607,9 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
   }
 
   async revertPublished(plan: ObsidianNoteReplacePlan) {
-    if (plan.projection?.proof.restoreAbsence !== true) return this.matchesEffect(plan);
+    if (plan.projection?.proof.restoreAbsence !== true) {
+      return this.locks.run(this.pathLock(plan.path), () => this.verifyPublicationAndSettleRestore(plan));
+    }
     if (plan.bindingFingerprint !== this.bindingFingerprint || (await this.inspect(plan.path)).exists) return false;
     const staged = this.journal.get(plan.operationId)?.filesystem?.stagedIdentity;
     const removed = this.removedPath(plan);
@@ -653,6 +668,10 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
       const target = await this.target(relative, true);
       if (!plan.filesystem || plan.bindingFingerprint !== this.bindingFingerprint ||
           hash(plan.nextContent) !== plan.afterSha256) throw conflict("The headless filesystem seal is invalid.");
+      const displacedSource = plan.filesystem.displacedSourceOperationId;
+      if (displacedSource && this.journal.get(displacedSource)?.status !== "outcome_unknown") {
+        throw conflict("The displaced edit is no longer eligible for restoration.");
+      }
       const policy = await this.policy();
       if (policy.digest !== plan.filesystem.policyDigest) throw conflict("The date policy changed after planning.");
       const content = plan.projection?.proof.restoreDisplaced === true ? plan.nextContent :
@@ -737,7 +756,7 @@ export class FilesystemNoteBackend implements AtomicWriteBackend, NoteCreateBack
       this.journal.confirmFilesystemPublication(plan.operationId, attempt);
       await syncDirectory(path.dirname(target));
       this.afterPublish?.();
-      if (!await this.verifyPublication(plan)) throw new Error("The headless postflight could not verify the published file.");
+      if (!await this.verifyPublicationAndSettleRestore(plan)) throw new Error("The headless postflight could not verify the published file.");
       return { sha256, size: Buffer.byteLength(content, "utf8") };
     });
   }
