@@ -155,12 +155,7 @@ async function createTempVault() {
   );
   for (const [name, yaml] of [
     ["Plain", "views:\n  - type: table\n    name: Plain\n"],
-    ["Filtered", "filters: 'type == \"project\"'\n"],
-    ["ViewFiltered", "views:\n  - type: table\n    name: Projects\n    filters: 'type == \"project\"'\n"],
-    ["ViewLimited", "views:\n  - type: table\n    name: First\n    limit: 1\n"],
-    ["ViewOrdered", "views:\n  - type: table\n    name: Ordered\n    order: [file.name]\n"],
-    ["ViewGrouped", "views:\n  - type: table\n    name: Grouped\n    groupBy:\n      property: type\n      direction: ASC\n"],
-    ["Formulas", "formulas:\n  score: '1 + 1'\n"],
+    ["Calendar", "views:\n  - type: calendar\n    name: Calendar\n"],
   ]) {
     await writeFile(path.join(vaultRoot, `${name}.base`), yaml, "utf8");
   }
@@ -789,6 +784,22 @@ async function main() {
       assertTextIncludes(schema, "local-fallback", "bases schema");
       assertTextIncludes(schema, "file.name", "bases schema");
 
+      for (const [regression, args] of [
+        ["a filterless calendar cannot silently become a Markdown scan", { base_id: "Calendar.base" }],
+        ["disabling evaluation does not opt into a Markdown scan", { base_id: "Plain.base", evaluate: false, property_only: false }],
+      ]) {
+        const result = await withTimeout(
+          client.callTool({ name: "bases_query", arguments: args }),
+          regression,
+        );
+        assert.equal(result.isError, true, regression);
+        const payload = jsonOf(result, regression);
+        assert.equal(payload.error.code, "SERVICE_UNAVAILABLE", regression);
+        assert.equal(payload.error.details.reasonCode, "base_query_requires_obsidian", regression);
+        assert.match(payload.error.message, /Obsidian.*property_only/u, regression);
+        assert.equal(payload.rows, undefined, regression);
+      }
+
       for (const [regression, filter, expected] of [
         ["unquoted YAML dates preserve ISO equality", { and: ['due == "2026-11-28"'] }, ["/Root.md"]],
         ["unquoted YAML dates sort chronologically in expression comparisons", { and: ['due >= "2026-12-01"'] }, ["/Projects/Headless.md"]],
@@ -797,7 +808,10 @@ async function main() {
         ["slash-prefixed path operands still match cached rows", { "file.path": { in: ["/Root.md"] } }, ["/Root.md"]],
       ]) {
         const result = await withTimeout(
-          client.callTool({ name: "bases_query", arguments: { base_id: "Plain.base", filter } }),
+          client.callTool({
+            name: "bases_query",
+            arguments: { base_id: "Plain.base", filter, property_only: true },
+          }),
           regression,
         );
         assert.equal(result.isError, false, regression);
@@ -816,36 +830,16 @@ async function main() {
         ["an opted-in scan must not sort on a note namespace it cannot resolve", { property_only: true, sort: [{ prop: "note.type" }] }, /unprefixed frontmatter/u],
       ]) {
         const result = await withTimeout(
-          client.callTool({ name: "bases_query", arguments: { base_id: "Plain.base", ...args } }),
+          client.callTool({
+            name: "bases_query",
+            arguments: { base_id: "Plain.base", property_only: true, ...args },
+          }),
           regression,
         );
         assert.equal(result.isError, true, regression);
         const payload = jsonOf(result, regression);
         assert.equal(payload.error.code, "VALIDATION_ERROR", regression);
         assert.match(payload.error.message, hint, regression);
-        assert.equal(payload.rows, undefined, regression);
-      }
-
-      for (const [regression, args] of [
-        ["requested view cannot silently become a vault-wide scan", { base_id: "Plain.base", view: "Plain" }],
-        ["top-level scalar filter cannot be ignored", { base_id: "Filtered.base" }],
-        ["the default view's filter cannot be ignored", { base_id: "ViewFiltered.base" }],
-        ["the default view's limit cannot be ignored", { base_id: "ViewLimited.base" }],
-        ["the default view's order cannot be ignored without a request sort", { base_id: "ViewOrdered.base" }],
-        ["the default view's grouping cannot be ignored without a request sort", { base_id: "ViewGrouped.base" }],
-        ["explicit evaluation cannot silently be disabled", { base_id: "Plain.base", evaluate: true }],
-        ["configured formulas cannot silently disappear", { base_id: "Formulas.base" }],
-        ["formula filters cannot silently match against missing values", { base_id: "Plain.base", filter: { "formula.score": 2 } }],
-        ["formula sorts cannot silently order missing values", { base_id: "Plain.base", sort: [{ prop: "formula.score" }] }],
-      ]) {
-        const result = await withTimeout(
-          client.callTool({ name: "bases_query", arguments: args }),
-          regression,
-        );
-        assert.equal(result.isError, true, regression);
-        const payload = jsonOf(result, regression);
-        assert.equal(payload.error.code, "SERVICE_UNAVAILABLE", regression);
-        assert.match(payload.error.message, /Obsidian.*property_only/u, regression);
         assert.equal(payload.rows, undefined, regression);
       }
 
@@ -859,10 +853,7 @@ async function main() {
         limit: 1,
       };
       for (const [regression, args] of [
-        ["plain queries remain usable without any opt-in", { base_id: "Plain.base" }],
-        ["the request sort can replace the default view's grouping", {
-          base_id: "ViewGrouped.base", sort: [{ prop: "file.name" }],
-        }],
+        ["a calendar Base permits an explicitly requested property scan", { base_id: "Calendar.base", property_only: true }],
         ["an opted-in scan returns Markdown outside the selected Base and labels it", {
           base_id: "Smoke.base", view: "Active", evaluate: true, property_only: true,
         }],

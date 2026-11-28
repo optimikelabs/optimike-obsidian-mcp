@@ -174,15 +174,15 @@ The final server can expose different capabilities depending on which Obsidian p
 - Local Bases fallback
 
   - available in headless modes for `bases_list`, `bases_get_schema`, and `bases_query`
-  - without Obsidian REST, `bases_query` returns `SERVICE_UNAVAILABLE` when a
-    query needs Base filters, view rules, formulas, or explicit `evaluate: true`
-  - use Obsidian with the Bases Bridge for those queries, or set
-    `property_only: true` to scan cached Markdown properties. Plain queries
-    without those requirements work with no opt-in
+  - Base rows require Obsidian and the Bases Bridge, even for a filterless
+    Base and regardless of `evaluate`. Without Obsidian REST, `bases_query`
+    returns `SERVICE_UNAVAILABLE` unless `property_only: true` is set
+  - `property_only: true` scans cached Markdown properties independently
+    of the Base and its views. The Base file must exist
   - a scan reports `source: "local-fallback"`, `mode: "property-scan"`,
     `evaluate: false`, and `limitations`. Its rows and total describe the
     Markdown scan, with only the request's property filter, sort and pagination.
-    Non-Markdown files are excluded even for plain queries
+    Non-Markdown files are excluded
   - scan filters support direct equality, arrays, `eq`, `ne`, `contains`,
     `in`, `gt`, `gte`, `lt`, and `lte`. Both filters and sorts accept
     unprefixed frontmatter keys and `file.path`, `file.name`, `file.ctime`,

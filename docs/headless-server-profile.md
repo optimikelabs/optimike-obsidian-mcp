@@ -60,9 +60,9 @@ The server-profile smoke checks that:
 - `obsidian_runtime_maintenance refresh_all` works;
 - runtime status reports readonly write policy;
 - list/read/tasks run against the vault;
-- local Bases list and schema inspection are available. Queries that require
-  filters from the Base, view rules or formula evaluation need Obsidian with the
-  Bases Bridge. Use `property_only: true` for a [Markdown property scan](../OPERATIONS.md#required-dependencies).
+- local Bases list and schema inspection are available. Base rows require
+  Obsidian and the Bases Bridge. In headless mode, `bases_query` requires
+  `property_only: true` for a [Markdown property scan](../OPERATIONS.md#required-dependencies).
 
 ## Guarded Writes
 
