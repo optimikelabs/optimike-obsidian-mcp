@@ -98,9 +98,10 @@ function detectLineEnding(content: string): "lf" | "crlf" | "mixed" {
 }
 
 function parseMarkdownStructure(content: string): ParsedMarkdown {
-  const opening = content.match(/^---(?:\r\n|\n)/u);
+  const opening = content.match(/^\uFEFF?---(?:\r\n|\n)/u);
   if (!opening) {
-    return { bodyStart: 0, frontmatter: "", body: content };
+    const start = content.startsWith("\uFEFF") ? 1 : 0;
+    return { bodyStart: start, frontmatter: content.slice(0, start), body: content.slice(start) };
   }
 
   let cursor = opening[0].length;
@@ -123,11 +124,11 @@ function parseMarkdownStructure(content: string): ParsedMarkdown {
   fail("The Markdown frontmatter opening delimiter is not closed.", "frontmatter_unclosed");
 }
 
-function parseMarkdown(content: string): ParsedMarkdown {
+function parseMarkdown(content: string, allowBom: boolean): ParsedMarkdown {
   if (typeof content !== "string") {
     fail("An existing Markdown note is required.", "markdown_note_missing");
   }
-  assertSupportedMarkdownEnvelope(content);
+  assertSupportedMarkdownEnvelope(allowBom ? content.replace(/^\uFEFF/u, "") : content);
   if (byteLength(content) > MAX_NOTE_BYTES) {
     fail("The Markdown note exceeds the P4 compiler size limit.", "markdown_note_too_large", {
       maxBytes: MAX_NOTE_BYTES,
@@ -401,9 +402,10 @@ export function compileTextPatch(
   content: string,
   operations: TextPatchOperation[],
   path?: string,
+  allowBom = false,
 ): CompiledTextPatch {
   validatePath(path);
-  const markdown = parseMarkdown(content);
+  const markdown = parseMarkdown(content, allowBom);
   const canonicalOperations = canonicalizeTextPatchOperations(operations);
   let body = markdown.body;
   const authorizedRanges: TextPatchAuthorizedRange[] = [];
@@ -539,7 +541,7 @@ export function compileTextPatch(
   }
 
   const nextContent = markdown.frontmatter + body;
-  assertSupportedMarkdownEnvelope(nextContent);
+  assertSupportedMarkdownEnvelope(allowBom ? nextContent.replace(/^\uFEFF/u, "") : nextContent);
   const beforeFrontmatterSha256 = sha256(markdown.frontmatter);
   let nextMarkdown: ParsedMarkdown;
   try {

@@ -2,10 +2,11 @@
 
 // End to end through the real server process (dist/index.js, stdio,
 // headless-filesystem) on temporary vaults: server instructions, a refused
-// direct write, read proofs through obsidian_read_note, a rule edited on disk
+// governed plan, read proofs through obsidian_read_note, a rule edited on disk
 // during the session, the off / no-AGENTS.md cases, a decomposed (NFD) folder
-// name next to its NFC twin, and a read-only tag audit under enforce.
+// name next to its NFC twin, and an ordinary read under enforce.
 
+import "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,6 +19,15 @@ const tempRoot = mkdtempSync(path.join(tmpdir(), "optimike-vault-instructions-e2
 
 function vault(files) {
   const root = mkdtempSync(path.join(tempRoot, "vault-"));
+  writeVault(root, ".obsidian/community-plugins.json", JSON.stringify(["frontmatter-date-manager"]));
+  writeVault(root, ".obsidian/plugins/frontmatter-date-manager/data.json", JSON.stringify({
+    headerCreated: "created_at",
+    headerUpdated: "updated_at",
+    enableAutoUpdate: true,
+    enableCreateTime: true,
+    dateFormat: "yyyy-MM-dd'T'HH:mm:ss",
+    filterRules: "",
+  }));
   for (const [relative, content] of Object.entries(files)) writeVault(root, relative, content);
   return root;
 }
@@ -43,6 +53,9 @@ async function start(root, mode) {
       OBSIDIAN_API_KEY: "",
       OBSIDIAN_BASE_URL: "http://127.0.0.1:9",
       MCP_WRITE_MODE: "guarded",
+      MCP_HEADLESS_ALLOW_TRANSIENT_ABSENCE: "true",
+      TZ: "UTC",
+      OPTIMIKE_VAULT_TIMEZONE: "UTC",
       MCP_VAULT_INSTRUCTIONS: mode,
       MCP_VAULT_INSTRUCTIONS_JOURNAL_PATH: path.join(root, "..", `${path.basename(root)}-seals.sqlite`),
       SEMANTIC_SEARCH_PREWARM: "false",
@@ -54,26 +67,11 @@ async function start(root, mode) {
   const client = new Client({ name: "vault-instructions-e2e", version: "0" });
   await client.connect(transport);
   await new Promise((resolve) => setTimeout(resolve, 750));
+  let writeNumber = 0;
   return {
     client,
-    async append(text) {
-      const result = await client.callTool({
-        name: "obsidian_update_note",
-        arguments: {
-          targetType: "filePath",
-          targetIdentifier: "Projects/Note.md",
-          modificationType: "wholeFile",
-          wholeFileMode: "append",
-          content: text,
-        },
-      });
-      let json;
-      try {
-        json = JSON.parse(result.content?.[0]?.text);
-      } catch {
-        json = undefined;
-      }
-      return { result, json };
+    append(text) {
+      return this.appendTo("Projects/Note.md", text);
     },
     read(filePath) {
       return client.callTool({ name: "obsidian_read_note", arguments: { filePath } });
@@ -88,14 +86,21 @@ async function start(root, mode) {
       }
       return { result, json };
     },
-    appendTo(filePath, text) {
-      return this.call("obsidian_update_note", {
-        targetType: "filePath",
-        targetIdentifier: filePath,
-        modificationType: "wholeFile",
-        wholeFileMode: "append",
-        content: text,
+    async appendTo(filePath, text) {
+      const idempotencyKey = `gate-append-${++writeNumber}`;
+      const planned = await this.call("obsidian_text_patch_plan", {
+        path: filePath,
+        idempotencyKey,
+        operations: [{ op: "append_body", text }],
       });
+      if (planned.result.isError) return planned;
+      assert.equal(typeof planned.json.planRef, "string");
+      const applied = await this.call("obsidian_text_patch_apply", {
+        planRef: planned.json.planRef,
+        idempotencyKey,
+      });
+      assert.equal(applied.json.outcome, "committed", JSON.stringify(applied.json));
+      return applied;
     },
     close: () => client.close(),
   };
@@ -203,12 +208,13 @@ try {
   assert.match(readFileSync(path.join(twinsRoot, nfd, "N.md"), "utf8"), /after/u);
   await twins.close();
 
-  // enforce: a read-only tag audit is never gated.
+  // enforce: an ordinary note read works before the instructions are read.
   const tagsRoot = vault({ "AGENTS.md": RULES, "Projects/AGENTS.md": LOCAL, "Projects/Note.md": "#alpha\n" });
   const tags = await start(tagsRoot, "enforce");
-  const audit = await tags.call("obsidian_manage_tags", { operation: "audit" });
-  assert.equal(audit.result.isError, false, JSON.stringify(audit.json));
-  assert.equal(audit.json.vaultInstructions, undefined);
+  const read = await tags.read("Projects/Note.md");
+  assert.equal(read.isError, false, JSON.stringify(read));
+  assert.match(read.content[0].text, /#alpha/u);
+  assert.doesNotMatch(read.content[0].text, /vault_instructions_unread/u);
   await tags.close();
 
   console.log("vault instructions end-to-end test passed");

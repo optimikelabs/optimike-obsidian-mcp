@@ -83,7 +83,7 @@ Modern profiles hide a direct tool only when the corresponding governed family i
 
 - `live` / live-capable `hybrid`: expose `obsidian_frontmatter_patch_{plan,apply,status,recover}` and hide `obsidian_manage_frontmatter`;
 - `live` / live-capable `hybrid`: expose `obsidian_text_patch_{plan,apply,status,recover}` and hide direct `obsidian_update_note` / `obsidian_search_replace` only after the quartet is complete;
-- `headless-guarded` / `headless-filesystem`: the governed Frontmatter family is absent, so `obsidian_manage_frontmatter` remains the bounded fallback;
+- `headless-guarded` / `headless-filesystem`: governed text and frontmatter families are registered. The direct note, text, frontmatter and tag editors are live-only, including in `full`. Headless batch frontmatter is removed. Direct Base row upsert is live-only.
 - `headless-filesystem` Canvas direct helpers remain available only where the governed live Canvas family is structurally absent;
 - `bases_upsert_config` is never a formula fallback and remains `full`-only.
 

@@ -30,6 +30,7 @@ This branch leaves `main` and the individual pull requests unaffected.
 | [#242](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/242) | `c6ac776c0f0fe8527bfede421312c8f7de7317c6` | Vault-bound Sync evidence and optional write guard, plus the incremental semantic indexing service with leases, bounded retention, and status |
 | [#243](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/243) | `45bb0fec8b600941072f835953ac114fdaaf70e1` | Governed move, backlink rewrites, trash and recovery in `headless-filesystem` with full write mode. Link index revision `v11:` |
 | [#244](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/244) | `dc6e7a12519942e5719827c9c3ec4784eb9086c2` | Reads and validates Operon tasks from Markdown and synchronized settings in all three headless modes, with filesystem provenance and local saved filters |
+| [#245](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/245) | `8bef7f1ed9f05cd0af3ddcf9c9ec75470721a42b` | Governed filesystem Markdown patches, creation, replacement and revert with a per-vault journal and native exchange on supported Linux/macOS filesystems |
 | [#246](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/246) | `5b3edb76c2003e1370a448190f61aa4ac866cef9` | Ranked BM25 search over cached Markdown and hybrid search with lexical, note, and section signals |
 | [#247](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/247) | `9cdf0af6e82f56373c88e66f7d7c8c682f90c43e` | Retries Operon `GET /status` once after a socket reset, with fixture connection cleanup |
 
@@ -44,8 +45,12 @@ rebuild of generations made with the older block selection. See the [producer](d
 contracts. Proposal planning needs the live Atomic Write authority. Apply
 retains the sealed plan and its compare-and-swap check.
 
-The optional Sync guard runs before filesystem effects, inside the existing
-write locks. It preserves the hash rechecks and create-if-absent behavior.
+The optional Sync guard still runs before effects on the legacy paths that
+use the shared vault file service. The new governed Markdown authority does
+not consume the Sync heartbeat. Keep the experimental write vault isolated
+from bidirectional Sync. Each write family retains its own concurrency
+checks. The governed Markdown authority and the move/trash lifecycle use
+separate journals and do not share a cross-family lock.
 Exact disk reads retain their independent observation time. Semantic service
 status comes from the current generation and its expiring observation.
 
@@ -66,6 +71,24 @@ suite runs both headless Operon and note-operation tests. Static profiles
 keep read-only Operon in all headless modes and use the extended governed
 move and trash lifecycles only in `headless-filesystem`. The old index
 revision remains only in a test fixture that verifies migration.
+
+The #245 merge preserves #243's cache-backed move and trash lifecycle and
+#244's Operon reads. It adds the guarded Markdown families to both writable
+headless modes, with replace and revert in `headless-filesystem`. The merged
+tool catalogue and cycle checks verify those combined profiles. The tests
+retain the Sync guard check on the compatible filesystem move route after
+the old headless note-edit routes were retired.
+
+The merged replacement runtime retains #223's exact base-hash precondition
+and #220's proposal sealing and retention. It also retains #245's disk
+witnesses, divergence cleanup, date policy and per-vault filesystem journal.
+The bilingual operations and capability guides describe both write
+lifecycles. `OPTIMIKE_VAULT_TIMEZONE` qualifies Frontmatter Date Manager
+against the process timezone. `OPERON_TIMEZONE` separately interprets
+Operon's local dates. Set each to match the vault when using both features.
+Windows refuses existing-note replacement by default. The explicit
+`MCP_HEADLESS_ALLOW_TRANSIENT_ABSENCE=true` fallback can temporarily hide
+the note path and is for a copy without bidirectional Sync.
 
 The #244 merge keeps the exact tool sets from the shared catalogue in the
 HTTP, stdio proxy, and static profile tests. The `tasks` catalogue includes

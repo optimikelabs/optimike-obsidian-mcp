@@ -72,6 +72,11 @@ for (const entry of governed) {
   roles.push(entry.lifecycleRole);
   governedFamilies.set(entry.family, roles);
 }
+assert.deepEqual([...governedFamilies.keys()].sort(), [
+  "asset-import", "base-config-patch", "base-create", "base-formula-patch", "base-rows",
+  "canvas-create", "canvas-patch", "frontmatter-patch", "note-create", "note-delete",
+  "note-move", "note-replace", "operation-revert", "text-patch",
+]);
 for (const [family, roles] of governedFamilies) {
   assert.deepEqual([...roles].sort(), ["note-create", "base-create", "canvas-create", "base-rows", "asset-import"].includes(family) ? ["apply", "plan", "status"] : ["apply", "plan", "recover", "status"]);
 }

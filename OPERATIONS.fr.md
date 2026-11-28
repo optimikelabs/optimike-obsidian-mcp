@@ -154,10 +154,12 @@ Cette politique protège le cache Optimike, la recherche, Tasks et le fallback l
 - `live` : mode complet par défaut. Requiert Obsidian Desktop + Local REST API + `OBSIDIAN_API_KEY`.
 - `hybrid` : Local REST API optionnelle et non bloquante. Si l’API est configurée, les tools live sont exposées ; sinon `OBSIDIAN_VAULT` est requis et la surface cache/filesystem reste disponible.
 - `headless-readonly` : requiert `OBSIDIAN_VAULT`; ne requiert ni Obsidian Desktop, ni Local REST API, ni `OBSIDIAN_API_KEY`; expose lecture, liste, recherche, Tasks, sémantique, runtime et fallback local Bases en lecture seule. Avec le cache partagé actif, il inclut `obsidian_get_frontmatter` et `obsidian_note_links`. L’index des liens réside dans le cache SQLite partagé et se met à jour avec le scan Markdown.
-- `headless-guarded` : même surface de lecture headless, plus écritures filesystem bornées pour `obsidian_update_note`, `obsidian_search_replace` et `obsidian_manage_frontmatter`. Les updates de note sont limitées à append/prepend ; overwrite reste bloqué par la politique guarded. Le fallback local Bases en lecture seule est aussi disponible.
-- `headless-filesystem` : même surface que `headless-guarded`, avec des fonctions filesystem explicites pour sandbox ou vault dédié : tags frontmatter/inline, index/audit local des tags, rename en dry-run, opérations admin move/archive/delete avec `expectedHash` ou `expectedMtime`, batch frontmatter avec dry-run, création/config YAML `.base`, rows Bases comme opérations `set` de frontmatter Markdown, et helpers JSON Canvas minimaux.
+- `headless-guarded` ajoute les patches gouvernés du texte et du frontmatter, la création durable et le cockpit à la surface de lecture headless. L’édition d’une note existante exige par défaut l’échange atomique natif. La gestion gouvernée des dates exige `OPTIMIKE_VAULT_TIMEZONE`. Voir le [profil serveur headless](docs/headless-server-profile.fr.md).
+- `headless-filesystem` ajoute le remplacement complet gouverné, le retour arrière, le déplacement, l’archivage et la suppression avec `expectedHash` ou `expectedMtime`, ainsi que les écritures Bases et Canvas minimales. Avec le cache partagé en mode full, il expose aussi le cycle gouverné de déplacement et de corbeille.
 
-Le service d’écriture commun à `headless-guarded` et `headless-filesystem`
+Le [profil serveur headless](docs/headless-server-profile.fr.md#écritures-markdown-gouvernées)
+décrit le journal gouverné, la politique des dates et les verrous entre processus.
+Le service d’écriture directe commun à `headless-guarded` et `headless-filesystem`
 exécute successivement les mutations du même fichier résolu dans un même
 processus serveur. Une mise à jour qui modifie le contenu invalide le précédent
 `expectedHash`. Lors d’ajouts concurrents en fin de fichier, le service conserve

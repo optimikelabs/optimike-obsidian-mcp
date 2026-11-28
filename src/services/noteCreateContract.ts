@@ -53,10 +53,10 @@ export function validateCreatePolicy(value: NoteCreatePolicy): NoteCreatePolicy 
 export function createPolicyDigest(policy: NoteCreatePolicy): string {
   return noteCreateHash(JSON.stringify(validateCreatePolicy(policy)));
 }
-export function validateNoteCreate(path: string, content: string, policy: NoteCreatePolicy): void {
+export function validateNoteCreate(path: string, content: string, policy: NoteCreatePolicy, allowBom = false): void {
   assertNoteName(path);
   if (typeof content !== "string" || Buffer.byteLength(content, "utf8") > NOTE_CREATE_MAX_BYTES ||
-      Buffer.from(content, "utf8").toString("utf8") !== content || content.startsWith("\uFEFF") || /\r(?!\n)/u.test(content)) {
+      Buffer.from(content, "utf8").toString("utf8") !== content || (!allowBom && content.startsWith("\uFEFF")) || /\r(?!\n)/u.test(content)) {
     throw new Error("invalid_create_content");
   }
   validateCreatePolicy(policy);
