@@ -199,8 +199,13 @@ The final server can expose different capabilities depending on which Obsidian p
   - scan filters support direct equality, arrays, `eq`, `ne`, `contains`,
     `in`, `gt`, `gte`, `lt`, and `lte`. Both filters and sorts accept
     unprefixed frontmatter keys and `file.path`, `file.name`, `file.ctime`,
-    `file.mtime`, and `file.size`. Unsupported operators, other `file.*` keys
-    and `note.*` keys return `VALIDATION_ERROR` even with `property_only: true`
+    `file.mtime`, and `file.size`. Combine conditions with
+    `{"and":[...]}`, `{"or":[...]}`, or `{"not":...}`. Each group has a
+    single logical key. Leaves can be local property maps, comparisons such
+    as `type == "project"`, or bare truthy properties such as `active`.
+    Unknown leaf forms, empty operator objects, and arrays of operator
+    objects return `VALIDATION_ERROR`. Formula references in filters
+    and sorts are rejected even with `property_only: true`
 
 - Smart Connections
   - required for semantic search

@@ -715,7 +715,7 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
     code === BaseErrorCode.VALIDATION_ERROR &&
     reasonCode === "base_query_unsupported_local_input"
   )
-    return "Unsupported local Base query filter or sort. Use unprefixed frontmatter keys or file.path, file.name, file.ctime, file.mtime, file.size. Filters accept direct equality, arrays, and the operators eq, ne, in, contains, gt, gte, lt, lte. Use Obsidian and the Bases Bridge for other query semantics.";
+    return "Unsupported local Base query filter or sort. Use unprefixed frontmatter keys or file.path, file.name, file.ctime, file.mtime, file.size. Property filters accept direct equality, scalar arrays, and non-empty operator objects with eq, ne, in, contains, gt, gte, lt, lte. Use and, or, not to combine property filters and simple comparison or truthy expressions. Filter and sort references to formula values require Obsidian and the Bases Bridge.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_tool_arguments")
     return "Invalid tool arguments. See validationIssues for the field and reason.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === BASE_FORMULA_ENGINE_REFUSAL)
