@@ -7,8 +7,7 @@ import { NOTE_DELETE_PREFIX } from "../noteDeleteContract.js";
 import { assertNewNotePath } from "../noteNameMcp.js";
 import { assertWriteAllowed } from "../writePolicy.js";
 import type { VaultCacheService } from "../obsidianRestAPI/vaultCache/service.js";
-import { LARGE_LINK_SOURCE_BYTES } from "../obsidianRestAPI/vaultCache/boundedLinkReferences.js";
-import { extractMarkdownLinkReferences } from "../obsidianRestAPI/vaultCache/markdownLinkReferences.js";
+import type { MarkdownLinkReference } from "../obsidianRestAPI/vaultCache/markdownLinkReferences.js";
 import { MarkdownLinkResolver } from "../obsidianRestAPI/vaultCache/markdownLinkResolver.js";
 import { HeadlessOperationJournal, type HeadlessRow } from "./headlessOperationJournal.js";
 import {
@@ -29,7 +28,7 @@ const WRITE_OPERATIONS = {
 } as const;
 type Intent = { kind: "move"; source: string; destination: string } |
   { kind: "delete"; source: string; acknowledged: boolean };
-type Rewrite = NonNullable<ReturnType<typeof rewriteIncoming>> & { path: string; beforeHash: string };
+type Rewrite = NonNullable<ReturnType<typeof rewriteIncoming>["rewrite"]> & { path: string; beforeHash: string };
 type Snapshot = {
   intent: Intent; destination: string; beforeHash: string; identity: string; size: number;
   settings: ReturnType<typeof readVaultAppSettings>; rewrites: Rewrite[];
@@ -37,9 +36,14 @@ type Snapshot = {
   backlinks: Array<{ sourcePath: string; count: number }>;
 };
 
-function graphProof(content: string, note: string, resolver: MarkdownLinkResolver): string {
-  return nativeDigest(extractMarkdownLinkReferences(content).map(ref =>
+function graphProof(references: readonly MarkdownLinkReference[], note: string, resolver: MarkdownLinkResolver): string {
+  return nativeDigest(references.map(ref =>
     [resolver.resolve(note, ref.linkPath)?.path ?? null, ref.subpath, ref.kind]));
+}
+
+function planConflictReason(error: McpError) {
+  return error.details?.reasonCode === "headless_link_coverage_incomplete"
+    ? "headless_link_coverage_incomplete" : "headless_plan_stale";
 }
 
 function inverseEdits(rewrite: Rewrite) {
@@ -68,6 +72,15 @@ export class HeadlessNoteOperations {
   private authorize(kind: Intent["kind"], phase: "plan" | "apply", source: string) {
     assertWriteAllowed({ operation: WRITE_OPERATIONS[kind][phase], action: phase,
       target: source, targetType: "filePath", destructive: true });
+  }
+
+  private requireCompleteLinks(content: string, bytes: number, editable = false) {
+    const source = this.cache.extractFilesystemLinkSource(content, bytes, editable);
+    if (!source.complete) {
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The operation requires complete link extraction.",
+        { reasonCode: "headless_link_coverage_incomplete" });
+    }
+    return source.references;
   }
 
   private async capture(intent: Intent, files: HeadlessVaultFiles): Promise<Snapshot> {
@@ -109,19 +122,16 @@ export class HeadlessNoteOperations {
       const note = indexedPath.slice(1);
       const state = note === intent.source ? original : files.state(note, { readBytes: true });
       if (!state?.bytes) filesystemConflict("An indexed backlink source disappeared.");
-      if (state.size > LARGE_LINK_SOURCE_BYTES) {
-        throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The operation requires complete backlink coverage.",
-          { reasonCode: "headless_link_coverage_incomplete" });
-      }
       const content = state.bytes.toString("utf8");
+      const links = this.requireCompleteLinks(content, state.size, intent.kind === "move");
       if (intent.kind === "delete") {
-        const count = extractMarkdownLinkReferences(content).filter(ref => before.resolve(indexedPath, ref.linkPath)?.path === source).length;
+        const count = links.filter(ref => before.resolve(indexedPath, ref.linkPath)?.path === source).length;
         if (count) snapshot.backlinks.push({ sourcePath: note, count });
       } else {
-        const rewrite = rewriteIncoming(content, indexedPath, source, "/" + destination, before, after, settings);
-        const next = rewrite ? applyLinkEdits(content, rewrite.edits) : content;
+        const { rewrite, references } = rewriteIncoming(content, indexedPath, source, "/" + destination, before, after,
+          settings, links, next => this.requireCompleteLinks(next, Buffer.byteLength(next)));
         const resultPath = indexedPath === source ? "/" + destination : indexedPath;
-        snapshot.graphProofs!.push({ path: resultPath.slice(1), digest: graphProof(next, resultPath, after) });
+        snapshot.graphProofs!.push({ path: resultPath.slice(1), digest: graphProof(references, resultPath, after) });
         if (!rewrite) continue;
         if (!Buffer.from(content).equals(state.bytes)) {
           throw new McpError(BaseErrorCode.VALIDATION_ERROR, "A backlink source is not valid UTF-8.");
@@ -221,9 +231,11 @@ export class HeadlessNoteOperations {
       return tx.revision();
     });
     let fresh: Snapshot | undefined;
+    let conflictReason = "headless_plan_stale";
     try { fresh = await this.capture(row.payload.intent, files); }
     catch (error) {
       if (!(error instanceof McpError && [BaseErrorCode.NOT_FOUND, BaseErrorCode.CONFLICT, BaseErrorCode.VALIDATION_ERROR].includes(error.code))) throw error;
+      conflictReason = planConflictReason(error);
     }
     if (this.bound().fingerprint !== fingerprint) filesystemConflict("The configured vault changed.");
     const eligible = fresh && nativeDigest(fresh) === nativeDigest(row.payload) && this.allBefore(files, row.payload);
@@ -232,7 +244,7 @@ export class HeadlessNoteOperations {
       if (current.phase !== "planned") return { row: current, run: false };
       if (tx.revision() !== revision) filesystemConflict("The vault graph changed during validation. Recheck the same plan.");
       if (!eligible) {
-        return { row: tx.settle(current, "conflict", "headless_plan_stale"), run: false };
+        return { row: tx.settle(current, "conflict", conflictReason), run: false };
       }
       return { row: tx.claim(current, this.paths(current.payload)), run: true };
     });
@@ -326,7 +338,7 @@ export class HeadlessNoteOperations {
           if (nativeDigest(fresh) !== nativeDigest(plan)) return this.receipt(settle("conflict", "headless_plan_stale"));
         } catch (error) {
           if (!(error instanceof McpError) || error.code === BaseErrorCode.SERVICE_UNAVAILABLE) throw error;
-          return this.receipt(settle("conflict", "headless_plan_stale"));
+          return this.receipt(settle("conflict", planConflictReason(error)));
         }
       }
       try {
@@ -392,8 +404,8 @@ export class HeadlessNoteOperations {
         for (const proof of plan.graphProofs) {
           await yieldToEventLoop();
           const state = files.state(proof.path, { readBytes: true });
-          if (!state?.bytes || state.size > LARGE_LINK_SOURCE_BYTES ||
-              graphProof(state.bytes.toString("utf8"), "/" + proof.path, resolver) !== proof.digest) {
+          const projection = state?.bytes && this.cache.extractFilesystemLinkSource(state.bytes.toString("utf8"), state.size);
+          if (!projection || !projection.complete || graphProof(projection.references, "/" + proof.path, resolver) !== proof.digest) {
             graphMatches = false;
             break;
           }

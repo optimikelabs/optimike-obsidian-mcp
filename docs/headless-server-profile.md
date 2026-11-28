@@ -14,7 +14,10 @@ This profile is for a dedicated server or copied Sync vault. It keeps the stable
 - With the shared cache enabled, `obsidian_get_frontmatter` reads one YAML key and `obsidian_note_links` reads outgoing references, unresolved counts, and backlinks. The index covers wikilinks, local Markdown links and embeds, and quoted YAML wikilinks. It skips links inside code, comments, inline or block math, and HTML elements. Desktop metadata behavior inside inline HTML is unverified.
 - In headless wikilinks, an unescaped `[[` starts a new link if the current alias is unfinished. Single square brackets may appear in aliases. In the body of a note, comments are stripped from targets and aliases. Source spans still refer to the original note.
 - The link index builds on a separate worker after the text cache is ready. Note reads, listings, search, and frontmatter are available while it builds. During that time `obsidian_note_links` returns `SERVICE_UNAVAILABLE` with `reasonCode: headless_link_index_building` and `retryable: true`.
-- Notes over 256 KiB use bounded Markdown sections. Syntax that spans sections can be interpreted differently or omitted. Sections and references beyond the extraction budget are skipped. When the index contains these notes, responses include `indexCoverage` with the number of limited sources and `backlinksComplete: false`. For a limited source, `sourceComplete: false` applies to the outgoing and unresolved results.
+- Large notes are parsed in bounded sections at paragraph boundaries when possible. A section can grow up to four times the target size. An oversized line uses a wikilink-only fallback. An unsafe boundary, a cap on retained references, or a worker heap failure marks that source as limited. The worker continues indexing the rest of the vault.
+- When a limited source affects a response, `indexCoverage.sourceComplete` describes its outgoing and unresolved links. `backlinksComplete` is false when a limited source is known or could link to the requested note. `limitedSourceCount` counts the sources relevant to the response.
+
+Tune the filesystem link index with `OBSIDIAN_LINK_LARGE_NOTE_BYTES` (default 262144), `OBSIDIAN_LINK_SECTION_BYTES` (65536), `OBSIDIAN_LINK_MAX_REFERENCES` (8192 per bounded source), and `OBSIDIAN_LINK_BATCH_BYTES` (262144 of source data per batch). Changes to extraction limits cause the link index to rebuild after the text cache is ready.
 - When a process sharing the text cache is reconciling it, the link tool returns a retryable reason for the cache itself. `headless_link_cache_refreshing` means a full or periodic refresh is running. `headless_link_cache_events_pending` means file events are still being processed. `headless_link_cache_uncertain` means the cache needs a successful refresh.
 - When several Markdown paths match, the filesystem resolver prefers the source folder, then the shortest path, then alphabetical order. It sets `resolution.ambiguous: true` when it chooses among several candidates. The tie-break remains unverified against Desktop. Explicit relative and vault-root paths select that location. The scanner resolves attachment names and user-excluded paths without caching their contents. Technical exclusions such as `node_modules`, `dist`, `build`, `tmp`, and `coverage` stay outside the inventory. Dot-prefixed paths require an explicit gitignore-style reinclusion.
 - The counts group references by destination path, including links with different fragments. Heading and block fragments have validation `unknown`. Headless pairs inline HTML tags within a single Markdown block. It follows the [Pandoc dollar delimiter rule](https://pandoc.org/MANUAL.html#extension-tex_math_dollars) for inline math and preserves dollar signs inside link destinations, autolinks, and wikilinks. The exact Desktop metadata rules for inline HTML and dollar delimiters remain unverified.
@@ -113,9 +116,10 @@ is capped. More than 100 notes requiring rewrites or 100 backlink sources for
 a deletion return `headless_backlink_limit`. The separate safety scan can
 inspect up to 1,000 candidate notes, including links to the destination name.
 Above that, it returns `headless_backlink_inspection_limit`.
-If any large note received bounded extraction, plans that need complete
-backlinks return `headless_link_coverage_incomplete`. Moves with
-`alwaysUpdateLinks: false` can still proceed.
+Plans use the same sections as the filesystem link index. If an incomplete
+source could affect the paths in the plan, the plan returns
+`headless_link_coverage_incomplete`. Moves with `alwaysUpdateLinks: false`
+can still proceed.
 The plan probes exclusive hard-link publication
 before admission. Apply with the original key. A stale plan returns
 `headless_plan_stale`.

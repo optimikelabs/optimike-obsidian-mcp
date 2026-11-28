@@ -316,7 +316,7 @@ function collectMarkdownLinks(body: string, editable: boolean, bodyOffset: numbe
 
 export function extractMarkdownLinkReferences(
   content: string,
-  { forceMarkdownTree = false, readFrontmatter = true, editable = false } = {},
+  { forceMarkdownTree = false, readFrontmatter = true, wikiOnly = false, maxReferences = Infinity, editable = false } = {},
 ): MarkdownLinkReference[] {
   const { body: rawBody, frontmatter } = readFrontmatter
     ? readMarkdownFrontmatter(content)
@@ -379,7 +379,7 @@ export function extractMarkdownLinkReferences(
   }
 
   if (!body.includes("[")) return references;
-  const { source, comments, blocked, located } = forceMarkdownTree || needsMarkdownTree.test(body)
+  const { source, comments, blocked, located } = !wikiOnly && (forceMarkdownTree || needsMarkdownTree.test(body))
     ? collectMarkdownLinks(body, editable, bodyOffset)
     : { ...(body.includes("%%") ? maskComments(body, []) : { source: body, comments: [] }), blocked: [], located: [] };
 
@@ -387,8 +387,11 @@ export function extractMarkdownLinkReferences(
   const slice = uncommentedSlice(body, comments);
   for (const { start, end, embed, target, alias } of wikiLinks(source, isBlocked)) {
     const reference = makeReference(embed ? "embed" : "link", slice(target), body.slice(start, end), alias && slice(alias));
-    if (reference && editable) reference.edit = { start: start + bodyOffset, end: end + bodyOffset, syntax: "wiki" };
-    if (reference) located.push({ start, end, reference });
+    if (reference) {
+      if (editable) reference.edit = { start: start + bodyOffset, end: end + bodyOffset, syntax: "wiki" };
+      located.push({ start, end, reference });
+      if (wikiOnly && located.length >= maxReferences) break;
+    }
   }
 
   const lineBreaks = content.matchAll(/\r\n?|\n/gu);

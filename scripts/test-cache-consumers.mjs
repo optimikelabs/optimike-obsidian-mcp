@@ -17,10 +17,35 @@ const {processObsidianNoteLinks}=await import('../dist/mcp-server/tools/obsidian
 const {publicMcpToolErrorPayload}=await import('../dist/utils/internal/errorHandler.js');
 const {createHttpObservability}=await import('../dist/mcp-server/transports/httpObservability.js');
 const {extractMarkdownLinkReferences}=await import('../dist/services/obsidianRestAPI/vaultCache/markdownLinkReferences.js');
+const {defaultLinkExtraction,extractBoundedLinkSource}=await import('../dist/services/obsidianRestAPI/vaultCache/boundedLinkReferences.js');
 const context={requestId:'cache-consumer-fixture',timestamp:new Date().toISOString(),operation:'test'};
 config.obsidianVaultPath=root;config.obsidianCacheSource='rest';
 
 const linkTexts=(markdown)=>extractMarkdownLinkReferences(markdown).map(({linkText})=>linkText);
+test('bounded sections preserve list continuations and wikilinks on oversized lines',()=>{
+ const list='- list\r\n'+'    [[Continuation]] and text\r\n'.repeat(3000);
+ const longLine='x'.repeat(70*1024)+' [[LongLine]]\n';
+ const source='Start\n\n'+list+'\r\nBreak\n\n'+longLine+'\n[[After]]';
+ const bounded=extractBoundedLinkSource(source);
+ assert.deepEqual(bounded, {complete:true,references:extractMarkdownLinkReferences(source)});
+ const overLimit='x'.repeat(300*1024)+' [[OverLimit]]\n\n[[After]]';
+ assert.deepEqual(extractBoundedLinkSource(overLimit),
+  {complete:false,references:extractMarkdownLinkReferences(overLimit)});
+});
+test('inline literals and an unmatched dollar pair do not hide later sections',()=>{
+ const tail='\n\nParagraph [[Visible]].'.repeat(250);
+ for (const prefix of ['Use `%%` to comment.','Use `code\n%%\ncode` here.',
+  'Cost $$ in prose.', 'Use `$$` then $[[Hidden]]$.', '$$\n[[Hidden]]\n$$']){
+  const markdown=prefix+tail;
+  const options={...defaultLinkExtraction,sectionBytes:1024};
+  assert.deepEqual(extractBoundedLinkSource(markdown,options),
+   {complete:true,references:extractMarkdownLinkReferences(markdown)});
+ }
+ const opaque='%%\n\n'+('line\n\n'.repeat(1024))+'[[Visible]]';
+ const result=extractBoundedLinkSource(opaque,{...defaultLinkExtraction,sectionBytes:1024});
+ assert.equal(result.complete,false);
+ assert.deepEqual(result.references.map(ref=>ref.linkPath),['Visible']);
+});
 test('comment delimiters in code leave adjacent links visible',()=>{
  assert.deepEqual(linkTexts('Use `%%` to open [[A]]\n\nClose it with `%%`. Also [[B]].\n\n```\na %% b\n```\n[[Visible]]\n%% [[Hidden]] %% [[After]]'),['A','B','Visible','After']);
 });
@@ -262,11 +287,12 @@ test('filesystem links preserve observations and reconcile edits, destination am
  }
 });
 
-async function linkFixture(run) {
+async function linkFixture(run, extraction=defaultLinkExtraction) {
  const vault=fs.mkdtempSync(path.join(root,'link-worker-'));
  const previous={obsidianVaultPath:config.obsidianVaultPath,obsidianCacheSource:config.obsidianCacheSource,
-  obsidianSharedCacheDbPath:config.obsidianSharedCacheDbPath};
- Object.assign(config,{obsidianVaultPath:vault,obsidianCacheSource:'filesystem',obsidianSharedCacheDbPath:path.join(vault,'cache.sqlite')});
+  obsidianSharedCacheDbPath:config.obsidianSharedCacheDbPath,obsidianLinkExtraction:config.obsidianLinkExtraction};
+ Object.assign(config,{obsidianVaultPath:vault,obsidianCacheSource:'filesystem',
+  obsidianSharedCacheDbPath:path.join(vault,'cache.sqlite'),obsidianLinkExtraction:extraction});
  const write=(name,content)=>fs.writeFileSync(path.join(vault,name),content,'utf8');
  write('A.md','[[Target]]');
  write('Target.md','# Target');
@@ -354,24 +380,27 @@ test('restart resumes a committed partial link index without exposing it',()=>li
  assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Z.md',count:1}]);
 }));
 
-test('restart rebuilds a stale v8 link projection from unchanged note content',()=>linkFixture(async f=>{
+test('restart rebuilds a stale v10 link projection from unchanged note content',()=>linkFixture(async f=>{
  await f.cache.buildVaultCache();
  await f.cache.linkIndexRun;
- f.cache.db.exec(`
+ const {largeNoteBytes,sectionBytes,maxReferences}=config.obsidianLinkExtraction;
+ f.cache.db.prepare(`
   UPDATE markdown_link_files
-  SET hash = 'v8:' || (SELECT hash FROM file_cache WHERE path = '/A.md')
+  SET hash = ? || (SELECT hash FROM file_cache WHERE path = '/A.md')
   WHERE path = '/A.md';
-  DELETE FROM markdown_link_refs WHERE source = '/A.md';
- `);
+ `).run(`v10:${largeNoteBytes}:${sectionBytes}:${maxReferences}:`);
+ f.cache.db.exec("DELETE FROM markdown_link_refs WHERE source = '/A.md'");
  await f.reopen();
  await assert.rejects(f.read(),isIndexPending);
  await f.cache.linkIndexRun;
  assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1}]);
 }));
 
-test('an indexing error rolls back the source and a later link request retries it',()=>linkFixture(async f=>{
+test('an indexing error rolls back the whole batch and a later link request retries it',()=>linkFixture(async f=>{
+ f.write('Z.md','[[Target]]');
  f.cache.db.exec(`
   CREATE TRIGGER fixture_reject_link BEFORE INSERT ON markdown_link_refs
+  WHEN NEW.source = '/Z.md'
   BEGIN SELECT RAISE(ABORT,'synthetic index failure'); END
  `);
  await f.cache.buildVaultCache();
@@ -381,8 +410,53 @@ test('an indexing error rolls back the source and a later link request retries i
  assert.equal(await f.cache.readFilesystemNoteContent('A.md',context),'[[Target]]');
  await assert.rejects(f.read(),isIndexPending);
  await f.cache.linkIndexRun;
- assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1}]);
+ assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Z.md',count:1}]);
 }));
+
+test('a note that exhausts its worker is marked limited and later notes still get backlinks',()=>linkFixture(async f=>{
+ f.write('Poison.md','[x](Target.md) '.repeat(40_000));
+ f.write('Z.md','[[Target]]');
+ f.write('Unrelated.md','No links');
+ await f.cache.buildVaultCache();
+ await f.cache.linkIndexRun;
+ const poison=await f.cache.readFilesystemNoteLinks('Poison.md',20,context);
+ assert.equal(poison.indexCoverage.sourceComplete,false);
+ assert.deepEqual(poison.outgoing,[]);
+ const target=await f.read();
+ assert.deepEqual(target.backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Z.md',count:1}]);
+ assert.deepEqual(target.indexCoverage,{reason:'bounded_large_note_extraction',
+  sourceComplete:true,backlinksComplete:false,limitedSourceCount:1});
+ assert.equal((await f.cache.readFilesystemNoteLinks('Unrelated.md',20,context)).indexCoverage,undefined);
+},{...defaultLinkExtraction,largeNoteBytes:1024*1024}));
+
+test('incremental rebuilds reuse the worker while publishing new backlinks',()=>linkFixture(async f=>{
+ await f.cache.buildVaultCache();
+ await f.cache.linkIndexRun;
+ const thread=f.cache.linkIndexWorker.worker.threadId;
+ f.write('A.md','[[Other]]');
+ await f.cache.updateFileVerified('A.md',context);
+ await f.cache.linkIndexRun;
+ assert.deepEqual((await f.read()).backlinks,[]);
+ assert.equal(f.cache.linkIndexWorker.worker.threadId,thread);
+}));
+
+test('configured budgets retain a limited source and scope its backlinks across a restart',()=>linkFixture(async f=>{
+ f.write('A.md',('paragraph '.repeat(50)+'\n\n').repeat(10)+'[[Other]] [[Other]] [[Target]]');
+ f.write('Other.md','Other');
+ f.write('Unrelated.md','Unrelated');
+ await f.cache.buildVaultCache();
+ await f.cache.linkIndexRun;
+ await f.reopen();
+ const source=await f.cache.readFilesystemNoteLinks('A.md',20,context);
+ assert.deepEqual(source.outgoing.map(ref=>ref.linkPath),['Other']);
+ assert.deepEqual(source.indexCoverage,{reason:'bounded_large_note_extraction',
+  sourceComplete:false,backlinksComplete:true,limitedSourceCount:1});
+ const target=await f.read();
+ assert.deepEqual(target.backlinks,[]);
+ assert.deepEqual(target.indexCoverage,{reason:'bounded_large_note_extraction',
+  sourceComplete:true,backlinksComplete:false,limitedSourceCount:1});
+ assert.equal((await f.cache.readFilesystemNoteLinks('Unrelated.md',20,context)).indexCoverage,undefined);
+},{largeNoteBytes:4096,sectionBytes:1024,maxReferences:1,batchBytes:4096}));
 
 test('healthz responds while the worker handles a five MiB note',()=>linkFixture(async f=>{
  const oversizedCode='hidden [[Target]]\n'.repeat(307_000);
@@ -414,9 +488,7 @@ test('healthz responds while the worker handles a five MiB note',()=>linkFixture
   assert.equal(checkedHealth,true);
   const result=await f.read();
   assert.deepEqual(result.backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Large.md',count:1}]);
-  assert.deepEqual(result.indexCoverage,{
-   reason:'bounded_large_note_extraction',sourceComplete:true,backlinksComplete:false,limitedSourceCount:1,
-  });
+  assert.equal(result.indexCoverage,undefined);
  } finally {
   await new Promise(resolve=>server.close(resolve));
  }

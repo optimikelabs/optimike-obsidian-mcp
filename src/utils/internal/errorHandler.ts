@@ -732,7 +732,7 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
   if (reasonCode === "headless_parent_missing")
     return "The destination parent folder must already exist.";
   if (reasonCode === "headless_link_coverage_incomplete")
-    return "The filesystem link index uses bounded extraction for at least one large note. This operation requires complete backlink coverage.";
+    return "Link extraction is incomplete for a source that could affect this operation. Complete link coverage is required.";
   if (reasonCode === "headless_plan_ref_invalid")
     return "Use the planRef returned by the matching plan tool.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === BASE_FORMULA_ENGINE_REFUSAL)

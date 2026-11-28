@@ -269,7 +269,7 @@ export type FilesystemNoteLinksResponse = NoteLinksProjection & {
   indexCoverage?: {
     reason: "bounded_large_note_extraction";
     sourceComplete: boolean;
-    backlinksComplete: false;
+    backlinksComplete: boolean;
     limitedSourceCount: number;
   };
   cache: {

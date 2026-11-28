@@ -437,25 +437,55 @@ try {
     assert.equal((await lifecycle("move", "apply", manyUnchanged, "many-unchanged")).graph_postflight, "verified");
     assert.equal((await linkQuery("Reader/Readme 0.md")).outgoing[0].resolution.targetPath, "A/Readme.md");
 
-    await put("Bounded target.md", "target with a backlink outside bounded extraction");
+    await put("Section target.md", "target referenced in two index sections");
+    const sectionPadding = ("A complete paragraph " + "x".repeat(1024) + "\r\n\r\n").repeat(268);
+    const sectionSource = '\uFEFF---\r\nrelated: "[[Section target]]"\r\n---\r\n\r\n' +
+      sectionPadding + "[link](../Section%20target.md#Heading) [[Section target\\|label]]\r\n";
+    await put("Reader/Complete large.md", sectionSource);
+    const sectionMove = await movePlan("Section target.md", "New/Section moved.md", "complete-large-source");
+    const sectionLinks = await linkQuery("Reader/Complete large.md");
+    assert.equal(sectionLinks.indexCoverage, undefined);
+    assert.deepEqual(sectionLinks.outgoing.map(ref => ref.resolution.targetPath), Array(3).fill("Section target.md"));
+    assert.equal(sectionMove.preview.rewriteCount, 3);
+    assert.equal((await lifecycle("move", "apply", sectionMove, "complete-large-source")).graph_postflight, "verified");
+    assert.equal(await read("Reader/Complete large.md"), sectionSource
+      .replaceAll("[[Section target", "[[Section moved")
+      .replace("../Section%20target.md", "Section%20moved.md"));
+    const rewrittenSection = await linkQuery("Reader/Complete large.md");
+    assert.deepEqual(rewrittenSection.outgoing.map(ref => ref.resolution.targetPath), Array(3).fill("New/Section moved.md"));
+
+    await put("Bounded target.md", "target with links in a limited source");
+    await put("Hidden target.md", "target omitted by the wikilink-only fallback");
+    await put("Distinct target.md", "target with unrelated coverage");
+    await put("C/Unexpected.md", "existing destination basename");
+    await put("C/Distinct moved.md", "existing qualified target");
     const beforeLarge = await movePlan("Bounded target.md", "New/Bounded moved.md", "before-large-source");
-    const oversized = "x".repeat(300 * 1024) + " [[Bounded target]]";
+    const oversized = "x".repeat(300 * 1024) +
+      " [[Bounded target]] [plain](../Hidden%20target.md) [destination](Unexpected.md) [[C/Distinct moved]]";
     await put("Reader/Large backlink source.md", oversized);
-    assert.equal((await lifecycle("move", "apply", beforeLarge, "before-large-source")).reasonCode, "headless_plan_stale");
+    assert.equal((await lifecycle("move", "apply", beforeLarge, "before-large-source")).reasonCode, "headless_link_coverage_incomplete");
     const boundedLinks = await linkQuery("Bounded target.md");
     assert.equal(boundedLinks.indexCoverage.backlinksComplete, false);
-    assert.equal(boundedLinks.backlinks.length, 0);
+    assert.equal(boundedLinks.backlinks.length, 1);
+    const hiddenLinks = await linkQuery("Hidden target.md");
+    assert.equal(hiddenLinks.indexCoverage.backlinksComplete, false);
+    assert.equal(hiddenLinks.backlinks.length, 0);
     const boundedMove = await rawCall("obsidian_note_move_plan", {
       sourcePath: "Bounded target.md", destinationPath: "New/Bounded moved.md", idempotencyKey: "bounded-move",
     });
     const boundedDelete = await rawCall("obsidian_note_delete_plan", {
-      path: "Bounded target.md", acknowledgeBacklinks: true, idempotencyKey: "bounded-delete",
+      path: "Hidden target.md", acknowledgeBacklinks: true, idempotencyKey: "bounded-delete",
     });
-    for (const refusal of [boundedMove, boundedDelete]) {
+    const boundedDestination = await rawCall("obsidian_note_move_plan", {
+      sourcePath: "Distinct target.md", destinationPath: "A/Unexpected.md", idempotencyKey: "bounded-destination",
+    });
+    for (const refusal of [boundedMove, boundedDelete, boundedDestination]) {
       assert.equal(refusal.body.error.details.reasonCode, "headless_link_coverage_incomplete");
     }
+    const unrelated = await movePlan("Distinct target.md", "New/Distinct moved.md", "unrelated-limited-source");
+    assert.equal((await lifecycle("move", "apply", unrelated, "unrelated-limited-source")).outcome, "committed");
     await missing("New/Bounded moved.md");
-    await missing(".trash/Bounded target.md");
+    await missing(".trash/Hidden target.md");
     await settings({ alwaysUpdateLinks: false });
     const noRelink = await movePlan("Bounded target.md", "New/Bounded moved.md", "bounded-without-link-updates");
     assert.equal((await lifecycle("move", "apply", noRelink, "bounded-without-link-updates")).outcome, "committed");

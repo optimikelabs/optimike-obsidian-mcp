@@ -1,7 +1,5 @@
 import path from "node:path";
-import {
-  extractMarkdownLinkReferences, type MarkdownLinkReference,
-} from "../obsidianRestAPI/vaultCache/markdownLinkReferences.js";
+import type { MarkdownLinkReference } from "../obsidianRestAPI/vaultCache/markdownLinkReferences.js";
 import { MarkdownLinkResolver } from "../obsidianRestAPI/vaultCache/markdownLinkResolver.js";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { sha256, type readVaultAppSettings } from "./headlessVaultFiles.js";
@@ -88,9 +86,9 @@ export function applyLinkEdits(content: string, edits: readonly LinkEdit[]) {
 }
 
 export function rewriteIncoming(content: string, note: string, source: string, destination: string,
-  before: MarkdownLinkResolver, after: MarkdownLinkResolver, settings: Settings) {
+  before: MarkdownLinkResolver, after: MarkdownLinkResolver, settings: Settings,
+  original: MarkdownLinkReference[], extract: (content: string) => MarkdownLinkReference[]) {
   const nextNote = note === source ? destination : note;
-  const original = extractMarkdownLinkReferences(content, { editable: true });
   const edits = new Map<number, LinkEdit>();
   const expected = new Map<string, number>();
   for (const ref of original) {
@@ -118,9 +116,10 @@ export function rewriteIncoming(content: string, note: string, source: string, d
   for (let i = 1; i < ordered.length; i++) {
     if (ordered[i].end > ordered[i - 1].start) return unsupported();
   }
-  if (!ordered.length) return undefined;
+  if (!ordered.length) return { references: original };
   const next = applyLinkEdits(content, ordered);
-  for (const ref of extractMarkdownLinkReferences(next)) {
+  const references = extract(next);
+  for (const ref of references) {
     const target = after.resolve(nextNote, ref.linkPath)?.path;
     const identity = JSON.stringify([target, ref.subpath]);
     const remaining = expected.get(identity);
@@ -128,6 +127,8 @@ export function rewriteIncoming(content: string, note: string, source: string, d
   }
   if ([...expected.values()].some(count => count > 0)) return unsupported();
   const first = ordered.at(-1)!;
-  return { edits: ordered, beforeText: content, afterHash: sha256(next), count: ordered.length,
-    sample: { before: content.slice(first.start, first.end).slice(0, 240), after: first.after.slice(0, 240) } };
+  return { references, rewrite: {
+    edits: ordered, beforeText: content, afterHash: sha256(next), count: ordered.length,
+    sample: { before: content.slice(first.start, first.end).slice(0, 240), after: first.after.slice(0, 240) },
+  } };
 }

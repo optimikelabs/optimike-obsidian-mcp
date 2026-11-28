@@ -30,6 +30,7 @@ import { NoteJson, ObsidianRestApiService } from "../index.js";
 import type { FilesystemNoteLinksResponse } from "../types.js";
 import { CacheEventSupervisor } from "./eventSupervisor.js";
 import { MarkdownLinkIndex } from "./markdownLinkIndex.js";
+import { extractIndexedLinkSource } from "./boundedLinkReferences.js";
 import { foldedPath, readVaultAppSettings } from "../../operations/headlessVaultFiles.js";
 import { MarkdownLinkWorker } from "./markdownLinkWorker.js";
 import {
@@ -178,6 +179,9 @@ export class VaultCacheService {
   private hotCacheDataVersion?: number;
   private linkIndexRun?: Promise<void>;
   private linkIndexWorker?: MarkdownLinkWorker;
+  private linkIndexIdleTimer?: ReturnType<typeof setTimeout>;
+  private linkIndexIdleRun?: Promise<void>;
+  private readonly linkExtraction = config.obsidianLinkExtraction;
   private readonly vaultExclusionMatcher = createVaultExclusionMatcher(
     config.obsidianVaultExcludePatterns,
   );
@@ -219,7 +223,7 @@ export class VaultCacheService {
         updated_at = excluded.updated_at
     `);
     if (!obsidianService && config.obsidianRuntimeMode.startsWith("headless-")) {
-      this.markdownLinks = new MarkdownLinkIndex(this.db);
+      this.markdownLinks = new MarkdownLinkIndex(this.db, this.linkExtraction);
       this.filesystemIndexScope = createHash("sha256").update(JSON.stringify([
         "path-targets-v3", getVaultRoot(), config.obsidianVaultExcludePatterns,
       ])).digest("hex");
@@ -603,17 +607,21 @@ export class VaultCacheService {
       if (!this.verifyFilesystemIndex(false)) {
         throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "The filesystem link inventory is changing.");
       }
-      if (limit > 0 && this.markdownLinks.readIndexCoverage("/" + filePath)) {
+      const inventory = this.markdownLinks.moveInventory("/" + filePath, destination ? "/" + destination : undefined, limit);
+      if (!inventory.complete) {
         throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The operation requires complete backlink coverage.",
           { reasonCode: "headless_link_coverage_incomplete" });
       }
-      const inventory = this.markdownLinks.moveInventory("/" + filePath, destination ? "/" + destination : undefined, limit);
       this.db.exec("COMMIT");
       return inventory;
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  public extractFilesystemLinkSource(content: string, bytes: number, editable = false) {
+    return extractIndexedLinkSource(content, bytes, this.linkExtraction, editable);
   }
 
   public async readFilesystemResolutionTargets(): Promise<string[]> {
@@ -721,8 +729,12 @@ export class VaultCacheService {
     await yieldToEventLoop();
     if (this.closing || !this.isReady()) return;
     if (this.verifyFilesystemIndex()) return;
-    const worker = new MarkdownLinkWorker(config.obsidianSharedCacheDbPath);
-    this.linkIndexWorker = worker;
+    clearTimeout(this.linkIndexIdleTimer);
+    await this.linkIndexIdleRun;
+    if (this.closing) return;
+    const worker = this.linkIndexWorker ??= new MarkdownLinkWorker(
+      config.obsidianSharedCacheDbPath, this.linkExtraction, links,
+    );
     try {
       let afterPath = "";
       while (!this.closing) {
@@ -735,8 +747,12 @@ export class VaultCacheService {
         await yieldToEventLoop();
       }
     } finally {
-      await worker.close();
-      this.linkIndexWorker = undefined;
+      if (!this.closing) {
+        this.linkIndexIdleTimer = setTimeout(() => {
+          this.linkIndexWorker = undefined;
+          this.linkIndexIdleRun = worker.close().finally(() => { this.linkIndexIdleRun = undefined; });
+        }, 30_000).unref();
+      }
     }
   }
 
@@ -957,9 +973,11 @@ export class VaultCacheService {
     if (this.closed) return;
     this.stopPeriodicRefresh();
     this.closing = true;
+    clearTimeout(this.linkIndexIdleTimer);
     await this.eventStop;
     await this.refreshRun?.catch(() => undefined);
     await this.linkIndexWorker?.close();
+    await this.linkIndexIdleRun;
     await this.linkIndexRun;
     await this.cacheWriteTail;
     if (!this.closed) {
