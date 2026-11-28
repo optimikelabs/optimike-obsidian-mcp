@@ -25,6 +25,7 @@ This branch leaves `main` and the individual pull requests unaffected.
 | [#224](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/224) | `99b2afbc6ba6f9c2b54eb80fa12576fde13af82e` | The producer can bootstrap an external generation from compatible Smart Connections vectors and reproduce the 4.7.2 selection rules |
 | [#238](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/238) | `7a1065bba590fdd2d633bb7ec805c9de9b7d09ab` | Regex search anchors match each line in live and headless modes |
 | [#239](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/239) | `2f42c5da8dacd4e0527e0a699aa9c54d264bafb9` | Bases Bridge 1.3.2 uses native row selection in both live query modes and omits formula columns with `evaluate: false` |
+| [#240](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/240) | `d5c7698b84b5f887f71ecf96f79a674609e6b2a0` | The three headless modes can read a frontmatter key and report outgoing links, backlinks, and unresolved links from a SQLite index |
 
 Run the read-only profile first. Test filesystem writes on a separate,
 disposable copy using synthetic notes. Write serialization is process-local.
@@ -64,6 +65,12 @@ when explicitly selected. See the [bootstrap contract](docs/semantic-index-produ
 
 When a cold read bypasses the cache, it reports the exact physical spelling.
 Alias resolution uses the completed inventory.
+
+Headless frontmatter uses the shared CORE-schema parser. Live reads retain
+stale metadata detection. The headless link index and its inventory are
+published with the successful refresh checkpoint. Hidden notes remain
+excluded by default, with explicit reinclusions supported. Link resolution
+uses the filesystem snapshot. Heading and block validation requires Desktop.
 
 ## Add another change
 

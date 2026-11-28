@@ -47,7 +47,7 @@ The canonical tool registry is documented in [Tool Surface](docs/obsidian_mcp_to
 | Same-machine HTTP                        | authenticated loopback HTTP                              |
 | Remote HTTP                              | reviewed TLS reverse proxy + private network; pilot only |
 
-Runtime answers what the backend can execute. It does not decide how many tools the model should see.
+The runtime sets backend capabilities. With the shared cache enabled, headless modes can read frontmatter keys and inspect links between indexed Markdown notes. [Headless read coverage](docs/headless-server-profile.md#contract).
 
 ## Tool surface profiles
 

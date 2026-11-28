@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import "./test-support/isolated-state.mjs";
+import { isolatedStateEnv } from "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
 import {
   mkdtemp,
@@ -89,7 +89,9 @@ async function createTempVault() {
   for (const file of [...hiddenNotes, explicitlyIncludedNote]) {
     const target = path.join(vaultRoot, file);
     await mkdir(path.dirname(target), { recursive: true });
-    await writeFile(target, "Synthetic note with searchable keyword alphasmoke.\n", "utf8");
+    await writeFile(target,
+      "---\nstatus: visible-only-by-policy\n---\nSynthetic note with searchable keyword alphasmoke.\n" +
+      (file === explicitlyIncludedNote ? "[[Root]] [[notes/.hidden/Context]]\n" : ""), "utf8");
   }
   await mkdir(path.join(vaultRoot, 'Wide\u00a0Folder'));
   for (const [diskPath] of unicodeNotes) {
@@ -120,6 +122,10 @@ async function createTempVault() {
     ].join("\n"),
     "utf8",
   );
+  if (runtimeMode.startsWith("headless-")) {
+    await writeFile(path.join(vaultRoot, "Projects", "Properties.md"),
+      "\uFEFF---\r\ndate: 2026-11-28\r\nblank: null\r\n---\r\n", "utf8");
+  }
   await writeFile(
     path.join(vaultRoot, "Root.md"),
     [
@@ -369,6 +375,7 @@ async function main() {
     cwd: process.cwd(),
     env: {
       ...process.env,
+      ...isolatedStateEnv(),
       OBSIDIAN_RUNTIME_MODE: runtimeMode,
       OBSIDIAN_VAULT: vaultRoot,
       OBSIDIAN_CACHE_SOURCE: "filesystem",
@@ -404,6 +411,28 @@ async function main() {
     const tools = await withTimeout(client.listTools(), "listTools");
     const toolNames = tools.tools.map((tool) => tool.name).sort();
     const toolsByName = new Map(tools.tools.map((tool) => [tool.name, tool]));
+    if (runtimeMode.startsWith("headless-")) {
+      const requiredReads = ["obsidian_get_frontmatter", "obsidian_note_links"];
+      assert.deepEqual(requiredReads.filter((name) => !toolsByName.get(name)?.annotations.readOnlyHint), []);
+      for (const [key, value] of [["date", "2026-11-28"], ["blank", null], ["missing", undefined]]) {
+        const result = await client.callTool({
+          name: "obsidian_get_frontmatter", arguments: { filePath: "Projects/Properties.md", key },
+        });
+        assert.deepEqual(jsonOf(result, key), {
+          success: true,
+          message: `Successfully retrieved key '${key}' from frontmatter.`,
+          ...(value === undefined ? {} : { value }),
+          provenance: { source: "filesystem" },
+        });
+      }
+      const result = await client.callTool({
+        name: "obsidian_note_links", arguments: { filePath: "Projects/Headless.md" },
+      });
+      const links = jsonOf(result, "filesystem note links");
+      assert.equal(links.backend.kind, "filesystem");
+      assert.deepEqual(links.outgoing.find((link) => link.linkText === "Root")?.resolution,
+        { status: "resolved", targetPath: "Root.md" });
+    }
     const unannotatedTools = tools.tools.filter((tool) => {
       const annotations = tool.annotations;
       return (
@@ -787,19 +816,29 @@ async function main() {
           }),
           `read ${filePath}`,
         );
+        const frontmatter = await withTimeout(client.callTool({
+          name: "obsidian_get_frontmatter", arguments: { filePath, key: "status" },
+        }), `read frontmatter for ${filePath}`);
         visibility[filePath] = {
           listed: listText.includes(filePath),
           found: searchText.includes(filePath),
           readable: !exactRead.isError,
+          frontmatterReadable: !frontmatter.isError,
         };
       }
-      const excluded = { listed: false, found: false, readable: false };
+      const excluded = { listed: false, found: false, readable: false, frontmatterReadable: false };
       assert.deepEqual(visibility, {
         [hiddenNotes[0]]: excluded,
         [hiddenNotes[1]]: excluded,
         [hiddenNotes[2]]: excluded,
-        [explicitlyIncludedNote]: { listed: true, found: true, readable: true },
+        [explicitlyIncludedNote]: { listed: true, found: true, readable: true, frontmatterReadable: true },
       });
+      const links = await withTimeout(client.callTool({
+        name: "obsidian_note_links", arguments: { filePath: explicitlyIncludedNote },
+      }), "links from the explicitly included hidden note");
+      assert.equal(links.isError, false);
+      assert.deepEqual(jsonOf(links, "reincluded note links").outgoing.map(({ resolution }) =>
+        resolution.targetPath ?? null), ["Root.md", null]);
     }
 
     const excludedSearch = await withTimeout(

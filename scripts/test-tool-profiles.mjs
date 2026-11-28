@@ -8,6 +8,7 @@ import {
   selectAvailableToolProfileNames,
 } from "../dist/mcp-server/toolProfiles.js";
 import { TOOL_REGISTRATION_MODES } from "../dist/mcp-server/toolSurfaceRegistry.js";
+import toolCatalog from "../evals/tool-catalog.v1.json" with { type: "json" };
 
 const WITH_CACHE = ["vault-cache"];
 
@@ -243,7 +244,7 @@ const tasksSnapshot = compileToolProfileNames({
   registrationMode: "headless-readonly",
   availableStaticRequirements: WITH_CACHE,
 });
-assert.equal(tasksSnapshot.length, 14);
+assert.deepEqual(tasksSnapshot, toolCatalog.profiles.tasks.modes["headless-readonly"]);
 for (const required of [
   "operon_status",
   "operon_get_configuration",
@@ -301,25 +302,18 @@ const selectedLiveTasks = selectAvailableToolProfileNames({
 });
 assert.deepEqual(selectedLiveTasks, tasksLive);
 
-for (const profile of ["standard", "authoring", "tasks", "full"]) {
-  const live = compileToolProfileNames({
-    profile,
-    registrationMode: "live",
-    availableStaticRequirements: WITH_CACHE,
-  });
-  assert.ok(
-    live.includes("obsidian_note_links"),
-    profile + "/live lost M2 note links",
-  );
+const noteMetadataReads = ["obsidian_get_frontmatter", "obsidian_note_links"];
+for (const profile of ["standard", "authoring", "tasks", "operational", "full"]) {
+  for (const mode of ["live", "hybrid-live", "headless-readonly", "headless-guarded", "headless-filesystem"]) {
+    const names = compileToolProfileNames({ profile, registrationMode: mode, availableStaticRequirements: WITH_CACHE });
+    for (const name of noteMetadataReads) assert.ok(names.includes(name), `${profile}/${mode} lost ${name}`);
+  }
   const degraded = compileToolProfileNames({
     profile,
     registrationMode: "hybrid-degraded",
     availableStaticRequirements: WITH_CACHE,
   });
-  assert.ok(
-    !degraded.includes("obsidian_note_links"),
-    profile + "/hybrid-degraded exposed Desktop metadata cache",
-  );
+  for (const name of noteMetadataReads) assert.ok(!degraded.includes(name), `${profile}/hybrid-degraded exposed ${name}`);
 }
 
 const standardWithoutCache = compileToolProfileNames({
@@ -337,7 +331,12 @@ const readonlyWithoutCache = compileToolProfileNames({
   registrationMode: "headless-readonly",
   availableStaticRequirements: [],
 });
+assert.deepEqual(readonlyWithoutCache, [
+  "obsidian_list_notes", "obsidian_read_note", "obsidian_runtime_status",
+  "obsidian_validate_format", "smart_semantic_search",
+]);
 for (const absent of [
+  ...noteMetadataReads,
   "obsidian_global_search",
   "bases_list",
   "bases_get_schema",
@@ -345,7 +344,6 @@ for (const absent of [
 ]) {
   assert.ok(!readonlyWithoutCache.includes(absent));
 }
-assert.equal(readonlyWithoutCache.length, 5);
 
 console.log(
   "PASS: profiles are deterministic, removed semantic aliases stay absent, whole-Base config stays full-only, governed families are atomic, and headless tasks expose only snapshot-safe Operon reads",

@@ -13,8 +13,10 @@ runtime- and profile-dependent; never infer that an absent tool can be emulated 
 ## Canonical priorities
 
 - Read, list and exact text search: use the dedicated read/search tools.
-- Frontmatter key reads: use \`obsidian_get_frontmatter\` in live/hybrid mode.
+- Frontmatter key reads: use \`obsidian_get_frontmatter\` when exposed.
   It is read-only and does not accept mutation inputs.
+- Outgoing references and backlinks: use \`obsidian_note_links\`. In headless
+  modes it reports filesystem observations limited to indexed Markdown files.
 - Semantic search: use \`smart_semantic_search\`. It is the only registered
   semantic-search tool in 3.0.
 - Operon-managed tasks: use \`operon_list_tasks\` or \`operon_query_tasks\`. Use

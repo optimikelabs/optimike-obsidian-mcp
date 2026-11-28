@@ -47,7 +47,7 @@ Le registre canonique des outils est documenté dans [Surface des outils](docs/o
 | HTTP sur la même machine                 | HTTP loopback authentifié                                |
 | HTTP distant                             | reverse proxy TLS revu + réseau privé ; pilote seulement |
 
-Le runtime répond à ce que le backend peut exécuter. Il ne décide pas combien d’outils le modèle doit voir.
+Le runtime définit les capacités du backend. Avec le cache partagé actif, les modes headless peuvent lire une clé de frontmatter et examiner les liens entre notes Markdown indexées. [Couverture des lectures headless](docs/headless-server-profile.fr.md#contrat).
 
 ## Profils de surface d’outils
 

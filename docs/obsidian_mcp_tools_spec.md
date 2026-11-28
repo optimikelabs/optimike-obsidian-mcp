@@ -86,7 +86,7 @@ The family is live/hybrid-live only and has no recover or undo operation. Missin
 
 - `obsidian_read_note`: read a vault note by path, with cache fallback and a
   top-level `sha256` of the returned Markdown encoded as UTF-8.
-- `obsidian_note_links`: live/hybrid-live only. Observe a bounded semantic neighborhood from Obsidian Desktop public `MetadataCache` APIs: outgoing links, embeds and frontmatter links with effective resolution; requested subpaths with heading/block validity when demonstrable; unresolved aggregates; and backlinks reconstructed from resolved relations. It reports provenance, truncation, explicit collection availability, a best-effort non-atomic snapshot and cache freshness as `unknown` when the public API cannot prove it. An unavailable source cache reports `coverage.outgoing.total: null` rather than fabricating zero links. It performs no write and makes no graph-preservation claim.
+- `obsidian_note_links`: in live/hybrid-live, observe a bounded semantic neighborhood from Obsidian Desktop public `MetadataCache` APIs: outgoing links, embeds and frontmatter links with effective resolution; requested subpaths with heading/block validity when demonstrable; unresolved aggregates; and backlinks reconstructed from resolved relations. It reports provenance, truncation, explicit collection availability, a best-effort non-atomic snapshot and cache freshness as `unknown` when the public API cannot prove it. An unavailable source cache reports `coverage.outgoing.total: null` rather than fabricating zero links. It performs no write and makes no graph-preservation claim. In the three headless modes with the shared cache enabled, it projects the same response fields from indexed Markdown. See [Headless Server Profile](headless-server-profile.md#contract).
 - `obsidian_list_notes`: list notes and folders, using REST or cache/filesystem.
 - `obsidian_global_search` searches live or cached vault content. With
   `useRegex: true`, `^` and `$` match the start and end of each line.
@@ -517,7 +517,7 @@ exact plugin engine semantics remains outside the current headless surface.
 
 ## Dedicated frontmatter reads and operational profile
 
-`obsidian_get_frontmatter`: read-only live/hybrid key access using filePath and key; no set/delete/value inputs. `operational` retains complete workflows while suppressing redundant direct note/frontmatter mutations and reserving whole-Base replacement for `full`. See [Tool Surface Profiles](tool-surface-profiles.md).
+`obsidian_get_frontmatter`: read-only key access using `filePath` and `key`. Live/hybrid-live use Local REST. The three headless modes use the shared filesystem cache and return `provenance.source: filesystem`. An absent key omits `value`. A YAML null retains `value: null`. `operational` retains complete workflows while suppressing redundant direct note/frontmatter mutations and reserving whole-Base replacement for `full`. See [Tool Surface Profiles](tool-surface-profiles.md).
 
 
 ### Pin and batch update (Developer API V1)

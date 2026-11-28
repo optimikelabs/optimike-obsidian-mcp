@@ -34,7 +34,7 @@ The counts above exclude three optional asset tools: the current local configura
 
 Counts are projections of the current registry and may be lower in restricted runtimes. `full` means all tools structurally registered by the active runtime, not always 106 tools. The canonical registry covers 113 unique names across all runtimes because four names exist only in `headless-filesystem`. The operation cockpit is live-only because it reads the process-owned governed journals; visibility never substitutes for a write grant.
 
-`obsidian_note_links` is live/hybrid-live only because its semantics come from Obsidian Desktop's public `MetadataCache`; degraded and headless profiles omit it rather than simulating graph semantics from filesystem state.
+`obsidian_get_frontmatter` and `obsidian_note_links` are in the note-read group. Live and hybrid-live use Desktop services. All three headless modes expose them with the shared cache enabled. See [headless reads](headless-server-profile.md#contract) for filesystem coverage.
 
 The [P6 routing evaluation](tool-routing-evaluation-p6.md) measures these
 surfaces from actual `tools/list` schemas and a versioned 31-case baseline. Its

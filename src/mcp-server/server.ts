@@ -1921,6 +1921,10 @@ async function createMcpServerInstance(
       obsidianService,
       vaultCacheService,
     );
+    if (obsidianService || (vaultCacheService && (isHeadlessReadonly || isHeadlessGuarded || isHeadlessFilesystem))) {
+      registerObsidianGetFrontmatterTool(server, obsidianService, vaultCacheService);
+      await registerObsidianNoteLinksTool(server, obsidianService, vaultCacheService);
+    }
     if (vaultCacheService) {
       await registerObsidianGlobalSearchTool(
         server,
@@ -1975,7 +1979,6 @@ async function createMcpServerInstance(
       await registerBasesGetSchemaTool(server, undefined, localBasesService);
       await registerBasesQueryTool(server, undefined, localBasesService);
     } else if (!isHeadlessReadonly && obsidianService) {
-      await registerObsidianNoteLinksTool(server, obsidianService);
       await registerObsidianDeleteNoteTool(
         server,
         obsidianService,
@@ -1996,7 +1999,6 @@ async function createMcpServerInstance(
         obsidianService,
         vaultCacheService,
       );
-      registerObsidianGetFrontmatterTool(server, obsidianService);
       await registerObsidianManageTagsTool(
         server,
         obsidianService,
