@@ -60,6 +60,14 @@ continue. Les p50/p95 portent sur au plus 128 mesures réception→cache vérifi
 pas sur le délai édition humaine→réponse du modèle. L’index sémantique et les
 reçus de mutations gouvernées restent indépendants.
 
+La recherche globale en mode live réutilise un résultat complet pendant
+30 secondes au plus si les quatre flux restent réconciliés et si la génération
+observée du coffre reste stable. Le serveur conserve jusqu’à quatre résultats de
+4 Mio chacun après sérialisation. Une modification touchant un chemin exclu du
+cache de notes invalide aussi la réutilisation. Si les flux sont désactivés,
+si la couverture manque ou si le résultat est incomplet, chaque page relance
+une recherche.
+
 ## Tests et retour arrière
 
     npm ci

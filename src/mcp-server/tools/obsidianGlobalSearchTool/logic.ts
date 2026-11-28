@@ -22,7 +22,10 @@ import {
 // ====================================================================================
 // Schema Definitions (Updated for Pagination, Match Limit, and Path Filter)
 // ====================================================================================
-const ObsidianGlobalSearchInputSchema = z
+const MAX_PAGE_SIZE = 500;
+export const PAGE_SIZE_LIMIT_MESSAGE = `Use at most ${MAX_PAGE_SIZE} result files per page.`;
+
+export const ObsidianGlobalSearchInputSchema = z
   .object({
     query: z
       .string()
@@ -67,7 +70,7 @@ const ObsidianGlobalSearchInputSchema = z
       .number()
       .int()
       .positive()
-      .max(500)
+      .max(MAX_PAGE_SIZE, PAGE_SIZE_LIMIT_MESSAGE)
       .optional()
       .default(50)
       .describe("Maximum number of result files per page (up to 500). Defaults to 50."),
@@ -211,6 +214,49 @@ function findMatchesInContent(
 // Core Logic Function (API-First with Cache Fallback)
 // ====================================================================================
 const API_SEARCH_TIMEOUT_MS = config.obsidianApiSearchTimeoutMs;
+const LIVE_SEARCH_TTL_MS = 30_000;
+const LIVE_SEARCH_MAX_ENTRIES = 4;
+const LIVE_SEARCH_MAX_RESULT_BYTES = 4 * 1024 * 1024;
+
+interface CachedLiveSearch {
+  resultsJson: string;
+  totalMatches: number;
+  expiresAt: number;
+}
+
+const liveSearchResults = new WeakMap<VaultCacheService, {
+  generation: string;
+  entries: Map<string, CachedLiveSearch>;
+}>();
+
+function resultsForGeneration(cache: VaultCacheService, generation: string | undefined) {
+  if (generation === undefined) {
+    liveSearchResults.delete(cache);
+    return undefined;
+  }
+  let current = liveSearchResults.get(cache);
+  if (current?.generation !== generation) {
+    current = { generation, entries: new Map() };
+    liveSearchResults.set(cache, current);
+  }
+  for (const [key, entry] of current.entries) {
+    if (entry.expiresAt <= performance.now()) current.entries.delete(key);
+  }
+  return current.entries;
+}
+
+function serializeLiveResults(results: GlobalSearchResult[]): string | undefined {
+  const encoded: string[] = [];
+  let bytes = 2; // Array brackets
+  for (const result of results) {
+    const json = JSON.stringify(result);
+    bytes += Buffer.byteLength(json) + 1;
+    if (bytes > LIVE_SEARCH_MAX_RESULT_BYTES) return undefined;
+    encoded.push(json);
+  }
+  // Store detached JSON so match snippets cannot retain the original note body.
+  return "[" + encoded.join(",") + "]";
+}
 
 export const processObsidianGlobalSearch = async (
   params: ObsidianGlobalSearchInput,
@@ -263,8 +309,24 @@ export const processObsidianGlobalSearch = async (
   }
 
   // 2. Attempt API Search with Retries and Timeout
+  const generation = obsidianService
+    ? vaultCacheService?.getLiveSearchGeneration?.(obsidianService)
+    : undefined;
+  const liveResults = vaultCacheService && resultsForGeneration(vaultCacheService, generation);
+  // Pagination and projection happen after matching. Parsed dates are included
+  // so relative date filters cannot reuse results for a different time window.
+  const cacheKey = liveResults && JSON.stringify([
+    params.query, searchPathPrefix, params.useRegex, params.caseSensitive,
+    params.contextLength, params.maxMatchesPerFile, sinceDate?.getTime(), untilDate?.getTime(),
+  ]);
+  const cachedResult = cacheKey ? liveResults?.get(cacheKey) : undefined;
+  let incompleteLiveSearch = false;
   let apiFailedOrTimedOut = false;
-  try {
+  if (cachedResult) {
+    allFilteredResults = JSON.parse(cachedResult.resultsJson) as GlobalSearchResult[];
+    totalMatchesCount = cachedResult.totalMatches;
+    strategyMessage = "Reused the live search for the current vault generation. ";
+  } else try {
     if (!obsidianService) {
       throw new McpError(
         BaseErrorCode.SERVICE_UNAVAILABLE,
@@ -377,6 +439,7 @@ export const processObsidianGlobalSearch = async (
           continue; // Skip due to date filter
         }
       } catch (statError) {
+        incompleteLiveSearch = true;
         logger.warning("Failed to fetch file stats. Skipping file.", {
           ...fetchStatsContext,
           failureCategory:
@@ -527,10 +590,28 @@ export const processObsidianGlobalSearch = async (
   const startIndex = (currentPage - 1) * pageSize;
   const endIndex = startIndex + pageSize;
 
-  // Sort results by numeric modified time (descending) *before* pagination
-  allFilteredResults.sort((a, b) => {
-    return b.numericMtime - a.numericMtime || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0); // Descending
-  });
+  // Cache only complete live results collected across the same generation.
+  if (!cachedResult) {
+    allFilteredResults.sort((a, b) =>
+      b.numericMtime - a.numericMtime || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0),
+    );
+    if (liveResults && cacheKey && cacheKey.length <= 4096 && obsidianService &&
+        !apiFailedOrTimedOut && !incompleteLiveSearch &&
+        vaultCacheService?.getLiveSearchGeneration(obsidianService) === generation) {
+      const resultsJson = serializeLiveResults(allFilteredResults);
+      if (resultsJson !== undefined) {
+        liveResults.delete(cacheKey);
+        if (liveResults.size >= LIVE_SEARCH_MAX_ENTRIES) {
+          liveResults.delete(liveResults.keys().next().value!);
+        }
+        liveResults.set(cacheKey, {
+          resultsJson,
+          totalMatches: totalMatchesCount,
+          expiresAt: performance.now() + LIVE_SEARCH_TTL_MS,
+        });
+      }
+    }
+  }
 
   const paginatedResults = allFilteredResults.slice(startIndex, endIndex);
   if (!apiFailedOrTimedOut) {

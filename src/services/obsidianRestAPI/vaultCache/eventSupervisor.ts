@@ -40,6 +40,7 @@ export class CacheEventSupervisor {
   private timer: NodeJS.Timeout | null = null;
   private pump: Promise<void> | null = null;
   private revision = 0;
+  private vaultGeneration = 0;
   private reconciledRevision = -1;
   private nextReconcileAt = 0;
   private lastReason: EventStreamFailure | null = null;
@@ -103,16 +104,21 @@ export class CacheEventSupervisor {
     return this.stopping;
   }
 
+  /** Available only with reconciled coverage of every vault event stream. */
+  getVaultGeneration(): number | undefined {
+    if (this.running &&
+      this.connected.size === VAULT_CACHE_EVENTS.length &&
+      this.revision === this.reconciledRevision &&
+      this.pending.size === 0 &&
+      this.pump === null) return this.vaultGeneration;
+    return undefined;
+  }
+
   snapshot() {
     const ordered = [...this.latencies].sort((a, b) => a - b);
     const percentile = (p: number) =>
       ordered.length ? ordered[Math.ceil(p * ordered.length) - 1] : null;
-    const fresh =
-      this.running &&
-      this.connected.size === VAULT_CACHE_EVENTS.length &&
-      this.revision === this.reconciledRevision &&
-      this.pending.size === 0 &&
-      this.pump === null;
+    const fresh = this.getVaultGeneration() !== undefined;
     return {
       state: !this.running
         ? "stopped"
@@ -142,12 +148,15 @@ export class CacheEventSupervisor {
 
   private requestReconciliation(markUncertain = true): void {
     this.revision++;
+    this.vaultGeneration++;
     if (markUncertain) this.target.uncertain();
     this.schedule();
   }
 
   private receive(notice: VaultEventNotice): void {
     if (!this.running) return;
+    // Live search can include paths excluded from the shared note cache.
+    this.vaultGeneration++;
     this.lastEventAt = Date.now();
     if (notice.epoch) {
       const previous = this.epochs.get(notice.event);

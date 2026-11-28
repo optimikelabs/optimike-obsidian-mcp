@@ -64,6 +64,13 @@ never dropped an event. `freshness: observed` describes the last observation, no
 continuous or linearizable freshness. The semantic embedding index and governed
 operation receipts are independent and unchanged.
 
+Live global search reuses complete results for up to 30 seconds while all four
+streams remain reconciled and the observed vault generation is unchanged.
+The backend keeps up to four results of at most 4 MiB each (serialized size).
+Changes in paths excluded from the shared note cache also invalidate reuse.
+With streams disabled, missing coverage or incomplete search results, each
+page runs a new search.
+
 ## Validation and rollback
 
     npm ci

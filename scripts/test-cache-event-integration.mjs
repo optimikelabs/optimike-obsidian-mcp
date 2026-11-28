@@ -12,6 +12,7 @@ const logs = path.join(process.cwd(), "logs", path.basename(root));
 const notes = new Map([["Note.md", "one"]]);
 const streams = new Map();
 const reads = [];
+let searches = 0;
 let subscriptions = 0;
 let counter = 0;
 const server = createServer(async (req, res) => {
@@ -53,6 +54,14 @@ const server = createServer(async (req, res) => {
     });
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.write(": connected\n\n");
+    return;
+  }
+  if (req.method === "POST" && req.url.startsWith("/search/simple/")) {
+    searches++;
+    const query = new URL(req.url, "http://fixture.invalid").searchParams.get("query");
+    const results = [...notes].filter(([, content]) => content.includes(query))
+      .map(([filename]) => ({ filename, matches: [], score: 0 }));
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(results));
     return;
   }
   if (req.url === "/vault/") {
@@ -203,4 +212,44 @@ test("production adapter and cache observe create/modify/rename/delete and recon
   console.log("FIXTURE_METRICS " + JSON.stringify(evidence));
   await cache.close();
   await wait(() => streams.size === 0);
+});
+
+test("live search pages reuse a complete result only while vault coverage stays current", async () => {
+  const { processObsidianGlobalSearch } = await import(
+    "../dist/mcp-server/tools/obsidianGlobalSearchTool/logic.js"
+  );
+  notes.set("PageA.md", "pagination fixture");
+  notes.set("PageB.md", "pagination fixture");
+  const api = new ObsidianRestApiService();
+  const searchCache = new VaultCacheService(api);
+  const context = { requestId: "search-pages", timestamp: new Date(0).toISOString() };
+  const search = (page) => processObsidianGlobalSearch({
+    query: "pagination fixture", page, pageSize: 1, useRegex: false,
+    caseSensitive: false, contextLength: 100, maxMatchesPerFile: 5, responseMode: "compact",
+  }, context, api, searchCache);
+  try {
+    searchCache.startPeriodicRefresh();
+    await wait(() => searchCache.getStats().eventCache.state === "ready");
+    const before = searches;
+    const first = await search(1);
+    const afterFirstPageReads = reads.length;
+    const second = await search(2);
+    assert.equal(first.totalFilesFound, 2);
+    assert.equal(second.totalMatchesFound, first.totalMatchesFound);
+    assert.deepEqual([first.results[0].path, second.results[0].path], ["PageA.md", "PageB.md"]);
+    assert.equal(searches - before, 1, "the second page must not rescan Local REST");
+    assert.equal(reads.length, afterFirstPageReads, "the second page must not reread notes");
+
+    notes.set("PageB.md", "edited");
+    emit("modify", "PageB.md");
+    await wait(async () => (await searchCache.getEntry("/PageB.md"))?.content === "edited");
+    assert.equal((await search(2)).totalFilesFound, 1);
+    assert.equal(searches - before, 2, "the previous result must expire on a vault change");
+
+    searchCache.stopPeriodicRefresh();
+    assert.equal((await search(1)).totalFilesFound, 1);
+    assert.equal(searches - before, 3, "reuse requires active event coverage");
+  } finally {
+    await searchCache.close();
+  }
 });
