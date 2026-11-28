@@ -17,12 +17,15 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { SignJWT } from "jose";
+import { syncVaultBinding } from "../dist/services/syncVaultBinding.js";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const jwtSecret =
   "headless-multiclient-test-secret-must-be-at-least-32-characters";
 const newestMarkdownMtime = 1_700_000_001;
 const conflictNote = "Projects/Pilot (Conflicted copy FixtureDevice 202501010800).md";
+const additionalConflicts = Array.from({ length: 101 }, (_, index) =>
+  `Fixture ${index} (Conflicted copy FixtureDevice 202501010800).md`);
 const nearMatch = "Projects/Pilot (Conflicted copy FixtureDevice sometime).md";
 
 async function hashDirectory(root) {
@@ -266,12 +269,13 @@ async function createPilotVault(sandbox) {
     ].join("\n"),
     "utf8",
   );
-  for (const file of [conflictNote, nearMatch]) {
+  for (const file of [conflictNote, nearMatch, ...additionalConflicts]) {
     await writeFile(path.join(vaultPath, file), "Conflict-name fixture");
   }
   for (const [file, mtime] of [
     [conflictNote, newestMarkdownMtime - 2],
     [nearMatch, newestMarkdownMtime - 2],
+    ...additionalConflicts.map(relative => [relative, newestMarkdownMtime - 2]),
     ["Reference.md", newestMarkdownMtime - 1],
     ["Projects/Pilot.md", newestMarkdownMtime],
     ["Pilot.base", newestMarkdownMtime + 1],
@@ -482,7 +486,9 @@ try {
   assert.equal(statusBody.runtimeMode, "headless-readonly");
   assert.equal(statusBody.provenance.source, "filesystem");
   assert.equal(statusBody.provenance.upstreamSync, "unknown");
-  assert.deepEqual(statusBody.syncConflictFiles, [conflictNote]);
+  assert.equal(statusBody.syncConflictFiles.length, 100);
+  assert.equal(statusBody.syncConflictCount, 102);
+  assert.ok(statusBody.syncConflictFiles.every(name => name === conflictNote || additionalConflicts.includes(name)));
   assert.equal(statusBody.capabilities.mutations, false);
   const serializedStatus = JSON.stringify(statusBody);
   for (const secret of [tokenA, tokenB, monitorToken, jwtSecret, vaultPath]) {
@@ -583,7 +589,7 @@ try {
 
   const pullAt = new Date().toISOString();
   await writeFile(path.join(sandbox, "sync-heartbeat.json"), JSON.stringify({
-    version: 1, heartbeatAt: pullAt, state: "ok",
+    version: 2, vaultBinding: await syncVaultBinding(vaultPath), heartbeatAt: pullAt, state: "ok",
     lastSuccessfulPull: { startedAt: pullAt, completedAt: pullAt },
   }));
   const currentReadiness = await fetch(new URL("/readyz", backend.baseUrl)).then(response => response.json());
@@ -603,7 +609,8 @@ try {
     upstreamSync: "current",
     lastSuccessfulPullAt: pullAt,
     evidenceSource: "heartbeat-file",
-    syncConflictFiles: [conflictNote],
+    syncConflictFiles: statusBody.syncConflictFiles,
+    syncConflictCount: 102,
     refreshOrigin: "process-refresh",
     refreshing: false,
     newestFileMtimeMs: newestMarkdownMtime * 1000,

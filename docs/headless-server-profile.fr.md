@@ -100,7 +100,10 @@ opération atomique. Le script livré crée un reçu privé. Utilisez le même
 compte dédié pour MCP et le script, ou des permissions qui donnent au compte
 MCP la lecture à chaque remplacement.
 
-Utilisez des dates ISO UTC avec millisecondes. L’état du reçu est `running`
+Le reçu v2 contient `vaultBinding`, le SHA-256 du chemin réel absolu du coffre
+en UTF-8, sans retour à la ligne. Un reçu d’un autre coffre ou un ancien reçu
+sans empreinte donne `unknown`. Utilisez des dates ISO UTC avec millisecondes.
+L’état du reçu est `running`
 au démarrage, `ok` après réussite, ou `error` après échec. Conservez le dernier
 `lastSuccessfulPull` au démarrage et en cas d’échec, ou laissez `null` jusqu’à
 la première réussite. Le backend renvoie `unknown` si la preuve est absente,
@@ -114,11 +117,15 @@ la dernière passe réussie.
 
 `OBSIDIAN_SYNC_WRITE_MAX_AGE_SECONDS` active le garde-fou d’écriture
 optionnel. Une écriture headless renvoie `upstream_sync_write_blocked` face
-à un état `unknown`, `stalled`, `error` ou à un pull trop ancien. Les
+à un état `unknown`, `stalled`, `error` ou à un pull trop ancien. L’erreur
+inclut `upstreamSync` et le code `syncWriteRefusal`. Les
 lectures, les simulations et les préconditions existantes restent
 applicables. Le statut runtime et `/statusz` authentifié listent les chemins
 relatifs des `syncConflictFiles` indexés, selon le motif Markdown daté
-d’Obsidian. `/readyz` public ne contient aucun nom de note.
+d’Obsidian, avec une limite de 100 et le total `syncConflictCount`. La fusion
+automatique par défaut d’Obsidian ne crée aucun fichier de conflit. Une liste
+vide indique seulement qu’aucun fichier indexé ne correspond au motif.
+`/readyz` public ne contient aucun nom de note.
 
 Le script livré `scripts/obsidian-sync-heartbeat.mjs` exécute une passe du CLI
 avec un délai maximal et écrit le reçu. Planifiez-le sous le compte ayant

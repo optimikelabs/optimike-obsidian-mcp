@@ -528,9 +528,7 @@ Type=simple
 EnvironmentFile=%h/.config/optimike/headless.env
 ExecStart=node ${INDEX_CLI} service --vault ${VAULT} --index ${INDEX} --endpoint ${EMBED_ENDPOINT} --model ${EMBED_MODEL} --revision ${EMBED_REVISION} --model-sha256 ${EMBED_MODEL_SHA256}
 Restart=on-failure
-RestartSec=15s
-# Give an in-flight build time to finish on a routine stop.
-TimeoutStopSec=infinity
+RestartSec=35s
 
 [Install]
 WantedBy=default.target
@@ -540,8 +538,10 @@ Enable `optimike-sync.timer` and `optimike-semantic.service` under that user's
 systemd manager. Set the MCP environment independently, with
 `OBSIDIAN_SYNC_HEARTBEAT_FILE`, `SMART_ENV_GENERATION_POINTER` targeting the
 index's `CURRENT`, and the matching `SMART_ENV_QUERY_FINGERPRINT` and query
-encoder settings. For shutdown after an abnormal kill, follow the producer's
-[lock recovery procedure](docs/semantic-index-producer.md#publication-and-recovery).
+encoder settings. Keep the producer index on a machine-local filesystem.
+Shutdown cancels in-flight encoding. See the
+[producer guide](docs/semantic-index-producer.md#publication-and-recovery)
+for lease recovery after a forced stop.
 
 ### Windows Task Scheduler
 
@@ -552,8 +552,8 @@ that owns the dedicated cache and has set up Obsidian Headless. For Sync, use
 a repeating trigger every minute and **Do not start a new instance**. For the
 producer, use an at-startup trigger, restart on failure, **Do not start a new
 instance**, and disable the execution-time limit. Let an interactive foreground
-producer stop with Ctrl+C. Task Scheduler's forced stop may leave its lock, which
-uses the same recovery procedure.
+producer stop with Ctrl+C. Use a restart interval of at least one minute to
+allow the lease to expire after a forced stop.
 
 See the [headless profile](docs/headless-server-profile.md#upstream-sync-evidence)
 for upstream states and the [producer guide](docs/semantic-index-producer.md#service-mode)

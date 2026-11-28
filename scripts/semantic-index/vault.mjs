@@ -48,6 +48,10 @@ function inode(stat) {
   return [stat.dev, stat.ino, stat.birthtimeNs].join(":");
 }
 
+function vaultBinding(vault, stat) {
+  return sha256(vault + "\0" + inode(stat));
+}
+
 function stamp(stat) {
   return [inode(stat), stat.size, stat.mtimeNs, stat.ctimeNs].join(":");
 }
@@ -85,24 +89,63 @@ export async function inventory(vault, excludedPaths, excludedByProfile = () => 
   }
   await walk("");
   if (directories.get("") !== inode(root)) throw Error("Vault root was replaced during inventory");
-  return { binding: sha256(vault + "\0" + inode(root)), files, directories, unsafePaths };
+  return { binding: vaultBinding(vault, root), files, directories, unsafePaths };
 }
 
 export async function readSource(vault, relative, expected) {
   const filename = path.join(vault, relative);
-  if (await realpath(filename) !== filename) throw Error("Markdown source path changed");
+  if (await realpath(filename) !== filename) throw sourceDrift("Markdown source path changed");
   const handle = await open(filename, "r");
   try {
     const before = await handle.stat({ bigint: true });
-    if (!before.isFile() || stamp(before) !== expected) throw Error("Markdown source changed during scan");
+    if (!before.isFile() || stamp(before) !== expected) throw sourceDrift("Markdown source changed during scan");
     const bytes = await handle.readFile();
     if (stamp(await handle.stat({ bigint: true })) !== expected) {
-      throw Error("Markdown source changed during read");
+      throw sourceDrift("Markdown source changed during read");
     }
     return bytes;
   } finally {
     await handle.close();
   }
+}
+
+function sourceDrift(message) {
+  return Object.assign(Error(message), { code: "SOURCE_DRIFT" });
+}
+
+export async function verifyIncludedSources(vault, binding, included, signal) {
+  async function checkRoot() {
+    signal.throwIfAborted();
+    const root = await lstat(vault, { bigint: true });
+    if (!root.isDirectory() || vaultBinding(vault, root) !== binding || await realpath(vault) !== vault) {
+      throw Error("Vault root or volume differs from the build");
+    }
+    return root.dev;
+  }
+  const device = await checkRoot();
+  async function includedStamp(relative) {
+    signal.throwIfAborted();
+    const filename = path.join(vault, relative);
+    const stat = await lstat(filename, { bigint: true });
+    if (!stat.isFile() || stat.dev !== device || await realpath(filename) !== filename) {
+      throw sourceDrift("Included Markdown path changed during verification");
+    }
+    return stamp(stat);
+  }
+  const verified = new Map();
+  for (const [relative, digest] of included) {
+    const expected = await includedStamp(relative);
+    if (sha256(await readSource(vault, relative, expected)) !== digest) {
+      throw sourceDrift("Included Markdown changed during build");
+    }
+    verified.set(relative, expected);
+  }
+  for (const [relative, expected] of verified) {
+    if (await includedStamp(relative) !== expected) {
+      throw sourceDrift("Included Markdown changed during verification");
+    }
+  }
+  await checkRoot();
 }
 
 function sameEntries(left, right) {

@@ -53,7 +53,7 @@ chemins ou blocs écartés et leur motif, y compris un UTF-8 invalide ou un
 chemin incompatible avec le lecteur strict. Un échec de lecture arrête la
 génération.
 
-Le producteur recontrôle l’inventaire et les empreintes avant publication.
+Une exécution ponctuelle recontrôle l’inventaire et les empreintes avant publication.
 L’incrémental retrouve les vecteurs de la génération active à partir du texte
 UTF-8 exact et du profil d’encodage. Un échec de lecture, un changement du
 coffre ou un changement d’identité du bridge peut arrêter la publication. Le
@@ -134,29 +134,42 @@ Le décompte des lignes à encoder précède les éventuels refus pour longueur.
 
 Lancez `optimike-semantic-index service` avec les mêmes options de coffre,
 d’index, d’encodage et de sélection que pour une construction ponctuelle.
-Le service peut repartir d’une génération amorcée depuis Smart Connections.
-Il observe les fichiers Markdown toutes les 15 secondes (`--poll-ms`) et
-attend que les changements se stabilisent (`--debounce-ms`, 5 secondes par
-défaut). Il utilise le même verrou exclusif que les constructions ponctuelles
-et l’amorçage. Il ne contacte l’encodeur qu’en cas de construction et réutilise
-les vecteurs dont l’entrée est identique. Il conserve le seuil de suppression
-et la publication atomique. Un renommage compte pour un retrait et un ajout.
-Le nouveau chemin peut modifier l’entrée encodée. Après un refus de charge
-ou une panne, les tentatives s’espacent jusqu’à cinq minutes. Si le profil
-d’encodage change, exécutez `--rebuild` hors service avant de redémarrer.
+Le service observe les fichiers Markdown toutes les 15 secondes (`--poll-ms`)
+et regroupe les changements (`--debounce-ms`, 5 secondes par défaut). Les
+arrivées continues ne repoussent pas indéfiniment une construction. Si seul
+l’horodatage d’un fichier change, le service vérifie son empreinte avant de
+le compter. Un relevé sans changement ne contacte pas l’encodeur.
 
-`SERVICE.json` associe une observation à durée limitée à la génération publiée.
-Le statut runtime MCP et `/statusz` authentifié exposent
-`semanticIndex.generation`, `builtAt`, `pendingChanges`, `lastError` et
-`coverage` (notes et sections indexées, notes candidates dans le périmètre
-du producteur). Pour une génération externe compatible,
-`smart_semantic_search` conserve `generation_id` et ajoute
-`indexGeneration`, `indexBuiltAt` et `staleNotes`. Ce nombre cumule les
-ajouts, modifications et suppressions au dernier relevé valide de la génération
-utilisée par la requête. Il peut manquer les écritures intervenues depuis.
-Sans relevé valide, notamment pendant une construction longue ou en l’absence
-du service, il vaut `null`. La couverture et les reçus du producteur reflètent
-les exclusions de sélection et les refus d’encodage.
+Le producteur vérifie l’identité du coffre et le contenu des notes incluses
+avant de publier. Les nouvelles notes arrivées pendant le calcul restent en
+attente. Si une note incluse change, `source_drift` déclenche une nouvelle
+tentative après le délai d’agrégation. Une panne de l’encodeur espace les
+tentatives jusqu’à cinq minutes. Un changement de profil d’encodage exige
+`--rebuild` hors service avant de redémarrer.
+
+Le seuil de suppression traite un même contenu réapparu sous un nouveau chemin
+comme un renommage, avec une correspondance un pour un. Le chemin peut
+néanmoins changer l’entrée à encoder. Au-delà du seuil, le service renvoie
+`deletion_guard`. Après vérification, placez un fichier `ALLOW_DELETIONS`
+à côté de `CURRENT` avec l’identifiant de la génération active suivi d’un
+retour à la ligne. Le service consomme ce fichier avant d’autoriser un seul
+calcul à dépasser le seuil. Si le calcul échoue, une nouvelle autorisation est
+nécessaire. `--allow-deletions` reste une option ponctuelle.
+
+`SERVICE.json` associe une observation à durée limitée à la génération publiée
+et reste actualisé pendant l’encodage. Le statut runtime et `/statusz`
+authentifié exposent `semanticIndex.generation`, `builtAt`, `pendingChanges`,
+`lastError` et `coverage`. La recherche expose `generation_id`,
+`indexGeneration`, `indexBuiltAt` et `staleNotes`. Ce dernier champ compte les
+ajouts, modifications de contenu et suppressions au dernier relevé valide.
+Le nombre et la dernière erreur valent `null` quand le relevé expire ou manque.
+
+Le service conserve `CURRENT` et deux générations retirées récentes par défaut
+(`--keep-generations`). Il conserve aussi toute génération retirée dans le
+délai de grâce (`--reader-grace-seconds`, 3 600 secondes par défaut). Le délai
+court depuis le retrait ou, à défaut, son premier constat. Réglez-le au-dessus
+de la durée maximale d’une lecture. Utilisez le pointeur avec le service.
+Gardez une copie à part pour les lecteurs qui ouvrent un dossier fixe.
 
 Voir le [déploiement des services](../OPERATIONS.fr.md#services-sync-et-index-sémantique-headless).
 
@@ -171,23 +184,24 @@ Voir le [déploiement des services](../OPERATIONS.fr.md#services-sync-et-index-s
   Le lecteur externe exige au moins une note. Un corpus vide bloque la
   publication et préserve le pointeur précédent s’il existe.
 - Le producteur valide la génération puis renomme un pointeur temporaire situé
-  à côté de `CURRENT` pour le remplacer atomiquement. Un échec peut laisser une
-  génération non publiée. Le pointeur précédent reste lisible jusqu’au
-  remplacement.
+  à côté de `CURRENT` pour le remplacer atomiquement. Un échec préserve le pointeur précédent.
   Windows peut refuser le remplacement pendant qu’un autre processus tient le
   pointeur ouvert. Fermer ce fichier puis relancer le producteur. Le lecteur
   doit refermer le pointeur dès qu’il a copié l’identifiant.
 - Un changement de profil d’encodage exige `--rebuild`. Cette option réencode
   tous les vecteurs et maintient les contrôles d’identité et de cohérence. Pour
   indexer un autre coffre, choisir un autre dossier d’index.
-- Un arrêt brutal peut laisser `.producer.lock`, avec le PID et l’heure de
-  démarrage. Vérifier que le processus a bien pris fin et empêcher tout autre
-  lancement avant de retirer le verrou. `CURRENT` reste utilisable.
-- Conserver les générations active et précédente. Supprimer les générations
-  plus anciennes et les restes `.staging-*` ou `.CURRENT-*` après l’arrêt des
-  producteurs et la fin des lectures, y compris celles qui visent un chemin de
-  génération fixe. Le producteur conserve les anciennes générations pour laisser
-  ces lectures se terminer.
+- Utilisez un système de fichiers local qui gère les liens physiques et le
+  verrouillage SQLite. Un seul producteur détient le verrou et renouvelle le reçu
+  `.producer.lock` toutes les 10 secondes. Après un arrêt forcé, un nouveau
+  processus reprend le bail expiré au bout de 30 secondes s’il peut établir
+  que le PID a disparu ou correspond à un autre processus ou démarrage. Un
+  propriétaire invérifiable bloque la reprise. SIGINT et SIGTERM interrompent
+  l’encodage et libèrent le bail.
+- Un calcul refusé retire sa génération scellée qui n’a pas été publiée.
+  Après un arrêt forcé, le prochain producteur retire les fichiers de travail
+  restants. Pour un élagage manuel ou un retour arrière de `CURRENT`,
+  arrêtez le service et attendez la fin des lectures.
 
 Pour un serveur configuré avec `SMART_ENV_DIR`, indiquer au démarrage le dossier
 de la génération publiée, le coffre correspondant dans `OBSIDIAN_VAULT` et le

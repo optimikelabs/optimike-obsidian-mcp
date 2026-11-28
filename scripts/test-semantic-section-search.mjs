@@ -66,10 +66,9 @@ const publishPointer = async (contents) => {
 const publish = (id) => publishPointer(id + "\n");
 const generationRoot = path.join(root, "generations");
 const builtAt = "2026-01-01T12:00:00.000Z";
-async function reportService(generation, pendingChanges) {
-  const observedAt = Date.now();
+async function reportService(generation, pendingChanges, { observedAt = Date.now(), lastError = null } = {}) {
   await writeFile(path.join(root, "SERVICE.json"), JSON.stringify({
-    version: 1, generation, pendingChanges, lastError: null, observedAt, validUntil: observedAt + 300_000,
+    version: 1, generation, pendingChanges, lastError, observedAt, validUntil: observedAt + 300_000,
   }));
 }
 async function writeGeneration(id, records, notes, sections) {
@@ -304,6 +303,11 @@ try {
     generation: "a", builtAt, pendingChanges: 2, lastError: null,
     coverage: { indexedNotes: 2, indexedSections: 2, candidateNotes: null },
   });
+  await reportService("a", 2, { observedAt: Date.now() - 900_000, lastError: "deletion_guard" });
+  const expired = (await runtimeStatus()).index;
+  assert.equal(expired.pendingChanges, null);
+  assert.equal(expired.lastError, null);
+  await reportService("a", 2);
 
   beforeEmbedReply = async () => {
     beforeEmbedReply = undefined;

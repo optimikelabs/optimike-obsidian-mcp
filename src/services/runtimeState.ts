@@ -17,7 +17,7 @@ import { getWritePolicyStatus } from "./writePolicy.js";
 import { attestVaultFilesystemTarget } from "./externalReferences/backendVaultAdapter.js";
 import { inspectAssetPolicy } from "./assets/assetPolicyDiscovery.js";
 import type { VaultCacheService } from "./obsidianRestAPI/vaultCache/index.js";
-import { isSyncConflictPath, readUpstreamSync, unknownUpstreamSync, upstreamSyncSchema, type UpstreamSyncEvidence } from "./upstreamSyncEvidence.js";
+import { isSyncConflictPath, readUpstreamSync, SYNC_CONFLICT_LIMIT, unknownUpstreamSync, upstreamSyncSchema, type UpstreamSyncEvidence } from "./upstreamSyncEvidence.js";
 import { collectSemanticIndexStatus, publicSemanticIndexSchema } from "./semanticIndexStatus.js";
 
 const PROCESS_STARTED_AT_MS = Math.round(Date.now() - process.uptime() * 1000);
@@ -209,6 +209,7 @@ type PublicRuntimeStatus = {
   headlessRead?: UpstreamSyncEvidence & {
     source: "filesystem";
     syncConflictFiles: string[];
+    syncConflictCount: number;
     refreshOrigin?: "startup-snapshot" | "process-refresh";
     lastSuccessfulRefreshStartedAt: number | null;
     refreshing: boolean;
@@ -538,8 +539,9 @@ export function projectPublicRuntimeStatus(
         ...upstreamSyncSchema.catch(unknownUpstreamSync).parse(headlessRead),
         syncConflictFiles: Array.isArray(headlessRead.syncConflictFiles)
           ? headlessRead.syncConflictFiles.filter((entry): entry is string =>
-            typeof entry === "string" && isSyncConflictPath(entry))
+            typeof entry === "string" && isSyncConflictPath(entry)).slice(0, SYNC_CONFLICT_LIMIT)
           : [],
+        syncConflictCount: numberOr(headlessRead.syncConflictCount),
         refreshOrigin: allowedValue(headlessRead.refreshOrigin, [
           "startup-snapshot",
           "process-refresh",
@@ -726,7 +728,7 @@ export async function collectRuntimeStatus(
     ...(headless ? {
       headlessRead: {
         ...upstreamSync,
-        syncConflictFiles: vaultCacheService?.getSyncConflictFiles() ?? [],
+        ...(vaultCacheService?.getSyncConflicts() ?? { syncConflictFiles: [], syncConflictCount: 0 }),
         refreshing: refresh?.refreshing ?? false,
         refreshOrigin: refresh?.refreshOrigin,
         lastSuccessfulRefreshStartedAt: refresh?.lastSuccessfulRefreshStartedAt ?? null,

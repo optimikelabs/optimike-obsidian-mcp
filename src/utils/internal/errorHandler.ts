@@ -227,6 +227,8 @@ const SAFE_ERROR_DETAIL_FIELDS = new Set([
   "planRef",
   "recoveryRef",
   "reasonCode",
+  "upstreamSync",
+  "syncWriteRefusal",
   "validationIssues",
   // Bases engine refusal: bounded, schema-checked formula diagnosis.
   "formulaCheck",
@@ -627,6 +629,8 @@ function isSafeDiagnosticString(field: string, value: string): boolean {
   if (field === "planDigest") return /^[a-f0-9]{64}$/u.test(value);
   if (field === "preparationCheck") return isDatePreparationCheck(value);
   if (field === "reasonCode") return SAFE_PUBLIC_REASON_CODES.has(value);
+  if (field === "upstreamSync") return ["unknown", "current", "lagging", "stalled", "error"].includes(value);
+  if (field === "syncWriteRefusal") return ["evidence_unavailable", "pull_too_old", "stalled", "error"].includes(value);
   if (field === "hint") return isNoteNameHint(value) || isNativeMoveHint(value);
   // A suggestion is only released if it satisfies the shared name rule itself.
   if (CALLER_DERIVED_PUBLIC_FIELDS.has(field)) return checkNoteName(value, { extensions: null }).ok;

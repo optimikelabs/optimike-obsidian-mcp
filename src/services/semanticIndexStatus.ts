@@ -6,7 +6,7 @@ import { resolveExternalSemanticGeneration, type ExternalSemanticGeneration } fr
 
 const count = z.number().int().nonnegative().safe();
 const generationId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u);
-const errorCode = z.enum(["scan_failed", "embedding_busy", "embedding_failed", "build_failed"]);
+const errorCode = z.enum(["scan_failed", "embedding_busy", "embedding_failed", "build_failed", "source_drift", "deletion_guard"]);
 const serviceStatus = z.object({
   version: z.literal(1),
   generation: generationId.nullable(),
@@ -44,7 +44,7 @@ export async function readSemanticIndexObservation(generation?: ExternalSemantic
           status.validUntil - status.observedAt <= 900_000) {
         return {
           pendingChanges: status.validUntil >= now ? status.pendingChanges : null,
-          lastError: status.lastError,
+          lastError: status.validUntil >= now && status.validUntil > status.observedAt ? status.lastError : null,
         };
       }
     } finally {

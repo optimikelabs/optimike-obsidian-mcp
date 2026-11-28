@@ -4,12 +4,14 @@ import { z } from "zod/v3";
 import { config } from "../config/index.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import type { RequestContext } from "../utils/index.js";
+import { syncVaultBinding } from "./syncVaultBinding.js";
 
 const timestamp = z.string().datetime({ precision: 3 }).refine(
   value => Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value,
 );
 const receiptSchema = z.object({
-  version: z.literal(1),
+  version: z.literal(2),
+  vaultBinding: z.string().regex(/^[a-f0-9]{64}$/u),
   heartbeatAt: timestamp,
   state: z.enum(["ok", "running", "error"]),
   lastSuccessfulPull: z.object({ startedAt: timestamp, completedAt: timestamp }).nullable(),
@@ -55,6 +57,7 @@ export function heartbeatFileSource(filename: string): SyncEvidenceSource {
 export async function observeUpstreamSync(
   source: SyncEvidenceSource | undefined,
   thresholds: { currentSeconds: number; stallSeconds: number },
+  vaultBinding: string | undefined,
   now = Date.now,
 ): Promise<UpstreamSyncEvidence> {
   const unknown: UpstreamSyncEvidence = {
@@ -63,7 +66,7 @@ export async function observeUpstreamSync(
   };
   const raw = await source?.read().catch(() => undefined);
   const parsed = receiptSchema.safeParse(raw);
-  if (!parsed.success) return unknown;
+  if (!parsed.success || parsed.data.vaultBinding !== vaultBinding) return unknown;
   const { heartbeatAt, state, lastSuccessfulPull } = parsed.data;
   const observedAt = now();
   const heartbeat = Date.parse(heartbeatAt);
@@ -85,12 +88,20 @@ export async function observeUpstreamSync(
   };
 }
 
-export function readUpstreamSync(): Promise<UpstreamSyncEvidence> {
+export async function readUpstreamSync(): Promise<UpstreamSyncEvidence> {
+  const file = config.upstreamSyncHeartbeatFile;
+  if (!file) return unknownUpstreamSync;
+  const binding = config.obsidianVaultPath
+    ? await syncVaultBinding(config.obsidianVaultPath).catch(() => undefined)
+    : undefined;
   return observeUpstreamSync(
-    config.upstreamSyncHeartbeatFile ? heartbeatFileSource(config.upstreamSyncHeartbeatFile) : undefined,
+    heartbeatFileSource(file),
     { currentSeconds: config.upstreamSyncCurrentSeconds, stallSeconds: config.upstreamSyncStallSeconds },
+    binding,
   );
 }
+
+export const SYNC_CONFLICT_LIMIT = 100;
 
 export function isSyncConflictPath(relative: string): boolean {
   return !/[:\\\x00-\x1f]/u.test(relative) &&
@@ -105,7 +116,10 @@ export async function assertHeadlessSyncWriteAllowed(context: RequestContext): P
   if (["unknown", "stalled", "error"].includes(evidence.upstreamSync) ||
       evidence.lagSecondsUpperBound === null || evidence.lagSecondsUpperBound > maximumAge) {
     throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Headless write blocked by upstream Sync freshness.", {
-      ...context, reasonCode: "upstream_sync_write_blocked",
+      ...context, reasonCode: "upstream_sync_write_blocked", upstreamSync: evidence.upstreamSync,
+      syncWriteRefusal: evidence.upstreamSync === "unknown" ? "evidence_unavailable"
+        : evidence.upstreamSync === "stalled" || evidence.upstreamSync === "error"
+          ? evidence.upstreamSync : "pull_too_old",
     });
   }
 }

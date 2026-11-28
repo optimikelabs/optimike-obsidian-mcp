@@ -515,8 +515,8 @@ Renseignez votre fichier d’environnement avec les chemins absolus vers les
 scripts installés, le point d’entrée JS du CLI Obsidian, le coffre et les
 répertoires d’état, ainsi que les paramètres de l’encodeur. Exécutez
 `ob sync-setup` sous le compte de service avant d’activer le timer.
-Le producteur redémarre en cas d’échec. Un arrêt normal attend la fin de la
-publication en cours.
+Le producteur redémarre en cas d’échec. Un arrêt normal annule l’encodage en
+cours. Placez l’index sur un système de fichiers local à la machine.
 
 Sous Windows, créez deux tâches dans le Planificateur de tâches. Utilisez le
 chemin absolu de `node.exe` comme programme. Dans les arguments, reprenez le
@@ -525,9 +525,10 @@ plaçant chaque chemin entre guillemets. Utilisez le compte qui possède le cach
 dédié et a configuré Obsidian Headless. Pour Sync, déclenchez toutes les
 minutes. Pour le producteur, déclenchez au démarrage, réessayez en cas d’échec
 et désactivez la durée maximale d’exécution. Sélectionnez **Ne pas démarrer une
-nouvelle instance** pour les deux tâches. En premier plan, Ctrl+C attend la fin
-de l’itération du producteur. Un arrêt forcé peut laisser son verrou. Suivez la
-[procédure de reprise](docs/semantic-index-producer.fr.md#publication-et-reprise).
+nouvelle instance** pour les deux tâches. En premier plan, Ctrl+C annule
+l’encodage. Après un arrêt forcé, prévoyez un intervalle d’au moins une minute
+avant le redémarrage pour laisser expirer le bail. Voir la
+[reprise du producteur](docs/semantic-index-producer.fr.md#publication-et-reprise).
 
 Configurez le lecteur MCP avec `OBSIDIAN_SYNC_HEARTBEAT_FILE`,
 `SMART_ENV_GENERATION_POINTER` pointant vers `CURRENT`,

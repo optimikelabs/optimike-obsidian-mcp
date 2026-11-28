@@ -23,6 +23,8 @@ const { VaultCacheService } = await import(
 );
 const { config } = await import("../dist/config/index.js");
 const { heartbeatFileSource, observeUpstreamSync } = await import("../dist/services/upstreamSyncEvidence.js");
+const { syncVaultBinding } = await import("../dist/services/syncVaultBinding.js");
+const { VaultFileService } = await import("../dist/services/vaultFileService.js");
 const { registerObsidianReadNoteTool } = await import(
   "../dist/mcp-server/tools/obsidianReadNoteTool/index.js"
 );
@@ -40,11 +42,13 @@ let content = "old";
 
 test("upstream Sync requires ordered, recent heartbeat evidence", async () => {
   const file = path.join(root, "sync-heartbeat.json");
+  const binding = await syncVaultBinding(root);
   const now = Date.parse("2026-01-01T00:10:00.000Z");
   const at = seconds => new Date(now - seconds * 1000).toISOString();
-  const read = () => observeUpstreamSync(heartbeatFileSource(file), { currentSeconds: 60, stallSeconds: 120 }, () => now);
+  const read = (expectedBinding = binding) =>
+    observeUpstreamSync(heartbeatFileSource(file), { currentSeconds: 60, stallSeconds: 120 }, expectedBinding, () => now);
   const put = (state, heartbeat, started, completed) => fs.writeFile(file, JSON.stringify({
-    version: 1, state, heartbeatAt: at(heartbeat),
+    version: 2, vaultBinding: binding, state, heartbeatAt: at(heartbeat),
     lastSuccessfulPull: started === null ? null : { startedAt: at(started), completedAt: at(completed) },
   }));
   assert.equal((await read()).upstreamSync, "unknown");
@@ -54,6 +58,10 @@ test("upstream Sync requires ordered, recent heartbeat evidence", async () => {
   assert.deepEqual(await read(), {
     upstreamSync: "current", lastSuccessfulPullAt: at(5), lagSecondsUpperBound: 30, evidenceSource: "heartbeat-file",
   });
+  const otherVault = path.join(root, "other-vault");
+  await fs.mkdir(otherVault);
+  assert.equal((await read(await syncVaultBinding(otherVault))).upstreamSync, "unknown");
+  await fs.rmdir(otherVault);
   await put("running", 5, 90, 80);
   assert.equal((await read()).upstreamSync, "lagging");
   await put("running", 121, 140, 130);
@@ -85,6 +93,7 @@ test("one-shot Sync wrapper preserves the last receipt when the next CLI pass fa
   await run();
   const first = JSON.parse(await fs.readFile(heartbeat, "utf8"));
   assert.equal(first.state, "ok");
+  assert.equal(first.vaultBinding, await syncVaultBinding(vault));
   assert.ok(first.lastSuccessfulPull.startedAt <= first.lastSuccessfulPull.completedAt);
   await fs.writeFile(cli, "process.exitCode = 1;");
   await assert.rejects(run(), /did not complete successfully/u);
@@ -92,6 +101,36 @@ test("one-shot Sync wrapper preserves the last receipt when the next CLI pass fa
   assert.equal(next.state, "error");
   assert.deepEqual(next.lastSuccessfulPull, first.lastSuccessfulPull);
   assert.deepEqual(await fs.readdir(vault), []);
+});
+
+test("a missing receipt blocks move and delete only when the guard is enabled", async t => {
+  const vault = await fs.mkdtemp(path.join(os.tmpdir(), "optimike-sync-guard-"));
+  t.after(() => fs.rm(vault, { recursive: true, force: true }));
+  const settings = {
+    obsidianRuntimeMode: config.obsidianRuntimeMode, obsidianVaultPath: config.obsidianVaultPath,
+    upstreamSyncHeartbeatFile: config.upstreamSyncHeartbeatFile, upstreamSyncWriteMaxAgeSeconds: config.upstreamSyncWriteMaxAgeSeconds,
+  };
+  Object.assign(config, {
+    obsidianRuntimeMode: "headless-filesystem", obsidianVaultPath: vault,
+    upstreamSyncHeartbeatFile: path.join(vault, "missing.json"), upstreamSyncWriteMaxAgeSeconds: 300,
+  });
+  try {
+    const target = path.join(vault, "Before.md");
+    await fs.writeFile(target, "Synthetic note");
+    const files = new VaultFileService(vault);
+    const { hash: expectedHash } = await files.read("Before.md", context);
+    const absent = error => error.details?.reasonCode === "upstream_sync_write_blocked" &&
+      error.details.upstreamSync === "unknown" && error.details.syncWriteRefusal === "evidence_unavailable";
+    await assert.rejects(files.moveFile("Before.md", "Other/After.md", context, { expectedHash }), absent);
+    await assert.rejects(files.deleteFile("Before.md", context, { expectedHash }), absent);
+    assert.deepEqual(await fs.readdir(vault), ["Before.md"]);
+    config.upstreamSyncWriteMaxAgeSeconds = undefined;
+    await files.moveFile("Before.md", "After.md", context, { expectedHash });
+    await files.deleteFile("After.md", context, { expectedHash });
+    assert.deepEqual(await fs.readdir(vault), []);
+  } finally {
+    Object.assign(config, settings);
+  }
 });
 const rest = {
   getFileContent: async (file) => {

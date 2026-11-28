@@ -676,7 +676,7 @@ export function createHttpObservability(options: HealthOptions = {}) {
     return c.json({
       ...snapshot,
       ...(snapshot.runtimeMode.startsWith("headless-") && {
-        syncConflictFiles: options.vaultCacheService?.getSyncConflictFiles() ?? [],
+        ...(options.vaultCacheService?.getSyncConflicts() ?? { syncConflictFiles: [], syncConflictCount: 0 }),
       }),
       ...(externalSemanticGenerationConfigured() && { semanticIndex: await readSemanticIndexStatus() }),
       controls,

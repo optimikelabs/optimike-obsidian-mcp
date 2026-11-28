@@ -94,7 +94,8 @@ account to read each replacement.
 
 ```json
 {
-  "version": 1,
+  "version": 2,
+  "vaultBinding": "<64 lowercase hex digits: SHA-256 of the UTF-8 real vault path>",
   "heartbeatAt": "2026-01-02T03:04:07.000Z",
   "state": "ok",
   "lastSuccessfulPull": {
@@ -104,7 +105,9 @@ account to read each replacement.
 }
 ```
 
-Use UTC ISO timestamps with milliseconds. State is `running` at the start,
+Compute `vaultBinding` from the canonical absolute path returned by `realpath`,
+with no trailing newline. Receipts for another vault and legacy unbound receipts
+yield `unknown`. Use UTC ISO timestamps with milliseconds. State is `running` at the start,
 `ok` after success or `error` after failure. Retain the previous successful
 pull during a run and after a failure, or use `null` until the first success.
 The backend reports `unknown` for missing, malformed, future or out-of-order
@@ -118,10 +121,14 @@ by its previous successful pass.
 Set `OBSIDIAN_SYNC_WRITE_MAX_AGE_SECONDS` to enable the optional headless
 write guard. A filesystem write refuses with `upstream_sync_write_blocked`
 when the evidence is `unknown`, `stalled`, `error`, or past that age limit.
+The error details include `upstreamSync` and a `syncWriteRefusal` code.
 Reads and dry runs continue, and existing write permission and preconditions
 still apply. Runtime status and authenticated `/statusz` list indexed,
 vault-relative `syncConflictFiles` matching Obsidian's dated Markdown conflict
-names. Public `/readyz` contains no filenames.
+names, capped at 100, and `syncConflictCount` for the full indexed count.
+Obsidian's default automatic merge does not create conflict files. An empty
+list only means the cache contains no matching files. Public `/readyz` contains
+no filenames.
 
 The packaged `scripts/obsidian-sync-heartbeat.mjs` runs the configured Obsidian CLI
 once, with a timeout, and writes this receipt. Schedule it for the vault

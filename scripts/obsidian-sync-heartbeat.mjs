@@ -4,6 +4,7 @@ import { readFile, realpath, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { jsonLine, writeSynced } from "./semantic-index/generation.mjs";
+import { syncVaultBinding } from "../dist/services/syncVaultBinding.js";
 
 async function main() {
   const { values } = parseArgs({ options: {
@@ -20,6 +21,7 @@ async function main() {
     throw Error("--timeout-seconds must be an integer from 1 to 86400");
   }
   const vault = await realpath(values.vault);
+  const vaultBinding = await syncVaultBinding(vault);
   const cli = await realpath(values["ob-cli"]);
   const directory = await realpath(path.dirname(values.heartbeat));
   const filename = path.join(directory, path.basename(values.heartbeat));
@@ -31,14 +33,15 @@ async function main() {
   let lastSuccessfulPull = null;
   try {
     const previous = JSON.parse(await readFile(filename, "utf8"));
-    if (previous.version === 1) lastSuccessfulPull = previous.lastSuccessfulPull ?? null;
+    if (previous.version === 2 && previous.vaultBinding === vaultBinding)
+      lastSuccessfulPull = previous.lastSuccessfulPull ?? null;
   } catch {
     // A missing or invalid prior receipt leaves freshness unknown.
   }
   async function publish(state, heartbeatAt) {
     const pending = path.join(directory, ".sync-heartbeat-" + randomUUID());
     try {
-      await writeSynced(pending, jsonLine({ version: 1, heartbeatAt, state, lastSuccessfulPull }));
+      await writeSynced(pending, jsonLine({ version: 2, vaultBinding, heartbeatAt, state, lastSuccessfulPull }));
       await rename(pending, filename);
     } finally {
       await rm(pending, { force: true });

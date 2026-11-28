@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { appendFileSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, symlink, unlink, watch, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, symlink, unlink, utimes, watch, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -13,6 +13,7 @@ import { readSmartEnvV3, smartTextHash } from "../dist/services/smartEnvV3.js";
 import { scanBootstrap } from "./semantic-index/bootstrap.mjs";
 import { selectSmartEnvBlocks } from "./semantic-index/smart-env-selection.mjs";
 import { inventory } from "./semantic-index/vault.mjs";
+import { pruneGenerations } from "./semantic-index/service.mjs";
 
 const cli = fileURLToPath(new URL("./semantic-index-producer.mjs", import.meta.url));
 const model = "fixture-model";
@@ -38,6 +39,7 @@ async function fixture(t) {
   const requests = [];
   const batches = [];
   let beforeEncode;
+  let beforeEncodeMatches;
   let transformRow = row => row;
   let refuseBatch = () => false;
   let serviceBusy = false;
@@ -59,7 +61,7 @@ async function fixture(t) {
         assert.equal(item.entity_kind, item.source_path.includes("#") ? "block" : "source");
         requests.push(item);
       }
-      if (beforeEncode) {
+      if (beforeEncode && beforeEncodeMatches(items)) {
         const callback = beforeEncode;
         beforeEncode = undefined;
         await callback();
@@ -97,7 +99,8 @@ async function fixture(t) {
   function start(...args) {
     const { promise, resolve } = Promise.withResolvers();
     const child = execFile(process.execPath, [
-      cli, "--vault", vault, "--index", index, "--endpoint", `http://127.0.0.1:${server.address().port}`,
+      "--disable-warning=ExperimentalWarning", cli,
+      "--vault", vault, "--index", index, "--endpoint", `http://127.0.0.1:${server.address().port}`,
       "--model", model, "--revision", "fixture-revision", "--model-sha256", weights,
       "--min-note-chars", "1", "--min-block-chars", "0", ...args,
     ], { timeout: producerTimeout, windowsHide: true }, (error, stdout, stderr) => resolve({ error, stdout, stderr }));
@@ -129,26 +132,10 @@ async function fixture(t) {
       blocks: true, expected: { fingerprint, model, noteCount: vectors.notes.count, sectionCount: vectors.sections.count },
     });
   }
-  return {
-    root, vault, index, requests, batches, health, start, run, fail, put, current, generation, manifest, load,
-    beforeEncode(callback) { beforeEncode = callback; },
-    transformRow(callback) { transformRow = callback; },
-    refuseBatch(callback) { refuseBatch = callback; },
-    setBusy(value) { serviceBusy = value; },
-  };
-}
-
-test("service polls changes, backs off, and atomically replaces the generation under the producer lock", async t => {
-  const f = await fixture(t);
-  await f.put("Edit.md", "# A\n\nOriginal.\n# B\n\nKept.\n");
-  await f.put("Remove.md", note("Removed."));
-  await f.put("Move.md", note("Moved."));
-  const first = await f.run();
-  const service = f.start("service", "--allow-deletions", "--poll-ms", "50", "--debounce-ms", "50");
-  const state = async () => JSON.parse(await readFile(path.join(f.index, "SERVICE.json"), "utf8")
+  const state = async () => JSON.parse(await readFile(path.join(index, "SERVICE.json"), "utf8")
     .catch(error => { if (error.code !== "ENOENT") throw error; return "null"; }));
   async function until(predicate) {
-    const events = watch(f.index, { signal: AbortSignal.timeout(15_000) });
+    const events = watch(index, { signal: AbortSignal.timeout(15_000) });
     try {
       const status = await state();
       if (status && predicate(status)) return status;
@@ -162,40 +149,164 @@ test("service polls changes, backs off, and atomically replaces the generation u
     }
     assert.fail("Service observation never matched: " + JSON.stringify(await state()));
   }
-  const release = Promise.withResolvers();
-  try {
-    await until(status => status.pendingChanges === 0 && status.generation === first.generation);
-    const unchangedRequests = f.requests.length;
-    await f.fail(/already has a producer lock/u);
-    assert.equal(f.requests.length, unchangedRequests, "an unchanged poll encodes nothing");
-    f.setBusy(true);
-    await f.put("Edit.md", "# A\n\nEdited.\n# B\n\nKept.\n");
-    await unlink(path.join(f.vault, "Remove.md"));
-    await rename(path.join(f.vault, "Move.md"), path.join(f.vault, "Moved.md"));
-    const backedOff = await until(status => status.lastError === "embedding_busy");
-    assert.equal(backedOff.pendingChanges, 4);
-    assert.ok(backedOff.retryAt > backedOff.observedAt, "a busy response schedules a later build, independently of the next poll");
-    assert.equal(await f.current(), first.generation, "a busy embedder must leave CURRENT intact");
-    const attempts = f.requests.length;
-    const arrived = Promise.withResolvers();
-    f.beforeEncode(async () => { arrived.resolve(); await release.promise; });
-    f.setBusy(false);
-    await Promise.race([arrived.promise, service.result.then(result => assert.fail(result.stderr || "Service exited early"))]);
-    assert.equal(await f.current(), first.generation, "readers see the old generation during embedding");
-    release.resolve();
-    const published = await until(status => status.generation !== first.generation && status.pendingChanges === 0);
-    assert.equal(await f.current(), published.generation);
-    assert.equal(published.lastError, null);
-    assert.deepEqual((await f.load(published.generation)).notes.map(row => row.notePath).sort(), ["Edit.md", "Moved.md"]);
-    assert.deepEqual((await f.load(first.generation)).notes.map(row => row.notePath).sort(), ["Edit.md", "Move.md", "Remove.md"]);
-    assert.ok(f.requests.slice(attempts).every(row => !row.input.includes("Kept.") || row.entity_kind === "source"),
-      "unchanged sections reuse their existing vectors");
-    assert.equal((await f.manifest(published.generation)).coverage.indexedNotes, 2);
-  } finally {
-    release.resolve();
-    service.child.kill("SIGKILL");
-    await service.result;
+  async function withService(callback, ...args) {
+    const service = start("service", "--poll-ms", "50", "--debounce-ms", "50", ...args);
+    try {
+      await callback(service);
+    } finally {
+      service.child.kill("SIGKILL");
+      await service.result;
+    }
   }
+  return {
+    root, vault, index, requests, batches, health, start, run, fail, put, current, generation, manifest, load,
+    withService, until,
+    beforeEncode(callback, matches = () => true) {
+      beforeEncode = callback;
+      beforeEncodeMatches = matches;
+    },
+    transformRow(callback) { transformRow = callback; },
+    refuseBatch(callback) { refuseBatch = callback; },
+    setBusy(value) { serviceBusy = value; },
+  };
+}
+
+test("service polls changes, backs off, and atomically replaces the generation under the producer lock", async t => {
+  const f = await fixture(t);
+  await f.put("Edit.md", "# A\n\nOriginal.\n# B\n\nKept.\n");
+  await f.put("Remove.md", note("Removed."));
+  await f.put("Move.md", note("Moved."));
+  const first = await f.run();
+  const release = Promise.withResolvers();
+  await f.withService(async service => {
+    try {
+      await f.until(status => status.pendingChanges === 0 && status.generation === first.generation);
+      const unchangedRequests = f.requests.length;
+      await f.fail(/already has a producer lock/u);
+      assert.equal(f.requests.length, unchangedRequests, "an unchanged poll encodes nothing");
+      f.setBusy(true);
+      await f.put("Edit.md", "# A\n\nEdited.\n# B\n\nKept.\n");
+      await unlink(path.join(f.vault, "Remove.md"));
+      await rename(path.join(f.vault, "Move.md"), path.join(f.vault, "Moved.md"));
+      const backedOff = await f.until(status => status.lastError === "embedding_busy");
+      assert.equal(backedOff.pendingChanges, 4);
+      assert.ok(backedOff.retryAt > backedOff.observedAt, "a busy response schedules a later build, independently of the next poll");
+      assert.equal(await f.current(), first.generation, "a busy embedder must leave CURRENT intact");
+      const attempts = f.requests.length;
+      const arrived = Promise.withResolvers();
+      f.beforeEncode(async () => { arrived.resolve(); await release.promise; });
+      f.setBusy(false);
+      await Promise.race([arrived.promise, service.result.then(result => assert.fail(result.stderr || "Service exited early"))]);
+      assert.equal(await f.current(), first.generation, "readers see the old generation during embedding");
+      release.resolve();
+      const published = await f.until(status => status.generation !== first.generation && status.pendingChanges === 0);
+      assert.equal(await f.current(), published.generation);
+      assert.equal(published.lastError, null);
+      assert.deepEqual((await f.load(published.generation)).notes.map(row => row.notePath).sort(), ["Edit.md", "Moved.md"]);
+      assert.deepEqual((await f.load(first.generation)).notes.map(row => row.notePath).sort(), ["Edit.md", "Move.md", "Remove.md"]);
+      assert.ok(f.requests.slice(attempts).every(row => !row.input.includes("Kept.") || row.entity_kind === "source"),
+        "unchanged sections reuse their existing vectors");
+      assert.equal((await f.manifest(published.generation)).coverage.indexedNotes, 2);
+    } finally {
+      release.resolve();
+    }
+  }, "--max-deletion-percent", "100");
+});
+
+test("service publishes consistent included notes despite a new arrival and keeps observing during embedding", async t => {
+  const f = await fixture(t);
+  const firstText = note("Original.");
+  await f.put("Edit.md", firstText);
+  const first = await f.run();
+  const release = Promise.withResolvers();
+  await f.withService(async service => {
+    try {
+      const initial = await f.until(status => status.generation === first.generation && status.pendingChanges === 0);
+      const before = f.requests.length;
+      await utimes(path.join(f.vault, "Edit.md"), new Date(1000), new Date(1000));
+      const touchedAt = Date.now();
+      const touched = await f.until(status => status.observedAt > Math.max(initial.observedAt, touchedAt));
+      assert.equal(touched.pendingChanges, 0);
+      assert.equal(await f.current(), first.generation);
+      assert.equal(f.requests.length, before, "an mtime-only change needs no embedding");
+      const arrived = Promise.withResolvers();
+      f.beforeEncode(async () => { arrived.resolve(); await release.promise; });
+      await f.put("Edit.md", note("Edited."));
+      await Promise.race([arrived.promise, service.result.then(result => assert.fail(result.stderr || "Service exited early"))]);
+      const inFlight = await f.until(status => status.generation === first.generation && status.pendingChanges === 1);
+      await f.put("Arrival.md", note("Created while the encoder was busy."));
+      await f.until(status => status.generation === first.generation && status.pendingChanges === 2 &&
+        status.observedAt > inFlight.observedAt);
+      const finishSecond = Promise.withResolvers();
+      f.beforeEncode(() => finishSecond.promise, items => items.some(item => item.source_path === "Arrival.md"));
+      release.resolve();
+      try {
+        const partial = await f.until(status => status.generation !== first.generation && status.pendingChanges === 1);
+        assert.deepEqual(Object.keys((await f.manifest(partial.generation)).sources), ["Edit.md"]);
+      } finally {
+        finishSecond.resolve();
+      }
+      const converged = await f.until(status => status.generation !== first.generation && status.pendingChanges === 0);
+      assert.deepEqual(Object.keys((await f.manifest(converged.generation)).sources), ["Arrival.md", "Edit.md"]);
+    } finally {
+      release.resolve();
+    }
+  });
+});
+
+test("included content drift is retried with the debounce instead of embedding backoff", async t => {
+  const f = await fixture(t);
+  await f.put("Edit.md", note("Original."));
+  const first = await f.run();
+  await f.withService(async () => {
+    await f.until(status => status.generation === first.generation && status.pendingChanges === 0);
+    f.beforeEncode(() => f.put("Edit.md", note("Final contents.")));
+    await f.put("Edit.md", note("First edit."));
+    const drift = await f.until(status => status.lastError === "source_drift");
+    assert.equal(drift.retryAt, null, "source drift does not schedule exponential backoff");
+    const next = await f.until(status => status.generation !== first.generation && status.pendingChanges === 0);
+    assert.equal((await f.manifest(next.generation)).sources["Edit.md"].sha256, hash(note("Final contents.")));
+    assert.deepEqual(new Set(await readdir(path.join(f.index, "generations"))), new Set([first.generation, next.generation]));
+  }, "--debounce-ms", "200");
+});
+
+test("retirement keeps CURRENT, the newest retired generation, and generations within reader grace", async t => {
+  const f = await fixture(t);
+  await f.put("Edit.md", note("One"));
+  const one = await f.run();
+  await f.put("Edit.md", note("Two"));
+  const two = await f.run();
+  await pruneGenerations(f.index, two.generation, 1, 5000, 1000);
+  await f.put("Edit.md", note("Three"));
+  const three = await f.run();
+  await pruneGenerations(f.index, three.generation, 1, 5000, 5999);
+  assert.equal((await f.load(one.generation)).notes[0].notePath, "Edit.md", "a pinned reader keeps access during grace");
+  await pruneGenerations(f.index, three.generation, 1, 5000, 6000);
+  assert.deepEqual(new Set(await readdir(path.join(f.index, "generations"))), new Set([two.generation, three.generation]));
+  assert.equal(await f.current(), three.generation);
+});
+
+test("service recognizes a rename and requires a fresh single-use authorization for deletion", async t => {
+  const f = await fixture(t);
+  for (const name of ["A", "B", "C"]) await f.put(name + ".md", note(name));
+  const first = await f.run();
+  const marker = path.join(f.index, "ALLOW_DELETIONS");
+  await f.withService(async () => {
+    await f.until(status => status.generation === first.generation && status.pendingChanges === 0);
+    await rename(path.join(f.vault, "A.md"), path.join(f.vault, "Renamed.md"));
+    const renamed = await f.until(status => status.generation !== first.generation && status.pendingChanges === 0);
+    assert.ok((await f.manifest(renamed.generation)).sources["Renamed.md"]);
+    await writeFile(marker, first.generation + "\n");
+    await unlink(path.join(f.vault, "B.md"));
+    await f.until(status => status.lastError === "deletion_guard");
+    assert.equal(await f.current(), renamed.generation, "a marker for the previous generation cannot authorize deletion");
+    await writeFile(marker, renamed.generation + "\n");
+    const authorized = await f.until(status => status.generation !== renamed.generation && status.pendingChanges === 0);
+    assert.ok(!(await readdir(f.index)).includes("ALLOW_DELETIONS"));
+    await unlink(path.join(f.vault, "C.md"));
+    await f.until(status => status.lastError === "deletion_guard");
+    assert.equal(await f.current(), authorized.generation);
+  }, "--max-deletions", "0");
 });
 
 test("first build sends exact note/block inputs and the Smart Env reader resolves vectors and line hashes", async t => {
@@ -292,6 +403,8 @@ test("a changed source or replacement vault volume refuses publication", async t
   f.beforeEncode(() => f.put("a.md", note("Changed again during embedding")));
   await f.fail(/Vault inventory changed/u);
   assert.equal(await f.current(), first.generation);
+  assert.deepEqual(await readdir(path.join(f.index, "generations")), [first.generation],
+    "verification after sealing must remove the unpublished generation");
   await rename(f.vault, path.join(f.root, "offline-vault"));
   await mkdir(f.vault);
   await f.fail(/Vault root or volume differs/u);
@@ -320,7 +433,36 @@ test("a killed writer and a competing invocation leave the previous pointer and 
   assert.equal(await f.current(), first.generation);
   assert.equal((await f.load(first.generation)).notes[0].notePath, "a.md");
   assert.deepEqual(await readdir(path.join(f.index, "generations")), [first.generation]);
+  await f.fail(/already has a producer lock/u);
+  await utimes(path.join(f.index, ".producer.lock"), new Date(1000), new Date(1000));
+  const recovered = await f.run();
+  assert.equal(await f.current(), recovered.generation);
+  assert.notEqual(recovered.generation, first.generation);
 });
+
+if (process.platform !== "win32") {
+  test("a service stop aborts an in-flight encode and relinquishes the lease", async t => {
+    const f = await fixture(t);
+    await f.put("A.md", note("Before"));
+    const first = await f.run();
+    const arrived = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    await f.withService(async service => {
+      try {
+        await f.until(status => status.generation === first.generation && status.pendingChanges === 0);
+        f.beforeEncode(async () => { arrived.resolve(); await release.promise; });
+        await f.put("A.md", note("After"));
+        await Promise.race([arrived.promise, service.result.then(result => assert.fail(result.stderr || "Service exited early"))]);
+        assert.ok(service.child.kill("SIGTERM"));
+        assert.ifError((await service.result).error);
+        assert.equal(await f.current(), first.generation);
+        assert.ok(!(await readdir(f.index)).includes(".producer.lock"));
+      } finally {
+        release.resolve();
+      }
+    });
+  });
+}
 
 test("pointer replacement exposes a complete generation or preserves CURRENT if a reader denies replacement", async t => {
   const f = await fixture(t);

@@ -13,6 +13,7 @@ import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { syncVaultBinding } from "../dist/services/syncVaultBinding.js";
 
 const timeoutMs = Number(process.env.MCP_SMOKE_TIMEOUT_MS ?? "60000");
 const modeArg =
@@ -190,6 +191,7 @@ async function createTempVault() {
 
 async function main() {
   const vaultRoot = await createTempVault();
+  const vaultBinding = await syncVaultBinding(vaultRoot);
   const evidenceDir = await mkdtemp(path.join(os.tmpdir(), "optimike-sync-evidence-"));
   const receipt = path.join(evidenceDir, "heartbeat.json");
   const testSyncGuard = modeArg === "headless-guarded";
@@ -197,7 +199,7 @@ async function main() {
     const now = Date.now();
     const pullAt = new Date(now - minutesAgo * 60_000).toISOString();
     await writeFile(receipt, JSON.stringify({
-      version: 1, state, heartbeatAt: new Date(now - heartbeatMinutesAgo * 60_000).toISOString(),
+      version: 2, vaultBinding, state, heartbeatAt: new Date(now - heartbeatMinutesAgo * 60_000).toISOString(),
       lastSuccessfulPull: { startedAt: pullAt, completedAt: pullAt },
     }));
   };
@@ -787,7 +789,10 @@ async function main() {
       if (testSyncGuard) {
         const target = path.join(vaultRoot, "Projects", "Headless.md");
         const before = await readFile(target, "utf8");
-        for (const [state, age, heartbeatAge] of [["error", 0, 0], ["ok", 6, 0], ["running", 3, 2]]) {
+        for (const [state, age, heartbeatAge, expectedState, refusal] of [
+          ["error", 0, 0, "error", "error"], ["ok", 6, 0, "lagging", "pull_too_old"],
+          ["running", 3, 2, "stalled", "stalled"],
+        ]) {
           await writeReceipt(state, age, heartbeatAge);
           const blocked = await withTimeout(client.callTool({
             name: "obsidian_update_note",
@@ -797,7 +802,10 @@ async function main() {
             },
           }), "Sync write guard");
           assert.equal(blocked.isError, true);
-          assert.match(blocked.content[0].text, /upstream_sync_write_blocked/u);
+          const { details } = JSON.parse(blocked.content[0].text).error;
+          assert.equal(details.reasonCode, "upstream_sync_write_blocked");
+          assert.equal(details.upstreamSync, expectedState);
+          assert.equal(details.syncWriteRefusal, refusal);
           const read = await withTimeout(client.callTool({
             name: "obsidian_read_note", arguments: { filePath: "Projects/Headless.md", format: "markdown" },
           }), "read with Sync write guard enabled");

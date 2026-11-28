@@ -10,22 +10,24 @@ export function validateVector(vector, dimensions) {
   }
 }
 
-export function bitnetClient(endpoint, modelId, revision, modelSha256) {
+export function bitnetClient(endpoint, modelId, revision, modelSha256, signal) {
   const base = new URL(endpoint);
   if (!["http:", "https:"].includes(base.protocol) || base.username || base.password ||
       base.pathname !== "/" || base.search || base.hash) {
     throw Error("Endpoint must be an HTTP(S) origin without credentials");
   }
   async function request(route, payload) {
+    const timeout = AbortSignal.timeout(125_000);
     const response = await fetch(new URL(route, base), {
       ...(payload && {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
       }),
-      signal: AbortSignal.timeout(125_000),
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       redirect: "error",
     }).catch(error => {
+      signal?.throwIfAborted();
       const failure = error.name === "TimeoutError" ? "timed out" : "request failed";
       throw Object.assign(Error(`BitNet ${route} ${failure}`), { code: "EMBEDDING_FAILED" });
     });
