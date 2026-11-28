@@ -41,8 +41,13 @@ function coverage(total: number, returned: number) {
 
 type LinkCount = { link_path: string; count: number };
 type Target = { path: string; ambiguous?: true };
-const INDEX_REVISION = "v15:";
+const INDEX_REVISION = "v16:";
 const MAX_CANDIDATE_PATHS = 32768;
+
+function isRetryableLinkFailure(reason?: LinkSourceLimitReason): boolean {
+  return reason === "timeout" || reason === "oom";
+}
+
 export type LinkIndexSource = {
   path: string; hash: string; size: number; attempts: number; bounded?: true;
   skipReason?: Exclude<LinkSourceLimitReason, "cap">; skipHints?: true;
@@ -337,9 +342,9 @@ export class MarkdownLinkIndex {
           ? extractBoundedLinkSource(content, this.options)
           : { references: extractMarkdownLinkReferences(content), complete: true };
     const source: IndexedSource = { ...request, ...result, attempts: retryAttempt };
-    // Only bounded timeouts schedule a retry. They publish no references,
-    // so a second timeout for the same content hash repeats the same result.
-    if (skipReason === "timeout" && (retryAttempt > 0 || retryAttempt + 1 >= (this.options.maxRetryAttempts ?? 2))) {
+    // Count the initial failure and any delayed attempts for this content hash.
+    // A fallback that finishes with partial coverage already has a stable result.
+    if (isRetryableLinkFailure(skipReason) && retryAttempt + 1 >= (this.options.maxRetryAttempts ?? 2)) {
       source.limitReason = "region";
     }
     if (skipHints) {
@@ -377,8 +382,8 @@ export class MarkdownLinkIndex {
   private replaceSource({ path: filePath, hash, complete, references, possible, possibleAnywhere, limitReason, attempts, skipReason }: IndexedSource): void {
     const basename = basenameKey(filePath);
     const indexedHash = this.revision + hash;
-    const retryAt = limitReason === "timeout" ? Date.now() + 60_000 : null;
-    const retryAttempt = skipReason === "timeout" ? attempts + 1 : 0;
+    const retryAt = isRetryableLinkFailure(limitReason) ? Date.now() + 60_000 : null;
+    const retryAttempt = isRetryableLinkFailure(skipReason) ? attempts + 1 : 0;
     if (!this.fileUpsert.run(filePath, filePath.toLowerCase(), basename, indexedHash,
       Number(complete), Number(!!possibleAnywhere), limitReason ?? null, retryAt, retryAttempt, attempts).changes) return;
     this.refsDelete.run(filePath);
