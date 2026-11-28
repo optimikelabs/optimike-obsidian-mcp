@@ -15,7 +15,7 @@ Any connection lets an AI read a vault. Optimike Obsidian MCP matters when your 
 | You want to… | What the MCP does |
 | --- | --- |
 | Approve before the AI writes | It prepares a plan; what gets written is exactly what you approved, then it is verified. If the connection drops, the write is not blindly replayed. |
-| Keep writing while it works | Its write is refused if the note changes between its plan and the write, so an edit made meanwhile is not overwritten. |
+| Keep writing while it works | For a full replacement, the agent can pass the hash from its original read so planning refuses later edits. A change after planning still blocks the write. |
 | Keep Bases, links and tasks correct | Obsidian-format properties, moves through Obsidian, deletion to the trash, Operon tasks through Operon. |
 | Have your rules applied | Before each write, the AI is pointed to the `AGENTS.md` files that apply, from Claude, ChatGPT or Codex; a strict mode refuses the write until it has read them. |
 | Find the right passage | Semantic search returns the passage that answers, with its lines. |

@@ -752,13 +752,27 @@ try {
   assert.equal(fake.casRequests, 0);
 
   fake.reset(`\uFEFF${INITIAL_CONTENT}`);
+  const bomRead = await call(session, "obsidian_read_note", { filePath: FIXTURE_PATH });
+  assert.equal(bomRead.payload.content, fake.content, "the fixture read preserves the UTF-8 BOM");
+  assert.equal(bomRead.payload.sha256, sha256(fake.content));
+  const bomRequest = {
+    path: FIXTURE_PATH,
+    nextContent: INITIAL_CONTENT.replace("before", "after"),
+    idempotencyKey: "unsupported-bom-source",
+  };
+  const bomConflict = await call(session, "obsidian_note_replace_plan", {
+    ...bomRequest,
+    expectedBeforeSha256: sha256(INITIAL_CONTENT),
+  }, true);
+  assert.equal(bomConflict.payload.error.code, "CONFLICT", "hashing as if the BOM were stripped must conflict");
+  assert.equal(bomConflict.payload.error.details.observedSha256, bomRead.payload.sha256,
+    "the read and the Bridge hash agree on the BOM-bearing bytes");
   const bomSourceAttempt = await call(
     session,
     "obsidian_note_replace_plan",
     {
-      path: FIXTURE_PATH,
-      nextContent: `\uFEFF${INITIAL_CONTENT.replace("before", "after")}`,
-      idempotencyKey: "unsupported-bom-source",
+      ...bomRequest,
+      expectedBeforeSha256: bomRead.payload.sha256,
     },
     true,
   );
@@ -1374,13 +1388,71 @@ try {
 
   session = await startClient("full", "live");
 
+  fake.reset(INITIAL_CONTENT.replace(/\n/g, "\r\n"));
+  const crlfRead = await call(session, "obsidian_read_note", { filePath: FIXTURE_PATH, format: "json" });
+  assert.equal(crlfRead.payload.content.content, fake.content, "the fixture read preserves CRLF");
+  const crlfKey = "strict-crlf-source";
+  const crlfReplacement = INITIAL_CONTENT.replace("before", "after");
+  const crlfPlan = await call(session, "obsidian_note_replace_plan", {
+    path: FIXTURE_PATH,
+    nextContent: crlfReplacement,
+    idempotencyKey: crlfKey,
+    expectedBeforeSha256: crlfRead.payload.sha256,
+  });
+  assert.equal(crlfPlan.payload.beforeProof.details.sha256, crlfRead.payload.sha256,
+    "planning must seal the exact CRLF hash returned by the read");
+  const crlfApply = await call(session, "obsidian_note_replace_apply", {
+    planRef: crlfPlan.payload.planRef,
+    idempotencyKey: crlfKey,
+  });
+  assertTerminal(crlfApply.payload);
+  assert.equal(fake.content, crlfReplacement);
+
   fake.reset();
-  const stalePlan = await call(session, "obsidian_note_replace_plan", {
+  const readA = await call(session, "obsidian_read_note", {
+    filePath: FIXTURE_PATH,
+    format: "json",
+  });
+  const shaA = sha256(readA.payload.content.content);
+  const editB = nextContent("third-party-edit");
+  fake.content = editB;
+  const staleBeforePlan = await call(session, "obsidian_note_replace_plan", {
+    path: FIXTURE_PATH,
+    nextContent: nextContent("based-on-a"),
+    idempotencyKey: "stale-before-plan",
+    expectedBeforeSha256: shaA,
+  }, true);
+  assert.equal(staleBeforePlan.payload.error.code, "CONFLICT", "an edit after read and before plan must refuse the stale replacement");
+  assert.equal(staleBeforePlan.payload.error.details.reasonCode, "note_replace_base_changed");
+  assert.equal(staleBeforePlan.payload.error.details.observedSha256, sha256(editB));
+  assert.equal(staleBeforePlan.payload.error.details.mutationMayHaveApplied, false);
+  assert.equal(fake.content, editB);
+  assert.equal(readA.payload.sha256, shaA, "the read hash must cover the returned UTF-8 content");
+
+  const staleBeforePlanRetry = await call(session, "obsidian_note_replace_plan", {
+    path: FIXTURE_PATH,
+    nextContent: nextContent("based-on-b"),
+    idempotencyKey: "stale-before-plan",
+    expectedBeforeSha256: sha256(editB),
+  });
+  assert.equal(staleBeforePlanRetry.payload.beforeProof.details.sha256, sha256(editB), "the refused request must not have sealed a plan or bound the key");
+
+  fake.reset();
+  const staleRequest = {
     path: FIXTURE_PATH,
     nextContent: nextContent("stale-target"),
     idempotencyKey: "stale-target",
-  });
-  fake.content = nextContent("third-party-edit");
+    expectedBeforeSha256: readA.payload.sha256,
+  };
+  const stalePlan = await call(session, "obsidian_note_replace_plan", staleRequest);
+  fake.content = editB;
+  const staleReplay = await call(session, "obsidian_note_replace_plan", staleRequest);
+  assert.equal(staleReplay.payload.planRef, stalePlan.payload.planRef, "same-base retries replay the sealed plan even after a later edit");
+  const differentBase = await call(session, "obsidian_note_replace_plan", {
+    ...staleRequest,
+    expectedBeforeSha256: sha256(editB),
+  }, true);
+  assert.equal(differentBase.payload.error.code, "CONFLICT", "the same key cannot be rebound to a different expected base");
   const staleWrites = fake.successfulWrites;
   const stale = await call(session, "obsidian_note_replace_apply", {
     planRef: stalePlan.payload.planRef,
@@ -1388,7 +1460,7 @@ try {
   });
   assertTerminal(stale.payload, "conflict");
   assert.equal(fake.successfulWrites, staleWrites);
-  assert.equal(fake.content, nextContent("third-party-edit"));
+  assert.equal(fake.content, editB, "apply preserves an edit made after planning");
 
   // A wrapper preflight refusal has not sent a CAS and must not wait for
   // an automation window belonging to a write that never happened.

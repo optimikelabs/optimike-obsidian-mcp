@@ -31,15 +31,32 @@ published artifacts, and public diagnostics.
 
 ### `obsidian_note_replace_plan`
 
-Input: `path`, complete `nextContent`, and mandatory `idempotencyKey`.
+Pass `path`, the complete `nextContent`, the `idempotencyKey`, and optionally
+`expectedBeforeSha256`. When composing a replacement from an existing note,
+copy the top-level `sha256` from the same `obsidian_read_note` response. It is
+the SHA-256 of the returned Markdown encoded as UTF-8, with 64 lowercase hex
+characters, in both Markdown and JSON formats.
 
-The requested replacement is not written during planning. An undated note can
-first be dated by FDM as described in the text-patch contract. The Atomic Write Bridge reads the existing
-`.md` note; that same read supplies the before SHA-256 and the current content
-used for structured protected-frontmatter comparison. The server validates the
-future Obsidian Markdown, seals target, backend binding, before/after hashes,
-request digest, idempotency key, and the private recovery content, then returns
-a receipt with an opaque `planRef`.
+The server compares that hash with the Bridge's live read before any date preparation
+or plan sealing. A stale base returns `CONFLICT` with
+`error.details.reasonCode: note_replace_base_changed` and
+`error.details.observedSha256`. Read the note again and rebuild the replacement
+from that version. When the note needs a creation date, a plan with an expected
+hash returns `CONFLICT` with `note_replace_date_preparation_required`. Open and
+save the note in Obsidian, wait for the date manager, and read it again before
+rebuilding the replacement. Both refusals leave the note untouched.
+
+If a previous date preparation still holds a lock, strict planning returns
+`note_replace_date_preparation_locked` and `mutationMayHaveApplied: false` for
+the current request. The owner resolves the previous preparation with
+`obsidian_operation_close` and `datePreparationPaths`, then the caller reads
+the note again before rebuilding the replacement.
+
+When `expectedBeforeSha256` is omitted, the Bridge's planning read supplies
+the base, and FDM may first date an undated note as described in the text-patch
+contract. The server validates the replacement and protected frontmatter,
+seals the target, backend binding, before/after hashes, request digest, key and
+private recovery content, then returns an opaque `planRef`.
 
 The caller's frontmatter must already match Obsidian's native canonical form.
 The Bridge's read-only `frontmatter/format` capability is mandatory and bound
@@ -49,9 +66,9 @@ field derived only from the caller's own frontmatter; no body or parser error
 is returned. The caller can resend that form. Type discrepancies are warnings,
 not admission failures. The capability and sealed form are checked again before CAS.
 
-The same key and canonical request return the same plan. Reusing the key for a
-different replacement is rejected. Planning is not classified as read-only:
-it creates durable mutation intent and is blocked by `MCP_WRITE_MODE=readonly`.
+The same key and canonical request return the same plan. Changing the expected
+hash or the replacement requires a new key once a plan exists. Planning creates
+durable mutation intent and is blocked by `MCP_WRITE_MODE=readonly`.
 
 ### `obsidian_note_replace_apply`
 

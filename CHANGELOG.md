@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creates that would overwrite an existing file with `overwrite=false` (#201).
 - Headless `bases_query` refuses queries that need Obsidian to apply Base or view rules or evaluate formulas. Use `property_only: true` to opt into a labeled property scan of cached Markdown notes. Plain queries can use the same Markdown-only scan without opting in. The scan accepts `and`/`or`/`not` filter trees with simple leaves and rejects unsupported filter and sort inputs, including formula references (#200).
 
+- Whole-note replacement can now refuse edits that arrive between the caller's source read and plan creation. Pass the new `sha256` from `obsidian_read_note` as `expectedBeforeSha256` to `obsidian_note_replace_plan`. A stale base or required date preparation refuses without writing or sealing a plan. Apply still compares the sealed hash at the write boundary. (#221)
+
 ### Added
 
 - Headless note reads, listings, and global search report cache provenance and flag requests that overlap a refresh. Runtime status reports the newest indexed Markdown modification time and explicitly marks upstream synchronization as unknown.
