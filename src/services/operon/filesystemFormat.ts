@@ -1,10 +1,9 @@
-
 import { createHash } from "node:crypto";
 import { posix } from "node:path";
 import { parse } from "yaml";
 import type { z } from "zod/v3";
 import {
-  OperonSemanticConfigurationSchema, resolveOperonWorkflowStatus,
+  OperonSemanticConfigurationSchema, resolveOperonPriorityStableId,
   type OperonTask, type OperonFieldValue,
 } from "./contract.js";
 
@@ -39,7 +38,7 @@ export function projectFilesystemConfiguration(data: RecordValue): FilesystemCon
   const rawFilters = packaged
     ? strings(filters.filterIds).map(id => object(filters.itemsById)[id])
     : array(data.filterSets);
-  return OperonSemanticConfigurationSchema.parse({
+  const configuration = OperonSemanticConfigurationSchema.parse({
     language,
     workflow: {
       language, defaultPipelineName: str((packaged ? pipelines : settings).defaultPipelineName),
@@ -110,6 +109,9 @@ export function projectFilesystemConfiguration(data: RecordValue): FilesystemCon
       };
     }) },
   });
+  const { defaultPriority, items } = configuration.priorities;
+  configuration.priorities.defaultPriority = resolveOperonPriorityStableId(defaultPriority, items) ?? defaultPriority;
+  return configuration;
 }
 
 const scalar = (value: unknown): string | null =>
@@ -128,18 +130,31 @@ type StoredTask = {
   id: string; description: string; line: number | null;
   fields: Record<string, OperonFieldValue>; tags: string[];
   checkbox?: OperonTask["checkbox"]; properties?: RecordValue;
-  progress?: { total: number; completed: number };
 };
 
-function readFields(entries: [string, unknown][], configuration: FilesystemConfiguration) {
+const storedCounters = new Set(builtInKeys.filter(key => key === "progress" || /(?:Subtask|Descendant)Count$/u.test(key)));
+
+function decodeInlineValue(input: string, note: boolean): string {
+  return input.replace(/\\\\|\\u000a|\\n|\\[{};]/giu, escape => {
+    if (escape.toLowerCase() === "\\u000a" || (note && escape === "\\n")) return "\n";
+    return escape.toLowerCase() === "\\n" ? escape : escape.slice(1);
+  });
+}
+
+function readFields(entries: [string, unknown][], configuration: FilesystemConfiguration, inline = false) {
   const mappings = new Map(configuration.keys.map(k => [k.visiblePropertyName, k]));
   const types = new Map(configuration.keys.map(k => [k.canonicalKey, k.type]));
   const fields: Record<string, OperonFieldValue> = Object.create(null);
   for (const [key, value] of entries) {
     const canonical = mappings.get(key)?.canonicalKey ?? (key === "dateCreated" ? "datetimeCreated" : key);
-    if (canonical.startsWith("_") || (!managed.has(canonical) && !types.has(canonical))) continue;
-    const parsed = types.get(canonical) === "list" || listKeys.includes(canonical)
-      ? splitOperonList(value) : scalar(value);
+    if (storedCounters.has(canonical) || canonical.startsWith("_") || (!managed.has(canonical) && !types.has(canonical))) continue;
+    const isList = types.get(canonical) === "list" || listKeys.includes(canonical);
+    const parsed = isList
+      ? inline && typeof value === "string"
+        ? (value.match(/(?:\\.|\[\[[^\]]*\]\]|[^;,\[\\]|\[(?!\[))+/gu) ?? [])
+          .map(item => decodeInlineValue(item, false).trim()).filter(Boolean)
+        : splitOperonList(value)
+      : scalar(inline && typeof value === "string" ? decodeInlineValue(value, canonical === "note") : value);
     if (typeof parsed === "string" && key === "dateCreated" && /^\d{4}-\d{2}-\d{2}$/u.test(parsed)) {
       fields[canonical] = parsed + "T00:00:01";
     } else if (parsed !== null && parsed.length > 0) {
@@ -149,7 +164,7 @@ function readFields(entries: [string, unknown][], configuration: FilesystemConfi
   return fields;
 }
 
-const fieldToken = /\{\{([^{}]+?)::[ \t]*((?:\{\{[^{}]*\}\}|[^}]|\}(?!\}))*?)\}\}/gu;
+const fieldToken = /\{\{([^{}]+?)::[ \t]*((?:\\[\s\S]|\{\{[^{}]*\}\}|[^}\\]|\}(?!\})|\\(?=\}\}))*?)\}\}/gu;
 const validId = /^[a-z0-9]{7}$/u;
 const tagToken = /(^|[\s(])#([\p{L}\p{N}\p{M}_/-]+)/gu;
 const fileCheckbox = (flags?: { isFinished: boolean; isCancelled: boolean }): OperonTask["checkbox"] =>
@@ -161,7 +176,6 @@ export function parseOperonMarkdown(content: string, path: string, configuration
   const tasks: StoredTask[] = [];
   let bodyStart = 0;
   let invalidFrontmatter = false;
-  let fileTask: StoredTask | undefined;
   if (lines[0] === "---") {
     const end = lines.findIndex((line, i) => i > 0 && /^(?:---|\.\.\.)[ \t]*$/u.test(line));
     if (end > 0) {
@@ -174,13 +188,11 @@ export function parseOperonMarkdown(content: string, path: string, configuration
           const known = new Set([...managed, "tags", "cssclasses", "position",
             ...configuration.keys.flatMap(k => [k.canonicalKey, k.visiblePropertyName])]);
           const properties = Object.fromEntries(Object.entries(raw).filter(([key]) => !key.startsWith("_") && !known.has(key)));
-          fields.operonId = id;
-          fileTask = {
+          tasks.push({
             id, line: null, fields, tags: splitOperonList(raw.tags),
             description: posix.basename(path).replace(/\.md$/iu, ""),
             properties: Object.keys(properties).length ? properties : undefined,
-          };
-          tasks.push(fileTask);
+          });
         }
       } catch {
         invalidFrontmatter = true;
@@ -188,20 +200,21 @@ export function parseOperonMarkdown(content: string, path: string, configuration
     }
   }
 
-  let fence: string | undefined;
+  let fence: { marker: string; quoteDepth: number } | undefined;
   let commentEnd: string | undefined;
-  let owner: StoredTask | undefined;
   let listIndent: number | undefined;
   for (let i = bodyStart; i < lines.length; i++) {
     const line = lines[i];
-    const marker = /^(?:[ \t]*>[ \t]*)*[ \t]*(\x60{3,}|~{3,})(.*)$/u.exec(line);
+    const quotePrefix = /^(?:[ \t]*>[ \t]*)*/u.exec(line)![0];
+    const quoteDepth = quotePrefix.split(">").length - 1;
+    const marker = /^[ \t]*(\x60{3,}|~{3,})(.*)$/u.exec(line.slice(quotePrefix.length));
+    if (fence && quoteDepth < fence.quoteDepth) fence = undefined;
     if (fence) {
-      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !marker[2].trim()) fence = undefined;
+      if (marker && marker[1][0] === fence.marker[0] && marker[1].length >= fence.marker.length && !marker[2].trim()) fence = undefined;
       continue;
     }
     if (!commentEnd && marker) {
-      fence = marker[1];
-      owner = undefined;
+      fence = { marker: marker[1], quoteDepth };
       continue;
     }
     let visible = "";
@@ -214,20 +227,26 @@ export function parseOperonMarkdown(content: string, path: string, configuration
         commentEnd = undefined;
         continue;
       }
-      const opening = /<!--|%%/u.exec(rest);
+      const opening = /<!--|%%|\x60+/u.exec(rest);
       if (!opening) {
         visible += rest;
         break;
       }
       visible += rest.slice(0, opening.index);
       rest = rest.slice(opening.index + opening[0].length);
+      if (opening[0][0] === "\x60") {
+        const closer = [...rest.matchAll(/\x60+/gu)].find(run => run[0].length === opening[0].length);
+        const through = closer ? closer.index + closer[0].length : 0;
+        visible += opening[0] + rest.slice(0, through);
+        rest = rest.slice(through);
+        continue;
+      }
       commentEnd = opening[0] === "%%" ? "%%" : "-->";
     }
     const indentation = /^[ \t]*/u.exec(visible)![0].replace(/\t/gu, "    ").length;
     // Four indented columns form a code block outside a list. Inside a
     // list, the content indentation can instead introduce a nested task.
     if (indentation >= 4 && (listIndent === undefined || indentation >= listIndent + 4)) {
-      owner = undefined;
       continue;
     }
     const list = /^[ \t]*(?:[-*+]|\d+[.)])([ \t]+)/u.exec(visible);
@@ -235,54 +254,55 @@ export function parseOperonMarkdown(content: string, path: string, configuration
     else if (visible.trim() && (listIndent === undefined || indentation < listIndent)) listIndent = undefined;
     const match = /^[ \t]*- \[([ xX-])\][ \t]*(.*)$/u.exec(visible);
     if (!match) {
-      owner = undefined;
       continue;
     }
     const checkbox = match[1] === " " ? "open" : match[1] === "-" ? "cancelled" : "done";
     const tokens = [...match[2].matchAll(fieldToken)];
-    const fields = readFields(tokens.map(m => [m[1].trim(), m[2].trim()]), configuration);
+    const fields = readFields(tokens.map(m => [m[1].trim(), m[2].trim()]), configuration, true);
     const id = scalar(fields.operonId);
-    if (!id || !validId.test(id)) {
-      if (Object.keys(fields).length === 0) {
-        for (const task of [fileTask, owner]) {
-          if (!task) continue;
-          task.progress ??= { total: 0, completed: 0 };
-          task.progress.total++;
-          if (checkbox !== "open") task.progress.completed++;
-        }
-      }
-      continue;
-    }
+    if (!id || !validId.test(id)) continue;
     const tags = tokens.filter(token => token[1].trim() === "tags").flatMap(token => splitOperonList(token[2]));
     const description = match[2].replace(fieldToken, "").replace(tagToken, (_, prefix: string, tag: string) => {
       tags.push(tag);
       return prefix;
     }).trim();
-    owner = { id, checkbox, description, line: i + 1, fields, tags };
-    tasks.push(owner);
+    tasks.push({ id, checkbox, description, line: i + 1, fields, tags });
   }
   return { tasks, invalidFrontmatter };
 }
 
 export function projectFilesystemTask(
-  stored: StoredTask, path: string, stat: { mtime: number; ctime: number }, configuration: FilesystemConfiguration, now: number,
+  stored: StoredTask, path: string, stat: { mtime: number; birthtime?: number }, configuration: FilesystemConfiguration, timeZone?: string,
 ): OperonTask {
   const fields = { ...stored.fields };
   const source = stored.line === null ? "file" : "inline";
+  delete fields.operonId;
+  if (stored.description) fields.description = stored.description;
+  const rawTags = [...new Set(stored.tags.map(tag => tag.replace(/^#/u, "")).filter(Boolean))];
+  if (rawTags.length) fields.tags = rawTags;
+  const priority = resolveOperonPriorityStableId(fields.priority, configuration.priorities.items) ?? scalar(fields.priority);
+  if (priority) fields.priority = priority;
   if (source === "file") {
-    const localTimestamp = (time: number) => {
-      const date = new Date(time);
-      return new Date(time - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 19);
+    const format = (time: number) => {
+      const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+        timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit",
+        minute: "2-digit", second: "2-digit", hourCycle: "h23",
+      }).formatToParts(time).map(({ type, value }) => [type, value]));
+      return [parts.year, parts.month, parts.day].join("-") + "T" + [parts.hour, parts.minute, parts.second].join(":");
     };
-    if (!fields.datetimeCreated && stat.ctime > 0) fields.datetimeCreated = localTimestamp(stat.ctime);
-    const modified = stat.mtime > 0 ? localTimestamp(stat.mtime) : "";
-    if (modified > (scalar(fields.datetimeModified) ?? "")) fields.datetimeModified = modified;
+    if (!fields.datetimeCreated && stat.birthtime && stat.birthtime > 0) fields.datetimeCreated = format(stat.birthtime);
+    if (!fields.datetimeModified && stat.mtime > 0) fields.datetimeModified = format(stat.mtime);
+  }
+  for (const name of ["datetimeStart", "datetimeEnd"]) {
+    const value = scalar(fields[name]);
+    if (!value || !/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/u.test(value) || !Number.isFinite(Date.parse(value + "Z"))) {
+      delete fields[name];
+    }
   }
   const field = (name: string) => scalar(fields[name]);
   const status = field("status");
-  const workflow = resolveOperonWorkflowStatus(status, configuration.workflow);
-  const pipeline = configuration.workflow.pipelines.find(p => p.name === workflow?.pipeline);
-  const definition = pipeline?.statuses.find(s => s.value === workflow?.value);
+  const pipeline = status ? configuration.workflow.pipelines.find(p => p.statuses.some(s => s.value === status)) : undefined;
+  const definition = pipeline?.statuses.find(s => s.value === status);
   const checkbox = definition ? fileCheckbox(definition) :
     field("dateCancelled") ? "cancelled" : field("dateCompleted") ? "done" : stored.checkbox ?? "open";
   const dates = {
@@ -291,17 +311,16 @@ export function projectFilesystemTask(
     datetimeStart: field("datetimeStart"), datetimeEnd: field("datetimeEnd"),
     created: field("datetimeCreated"), modified: field("datetimeModified"),
   };
-  const terminalDate = dates.completed ?? dates.cancelled;
-  const tier = checkbox === "open" ? "hot" : terminalDate && now - Date.parse(terminalDate) > 90 * 86_400_000 ? "cold" : "warm";
+  // Developer API V1 Bridge adapter maps every task to warm in the list DTO.
+  const tier = "warm";
   const semantics = {
     operonId: stored.id, source, path, description: stored.description, checkbox, status,
-    statusId: workflow?.id ?? null, statusLabel: workflow?.label ?? null,
-    pipeline: workflow?.pipeline ?? null, pipelineId: pipeline?.id ?? null,
-    priority: field("priority"), tags: [...new Set(stored.tags.map(tag => tag.replace(/^#/u, "")))].sort(),
+    statusId: definition?.id ?? null, statusLabel: definition?.label ?? null,
+    pipeline: pipeline?.name ?? null, pipelineId: pipeline?.id ?? null,
+    priority, tags: [...rawTags].sort(),
     parentTask: field("parentTask"), blocking: splitOperonList(fields.blocking),
     blockedBy: splitOperonList(fields.blockedBy), dates, fields,
     ...(stored.properties ? { properties: stored.properties } : {}),
-    ...(stored.progress ? { plainCheckboxProgress: stored.progress } : {}),
     recurrence: { repeating: Boolean(field("repeat")), seriesId: field("repeatSeriesId"), occurrenceDate: field("repeatOccurrenceDate") },
   } as const;
   return {

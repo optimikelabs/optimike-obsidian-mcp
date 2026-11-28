@@ -42,7 +42,9 @@ The upstream [storage specification](https://www.operon.cc/docs/docs-046-plugin-
 
 Every filesystem read reports `source: "filesystem"`, `freshness`, `cacheStatus`, `lastRefreshAt`, `lastRefreshCompletedAt`, and `partial`. Treat `partial: true` as an incomplete index during startup, refresh, or a cache error. Where exposed, `forceRefresh` updates the shared index from disk. No Desktop or Sync liveness is implied by a completed refresh.
 
-The finder uses local ranking and stored dates. Relationship reads expose stored edges and their derived inverses and hierarchy. Workflow validation, scores, tiers, checkbox progress, revision tokens, and native index projections may differ from Desktop. Native mutation authority, runtime relationship inference, live templates and active timers require Desktop. The compatibility timer tool returns `operon_filesystem_live_required`. Saved filters support nested groups over common checkbox, text, date, list, tag and persisted pin conditions with supported sorts. Runtime-dependent fields and unsupported operators or sorts return `operon_filesystem_filter_unsupported`. Relative dates use the server's time zone. Operon writes continue to require the live Bridge.
+The finder uses local ranking and stored dates. Relationship reads expose stored edges and their derived inverses and hierarchy. Validation, finder scores, revision tokens and configuration metadata can differ from Desktop. The capability doctor reports Operon reads as ready when the cache is ready and `data.json` is valid. Native mutation authority, runtime relationship inference, live templates and active timers require Desktop. The compatibility timer tool returns `operon_filesystem_live_required`. Saved filters support nested groups over common checkbox, text, date, list, tag and persisted pin conditions with supported sorts. Runtime-dependent fields and unsupported operators or sorts return `operon_filesystem_filter_unsupported`. Relative dates use the server's time zone. Operon writes continue to require the live Bridge.
+
+The task list uses the Developer API V1 Bridge's `warm` tier and canonical priority IDs, and omits native checklist progress. File-task creation falls back to filesystem birthtime when available. A stored modification time takes precedence over filesystem mtime. The index skips dot paths and applies Operon exclusions over the available shared-cache files. A configured cache exclusion produces a warning that the two scopes may differ. Grouped and dynamic saved filters return an explicit unsupported error, and continuation cursors bind to the generation that produced them.
 
 ### Operon parity harness
 
@@ -52,7 +54,7 @@ Run `npm run build` and `npm run test:operon-headless` to exercise MCP against a
 node scripts/operon-headless-parity.mjs /path/to/disposable-vault-copy
 ```
 
-Use `OPERON_PARITY_VERIFY_SSL=false` only for a self-signed loopback endpoint. The harness checks the marker through REST, uses private temporary caches, pages both versions of `operon_list_tasks`, and prints differing field names by task ID. Runtime versions, revision tokens, the source kind and filesystem mtime are excluded. A semantic difference gives a nonzero exit status. Keep the copy unchanged for the comparison.
+Use `OPERON_PARITY_VERIFY_SSL=false` only for a self-signed loopback endpoint. The harness checks the marker through REST, uses private temporary caches, pages both versions of `operon_list_tasks`, and compares configuration and validation. It checks the first finder page, depth-one relationships for up to ten tasks, and the first page of each saved filter. The output reports aggregate counts, including unavailable comparisons. Runtime versions, revision tokens, the source kind and the `sourceMtime` transport field are excluded. A semantic difference gives a nonzero exit status. Keep the copy unchanged for the comparison.
 
 ## Validation
 

@@ -39,13 +39,19 @@ const dueFilter = {
       { fieldType: "text", field: "description", operator: "is", value: "Synthetic project" },
     ] },
   ] },
-  sorts: [{ field: "description", order: "asc" }],
+  sorts: [{ field: "dateDue", order: "asc" }],
 };
 const runtimeFilter = {
   id: "fixture-runtime", name: "Runtime filter", icon: null,
   rootGroup: { logic: "all", children: [{ fieldType: "projectSerialScope", field: "serial", operator: "isAnyOf" }] },
 };
-const priority = { id: "priority_a", label: "A", color: null, description: null };
+const dynamicFilter = {
+  id: "fixture-dynamic", name: "Dynamic filter", icon: null,
+  rootGroup: { logic: "all", children: [{ fieldType: "date", field: "dateDue", operator: "after", value: "{{today}}" }] },
+};
+const groupedFilter = { ...dueFilter, id: "fixture-grouped", name: "Grouped filter", groupBy: "priority" };
+const filters = [dueFilter, runtimeFilter, dynamicFilter, groupedFilter];
+const priority = { id: "pr_a", label: "A", color: null, description: null };
 const mapping = { canonicalKey: "status", visiblePropertyName: "État", type: "text", sync: "yes", enabled: true, isSystem: true, isInternal: false };
 const pluginData = {
   schemaVersion: 3, settings: { language: "fr", excludedFolders: ["Excluded"] },
@@ -54,9 +60,7 @@ const pluginData = {
     priorities: { priorities: [priority], defaultPriority: "A" },
     keyMappings: { system: [mapping], custom: [] },
   },
-  views: { filters: { filterIds: [dueFilter.id, runtimeFilter.id], itemsById: {
-    [dueFilter.id]: dueFilter, [runtimeFilter.id]: runtimeFilter,
-  } } },
+  views: { filters: { filterIds: filters.map(f => f.id), itemsById: Object.fromEntries(filters.map(f => [f.id, f])) } },
   ui: { taskCreationProfile: { fileTasksFolder: "_Operon" } },
   state: { pinnedTasks: { itemsById: { root001: { pinned: true } } } },
 };
@@ -69,20 +73,19 @@ function expectedTask({ id, statusIndex, description, fields = {}, dates = {}, .
     operonId: id, source: "inline", path: notesPath, line: 4, sourceMtime: 0,
     description, checkbox: "open", status, statusId: "status" + statusIndex,
     statusLabel: statuses[statusIndex].label, pipeline: "CN", pipelineId: "pipeline_cn",
-    priority: null, tier: "hot", tags: [], parentTask: null, blocking: [], blockedBy: [],
+    priority: null, tier: "warm", tags: [], parentTask: null, blocking: [], blockedBy: [],
     dates: { due: null, scheduled: null, started: null, completed: null, cancelled: null, datetimeStart: null,
       datetimeEnd: null, created: null, modified: null, ...dates },
-    fields: { operonId: id, status, ...fields }, recurrence,
-    revision: "fnv1a32:01234567", sourceKind: "operon-index", operonVersion: "4.9.0", bridgeVersion: "0.9.9",
+    fields: { description, status, ...(overrides.tags?.length ? { tags: overrides.tags } : {}), ...fields }, recurrence,
+    revision: "fnv1a32:01234567", sourceKind: "operon-index", operonVersion: "4.6.0", bridgeVersion: "0.9.9",
     ...overrides,
   };
 }
 const expected = [
-  expectedTask({ id: "child01", statusIndex: 1, description: "Deliver", priority: "A", tags: ["sample"], parentTask: "root001",
+  expectedTask({ id: "child01", statusIndex: 1, description: "Deliver", priority: "pr_a", tags: ["sample"], parentTask: "root001",
     dates: { due: "2099-01-04", scheduled: "2099-01-03" },
-    fields: { priority: "A", dateDue: "2099-01-04", dateScheduled: "2099-01-03", parentTask: "root001",
+    fields: { priority: "pr_a", dateDue: "2099-01-04", dateScheduled: "2099-01-03", parentTask: "root001",
       repeat: "every week", repeatSeriesId: "rstest1", repeatOccurrenceDate: "2099-01-03" },
-    plainCheckboxProgress: { total: 1, completed: 1 },
     recurrence: { repeating: true, seriesId: "rstest1", occurrenceDate: "2099-01-03" },
   }),
   expectedTask({ id: "child02", statusIndex: 2, description: "Review", line: 6, checkbox: "done", tier: "warm", parentTask: "child01",
@@ -101,21 +104,43 @@ const envelope = {
   ok: true, contractVersion: "1", stale: false, generation: 1, settingsSignature: "stub", limitations: [],
 };
 const capabilities = OperonCapabilitiesSchema.parse({
-  status: true, configuration: true, list: true, get: true, query: true, validate: true,
+  status: true, configuration: true, list: true, get: true, query: true, validate: true, finder: true, relationships: true, filterQuery: true,
   create: false, update: false, convert: false, transition: false,
 });
-const live = createServer((req, res) => {
+const live = createServer(async (req, res) => {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const body = chunks.length ? JSON.parse(Buffer.concat(chunks)) : {};
+  const edge = (sourceOperonId, kind, targetOperonId) => ({ sourceOperonId, kind, targetOperonId });
+  const rows = expected.map(task => ({ task: { identity: { operonId: task.operonId } } }));
+  const native = (operation, result) => ({ ...envelope, source: "operon-live", operation, result });
+  const filtered = expected.filter(task => ["child01", "root001"].includes(task.operonId));
   const data = req.url.endsWith("/tasks/query") ? {
     ...envelope, source: "operon-live", cursor: "0", hasMore: false, tasks: expected,
     count: expected.length, total: expected.length,
-  } : req.url.endsWith("/validate") ? {
+  } : req.url.endsWith("/tasks/finder") ? native("finder", { rows, page: { actualCount: expected.length } })
+    : req.url.endsWith("/relationships") ? native("relationships", {
+      tasks: rows.filter(row => row.task.identity.operonId !== "child03" && row.task.identity.operonId !== "child04").map(row => row.task),
+      relationships: body.operonId === "child01" ? {
+        explicit: [edge("child01", "parent", "root001")],
+        derived: [edge("child01", "child", "child02"), edge("child01", "blocking", "child02"),
+          edge("child01", "ancestor", "root001"), edge("child01", "project-member", "child02")], inferred: [],
+      } : {
+        explicit: [edge("child02", "parent", "child01"), edge("child02", "blocked-by", "child01"),
+          edge("child02", "related", "root001")],
+        derived: [edge("child02", "ancestor", "child01")], inferred: [],
+      },
+    }) : req.url.endsWith("/tasks/filter") ? {
+      ...envelope, source: "operon-live", cursor: "0", hasMore: false,
+      tasks: filtered, count: filtered.length, total: filtered.length,
+    } : req.url.endsWith("/validate") ? {
     ...envelope, source: "operon-runtime", taskCount: expected.length, summary: { P0: 0, P1: 0, P2: 0 }, violations: [],
   } : req.url.endsWith("/configuration") ? {
-    ...envelope, source: "operon-runtime", operonVersion: "4.9.0", bridgeVersion: "0.9.9",
+    ...envelope, source: "operon-runtime", operonVersion: "4.6.0", bridgeVersion: "0.9.9",
     configuration: {
       language: "fr", workflow: { language: "fr", defaultPipelineName: "CN",
         pipelines: [{ ...pipeline, statuses: statuses.map(s => ({ ...s, value: "CN." + s.label })) }] },
-      priorities: { defaultPriority: "A", items: [priority] }, keys: [mapping],
+      priorities: { defaultPriority: "pr_a", items: [priority] }, keys: [mapping],
       creation: { fileTasksFolder: "_Operon", inlineTaskSaveMode: "", inlineTaskUseDailyNote: false, inlineTaskTargetFile: "", inlineTaskHeading: "",
         inlineTaskDailyNoteAddStartDate: false, inlineTaskDailyNoteAddScheduledDate: false, taskCreatorDefaultToFileTask: false,
         taskCreatorDefaultFileTemplateId: null, fileTaskTemplateFolder: "", fileTaskParentInlineTargetMode: "", fileTaskParentFileTargetMode: "",
@@ -124,28 +149,28 @@ const live = createServer((req, res) => {
         fileTaskAutoArchiveEnabled: false, fileTaskArchiveFolder: "", fileTaskArchiveDelaySeconds: 0,
         fileTaskArchiveOnlyFromFileTasksFolder: false, fileRepeatDestination: "", fileRepeatCustomFolder: "" },
       indexing: { excludedFolders: ["Excluded"], fullReindexOnStartup: false, indexEventDebounceMs: 0 },
-      docs: { folder: "", autoUpdateEnabled: false }, views: { filters: [] },
+      docs: { folder: "", autoUpdateEnabled: false }, views: { filters: filters.map(({ id, name, icon, ...definition }) => ({ id, name, icon, definition })) },
     },
   } : req.url.endsWith("/status") ? {
     ...envelope, source: "operon-runtime",
     bridge: { id: "optimike-operon-bridge", version: "0.9.9", mode: "read-only" },
-    operon: { present: true, version: "4.9.0", compatible: true, testedAgainst: "4.9.0", supportedRange: "4.9.0" },
+    operon: { present: true, version: "4.6.0", compatible: true, testedAgainst: "4.6.0", supportedRange: "4.6.0" },
     index: { ready: true, generation: 1, taskCount: expected.length, duplicateConflictCount: 0 },
     capabilities,
   } : { authenticated: true };
-  req.resume();
   res.setHeader("content-type", "application/json");
   res.end(JSON.stringify(data));
 });
 
 try {
   await Promise.all([mkdir(statePath, { recursive: true }), mkdir(path.join(vault, "_Operon"), { recursive: true }),
-    mkdir(path.join(vault, "Excluded"), { recursive: true })]);
+    mkdir(path.join(vault, "Excluded"), { recursive: true }), mkdir(path.join(vault, ".hidden"), { recursive: true })]);
   await Promise.all([
     writeFile(configurationFile, JSON.stringify(pluginData), "utf8"),
-    writeFile(path.join(statePath, "manifest.json"), JSON.stringify({ version: "4.9.0" }), "utf8"),
+    writeFile(path.join(statePath, "manifest.json"), JSON.stringify({ version: "4.6.0" }), "utf8"),
     writeFile(path.join(vault, notesPath), "\ufeff" + notes, "utf8"),
     writeFile(path.join(vault, filePath), "\ufeff---\r\noperonId: root001\r\nÉtat: CN.Open\r\ntags: [project]\r\ntaskGallery: ['[[a.png]]', '[[b.png]]']\r\ndatetimeCreated: 2099-01-01T12:00:00\r\ndatetimeModified: 2099-01-01T12:00:00\r\nsample: true\r\n---\r\n", "utf8"),
+    writeFile(path.join(vault, ".hidden", "Ignored.md"), "- [ ] Hidden {{operonId:: hide001}}", "utf8"),
     writeFile(path.join(vault, "Excluded", "Ignored.md"), "- [ ] Excluded {{operonId:: ignore4}}", "utf8"),
   ]);
   await new Promise((resolve, reject) => live.listen(0, "127.0.0.1", resolve).once("error", reject));
@@ -166,11 +191,22 @@ try {
           assert.deepEqual(tool.inputSchema, base.tools.find(tool => tool.name === name).inputSchema);
           assert.equal(tool.annotations.readOnlyHint, true);
         }
-        assert.deepEqual(await runParity(liveClient, fs), { liveCount: 5, filesystemCount: 5, differences: [] });
+        const parity = await runParity(liveClient, fs);
+        assert.equal(parity.liveCount, 5);
+        assert.equal(parity.filesystemCount, 5);
+        assert.deepEqual(parity.differences, []);
+        assert.deepEqual(parity.surfaces, {
+          operon_get_configuration: { equal: 1, different: 0, unavailable: 0 },
+          operon_validate: { equal: 1, different: 0, unavailable: 0 },
+          operon_find_tasks: { equal: 1, different: 0, unavailable: 0 },
+          operon_get_relationships: { equal: 2, different: 0, unavailable: 0 },
+          operon_query_saved_filter: { equal: 1, different: 0, unavailable: 3 },
+        });
         if (mode !== "headless-readonly") return;
         const read = (name, args, allowError) => callOperon(fs, "operon_" + name, args, allowError);
         const config = await read("get_configuration");
         assert.equal(config.configuration.creation.fileTasksFolder, "_Operon");
+        assert.equal(config.configuration.priorities.defaultPriority, "pr_a");
         assert.equal(config.source, "filesystem");
         assert.equal(config.partial, false);
         const single = await read("get_task", { operonId: "root001", includeProperties: true });
@@ -185,6 +221,14 @@ try {
           createHash("sha256").update("\ufeff" + notes).digest("hex"));
         const saved = await read("query_saved_filter", { filterSetId: dueFilter.id, scopePath: notesPath });
         assert.deepEqual(saved.tasks.map(task => task.operonId), ["child01"]);
+        const firstSaved = await read("query_saved_filter", { filterSetId: dueFilter.id, limit: 1 });
+        assert.deepEqual(firstSaved.tasks.map(task => task.operonId), ["child01"]);
+        const lastSaved = await read("query_saved_filter", { filterSetId: dueFilter.id, limit: 1, cursor: firstSaved.nextCursor });
+        assert.deepEqual(lastSaved.tasks.map(task => task.operonId), ["root001"]);
+        for (const filter of [dynamicFilter, groupedFilter]) {
+          const refusedFilter = await read("query_saved_filter", { filterSetId: filter.id }, true);
+          assert.equal(refusedFilter.error.details.reasonCode, "operon_filesystem_filter_unsupported");
+        }
         const refused = await read("query_saved_filter", { filterSetId: runtimeFilter.id }, true);
         assert.equal(refused.source, "filesystem");
         assert.match(JSON.stringify(refused), /operon_filesystem_filter_unsupported/u);
@@ -198,6 +242,13 @@ try {
         assert.equal(update.tasks.find(task => task.operonId === "child02").revision, siblingRevision);
         const cursorRefusal = await read("find_tasks", { limit: 1, cursor: first.result.page.nextCursor }, true);
         assert.match(JSON.stringify(cursorRefusal), /VALIDATION_ERROR/u);
+        const staleFilterCursor = await read("query_saved_filter", { filterSetId: dueFilter.id, limit: 1, cursor: firstSaved.nextCursor }, true);
+        assert.equal(staleFilterCursor.error.code, "VALIDATION_ERROR");
+        const invalidStatus = path.join(vault, "Invalid.md");
+        await writeFile(invalidStatus, "- [ ] Invalid status {{operonId:: wrong01}} {{status:: Open}}", "utf8");
+        const invalid = await read("validate", { forceRefresh: true });
+        assert.ok(invalid.violations.some(violation => violation.code === "unknown_workflow_status" && violation.operonId === "wrong01"));
+        await rm(invalidStatus);
         await rm(path.join(vault, notesPath));
         assert.equal((await read("list_tasks", { forceRefresh: true })).total, 1);
         await writeFile(path.join(vault, "Duplicate.md"), "- [ ] Duplicate {{operonId:: root001}}", "utf8");
@@ -214,11 +265,65 @@ try {
       });
     }
   });
+  let proxyCatalog;
   await withOperonClient({ ...options, mode: "headless-readonly", profile: "full" }, async fs => {
+    proxyCatalog = await fs.listTools();
     const refused = await callOperon(fs, "operon_get_timer_state", {}, true);
     assert.equal(refused.source, "filesystem");
     assert.equal(refused.error.details.reasonCode, "operon_filesystem_live_required");
   });
+
+  const backend = createServer(async (req, res) => {
+    if (req.url === "/healthz") { res.writeHead(200).end(); return; }
+    if (req.method !== "POST") { res.writeHead(405).end(); return; }
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const { id, method, params } = JSON.parse(Buffer.concat(chunks));
+    if (id === undefined) { res.writeHead(202).end(); return; }
+    const result = method === "initialize" ? {
+      protocolVersion: params.protocolVersion, capabilities: { tools: {} },
+      serverInfo: { name: "headless-proxy-fixture", version: "1" },
+    } : proxyCatalog;
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ id, jsonrpc: "2.0", result }));
+  });
+  try {
+    await new Promise(resolve => backend.listen(0, "127.0.0.1", resolve));
+    await withOperonClient({ ...options, mode: "headless-readonly", proxyPort: backend.address().port }, async proxy => {
+      const tools = (await proxy.listTools()).tools;
+      assert.deepEqual(tools.filter(tool => tool.name.startsWith("operon_")).map(tool => tool.name).sort(), [
+        "operon_find_tasks", "operon_get_configuration", "operon_get_relationships", "operon_get_task",
+        "operon_list_tasks", "operon_query_saved_filter", "operon_query_tasks", "operon_status", "operon_validate",
+      ]);
+    });
+  } finally {
+    await new Promise(resolve => backend.close(resolve));
+  }
+
+  const { parseOperonMarkdown, projectFilesystemConfiguration, projectFilesystemTask } =
+    await import("../dist/services/operon/filesystemFormat.js");
+  const cfg = projectFilesystemConfiguration(pluginData);
+  const source = [
+    "Text with " + String.fromCharCode(96) + "%% <!--" + String.fromCharCode(96),
+    "> ~~~", "> - [ ] Quoted placeholder {{operonId:: hide002}}",
+    "- [ ] Retained {{operonId:: kept001}} {{priority:: pr_a}} {{progress:: 50}} {{directSubtaskCount:: 2}}" +
+      " {{note:: first\\nsecond \\}}} {{contexts:: Alpha\\; Beta; Gamma}} {{datetimeStart:: 2099-01-01T12:00}} {{datetimeEnd:: invalid}}",
+    "- [x] Same level checkbox", "- Bullet", "  - [x] Nested checklist",
+  ].join("\n");
+  const decoded = parseOperonMarkdown(source, "Retained.md", cfg).tasks;
+  assert.equal(decoded.length, 1);
+  const projection = projectFilesystemTask(decoded[0], "Retained.md", { mtime: 1 }, cfg);
+  assert.deepEqual(projection.fields, {
+    description: "Retained", priority: "pr_a", note: "first\nsecond }", contexts: ["Alpha; Beta", "Gamma"],
+    datetimeStart: "2099-01-01T12:00",
+  });
+  assert.equal(projection.tier, "warm");
+  assert.equal(projection.plainCheckboxProgress, undefined);
+  const [rawFile] = parseOperonMarkdown("---\noperonId: time001\ndatetimeModified: 2020-01-02T08:00:00\n---\n- [x] Sidebar", "Clock.md", cfg).tasks;
+  const clock = projectFilesystemTask(rawFile, "Clock.md", { mtime: Date.UTC(2026, 1, 1), birthtime: Date.UTC(2020, 0, 1) }, cfg, "Europe/Paris");
+  assert.equal(clock.dates.created, "2020-01-01T01:00:00");
+  assert.equal(clock.dates.modified, "2020-01-02T08:00:00");
+  assert.equal(projectFilesystemTask(rawFile, "Clock.md", { mtime: 1 }, cfg).dates.created, null);
+  assert.equal(clock.plainCheckboxProgress, undefined);
 
   process.env.OBSIDIAN_VAULT = vault;
   process.env.OBSIDIAN_RUNTIME_MODE = "headless-readonly";
@@ -233,6 +338,12 @@ try {
   assert.equal(partial.source, "filesystem");
   await assert.rejects(building.getTask({ operonId: "child01" }), error =>
     error.details.reasonCode === "operon_filesystem_cache_partial");
+  assert.deepEqual(await building.configurationReadiness(), { configured: true });
+  await writeFile(configurationFile, JSON.stringify({ taxonomy: {}, schemaVersion: 3 }), "utf8");
+  await assert.rejects(building.configurationReadiness(), error =>
+    error.details.reasonCode === "operon_filesystem_configuration_invalid");
+  await rm(configurationFile);
+  assert.deepEqual(await building.configurationReadiness(), { configured: false });
   assert.deepEqual(compareTasks(expected, expected.slice(1)), [{ operonId: "child01", fields: ["missing-in-filesystem"] }]);
   console.log("PASS: filesystem Operon transport, exact schemas, synthetic REST parity, saved filters, relationships and cache edits");
 } finally {

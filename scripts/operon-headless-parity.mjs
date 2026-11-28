@@ -8,11 +8,11 @@ import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 const server = fileURLToPath(new URL("../dist/index.js", import.meta.url));
-export async function withOperonClient({ vault, cache, mode, url, token, profile = "tasks" }, run) {
+export async function withOperonClient({ vault, cache, mode, url, token, profile = "tasks", proxyPort }, run) {
   const client = new Client({ name: "operon-headless-parity", version: "1" });
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [server],
+    args: [proxyPort ? fileURLToPath(new URL("../dist/stdio-proxy.js", import.meta.url)) : server],
     cwd: cache,
     env: {
       OBSIDIAN_VAULT: vault,
@@ -25,6 +25,10 @@ export async function withOperonClient({ vault, cache, mode, url, token, profile
       OBSIDIAN_VERIFY_SSL: process.env.OPERON_PARITY_VERIFY_SSL ?? "true",
       MCP_TRANSPORT_TYPE: "stdio",
       MCP_TOOL_PROFILE: profile,
+      ...(proxyPort ? {
+        MCP_HTTP_HOST: "127.0.0.1", MCP_HTTP_PORT: String(proxyPort),
+        MCP_PROXY_REQUIRE_EXISTING_BACKEND: "true",
+      } : {}),
       MCP_WRITE_MODE: "readonly",
       OPERON_MUTATIONS_ENABLED: "false",
       SEMANTIC_SEARCH_PREWARM: "false",
@@ -44,7 +48,9 @@ export async function withOperonClient({ vault, cache, mode, url, token, profile
 
 export async function callOperon(client, name, args = {}, allowError = false) {
   const reply = await client.callTool({ name, arguments: args }, undefined, { timeout: 120_000 });
-  const result = JSON.parse(reply.content[0].text);
+  let result;
+  try { result = JSON.parse(reply.content[0].text); }
+  catch { throw new Error(name + " returned an invalid parity response."); }
   if (reply.isError && !allowError) throw new Error(name + " failed: " + (result.code ?? result.error?.code ?? "unknown"));
   return result;
 }
@@ -90,7 +96,7 @@ export function compareTasks(live, filesystem) {
       ? [...new Set([...Object.keys(left), ...Object.keys(right)])]
         .filter(field => !ignored.has(field) && !isDeepStrictEqual(left[field], right[field])).sort()
       : [left ? "missing-in-filesystem" : "missing-in-live"];
-    // Report identities and fields only. Never dump note text or field values.
+    // Keep field names for fixture assertions. The CLI only prints counts.
     if (fields.length) differing.push({ operonId: id, fields });
   }
   return differing;
@@ -102,7 +108,55 @@ export async function runParity(liveClient, filesystemClient) {
   ]);
   if (live.status === "rejected") throw live.reason;
   if (filesystem.status === "rejected") throw filesystem.reason;
-  return { liveCount: live.value.length, filesystemCount: filesystem.value.length, differences: compareTasks(live.value, filesystem.value) };
+  const surfaces = await compareSurfaces(liveClient, filesystemClient, live.value);
+  return { liveCount: live.value.length, filesystemCount: filesystem.value.length,
+    differences: compareTasks(live.value, filesystem.value), surfaces };
+}
+
+export async function compareSurfaces(live, filesystem, tasks) {
+  const report = {};
+  const record = (name, classify) => {
+    const counts = report[name] ??= { equal: 0, different: 0, unavailable: 0 };
+    counts[classify]++;
+  };
+  const pair = (name, args) => Promise.all([
+    callOperon(live, name, args, true), callOperon(filesystem, name, args, true),
+  ]);
+  const compare = async (name, args, project) => {
+    const [a, b] = await pair(name, args);
+    if ([a, b].some(result => result.error || result.result?.ok === false ||
+        (result.ok === false && (name !== "operon_validate" || !Array.isArray(result.violations))))) {
+      record(name, "unavailable");
+    } else record(name, isDeepStrictEqual(project(a), project(b)) ? "equal" : "different");
+    return [a, b];
+  };
+  const identity = task => task.identity?.operonId ?? task.operonId;
+  const [settingsLive, settingsFilesystem] = await compare("operon_get_configuration", {}, result => result.configuration);
+  await compare("operon_validate", {}, result => [result.taskCount, result.summary, result.violations]);
+  await compare("operon_find_tasks", { limit: 50 }, result => ({
+    ids: result.result.rows.map(row => identity(row.task)).sort(),
+    actualCount: result.result.page.actualCount,
+  }));
+  const roots = tasks.filter(task => task.parentTask || task.blocking?.length || task.blockedBy?.length).slice(0, 10);
+  for (const task of roots) {
+    await compare("operon_get_relationships", { operonId: task.operonId, depth: 1 }, result => ({
+      ids: result.result.tasks.map(identity).sort(),
+      edges: Object.entries(result.result.relationships).flatMap(([origin, edges]) =>
+        edges.map(edge => [origin, edge.kind, edge.sourceOperonId, edge.targetOperonId].join("\0"))).sort(),
+    }));
+  }
+  if (!roots.length) record("operon_get_relationships", "unavailable");
+  const filters = new Set([
+    ...(settingsLive.configuration?.views?.filters ?? []),
+    ...(settingsFilesystem.configuration?.views?.filters ?? []),
+  ].map(filter => filter.id));
+  for (const filterSetId of filters) {
+    await compare("operon_query_saved_filter", { filterSetId, limit: 100 }, result => ({
+      ids: result.tasks.map(identity), total: result.total, hasMore: result.hasMore,
+    }));
+  }
+  if (!filters.size) record("operon_query_saved_filter", "unavailable");
+  return report;
 }
 
 async function main() {
@@ -116,11 +170,12 @@ async function main() {
       target.username || target.password || target.search || target.hash) {
     throw new Error("Parity expects a loopback Obsidian Local REST URL.");
   }
-  const vault = await realpath(requestedVault);
+  const vault = await realpath(requestedVault).catch(() => { throw new Error("Could not locate the disposable vault copy."); });
   // Check an opt-in marker through REST as well as disk so an unrelated Desktop
   // vault is never used merely because it happens to be listening on the port.
   const markerName = "operon-parity-copy.md";
-  const marker = await readFile(path.join(vault, markerName), "utf8");
+  const marker = await readFile(path.join(vault, markerName), "utf8")
+    .catch(() => { throw new Error("Create a disposable copy marker first."); });
   if (!/^operon-parity-copy: [a-f0-9-]{36}\r?\n?$/iu.test(marker)) throw new Error("Create a disposable copy marker first.");
   // Use the same REST client as the MCP, including its explicit TLS setting.
   const { default: axios } = await import("axios");
@@ -136,8 +191,9 @@ async function main() {
   try {
     const result = await withOperonClient({ vault, cache, mode: "live", url, token }, live =>
       withOperonClient({ vault, cache, mode: "headless-readonly" }, fs => runParity(live, fs)));
-    console.log(JSON.stringify(result, null, 2));
-    if (result.differences.length) process.exitCode = 1;
+    const { differences, ...counts } = result;
+    console.log(JSON.stringify({ ...counts, differingTasks: differences.length }, null, 2));
+    if (differences.length || Object.values(result.surfaces).some(surface => surface.different > 0)) process.exitCode = 1;
   } finally {
     await rm(cache, { recursive: true, force: true });
   }

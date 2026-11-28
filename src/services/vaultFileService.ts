@@ -253,6 +253,13 @@ export class VaultFileService {
     }
   }
 
+  async readBirthtime(filePath: string, context: RequestContext): Promise<number | undefined> {
+    const absolutePath = this.resolveVaultPath(filePath, context);
+    await this.assertRealPathInsideVault(absolutePath, context);
+    const { birthtimeMs } = await stat(absolutePath);
+    return birthtimeMs > 0 ? Math.round(birthtimeMs) : undefined;
+  }
+
   async read(
     filePath: string,
     context: RequestContext,

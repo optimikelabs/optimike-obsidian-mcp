@@ -9,7 +9,7 @@ import { VaultFileService } from "../vaultFileService.js";
 import {
   OPERON_CONTRACT_VERSION, OPERON_PUBLIC_INPUT_MESSAGES, OPERON_SNAPSHOT_SCHEMA_VERSION,
   OperonCapabilitiesSchema, OperonQuerySchema, OperonTaskFinderSchema, OperonRelationshipsSchema,
-  OperonFilterQuerySchema, queryOperonSnapshot, resolveOperonPriorityStableId, parseOperonCursor, stripOperonTaskProperties,
+  OperonFilterQuerySchema, queryOperonSnapshot, resolveOperonPriorityStableId, stripOperonTaskProperties,
   type OperonSnapshotEnvelope, type OperonTask, type OperonRelationships,
 } from "./contract.js";
 import {
@@ -30,7 +30,7 @@ type ParsedFile = {
   ctime: number;
   invalidFrontmatter: boolean;
   sourceDigest: string;
-  tasks: { task: OperonTask; tierExpiresAt: number }[];
+  tasks: OperonTask[];
 };
 
 function unavailable(reasonCode: string, message: string): never {
@@ -85,21 +85,43 @@ export class FilesystemOperonService {
     }
   }
 
-  private async read(forceRefresh: boolean) {
-    if (!this.cache) return unavailable("operon_filesystem_cache_unavailable", "Headless Operon reads require the shared vault cache.");
-    if (forceRefresh) await this.cache.refreshCache(true);
-    const [data, manifest] = await Promise.all([this.pluginData("data.json"), this.pluginData("manifest.json")]);
-    const version = typeof manifest?.version === "string" ? manifest.version : "unknown";
+  private async readSettings() {
+    const data = await this.pluginData("data.json");
     let configuration: FilesystemConfiguration;
     try {
       if (data && "taxonomy" in data && data.schemaVersion !== 2 && data.schemaVersion !== 3) {
         throw new Error("Unsupported package version");
       }
+      if (data) {
+        const packaged = data.schemaVersion === 2 || data.schemaVersion === 3;
+        const pipelineList = packaged ? object(object(data.taxonomy).pipelines).pipelines : data.pipelines;
+        if (!Array.isArray(pipelineList)) throw new Error("Missing Operon pipelines");
+      }
       configuration = projectFilesystemConfiguration(data ?? {});
     } catch {
       return unavailable("operon_filesystem_configuration_invalid", "The Operon settings package uses an unsupported format.");
     }
-    const settingsSignature = "filesystem-sha256:" + digest(JSON.stringify([configuration, version]));
+    const settings = object(data?.settings ?? data);
+    const zone = settings.timeZone ?? settings.timezone;
+    let timeZone: string | undefined;
+    if (typeof zone === "string") {
+      try { timeZone = new Intl.DateTimeFormat("en", { timeZone: zone }).resolvedOptions().timeZone; }
+      catch { /* The server's zone is the fallback for invalid settings. */ }
+    }
+    return { data, configuration, timeZone };
+  }
+
+  async configurationReadiness(): Promise<Record<string, unknown>> {
+    const { data } = await this.readSettings();
+    return { configured: Boolean(data) };
+  }
+
+  private async read(forceRefresh: boolean) {
+    if (!this.cache) return unavailable("operon_filesystem_cache_unavailable", "Headless Operon reads require the shared vault cache.");
+    if (forceRefresh) await this.cache.refreshCache(true);
+    const [{ data, configuration, timeZone }, manifest] = await Promise.all([this.readSettings(), this.pluginData("manifest.json")]);
+    const version = typeof manifest?.version === "string" ? manifest.version : "unknown";
+    const settingsSignature = "filesystem-sha256:" + digest(JSON.stringify([configuration, version, timeZone]));
     const previous = this.configurationSignature === settingsSignature ? this.files : new Map<string, ParsedFile>();
     const next = new Map<string, ParsedFile>();
     const paths = configuration.indexing.excludedFolders.map(p => p.replace(/\\/gu, "/").replace(/^\/+|\/+$/gu, ""));
@@ -111,7 +133,7 @@ export class FilesystemOperonService {
     const start = this.provenance();
     for (const entry of this.cache.getEntriesByPrefix()) {
       const path = entry.path.replace(/^\//u, "");
-      if (paths.some(excluded => excluded && matchesPath(path, excluded))) continue;
+      if (path.split("/").some(segment => segment.startsWith(".")) || paths.some(excluded => excluded && matchesPath(path, excluded))) continue;
       let parsed = previous.get(path);
       if (parsed?.hash !== entry.hash || parsed.mtime !== entry.mtime || parsed.ctime !== entry.ctime) {
         const content = await this.cache.getEntry(entry.path);
@@ -120,22 +142,24 @@ export class FilesystemOperonService {
           continue;
         }
         const markdown = parseOperonMarkdown(content.content, path, configuration);
-        parsed = { hash: entry.hash, mtime: entry.mtime, ctime: entry.ctime,
+        let birthtime: number | undefined;
+        if (markdown.tasks.some(task => task.line === null && !task.fields.datetimeCreated) && config.obsidianVaultPath) {
+          birthtime = await new VaultFileService().readBirthtime(path,
+            requestContextService.createRequestContext({ operation: "readOperonFileBirthtime" }),
+          ).catch(() => undefined);
+        }
+        parsed = {
+          hash: entry.hash, mtime: entry.mtime, ctime: entry.ctime,
           invalidFrontmatter: markdown.invalidFrontmatter,
           sourceDigest: markdown.tasks.length ? digest(content.content) : "",
-          tasks: markdown.tasks.map(raw => {
-          const task = { ...projectFilesystemTask(raw, path, entry, configuration, now), operonVersion: version };
-          const terminalDate = task.dates.completed ?? task.dates.cancelled;
-          return {
-            task,
-            tierExpiresAt: terminalDate && task.tier === "warm" ? Date.parse(terminalDate) + 90 * 86_400_000 : Infinity,
-          };
-        }) };
+          tasks: markdown.tasks.map(raw => ({
+            ...projectFilesystemTask(raw, path, { mtime: entry.mtime, birthtime }, configuration, timeZone), operonVersion: version,
+          })),
+        };
       }
       next.set(path, parsed);
       if (parsed.invalidFrontmatter) invalidFrontmatter.push(path);
-      for (const item of parsed.tasks) {
-        const task = now > item.tierExpiresAt ? { ...item.task, tier: "cold" as const } : item.task;
+      for (const task of parsed.tasks) {
         tasks.push(task);
         sourceDigests.set(task, parsed.sourceDigest);
       }
@@ -151,6 +175,8 @@ export class FilesystemOperonService {
       provenance.freshness = "uncertain";
     }
     const limitations = [...baseLimitations];
+    if (config.obsidianVaultExcludePatterns.length) limitations.push("Shared-cache exclusions may omit notes within Operon's configured scope.");
+    if (tasks.some(task => task.source === "file" && !task.dates.created)) limitations.push("A file task without a stored creation date or filesystem birthtime has dates.created=null.");
     if (!data) limitations.push("Operon data.json is absent. Only canonical fields can be decoded; workflow and saved-filter definitions are unavailable.");
     const timestamp = typeof provenance.lastRefreshAt === "number" ? provenance.lastRefreshAt : now;
     const snapshot: OperonSnapshotEnvelope = {
@@ -220,17 +246,25 @@ export class FilesystemOperonService {
     const filter = configuration.views.filters.find(item => item.id === query.filterSetId);
     if (!snapshot.capabilities.configuration) return unavailable("operon_filesystem_configuration_missing", "Operon data.json is absent from this vault copy.");
     if (!filter) throw new McpError(BaseErrorCode.NOT_FOUND, "No saved Operon filter has this ID in the synchronized settings.");
+    const now = new Date();
     let compiled: ReturnType<typeof compileSavedFilter>;
-    try { compiled = compileSavedFilter(filter.definition, pinned, configuration, new Date()); }
+    try { compiled = compileSavedFilter(filter.definition, pinned, configuration, now); }
     catch { return unavailable("operon_filesystem_filter_unsupported", "This saved filter uses semantics unavailable in headless mode. Query it through the Desktop Bridge."); }
     const scope = query.scopePath;
     const tasks = snapshot.tasks.filter(task => (!scope || matchesPath(task.path, scope)) && compiled.predicate(task)).sort(compiled.compare);
-    const offset = parseOperonCursor(query.cursor);
+    const binding = digest(JSON.stringify([this.sessionId, snapshot.generation, snapshot.settingsSignature,
+      query.filterSetId, query.scopePath, query.includeProperties, query.limit, localDate(now), [...(pinned ?? [])].sort(),
+    ])).slice(0, 24);
+    const match = query.cursor && /^filesystem:([0-9a-f]{24}):(\d+)$/u.exec(query.cursor);
+    if (query.cursor && (!match || match[1] !== binding || !Number.isSafeInteger(Number(match[2])))) {
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Use a saved-filter cursor from the same filesystem query and cache generation.");
+    }
+    const offset = match ? Number(match[2]) : 0;
     const page = tasks.slice(offset, offset + query.limit);
     const next = offset + page.length;
     const { tasks: _full, source: _source, ...metadata } = snapshot;
     return { ok: true, ...metadata, ...provenance, total: tasks.length, count: page.length, cursor: String(offset),
-      hasMore: next < tasks.length, ...(next < tasks.length ? { nextCursor: String(next) } : {}),
+      hasMore: next < tasks.length, ...(next < tasks.length ? { nextCursor: "filesystem:" + binding + ":" + next } : {}),
       tasks: query.includeProperties ? page : page.map(stripOperonTaskProperties) };
   }
 

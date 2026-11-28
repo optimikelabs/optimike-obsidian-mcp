@@ -51,6 +51,9 @@ function compileNode(input: unknown, pinned: ReadonlySet<string> | null, today: 
     return task => logic[name](children, task);
   }
   const { field, fieldType, operator, value } = node;
+  if ([value, ...(Array.isArray(node.values) ? node.values : [])].some(item => typeof item === "string" && item.includes("{{"))) {
+    throw new Error("dynamic filter expression");
+  }
   if (typeof field !== "string" || typeof operator !== "string") throw new Error("filter condition");
   if (field.startsWith("file.property:") || field.startsWith("__")) throw new Error("unsupported property projection");
   const target = typeof value === "string" ? value : "";
@@ -110,6 +113,7 @@ export function compileSavedFilter(
   definition: Record<string, unknown>, pinned: ReadonlySet<string> | null,
   configuration: FilesystemConfiguration, now: Date,
 ) {
+  if (definition.groupBy || definition.subgroupBy) throw new Error("grouped filter");
   const predicate = compileNode(definition.rootGroup ?? {
     logic: definition.matchLogic, children: definition.conditions,
   }, pinned, localDate(now));
@@ -134,6 +138,7 @@ export function compileSavedFilter(
       const a = value(left);
       const b = value(right);
       const missing = Number.MAX_SAFE_INTEGER;
+      if (order === 1 && /^(?:date|datetime)/u.test(field) && Boolean(a) !== Boolean(b)) return a ? -1 : 1;
       return order * (ranking ? (ranking.get(a) ?? missing) - (ranking.get(b) ?? missing) : a.localeCompare(b));
     };
   });

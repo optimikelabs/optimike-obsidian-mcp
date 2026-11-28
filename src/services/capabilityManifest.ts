@@ -28,6 +28,7 @@ import type {
   BaseAtomicStatusResponse,
 } from "./obsidianRestAPI/types.js";
 import { OperonService } from "./operon/service.js";
+import { filesystemOperonService } from "./operon/filesystemService.js";
 import { getSemanticCacheService } from "./semanticCache.js";
 import { detectSmartEnvQueryProvider } from "./smartEnvV3.js";
 
@@ -977,10 +978,15 @@ function operonCapabilities(input: CapabilityManifestProjectionInput): {
   write: CapabilityManifestEntry;
 } {
   if (input.registrationMode.startsWith("headless-")) {
+    const configured = input.operon.state === "ready" && input.operon.value.configured === true;
+    const available = configured && input.cacheReady;
+    const reason = available ? "ready" : configured ? "operon_index_not_ready" :
+      input.operon.state === "timed_out" ? "bridge_probe_timed_out" :
+      input.operon.state === "ready" ? "operon_not_present" : "operon_incompatible";
     return {
-      read: entry(input, "operon-read", input.cacheReady, input.cacheReady,
-        input.cacheReady ? "ready" : "operon_index_not_ready",
-        input.cacheReady ? "none" : "refresh_vault_cache"),
+      read: entry(input, "operon-read", available, available, reason,
+        available ? "none" : configured ? "refresh_vault_cache" :
+          input.operon.state === "timed_out" ? "retry_capability_probe" : "load_or_update_operon"),
       write: unavailableOperonWrite(input, "operon_live_required", "use_live_runtime"),
     };
   }
@@ -1447,7 +1453,9 @@ export async function collectCapabilityManifest(options: {
       : undefined);
   const operonProbe =
     options.probes?.operon ??
-    (() => operonService.status(false, CAPABILITY_PROBE_TIMEOUT_MS));
+    (options.registrationMode.startsWith("headless-")
+      ? () => filesystemOperonService().configurationReadiness()
+      : () => operonService.status(false, CAPABILITY_PROBE_TIMEOUT_MS));
   const semanticIndexProbe =
     semanticEnabled &&
     config.enableQueryEmbedding &&
@@ -1475,7 +1483,7 @@ export async function collectCapabilityManifest(options: {
       semanticIndexProbe ? probe(semanticIndexProbe) : unavailable,
       atomicWriteProbe ? probe(atomicWriteProbe) : unavailable,
       baseAtomicWriteProbe ? probe(baseAtomicWriteProbe) : unavailable,
-      options.registrationMode.startsWith("headless-") ? unavailable : probe(operonProbe),
+      probe(operonProbe),
     ]);
   // A probe that lost the race against a cold cache load is not a failure:
   // report the load while it is recent, and a timeout once it is stale.
