@@ -19,6 +19,7 @@ const {publicMcpToolErrorPayload}=await import('../dist/utils/internal/errorHand
 const {createHttpObservability}=await import('../dist/mcp-server/transports/httpObservability.js');
 const {extractMarkdownLinkReferences}=await import('../dist/services/obsidianRestAPI/vaultCache/markdownLinkReferences.js');
 const {defaultLinkExtraction,extractBoundedLinkSource}=await import('../dist/services/obsidianRestAPI/vaultCache/boundedLinkReferences.js');
+const {MarkdownLinkIndex}=await import('../dist/services/obsidianRestAPI/vaultCache/markdownLinkIndex.js');
 const {readHeadlessNoteLinks}=await import('./test-support/headless-note-links.mjs');
 const context={requestId:'cache-consumer-fixture',timestamp:new Date().toISOString(),operation:'test'};
 config.obsidianVaultPath=root;config.obsidianCacheSource='rest';
@@ -492,8 +493,10 @@ test('a foreign SQLite writer defers indexing without marking notes as limited',
  } finally {writer.close();}
 }));
 
-test('a stuck parse times out and the next note still gets indexed',{timeout:25_000},()=>linkFixture(async f=>{
- f.write('Poison.md','['.repeat(16_000)+'](Target.md)'+']'.repeat(16_000));
+const nestedBrackets='['.repeat(16_000)+'](Target.md)'+']'.repeat(16_000);
+const pathologicalNote=`${nestedBrackets}\n\n${nestedBrackets}\n\n`.padEnd(80*1024,'[');
+test('the 80 KiB note gets two delayed retries at cap three and settles until edited',{timeout:45_000},()=>linkFixture(async f=>{
+ f.write('Poison.md',pathologicalNote);
  f.write('Z.md','[[Target]]');
  await f.cache.buildVaultCache();
  await f.cache.linkIndexRun;
@@ -505,9 +508,53 @@ test('a stuck parse times out and the next note still gets indexed',{timeout:25_
  const target=await f.read();
  assert.deepEqual(target.backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Z.md',count:1}]);
  assert.equal(target.indexCoverage.backlinksComplete,false);
-},{...defaultLinkExtraction,parseTimeoutMs:100}));
 
-test('a timed-out table keeps its links through bounded extraction and can be retried after restart',()=>linkFixture(async f=>{
+ await f.reopen();
+ const row=f.cache.db.prepare("SELECT hash, retry_at FROM markdown_link_files WHERE path='/Poison.md'");
+ const originalHash=row.get().hash;
+ for (const delayedRetry of [1,2]) {
+  f.cache.db.exec("UPDATE markdown_link_files SET retry_at=0 WHERE path='/Poison.md'");
+  await f.cache.buildVaultCache();
+  await f.cache.linkIndexRun;
+  assert.equal(row.get().hash,originalHash);
+  if (delayedRetry===1) assert.ok(row.get().retry_at>0,'the second timeout leaves another retry at cap three');
+ }
+ assert.equal(row.get().retry_at,null);
+ const settled=await f.cache.readFilesystemNoteLinks('Poison.md',20,context);
+ assert.deepEqual(settled.indexCoverage.limitedSources,[{path:'Poison.md',reason:'region'}]);
+ assert.deepEqual(settled.outgoing,[]);
+
+ await f.reopen();
+ await f.cache.buildVaultCache();
+ await f.cache.linkIndexRun;
+ assert.equal(f.cache.markdownLinks.nextRetryTime(),undefined);
+ f.write('Poison.md','[[Target]]');
+ await f.cache.updateFileVerified('Poison.md',context);
+ await f.cache.linkIndexRun;
+ assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Poison.md',count:1},{sourcePath:'Z.md',count:1}]);
+ assert.equal((await f.read()).indexCoverage,undefined);
+},{...defaultLinkExtraction,parseTimeoutMs:100,maxRetryAttempts:3}));
+
+test('every supported failure cap allows exactly cap minus one delayed retries',()=>linkFixture(async f=>{
+ await f.cache.buildVaultCache();
+ await f.cache.linkIndexRun;
+ const expire=f.cache.db.prepare('UPDATE markdown_link_files SET retry_at=0 WHERE path=? AND retry_at IS NOT NULL');
+ for (let cap=1;cap<=10;cap++) {
+  const index=new MarkdownLinkIndex(f.cache.db,{...defaultLinkExtraction,maxRetryAttempts:cap},false);
+  for (const skipReason of ['timeout','oom']) {
+   const path=skipReason==='timeout'?'/A.md':'/Target.md';
+   for (let attempt=1;attempt<=cap;attempt++) {
+    const [source]=index.describeSources([path]);
+    index.indexSources([{...source,skipReason}],()=>{});
+    assert.equal(expire.run(path).changes,Number(attempt<cap),`${skipReason} cap ${cap}, attempt ${attempt}`);
+   }
+   assert.ok(index.readIndexCoverage(path).limitedSources.some(source=>source.path===path.slice(1)&&source.reason==='region'));
+  }
+  assert.equal(index.nextRetryTime(),undefined);
+ }
+}));
+
+test('a completed bounded extraction keeps the timed-out table links without a retry',()=>linkFixture(async f=>{
  const rows=4500;
  f.write('Table.md','| a | b |\n|---|---|\n'+'| [[Target]] | [b](Other.md) |\n'.repeat(rows));
  await f.cache.buildVaultCache();
@@ -518,16 +565,15 @@ test('a timed-out table keeps its links through bounded extraction and can be re
  assert.equal(first.indexCoverage.sourceComplete,false);
  await f.reopen();
  const retry=f.cache.db.prepare("SELECT retry_at FROM markdown_link_files WHERE path='/Table.md'");
- assert.ok(retry.get().retry_at>0);
- f.cache.db.exec("UPDATE markdown_link_files SET retry_at=0 WHERE path='/Table.md'");
+ assert.equal(retry.get().retry_at,null);
  await f.cache.buildVaultCache();
  await f.cache.linkIndexRun;
  assert.equal((await read()).coverage.outgoing.total,2*rows);
- assert.ok(retry.get().retry_at>0);
+ assert.equal(f.cache.markdownLinks.nextRetryTime(),undefined);
 },{...defaultLinkExtraction,parseTimeoutMs:100}));
 
-test('a note that exhausts its worker is marked limited and later notes still get backlinks',()=>linkFixture(async f=>{
- f.write('Poison.md','[x](Target.md) '.repeat(40_000));
+test('an exhausted worker schedules a bounded retry without delaying later notes',()=>linkFixture(async f=>{
+ f.write('Poison.md','[x](Target.md) '.repeat(40_000)+'\n\n[[Target]]');
  f.write('Z.md','[[Target]]');
  f.write('Unrelated.md','No links');
  await f.cache.buildVaultCache();
@@ -540,6 +586,17 @@ test('a note that exhausts its worker is marked limited and later notes still ge
  assert.deepEqual(target.indexCoverage,{reason:'bounded_large_note_extraction',
   sourceComplete:true,backlinksComplete:false,limitedSourceCount:1,limitedSources:[{path:'Poison.md',reason:'oom'}]});
  assert.equal((await f.cache.readFilesystemNoteLinks('Unrelated.md',20,context)).indexCoverage,undefined);
+
+ await f.reopen();
+ const retry=f.cache.db.prepare("SELECT retry_at FROM markdown_link_files WHERE path='/Poison.md'");
+ assert.ok(retry.get().retry_at>0);
+ f.cache.db.exec("UPDATE markdown_link_files SET retry_at=0 WHERE path='/Poison.md'");
+ await f.cache.buildVaultCache();
+ await f.cache.linkIndexRun;
+ const recovered=await f.cache.readFilesystemNoteLinks('Poison.md',20,context);
+ assert.deepEqual(recovered.outgoing.map(link=>link.linkPath),['Target']);
+ assert.deepEqual(recovered.indexCoverage.limitedSources,[{path:'Poison.md',reason:'region'}]);
+ assert.equal(retry.get().retry_at,null);
 },{...defaultLinkExtraction,largeNoteBytes:1024*1024}));
 
 test('incremental rebuilds reuse the worker while publishing new backlinks',()=>linkFixture(async f=>{

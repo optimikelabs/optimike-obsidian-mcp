@@ -37,7 +37,9 @@ export class MarkdownLinkWorker {
     private readonly index: MarkdownLinkIndex,
   ) {}
 
-  readonly indexPaths = (paths: string[]): Promise<void> => this.indexBatch(this.index.describeSources(paths));
+  readonly indexPaths = (paths: string[]): Promise<void> => this.indexBatch(
+    this.index.describeSources(paths).map((source) => source.attempts > 0 ? { ...source, bounded: true } : source),
+  );
 
   private async indexBatch(sources: LinkIndexSource[]): Promise<void> {
     const active = new Int32Array(new SharedArrayBuffer(2 * Int32Array.BYTES_PER_ELEMENT));

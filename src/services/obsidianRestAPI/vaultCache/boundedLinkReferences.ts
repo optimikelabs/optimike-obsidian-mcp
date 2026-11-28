@@ -7,6 +7,7 @@ export type LinkExtractionOptions = {
   maxReferences: number;
   batchBytes: number;
   parseTimeoutMs?: number;
+  maxRetryAttempts?: number;
 };
 
 export const LARGE_LINK_SOURCE_BYTES = 256 * 1024;
@@ -17,6 +18,7 @@ export const defaultLinkExtraction: LinkExtractionOptions = {
   maxReferences: 8192,
   batchBytes: 256 * 1024,
   parseTimeoutMs: 10_000,
+  maxRetryAttempts: 2,
 };
 
 type Boundary = { offset: number; bytes: number; line: number; listPrefix?: string };
