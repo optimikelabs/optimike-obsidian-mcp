@@ -21,6 +21,9 @@ This branch leaves `main` and the individual pull requests unaffected.
 | [#229](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/229) | `215f1de9a3f019ed9d04632c1e12485d901f56cd` | Headless inventory excludes dot-prefixed files and directories by default |
 | [#232](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/232) | `353b97e0011eb9aa6278f99dbf43416776124600` | Live reads reconcile stale metadata from the same response and report `metadataCacheStale` |
 | [#233](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/233) | `d9befb4dc7e062e11a2f9a7af2bbb77641ed63e7` | Vault path aliases support NBSP and narrow NBSP, expose the physical spelling when needed, and refuse ambiguous REST aliases |
+| [#234](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/234) | `e1f340c4fd00c2ddf7a3555c37100aa9cb4652db` | Bases Bridge 1.3.1 and headless share the request filter grammar and report the invalid node before selecting rows |
+| [#224](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/224) | `99b2afbc6ba6f9c2b54eb80fa12576fde13af82e` | The producer can bootstrap an external generation from compatible Smart Connections vectors and reproduce the 4.7.2 selection rules |
+| [#238](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/238) | `7a1065bba590fdd2d633bb7ec805c9de9b7d09ab` | Regex search anchors match each line in live and headless modes |
 
 Run the read-only profile first. Test filesystem writes on a separate,
 disposable copy using synthetic notes. Write serialization is process-local.
@@ -41,11 +44,22 @@ in the provenance. The full inventory may still be refreshing. Cached reads
 keep the successful scan's start and refresh timestamps. The regression test
 exercises both responses on the same note.
 
-The headless Bases scan keeps #204's explicit opt-in and filter evaluation.
-It reads note properties with #228's shared CORE-schema parser. When a cold
-read bypasses the cache, it reports the exact physical spelling. Alias
-resolution uses the completed inventory. #224 and #234 remain outside this
-integration.
+The headless Bases scan validates request filters with #234's shared compiler
+before enforcing #204's explicit opt-in. It reads note properties with #228's
+CORE-schema parser, which preserves literal dates. The scan supports local
+property sorts. Formula evaluation and view queries still need Obsidian.
+Live property tables require Bases Bridge 1.3.1.
+
+The strict external generation reader and the bootstrap tool share the Smart
+Environment readers. The external reader still checks the manifest model,
+row counts, and vault-relative Markdown paths. Bootstrap checks the source
+model, vector references, selection metadata, and a bounded sample against
+the configured encoder. Builds that use the existing `bitnet-markdown-v3`
+selection can keep their published generations. The 4.7.2 selection applies
+when explicitly selected. See the [bootstrap contract](docs/semantic-index-producer.md#bootstrap-from-smart-connections-v3).
+
+When a cold read bypasses the cache, it reports the exact physical spelling.
+Alias resolution uses the completed inventory.
 
 ## Add another change
 
