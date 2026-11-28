@@ -69,7 +69,7 @@ export function registerNoteDeleteTools(
     plan: (input: z.infer<typeof Plan>) => Promise<unknown>;
     apply: (ref: string, key: string) => Promise<unknown>;
     status: (ref: string) => Promise<unknown>;
-    recover?: (ref: string, key: string) => Promise<unknown>;
+    recover?: (ref: string, key: string, action?: "resume" | "abandon") => Promise<unknown>;
   } | undefined,
 ): void {
   if (!runtime) return;
@@ -113,16 +113,17 @@ export function registerNoteDeleteTools(
   );
   if (runtime.recover) {
     const recover = runtime.recover;
+    const Recovery = Apply.extend({ action: z.enum(["resume", "abandon"]).optional() });
     server.registerTool(
       "obsidian_note_delete_recover",
       {
-        description: "Resume only the recorded headless plan after status reports recoveryAllowed. Reuse its original idempotency key.",
-        inputSchema: mcpSchema(Apply.shape),
+        description: "Resume the same headless plan when recoveryAllowed, or use action=abandon when abandonAllowed to release the reservation for manual repair. Reuse the original idempotency key.",
+        inputSchema: mcpSchema(Recovery.shape),
         annotations: GOVERNED_MUTATION_TOOL_ANNOTATIONS,
       },
       (params) => run("obsidian_note_delete_recover", () => {
-        const p = Apply.parse(params);
-        return recover(p.planRef, p.idempotencyKey);
+        const p = Recovery.parse(params);
+        return recover(p.planRef, p.idempotencyKey, p.action);
       }),
     );
   }

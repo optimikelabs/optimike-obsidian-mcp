@@ -587,8 +587,12 @@ export class VaultCacheService {
   }
 
   /** Refresh from disk before using the index to admit a filesystem mutation. */
-  public async readFilesystemMoveInventory(filePath: string) {
-    await this.refreshCache(true);
+  public async readFilesystemMoveInventory(filePath: string, destination: string | undefined, limit: number) {
+    await this.refreshCache();
+    return this.filesystemMoveInventory(filePath, destination, limit);
+  }
+
+  private async filesystemMoveInventory(filePath: string, destination: string | undefined, limit: number) {
     await this.linkIndexRun;
     if (!this.markdownLinks || !this.verifyFilesystemIndex(false)) {
       throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "The filesystem link inventory is incomplete.");
@@ -598,13 +602,57 @@ export class VaultCacheService {
       if (!this.verifyFilesystemIndex(false)) {
         throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "The filesystem link inventory is changing.");
       }
-      const inventory = this.markdownLinks.moveInventory("/" + filePath);
+      const inventory = this.markdownLinks.moveInventory("/" + filePath, destination ? "/" + destination : undefined, limit);
       this.db.exec("COMMIT");
       return inventory;
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  public async readFilesystemResolutionTargets(): Promise<string[]> {
+    const targets: string[] = [];
+    const context = requestContextService.createRequestContext({ operation: "readFilesystemResolutionTargets" });
+    const markdown = await this.listAllMarkdownFilesFromFilesystem(context, targets);
+    return markdown.concat(targets);
+  }
+
+  public async refreshFilesystemMovePaths(paths: readonly string[], trashFolder: string): Promise<void> {
+    const root = getVaultRoot();
+    const links = this.markdownLinks;
+    if (!root || !links) throw new Error("filesystem_index_unavailable");
+    const context = requestContextService.createRequestContext({ operation: "refreshFilesystemMovePaths" });
+    await this.serializeCacheWrite(async () => {
+      for (const relative of new Set(paths)) {
+        const filePath = "/" + relative;
+        const trash = foldedPath(relative).startsWith(foldedPath(trashFolder) + "/");
+        const markdown = relative.toLowerCase().endsWith(".md");
+        if (markdown && !trash) {
+          try {
+            const row = await this.readCacheRow(filePath, "filesystem", context);
+            this.writeLinkIndexBatch(() => {
+              this.upsertRow(row);
+              links.update(filePath, row.hash, row.content);
+            });
+            continue;
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException)?.code !== "ENOENT" &&
+                !(error instanceof McpError && error.code === BaseErrorCode.NOT_FOUND)) throw error;
+          }
+        }
+        const present = !markdown && !trash && await fs.lstat(path.join(root, relative))
+          .then(stat => stat.isFile(), (error: NodeJS.ErrnoException) => {
+            if (error.code === "ENOENT") return false;
+            throw error;
+          });
+        this.writeLinkIndexBatch(() => {
+          if (markdown) this.deleteRow(filePath);
+          links.updatePathTarget(filePath, present);
+        });
+      }
+      this.checkedFilesystemVersion = undefined;
+    });
   }
 
   public allowsHeadlessOperationSource(relativePath: string): boolean {
@@ -1036,7 +1084,8 @@ export class VaultCacheService {
               const vaultRoot = getVaultRoot();
               if (!vaultRoot) return "failed";
               const stats = await fs.stat(path.join(vaultRoot, filePath.slice(1)));
-              if (cachedEntry.mtime === Math.round(stats.mtimeMs) && cachedEntry.size === stats.size) {
+              if (cachedEntry.mtime === Math.round(stats.mtimeMs) && cachedEntry.size === stats.size &&
+                  (config.obsidianRuntimeMode !== "headless-filesystem" || cachedEntry.ctime === Math.round(stats.ctimeMs))) {
                 return "skipped";
               }
             }

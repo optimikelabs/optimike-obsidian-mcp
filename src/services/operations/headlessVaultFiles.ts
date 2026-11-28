@@ -10,8 +10,8 @@ export const sha256 = (bytes: Buffer | string) => createHash("sha256").update(by
 export const foldedPath = (value: string) => value.normalize("NFC").toLowerCase();
 export const missing = (error: unknown) => (error as NodeJS.ErrnoException)?.code === "ENOENT";
 
-export function filesystemConflict(message: string): never {
-  throw new McpError(BaseErrorCode.CONFLICT, message);
+export function filesystemConflict(message: string, reasonCode = "headless_plan_stale"): never {
+  throw new McpError(BaseErrorCode.CONFLICT, message, { reasonCode });
 }
 
 export function safeRelativePath(value: string, hidden = false): string {
@@ -53,6 +53,8 @@ export function readVaultAppSettings(root: string) {
     useMarkdownLinks: typeof settings.useMarkdownLinks === "boolean" ? settings.useMarkdownLinks : undefined,
     format,
     trashFolder,
+    trashPreference: settings.trashOption === "none" || settings.trashOption === "system"
+      ? settings.trashOption : "local",
   };
 }
 
@@ -78,8 +80,69 @@ function syncParent(file: string): void {
   finally { closeSync(fd); }
 }
 
+function hardLinkUnavailable(error: unknown): boolean {
+  return ["EPERM", "EXDEV", "ENOSYS", "ENOTSUP", "EOPNOTSUPP", "EACCES"].includes((error as NodeJS.ErrnoException)?.code ?? "");
+}
+
+function hardLinksUnsupported(): never {
+  throw new McpError(BaseErrorCode.CONFLICT, "The destination does not support exclusive hard-link publication.",
+    { reasonCode: "hard_links_unsupported" });
+}
+
 export class HeadlessVaultFiles {
+  private directories = new Map<string, { signature: string; entries: Map<string, string[]> }>();
   constructor(readonly root: string) {}
+
+  private siblings(directory: string, name: string): string[] {
+    const stat = lstatSync(directory, { bigint: true });
+    if (!stat.isDirectory() || stat.isSymbolicLink()) filesystemConflict("The parent directory changed.");
+    const signature = [stat.dev, stat.ino, stat.mtimeNs, stat.ctimeNs].join(":");
+    let cached = this.directories.get(directory);
+    if (cached?.signature !== signature) {
+      const entries = new Map<string, string[]>();
+      for (const entry of readdirSync(directory)) {
+        const key = foldedPath(entry);
+        const group = entries.get(key) ?? [];
+        group.push(entry);
+        entries.set(key, group);
+      }
+      cached = { signature, entries };
+      this.directories.set(directory, cached);
+    }
+    return cached.entries.get(foldedPath(name)) ?? [];
+  }
+
+  probeHardLinks(source: string, destination: string, allowMissingParents: boolean): void {
+    const original = this.locate(source);
+    let parent = path.dirname(this.locate(destination, allowMissingParents));
+    while (allowMissingParents) {
+      try { lstatSync(parent); break; }
+      catch (error) {
+        if (!missing(error)) throw error;
+        parent = path.dirname(parent);
+      }
+    }
+    const temporary = path.join(parent, `.optimike-probe-${randomUUID()}.tmp`);
+    try { linkSync(original, temporary); }
+    catch (error) {
+      if (hardLinkUnavailable(error)) hardLinksUnsupported();
+      throw error;
+    }
+    unlinkSync(temporary);
+  }
+
+  private staging(relative: string, operationId: string): string {
+    const target = this.locate(relative);
+    return path.join(path.dirname(target), `.optimike-${operationId}-${sha256(relative).slice(0, 16)}.tmp`);
+  }
+
+  cleanStage(relative: string, operationId: string): void {
+    const temporary = this.staging(relative, operationId);
+    try {
+      if (!lstatSync(temporary).isFile()) filesystemConflict("An operation staging path was replaced.");
+      unlinkSync(temporary);
+    } catch (error) { if (!missing(error)) throw error; }
+  }
 
   // Check every component and its exact spelling, including Windows junctions.
   // Reject folded siblings rather than relying on OS-specific case behavior.
@@ -87,13 +150,12 @@ export class HeadlessVaultFiles {
     const parts = safeRelativePath(relative, true).split("/");
     let current = this.root;
     for (const [index, name] of parts.entries()) {
-      let siblings: string[];
-      try { siblings = readdirSync(current); }
+      let variants: string[];
+      try { variants = this.siblings(current, name); }
       catch (error) {
         if (allowMissingParents && missing(error)) return path.join(current, ...parts.slice(index));
         throw error;
       }
-      const variants = siblings.filter(item => foldedPath(item) === foldedPath(name));
       current = path.join(current, name);
       if (!variants.length) {
         if (index === parts.length - 1 || allowMissingParents) return path.join(current, ...parts.slice(index + 1));
@@ -140,10 +202,10 @@ export class HeadlessVaultFiles {
     this.locate(relative);
   }
 
-  replace(relative: string, expected: string, next: Buffer): void {
+  replace(relative: string, expected: string, next: Buffer, operationId: string): void {
     const current = this.state(relative);
     if (current?.hash !== expected) filesystemConflict("A file changed during the move.");
-    const temporary = path.join(path.dirname(current.absolute), `.optimike-${randomUUID()}.tmp`);
+    const temporary = this.staging(relative, operationId);
     const fd = openSync(temporary, "wx", current.mode);
     try {
       try {
@@ -163,11 +225,17 @@ export class HeadlessVaultFiles {
 
   // Portable exclusive publication. A crash between link/unlink leaves two
   // names for one inode; recovery can prove that it owns both names.
-  relocate(source: string, destination: string, before: string, identity: string): void {
+  relocate(source: string, destination: string, before: string, identity: string, markPublished: () => void): void {
     const original = this.state(source);
     if (original?.hash !== before || original.identity !== identity) filesystemConflict("The source changed during the move.");
     const target = this.state(destination);
-    if (!target) linkSync(original.absolute, this.locate(destination));
+    if (!target) {
+      try { linkSync(original.absolute, this.locate(destination)); }
+      catch (error) {
+        if (hardLinkUnavailable(error)) hardLinksUnsupported();
+        throw error;
+      }
+    }
     const published = this.state(destination);
     const current = this.state(source);
     if (published?.identity !== identity || published.hash !== before ||
@@ -175,6 +243,7 @@ export class HeadlessVaultFiles {
       filesystemConflict("The destination could not be verified before removing the original name.");
     }
     syncParent(published.absolute);
+    markPublished();
     unlinkSync(original.absolute);
     syncParent(original.absolute);
   }

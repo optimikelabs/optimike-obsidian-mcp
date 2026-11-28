@@ -105,30 +105,45 @@ Ne jamais utiliser cette phase pour modifier des notes de production existantes 
 
 En `headless-filesystem`, avec le cache filesystem et `MCP_WRITE_MODE=full`,
 appeler `obsidian_note_move_plan` avec les chemins exacts de départ et d’arrivée
-et une clé d’idempotence. Le plan s’appuie sur les liens Markdown indexés, y
-compris les liens YAML entre guillemets pris en charge et les embeds de pièces
-jointes. Son aperçu indique le nombre de réécritures et de notes concernées avec
-des exemples bornés. Les préférences de `.obsidian/app.json` déterminent si les
-liens sont actualisés et sous quelle forme. Appliquer avec la clé d’origine. Le
-fichier source et chaque note réécrite sont contrôlés avant la première écriture.
-Un plan périmé renvoie `outcome: conflict`.
+et une clé d’idempotence. Il inspecte les liens Markdown indexés et les embeds
+de pièces jointes. Il préserve la syntaxe et les libellés déjà présents, y
+compris dans les scalaires YAML. Il ajuste les liens sortants de la note
+déplacée si leur cible change, et refuse une opération qui détournerait un
+lien résolu depuis une autre note. L’aperçu est plafonné. Au-delà de 100 sources
+potentielles de backlinks, le plan renvoie `headless_backlink_limit`. Il sonde
+la création exclusive de liens physiques avant de sceller le plan. Appliquer
+avec la clé d’origine. Un plan périmé renvoie `headless_plan_stale`.
 
-Appeler `obsidian_note_delete_plan` pour obtenir le nombre de liens entrants
-et la liste plafonnée des notes sources. En présence de backlinks, les examiner
-puis soumettre un nouveau plan avec `acknowledgeBacklinks: true`. L’application
-déplace les octets d’origine dans un emplacement libre sous `.trash` ou sous
-le dossier du coffre indiqué par `trashFolder` / `trashFolderPath` dans
-`app.json`. Les liens existants sont conservés. La destination reste un dossier
-du coffre, quelle que soit la préférence Desktop de suppression.
+`app.json` pilote l’actualisation via `alwaysUpdateLinks` et la forme des chemins
+via `newLinkFormat`. `useMarkdownLinks` concerne les liens générés. Le
+déplacement conserve les wikilinks et liens Markdown dans leur syntaxe
+d’origine. Voir les [réglages d’Obsidian](https://obsidian.md/help/settings#files-and-links).
 
-Les deux opérations actualisent le cache partagé et l’index avant de confirmer
-leur actualisation. Après une interruption, appeler le `*_status` correspondant,
-puis `*_recover` si `recoveryAllowed` est vrai, avec la même référence et la
-même clé. Les autres processus ne partagent pas ces verrous. Chaque remplacement
-est atomique. Une opération sur plusieurs fichiers peut être visible en cours
-d’exécution et reprendre après une interruption. Les propriétés de date sont
-préservées. La couverture suit l’inventaire filesystem, avec ses exclusions de
-sources Markdown.
+Appeler `obsidian_note_delete_plan` pour examiner les liens entrants. S’il en
+existe, soumettre un nouveau plan avec `acknowledgeBacklinks: true` après les
+avoir examinés. L’application déplace le fichier dans un emplacement libre
+sous `.trash` par défaut. Le MCP accepte aussi `trashFolder` ou `trashFolderPath`
+comme chemin local de remplacement. Il refuse les valeurs explicites
+`trashOption: "system"` et `trashOption: "none"`. Sans ce réglage, le MCP choisit
+la corbeille du coffre.
+
+Les deux opérations actualisent les chemins touchés dans le cache et l’index.
+Le reçu de vérification s’appuie sur une relecture. Après une interruption,
+appeler `*_status` puis `*_recover` avec la même référence et clé si
+`recoveryAllowed` est vrai. Si une édition externe empêche la reprise,
+`abandonAllowed` permet d’appeler `*_recover` avec `action: "abandon"`.
+Le verrou est libéré pour une réparation manuelle. Le journal privé conserve
+le texte d’avant et les empreintes dans `headless_file_operations.payload.rewrites`.
+Comparer les empreintes courantes aux preuves du reçu avant toute restauration.
+Sans effet publié, l’opération se règle en conflit et libère son verrou. La
+reprise ou l’abandon supprime les fichiers de préparation encore accessibles.
+
+La sonde des liens physiques, sur le même système de fichiers, peut renvoyer
+`hard_links_unsupported`. Chaque remplacement est atomique. Les autres
+processus ne partagent pas les verrous, et plusieurs remplacements peuvent
+être visibles en cours d’opération. Ce parcours s’applique à un coffre copié
+ou dédié. L’[ADR](adr/ADR-External-Reference-Integrity.md#vault-only-moves)
+précise la distinction avec le déplacement de documents externes.
 
 `operational` privilégie ces outils. Le profil `full` conserve également les
 anciens outils directs dont le contrôle hash/mtime porte sur un seul fichier.

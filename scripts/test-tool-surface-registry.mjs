@@ -102,6 +102,8 @@ for (const entry of TOOL_SURFACE_REGISTRY) {
   items.push(entry);
   governedFamilies.set(entry.family, items);
 }
+assert.equal(governedFamilies.size, 13, "exactly thirteen governed lifecycle families are expected");
+
 for (const [family, entries] of governedFamilies) {
   assert.deepEqual(
     entries.map((entry) => entry.lifecycleRole).sort(),

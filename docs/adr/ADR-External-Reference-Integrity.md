@@ -111,6 +111,16 @@ The former hard-link/unlink sequence is retired and is not executable. A future
 native handle-relative primitive must prove no-clobber behavior and fail closed
 when that proof cannot be established.
 
+## Vault-only moves
+
+The external-document hard-link/unlink path above remains retired. Governed
+note move and trash have a separate contract for copied or dedicated headless
+vaults. They probe hard-link support, reserve the operation in a local journal
+and record proof of publication before removing the old name. Recovery can
+recognize the two names of one inode after process interruption. The probe
+does not grant a native handle-relative guarantee against other processes.
+This contract does not authorize any external-document mutation.
+
 ## Vault repair and concurrency
 
 Each planned note repair stores its exact before/after content and expected

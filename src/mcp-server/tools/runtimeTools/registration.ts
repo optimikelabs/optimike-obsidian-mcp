@@ -174,13 +174,13 @@ export async function registerRuntimeTools(
     plan: input => headless.planMove(input),
     apply: (ref, key) => headless.apply("move", ref, key),
     status: ref => headless.status("move", ref),
-    recover: (ref, key) => headless.recover("move", ref, key),
+    recover: (ref, key, action) => headless.recover("move", ref, key, action),
   } : governedNoteReplaceRuntime?.nativeMove);
   registerNoteDeleteTools(server, headless ? {
     plan: input => headless.planDelete(input),
     apply: (ref, key) => headless.apply("delete", ref, key),
     status: ref => headless.status("delete", ref),
-    recover: (ref, key) => headless.recover("delete", ref, key),
+    recover: (ref, key, action) => headless.recover("delete", ref, key, action),
   } : governedNoteReplaceRuntime?.noteDelete);
   registerNoteCreateTools(server, governedNoteReplaceRuntime?.noteCreate);
   registerVaultFileCreateTools(server, [governedNoteReplaceRuntime?.baseCreate, governedNoteReplaceRuntime?.canvasCreate]);

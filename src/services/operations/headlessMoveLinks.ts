@@ -63,21 +63,14 @@ function replacement(content: string, ref: MarkdownLinkReference, resolver: Mark
   const raw = content.slice(edit.start, edit.end);
   if (!ref.linkPath) return undefined; // A bare self fragment follows the move.
   const wiki = edit.syntax === "wiki" || edit.syntax === "yaml";
-  // Property wikilinks and reference definitions retain their container syntax.
-  const toMarkdown = wiki && edit.syntax !== "yaml" && settings.useMarkdownLinks === true &&
-    !(ref.kind === "embed" && ref.displayText);
-  const format = settings.format;
-  const spelling = linkSpelling(resolver, source, destination, format, !wiki || toMarkdown);
+  const spelling = linkSpelling(resolver, source, destination, settings.format, !wiki);
   let after: string;
-  if (toMarkdown) {
-    const label = (ref.displayText ?? path.posix.basename(destination).replace(/\.md$/iu, "")).replace(/[\\[\]]/gu, "\\$&");
-    const fragment = ref.subpath ? "#" + encodeURIComponent(ref.subpath.slice(1)) : "";
-    after = `${ref.kind === "embed" ? "!" : ""}[${label}](${encodePath(spelling)}${fragment})`;
-  } else if (wiki) {
+  // Preserve existing link syntax. Markdown fragment conversion is not required for relocation.
+  if (wiki) {
     const start = raw.indexOf("[[") + 2;
     const tail = raw.slice(start);
-    const target = /^[^#|\]]+/u.exec(tail)?.[0];
-    if (!target || target.trim() !== ref.linkPath || /[#|\[\]]/u.test(spelling)) return unsupported();
+    const target = /^[^#|\]]+?(?=\\?\||#|\]\])/u.exec(tail)?.[0];
+    if (!target || (edit.quote === "'" ? target.replace(/''/gu, "'") : target).trim() !== ref.linkPath || /[#|\[\]]/u.test(spelling)) return unsupported();
     const escaped = edit.quote === "'" ? spelling.replace(/'/gu, "''")
       : edit.quote === '"' ? spelling.replace(/["\\]/gu, "\\$&") : spelling;
     after = raw.slice(0, start) + target.replace(/\S(?:[\s\S]*\S)?/u, () => escaped) + tail.slice(target.length);
@@ -97,12 +90,28 @@ export function applyLinkEdits(content: string, edits: readonly LinkEdit[]) {
 export function rewriteIncoming(content: string, note: string, source: string, destination: string,
   before: MarkdownLinkResolver, after: MarkdownLinkResolver, settings: Settings) {
   const nextNote = note === source ? destination : note;
-  const matches = extractMarkdownLinkReferences(content, true).filter(ref => before.resolve(note, ref.linkPath)?.path === source);
+  const original = extractMarkdownLinkReferences(content, true);
   const edits = new Map<number, LinkEdit>();
-  for (const ref of matches) {
-    if (!ref.linkPath) continue;
+  const expected = new Map<string, number>();
+  for (const ref of original) {
+    const target = before.resolve(note, ref.linkPath)?.path;
+    if (!target) continue;
+    const wanted = target === source ? destination : target;
+    const projected = after.resolve(nextNote, ref.linkPath);
+    const identity = JSON.stringify([wanted, ref.subpath]);
+    expected.set(identity, (expected.get(identity) ?? 0) + 1);
+    if (note !== source && target !== source) {
+      if (projected?.path !== wanted) {
+        throw new McpError(BaseErrorCode.CONFLICT, "The move would change the target of an unrelated link.",
+          { reasonCode: "headless_link_target_changed" });
+      }
+      continue;
+    }
+    if (!ref.linkPath || (target !== source && projected?.path === wanted)) continue;
     if (ref.frontmatterKey && /^(?:création|modification)$/iu.test(ref.frontmatterKey)) return unsupported();
-    const edit = replacement(content, ref, after, nextNote, destination, settings);
+    const style = note === source && target !== source && settings.format === "shortest" &&
+      /^\.\.?\//u.test(ref.linkPath) ? { ...settings, format: "relative" as const } : settings;
+    const edit = replacement(content, ref, after, nextNote, wanted, style);
     if (edit) edits.set(edit.start, edit);
   }
   const ordered = [...edits.values()].sort((a, b) => b.start - a.start);
@@ -111,16 +120,14 @@ export function rewriteIncoming(content: string, note: string, source: string, d
   }
   if (!ordered.length) return undefined;
   const next = applyLinkEdits(content, ordered);
-  const rewritten = extractMarkdownLinkReferences(next).filter(ref => after.resolve(nextNote, ref.linkPath)?.path === destination);
-  // Reject a splice that makes an incoming link disappear or lose its fragment.
-  const fragments = new Map<string, number>();
-  for (const ref of rewritten) fragments.set(ref.subpath, (fragments.get(ref.subpath) ?? 0) + 1);
-  for (const ref of matches) {
-    const count = fragments.get(ref.subpath) ?? 0;
-    if (!count) return unsupported();
-    fragments.set(ref.subpath, count - 1);
+  for (const ref of extractMarkdownLinkReferences(next)) {
+    const target = after.resolve(nextNote, ref.linkPath)?.path;
+    const identity = JSON.stringify([target, ref.subpath]);
+    const remaining = expected.get(identity);
+    if (remaining) expected.set(identity, remaining - 1);
   }
+  if ([...expected.values()].some(count => count > 0)) return unsupported();
   const first = ordered.at(-1)!;
-  return { edits: ordered, afterHash: sha256(next), count: ordered.length,
+  return { edits: ordered, beforeText: content, afterHash: sha256(next), count: ordered.length,
     sample: { before: content.slice(first.start, first.end).slice(0, 240), after: first.after.slice(0, 240) } };
 }

@@ -77,10 +77,7 @@ const defaultCrossRuntimeNames = new Set(registrationModes.flatMap(registrationM
 const configuredCrossRuntimeNames = new Set(registrationModes.flatMap(registrationMode =>
   compileToolNames({ registrationMode, availableStaticRequirements: ["vault-cache", "asset-policy"] }),
 ));
-// The frozen cycle inventory predates the two headless-only recovery tools.
-const headlessRecoveryNames = ["obsidian_note_delete_recover", "obsidian_note_move_recover"];
-assert.ok(headlessRecoveryNames.every(name => defaultCrossRuntimeNames.has(name)));
-assert.equal(cycle.expectedSurface.crossRuntime, defaultCrossRuntimeNames.size - headlessRecoveryNames.length,
+assert.equal(cycle.expectedSurface.crossRuntime, defaultCrossRuntimeNames.size,
   "Cycle surface records the default-off cross-runtime contract");
 assert.equal(TOOL_SURFACE_REGISTRY.length, configuredCrossRuntimeNames.size,
   "Conditional registry union must remain exhaustively reachable when optional requirements are present");

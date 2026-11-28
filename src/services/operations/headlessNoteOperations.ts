@@ -1,3 +1,4 @@
+import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
@@ -17,7 +18,8 @@ import {
 } from "./headlessVaultFiles.js";
 
 const PREVIEW_LIMIT = 12;
-const BACKLINK_LIMIT = 200;
+const BACKLINK_LIMIT = 100;
+type RecoveryAction = "resume" | "abandon";
 const PREFIX = { move: NATIVE_MOVE_PREFIX, delete: NOTE_DELETE_PREFIX };
 const WRITE_OPERATIONS = {
   move: { plan: "obsidian_note_move_plan", apply: "obsidian_note_move_apply" },
@@ -29,8 +31,14 @@ type Rewrite = NonNullable<ReturnType<typeof rewriteIncoming>> & { path: string;
 type Snapshot = {
   intent: Intent; destination: string; beforeHash: string; identity: string; size: number;
   settings: ReturnType<typeof readVaultAppSettings>; rewrites: Rewrite[];
+  graphProofs?: Array<{ path: string; digest: string }>;
   backlinks: Array<{ sourcePath: string; count: number }>;
 };
+
+function graphProof(content: string, note: string, resolver: MarkdownLinkResolver): string {
+  return nativeDigest(extractMarkdownLinkReferences(content).map(ref =>
+    [resolver.resolve(note, ref.linkPath)?.path ?? null, ref.subpath, ref.kind]));
+}
 
 export class HeadlessNoteOperations {
   constructor(private readonly root: string, private readonly journalPath: string, private readonly cache: VaultCacheService) {}
@@ -51,13 +59,21 @@ export class HeadlessNoteOperations {
 
   private async capture(intent: Intent, files: HeadlessVaultFiles): Promise<Snapshot> {
     const settings = readVaultAppSettings(files.root);
-    const inventory = await this.cache.readFilesystemMoveInventory(intent.source);
+    const inventory = await this.cache.readFilesystemMoveInventory(intent.source, intent.kind === "move" ? intent.destination : undefined, BACKLINK_LIMIT);
+    if (inventory.sources.length > BACKLINK_LIMIT) {
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Too many potential backlink sources for a bounded operation.",
+        { reasonCode: "headless_backlink_limit" });
+    }
+    if (intent.kind === "delete" && settings.trashPreference !== "local") {
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Select Obsidian's vault trash before planning headless deletion.",
+        { reasonCode: "headless_trash_preference_unsupported" });
+    }
     const source = "/" + intent.source;
     if (!inventory.paths.includes(source) || !this.cache.allowsHeadlessOperationSource(intent.source)) {
       throw new McpError(BaseErrorCode.NOT_FOUND, "The source is outside the filesystem link inventory.");
     }
     const original = files.state(intent.source, { readBytes: settings.updateLinks && intent.kind === "move" &&
-      inventory.sources.includes(source) });
+      intent.source.toLowerCase().endsWith(".md") });
     if (!original) throw new McpError(BaseErrorCode.NOT_FOUND, "Source file unavailable.");
     const before = MarkdownLinkResolver.fromPaths(inventory.paths);
     const isTrash = (value: string) => foldedPath(value).startsWith(foldedPath(settings.trashFolder) + "/");
@@ -69,9 +85,12 @@ export class HeadlessNoteOperations {
     if (files.state(destination, { allowMissingParents: intent.kind === "delete" })) filesystemConflict("The destination already exists.");
     const after = MarkdownLinkResolver.fromPaths(inventory.paths.filter(item => item !== source).concat("/" + destination));
     const snapshot: Snapshot = { intent, destination, beforeHash: original.hash, identity: original.identity,
-      size: original.size, settings, rewrites: [], backlinks: [] };
-    for (const indexedPath of inventory.sources) {
+      size: original.size, settings, rewrites: [], backlinks: [], graphProofs: [] };
+    const scoped = new Set(inventory.sources);
+    if (intent.kind === "move" && intent.source.toLowerCase().endsWith(".md")) scoped.add(source);
+    for (const indexedPath of scoped) {
       if ((intent.kind === "move" && !settings.updateLinks) || (intent.kind === "delete" && indexedPath === source)) continue;
+      await yieldToEventLoop();
       const note = indexedPath.slice(1);
       const state = note === intent.source ? original : files.state(note, { readBytes: true });
       if (!state?.bytes) filesystemConflict("An indexed backlink source disappeared.");
@@ -81,6 +100,9 @@ export class HeadlessNoteOperations {
         if (count) snapshot.backlinks.push({ sourcePath: note, count });
       } else if (settings.updateLinks) {
         const rewrite = rewriteIncoming(content, indexedPath, source, "/" + destination, before, after, settings);
+        const next = rewrite ? applyLinkEdits(content, rewrite.edits) : content;
+        const resultPath = indexedPath === source ? "/" + destination : indexedPath;
+        snapshot.graphProofs!.push({ path: resultPath.slice(1), digest: graphProof(next, resultPath, after) });
         if (!rewrite) continue;
         if (!Buffer.from(content).equals(state.bytes)) {
           throw new McpError(BaseErrorCode.VALIDATION_ERROR, "A backlink source is not valid UTF-8.");
@@ -138,6 +160,7 @@ export class HeadlessNoteOperations {
     const existing = journal.transaction(tx => tx.read(internalKey, true));
     if (existing) return replay(existing);
     const payload = await this.capture(intent, files);
+    files.probeHardLinks(intent.source, payload.destination, intent.kind === "delete");
     return journal.transaction(tx => {
       const winner = tx.read(internalKey, true);
       if (winner) return replay(winner);
@@ -168,53 +191,43 @@ export class HeadlessNoteOperations {
     const row = this.get(kind, ref, journal, key);
     if (row.phase !== "planned") return this.status(kind, ref);
     this.authorize(kind, "apply", row.payload.intent.source);
-    const revision = journal.transaction(tx => tx.revision());
+    const revision = journal.transaction(tx => {
+      tx.ensureVaultAvailable();
+      return tx.revision();
+    });
     let fresh: Snapshot | undefined;
     try { fresh = await this.capture(row.payload.intent, files); }
     catch (error) {
       if (!(error instanceof McpError && [BaseErrorCode.NOT_FOUND, BaseErrorCode.CONFLICT, BaseErrorCode.VALIDATION_ERROR].includes(error.code))) throw error;
     }
     if (this.bound().fingerprint !== fingerprint) filesystemConflict("The configured vault changed.");
+    const eligible = fresh && nativeDigest(fresh) === nativeDigest(row.payload) && this.allBefore(files, row.payload);
     const claimed = journal.transaction(tx => {
       const current = tx.read(row.id)!;
       if (current.phase !== "planned") return { row: current, run: false };
       if (tx.revision() !== revision) filesystemConflict("The vault graph changed during validation. Recheck the same plan.");
-      if (!fresh || nativeDigest(fresh) !== nativeDigest(current.payload) || !this.allBefore(files, current.payload)) {
-        return { row: tx.settle(current, "conflict"), run: false };
+      if (!eligible) {
+        return { row: tx.settle(current, "conflict", "headless_plan_stale"), run: false };
       }
       return { row: tx.claim(current, this.paths(current.payload)), run: true };
     });
     if (!claimed.run) return this.receipt(claimed.row);
-    return this.execute(files, journal, row.id);
+    return this.runPending(files, journal, claimed.row, "apply");
   }
 
   async status(kind: Intent["kind"], ref: string) {
     const { files, journal } = this.bound();
     const row = this.get(kind, ref, journal);
-    const reconciled = journal.transaction(tx => {
-      const current = tx.read(row.id)!;
-      return current.phase === "applying" && this.observe(files, current.payload).complete
-        ? tx.settle(current, "committed") : current;
-    });
-    return this.withCache(reconciled);
+    if (row.phase === "applying") return this.runPending(files, journal, row, "status");
+    return this.withCache(row, files);
   }
 
-  async recover(kind: Intent["kind"], ref: string, key: string) {
-    const { files, journal, fingerprint } = this.bound();
+  async recover(kind: Intent["kind"], ref: string, key: string, action: RecoveryAction = "resume") {
+    const { files, journal } = this.bound();
     const row = this.get(kind, ref, journal, key);
-    if (row.phase !== "applying") return this.withCache(row);
+    if (row.phase !== "applying") return this.withCache(row, files);
     this.authorize(kind, "apply", row.payload.intent.source);
-    if (!this.observe(files, row.payload).safe) {
-      filesystemConflict("A sealed path changed after dispatch. Restore the recorded files before retrying recovery.");
-    }
-    // If the crash preceded all effects, validate the graph again before resuming.
-    if (this.allBefore(files, row.payload)) {
-      const fresh = await this.capture(row.payload.intent, files);
-      if (this.bound().fingerprint !== fingerprint || nativeDigest(fresh) !== nativeDigest(row.payload)) {
-        filesystemConflict("The pending plan's preconditions changed.");
-      }
-    }
-    return this.execute(files, journal, row.id);
+    return this.runPending(files, journal, row, action);
   }
 
   private paths(plan: Snapshot) {
@@ -246,69 +259,146 @@ export class HeadlessNoteOperations {
     return { safe: true, complete };
   }
 
-  private async execute(files: HeadlessVaultFiles, journal: HeadlessOperationJournal<Snapshot>, id: string) {
-    const row = journal.transaction(tx => {
-      const current = tx.read(id)!;
-      if (current.phase !== "applying") return current;
-      const plan = current.payload;
-      try {
-        const observed = this.observe(files, plan);
-        if (!observed.safe) return current;
-        if (!observed.complete) {
-          if (files.state(plan.intent.source)) {
-            if (plan.intent.kind === "delete") files.createTrashParents(plan.destination);
-            files.relocate(plan.intent.source, plan.destination, plan.beforeHash, plan.identity);
-          }
-          for (const rewrite of plan.rewrites) {
-            const target = rewrite.path === plan.intent.source ? plan.destination : rewrite.path;
-            const state = files.state(target, { readBytes: true });
-            if (state?.hash === rewrite.afterHash) continue;
-            if (!state?.bytes || state.hash !== rewrite.beforeHash) return current;
-            files.replace(target, rewrite.beforeHash, Buffer.from(applyLinkEdits(state.bytes.toString("utf8"), rewrite.edits)));
-          }
-        }
-        if (!this.observe(files, plan).complete) return current;
-      } catch {
-        // A failed filesystem call may have published an effect. Keep the
-        // durable reservation until status or exact-plan recovery can prove it.
-        return current;
-      }
-      return tx.settle(current, "committed");
-    });
-    return this.withCache(row);
-  }
-
-  private async withCache(row: HeadlessRow<Snapshot>) {
-    if (row.phase !== "committed" && row.phase !== "applying") return this.receipt(row);
+  private async runPending(files: HeadlessVaultFiles, journal: HeadlessOperationJournal<Snapshot>,
+    row: HeadlessRow<Snapshot>, action: "apply" | "status" | RecoveryAction) {
+    const token = randomUUID();
+    const attempt = journal.transaction(tx =>
+      tx.beginAttempt(row.id, token) ? { published: tx.published(row.id) } : undefined);
+    if (!attempt) {
+      const current = journal.transaction(tx => tx.read(row.id))!;
+      return current.phase === "applying" ? this.receipt(current, false, false, "headless_operation_pending")
+        : this.withCache(current, files);
+    }
+    const plan = row.payload;
+    let published = attempt.published;
+    const noEffect = () => this.noEffect(files, plan, published);
+    const settle = (phase: HeadlessRow<Snapshot>["phase"], reason?: string) =>
+      journal.transaction(tx => tx.settle(row, phase, reason));
     try {
-      await this.cache.readFilesystemMoveInventory(row.payload.intent.source);
-      return { ...this.receipt(row), cache: "refreshed" };
-    } catch {
-      return { ...this.receipt(row), cache: "unavailable" };
+      let observed = this.tryObserve(files, plan);
+      if (observed.complete) return await this.withCache(settle("committed"), files);
+      if (action === "abandon") {
+        if (observed.safe) filesystemConflict("The sealed operation can still be recovered.", "headless_operation_pending");
+        for (const item of plan.rewrites) {
+          try { files.cleanStage(item.path === plan.intent.source ? plan.destination : item.path, row.id); }
+          catch { /* Manual repair also covers inaccessible staging paths. */ }
+        }
+        return await this.withCache(settle("abandoned", "headless_manual_repair_required"), files);
+      }
+      if (!observed.safe || action === "status") {
+        if (noEffect()) {
+          return this.receipt(settle("conflict", "headless_plan_stale"));
+        }
+        return this.receipt(row, false, observed.safe,
+          observed.safe ? undefined : "headless_manual_repair_required");
+      }
+      if (action === "resume" && noEffect()) {
+        try {
+          const fresh = await this.capture(plan.intent, files);
+          if (nativeDigest(fresh) !== nativeDigest(plan)) return this.receipt(settle("conflict", "headless_plan_stale"));
+        } catch (error) {
+          if (!(error instanceof McpError) || error.code === BaseErrorCode.SERVICE_UNAVAILABLE) throw error;
+          return this.receipt(settle("conflict", "headless_plan_stale"));
+        }
+      }
+      try {
+        await yieldToEventLoop();
+        if (files.state(plan.intent.source)) {
+          if (plan.intent.kind === "delete") files.createTrashParents(plan.destination);
+          files.relocate(plan.intent.source, plan.destination, plan.beforeHash, plan.identity, () => {
+            journal.transaction(tx => tx.markPublished(row.id));
+            published = true;
+          });
+        }
+        for (const rewrite of plan.rewrites) {
+          await yieldToEventLoop();
+          const target = rewrite.path === plan.intent.source ? plan.destination : rewrite.path;
+          files.cleanStage(target, row.id);
+          const state = files.state(target, { readBytes: true });
+          if (state?.hash === rewrite.afterHash) continue;
+          if (!state?.bytes || state.hash !== rewrite.beforeHash) filesystemConflict("A rewritten file changed.");
+          files.replace(target, rewrite.beforeHash, Buffer.from(applyLinkEdits(state.bytes.toString("utf8"), rewrite.edits)), row.id);
+        }
+      } catch (error) {
+        if (noEffect()) {
+          const reason = error instanceof McpError && error.details?.reasonCode === "hard_links_unsupported"
+            ? "hard_links_unsupported" : "headless_plan_stale";
+          return this.receipt(settle("conflict", reason));
+        }
+      }
+      observed = this.tryObserve(files, plan);
+      return observed.complete ? await this.withCache(settle("committed"), files)
+        : this.receipt(row, false, observed.safe, observed.safe ? undefined : "headless_manual_repair_required");
+    } finally {
+      journal.transaction(tx => tx.endAttempt(row.id, token));
     }
   }
 
-  private receipt(row: HeadlessRow<Snapshot>) {
+  private noEffect(files: HeadlessVaultFiles, plan: Snapshot, published: boolean): boolean {
+    if (published) return false;
+    try {
+      const source = files.state(plan.intent.source);
+      // Before the durable publication mark, no replacement or removal
+      // could have run. Legacy journal rows still require the original inode.
+      return !!source && (!!plan.graphProofs || source.identity === plan.identity) &&
+        !files.state(plan.destination, { allowMissingParents: plan.intent.kind === "delete" });
+    } catch { return false; }
+  }
+
+  private tryObserve(files: HeadlessVaultFiles, plan: Snapshot) {
+    try { return this.observe(files, plan); }
+    catch { return { safe: false, complete: false }; }
+  }
+
+  private async withCache(row: HeadlessRow<Snapshot>, files: HeadlessVaultFiles) {
+    if (row.phase !== "committed" && row.phase !== "abandoned") return this.receipt(row);
+    const plan = row.payload;
+    const complete = row.phase === "committed" && this.tryObserve(files, plan).complete;
+    let verified = complete && plan.intent.kind === "delete";
+    try {
+      await this.cache.refreshFilesystemMovePaths(this.paths(plan), plan.settings.trashFolder);
+      if (complete && plan.intent.kind === "move" && plan.settings.updateLinks && plan.graphProofs) {
+        const resolver = MarkdownLinkResolver.fromPaths(await this.cache.readFilesystemResolutionTargets());
+        let graphMatches = true;
+        for (const proof of plan.graphProofs) {
+          await yieldToEventLoop();
+          const state = files.state(proof.path, { readBytes: true });
+          if (!state?.bytes || graphProof(state.bytes.toString("utf8"), "/" + proof.path, resolver) !== proof.digest) {
+            graphMatches = false;
+            break;
+          }
+        }
+        verified = graphMatches;
+      }
+      return { ...this.receipt(row, verified), cache: "refreshed" };
+    } catch {
+      return { ...this.receipt(row, verified), cache: "unavailable" };
+    }
+  }
+
+  private receipt(row: HeadlessRow<Snapshot>, verified = false, recoverable = false, reason = row.reason) {
     const { intent, destination, beforeHash, size, settings, rewrites, backlinks } = row.payload;
     const digest = nativeDigest(row.payload);
     const pending = row.phase === "applying";
-    const committed = row.phase === "committed";
     const affectedPaths = [...new Set(this.paths(row.payload))];
     const common = {
       contractVersion: 1, operationKind: `obsidian.note.${intent.kind}`, operationId: row.id,
       planRef: PREFIX[intent.kind] + row.id, planDigest: digest, affectedPaths,
       phase: row.phase === "planned" ? "planned" : "terminal",
       outcome: row.phase === "planned" ? null : pending ? "outcome_unknown" : row.phase,
-      ...(row.phase === "conflict" ? { reasonCode: BaseErrorCode.CONFLICT } : {}),
-      applyAllowed: row.phase === "planned", recoveryAllowed: pending,
-      nextAction: row.phase === "planned" ? "apply" : pending ? "recover" : "none",
+      ...(reason ? { reasonCode: reason } : {}),
+      applyAllowed: row.phase === "planned", recoveryAllowed: pending && recoverable,
+      abandonAllowed: pending && reason === "headless_manual_repair_required",
+      nextAction: row.phase === "planned" ? "apply" : pending ? recoverable ? "recover" : reason === "headless_manual_repair_required" ? "manual_repair" : "status" : "none",
       admittedAt: row.createdAt, updatedAt: row.updatedAt,
     };
     if (intent.kind === "move") {
-      return { ...common, target: { sourcePath: intent.source, destinationPath: destination },
+      const needsRepair = reason === "headless_manual_repair_required";
+      return { ...common,
+        ...(needsRepair ? { repairProofs: rewrites.map(item => ({ path: item.path, beforeSha256: item.beforeHash, afterSha256: item.afterHash })) } : {}), target: { sourcePath: intent.source, destinationPath: destination },
         beforeProof: { sourceSha256: beforeHash, neighborhoodDigest: digest },
-        expectedGraphDigest: nativeDigest(rewrites.map(rewrite => [rewrite.path, rewrite.afterHash])),
-        graph_postflight: committed && settings.updateLinks ? "verified" : "indeterminate",
+        expectedGraphDigest: nativeDigest(row.payload.graphProofs ?? rewrites.map(rewrite => [rewrite.path, rewrite.afterHash])),
+        graph_postflight: verified ? "verified" : "indeterminate",
         scope: "sealed_neighborhood_only", updateLinks: settings.updateLinks,
         preview: { noteCount: rewrites.length, rewriteCount: rewrites.reduce((sum, item) => sum + item.count, 0),
           truncated: rewrites.length > PREVIEW_LIMIT,
@@ -321,8 +411,8 @@ export class HeadlessNoteOperations {
       incomingLinks: { acknowledged: intent.acknowledged, sourceCount: backlinks.length,
         count: backlinks.reduce((total, item) => total + item.count, 0), sources: backlinks.slice(0, BACKLINK_LIMIT),
         truncated: backlinks.length > BACKLINK_LIMIT },
-      trash: { preference: "local", destination: "vault_trash_folder", path: destination },
-      postflight: { status: committed ? "verified" : "indeterminate",
+      trash: { preference: settings.trashPreference, destination: "vault_trash_folder", path: destination },
+      postflight: { status: verified ? "verified" : "indeterminate",
         reason: row.phase === "rejected" ? "delete_note_has_backlinks" : null },
       limitations: ["indexed_markdown_sources_only", "external_writers_do_not_share_locks"],
     };

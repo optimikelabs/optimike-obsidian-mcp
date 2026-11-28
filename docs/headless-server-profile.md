@@ -103,26 +103,43 @@ Never use this phase to edit existing production notes until the server profile 
 
 In `headless-filesystem` with the filesystem cache and `MCP_WRITE_MODE=full`, call
 `obsidian_note_move_plan` with exact source and destination paths and an idempotency key.
-The plan uses the indexed Markdown links, including supported quoted YAML links and
-attachment embeds. Its preview includes the rewrite count, affected notes and bounded
-examples. The link preferences in `.obsidian/app.json` control whether links are updated
-and how paths are rendered. Apply with the original key. The source and all rewritten
-notes are checked before the first write. A stale plan returns `outcome: conflict`.
+The plan inspects indexed Markdown links and attachment embeds. It preserves
+the syntax and labels of existing links, including YAML scalars, and adjusts
+resolved links in a moved note when they would otherwise lose their target.
+It refuses a move that would retarget another note's resolved link. The preview
+is capped, and operations with more than 100 potential backlink sources return
+`headless_backlink_limit`. The plan probes exclusive hard-link publication
+before admission. Apply with the original key. A stale plan returns
+`headless_plan_stale`.
 
-Call `obsidian_note_delete_plan` to see the total incoming link count and capped
-source list. If backlinks exist, inspect them and submit a new plan with
-`acknowledgeBacklinks: true`. Apply moves the original bytes to a collision-safe
-path under `.trash` or the vault-relative `trashFolder` / `trashFolderPath` in
-`app.json`. Existing links are retained. The destination is always a vault folder
-regardless of the Desktop system-trash or permanent-delete preference.
+`app.json` controls link updates through `alwaysUpdateLinks` and paths through
+`newLinkFormat`. `useMarkdownLinks` concerns newly generated links. Headless
+moves keep existing wikilinks and Markdown links in their original syntax.
+See [Obsidian's Files and links settings](https://obsidian.md/help/settings#files-and-links).
 
-Both operations refresh the shared cache and link index before returning a successful
-cache receipt. After an interruption, call the matching `*_status` and use
-`*_recover` with the same reference and key when `recoveryAllowed` is true. Other
-processes outside the governed tools do not share their locks. Each replacement
-is atomic, while a multi-file change is recoverable and can be visible partway
-through. Moves preserve the date properties. Coverage follows the filesystem link
-inventory, including its Markdown-source exclusions.
+Call `obsidian_note_delete_plan` to inspect incoming links. Submit a new plan
+with `acknowledgeBacklinks: true` after examining nonempty backlinks.
+The original file moves to a free path under `.trash` by default. The MCP also
+accepts `trashFolder` or `trashFolderPath` as local folder overrides.
+Explicit `trashOption: "system"` and `trashOption: "none"` are refused.
+When the setting is absent, the MCP uses its local-trash default.
+
+Both operations update the affected cache and index paths and re-read the
+filesystem for the postflight receipt. After interruption, call `*_status`.
+Use `*_recover` with the same reference and key when `recoveryAllowed` is true.
+If an external edit prevents recovery, `abandonAllowed` permits
+`*_recover` with `action: "abandon"`. This releases the reservation for manual
+repair and retains exact before text and hashes in the private journal
+(`headless_file_operations.payload.rewrites`). An operator should compare the
+current hashes with the receipt's repair proofs before restoring anything.
+An attempt with no published file effect releases the reservation and reports
+a conflict. Recovery or abandonment cleans the operation's addressable staging files.
+
+The same-filesystem hard-link probe can return `hard_links_unsupported`.
+Each replacement is atomic. Other file writers remain outside these locks, and
+several replacements can be visible partway through. The workflow is scoped to
+a copied or dedicated vault. See the [ADR](adr/ADR-External-Reference-Integrity.md#vault-only-moves)
+for its distinction from external-document relocation.
 
 `operational` prefers these tools. The `full` profile also retains the older
 direct move and delete tools, whose hash/mtime checks apply to a single file.

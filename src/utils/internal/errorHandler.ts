@@ -251,6 +251,13 @@ type SafeDetailValue = string | number | boolean | PublicToolInputIssues | Publi
 const CALLER_DERIVED_PUBLIC_FIELDS = new Set(["suggestedPath", "suggestedName"]);
 
 const SAFE_PUBLIC_REASON_CODES = new Set<string>([
+  "headless_plan_stale",
+  "headless_operation_pending",
+  "headless_manual_repair_required",
+  "hard_links_unsupported",
+  "headless_backlink_limit",
+  "headless_link_target_changed",
+  "headless_trash_preference_unsupported",
   "invalid_tool_arguments",
   "headless_link_index_building",
   "headless_link_cache_refreshing",
