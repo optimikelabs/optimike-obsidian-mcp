@@ -1,5 +1,6 @@
 import {
   TOOL_GROUP_IDS,
+  TOOL_REGISTRATION_MODES,
   compileToolSurface,
   getToolSurfaceEntry,
   governedLifecycleRoles,
@@ -18,6 +19,13 @@ export const TOOL_PROFILE_IDS = [
 ] as const;
 
 export type ToolProfileId = (typeof TOOL_PROFILE_IDS)[number];
+
+export const TOOL_PROFILE_MODE_CAPABILITY = "optimike.tool-profile-mode";
+
+export function profileModeFromCapability(capability: unknown): ToolRegistrationMode | undefined {
+  if (typeof capability !== "object" || capability === null || !("registrationMode" in capability)) return undefined;
+  return TOOL_REGISTRATION_MODES.find(mode => mode === capability.registrationMode);
+}
 
 export interface ToolProfileDefinition {
   id: ToolProfileId;
@@ -184,7 +192,7 @@ function assertGovernedFamiliesAtomic(
 }
 
 function operonLiveForRegistrationMode(
-  registrationMode: ToolRegistrationMode,
+  registrationMode: ToolRegistrationMode | undefined,
 ): boolean {
   return registrationMode === "live" || registrationMode === "hybrid-live";
 }
@@ -266,6 +274,7 @@ export function compileToolProfileNames(
 export interface SelectAvailableToolProfileInput {
   profile: ToolProfileId;
   availableNames: readonly string[];
+  registrationMode?: ToolRegistrationMode;
 }
 
 /**
@@ -274,10 +283,8 @@ export interface SelectAvailableToolProfileInput {
  * profile contract with real registration rather than predicting availability.
  *
  * `full` intentionally preserves unknown future names as the explicit complete surface.
- * Modern profiles fail closed on unknown names and hide Operon tools whose
- * service contract is statically live-only. Presence of the governed note
- * family is used as the concrete live/hybrid marker because it is registered
- * before Operon in live-capable server construction and is absent headlessly.
+ * Modern profiles fail closed on unknown names. Live-only Operon tools require
+ * an explicit live registration mode, independently of the tools present.
  *
  * Registration is incremental, so a governed quartet may be transiently
  * incomplete while the server factory is still constructing the instance. In
@@ -286,6 +293,7 @@ export interface SelectAvailableToolProfileInput {
 export function selectAvailableToolProfileNames({
   profile,
   availableNames,
+  registrationMode,
 }: SelectAvailableToolProfileInput): readonly string[] {
   const uniqueNames = [...new Set(availableNames)];
   if (profile === "full") {
@@ -298,7 +306,7 @@ export function selectAvailableToolProfileNames({
     .map((name) => getToolSurfaceEntry(name))
     .filter((entry): entry is ToolSurfaceEntry => Boolean(entry))
     .filter((entry) => groups.has(entry.group));
-  const operonLive = uniqueNames.includes("obsidian_note_replace_plan");
+  const operonLive = operonLiveForRegistrationMode(registrationMode);
 
   return finalizeProfileEntries(definition, entries, operonLive, {
     tolerateIncompleteRegistration: true,

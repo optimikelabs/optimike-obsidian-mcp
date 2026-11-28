@@ -98,6 +98,9 @@ exposed by this profile”, not “the Operon plugin is not loaded”. Use `task
 task-focused sessions: its Operon tools remain discoverable while Desktop or
 the Bridge is temporarily unavailable and return a structured unavailable or
 stale status until `operon_status` can refresh the live contract.
+Live-only Operon tools require an explicit `live` or `hybrid-live` registration
+mode. The stdio proxy uses the connected backend's mode from MCP initialization.
+If that backend omits the mode, the proxy exposes only the non-live Operon subset.
 
 ```bash
 node dist/stdio-proxy.js --tool-profile standard
