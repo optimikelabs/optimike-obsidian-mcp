@@ -38,6 +38,7 @@ import type { GovernedCanvasRuntime } from "../../../services/canvasProjectionRu
 import { registerGovernedCanvasTools } from "../governedCanvasTools/index.js";
 import { registerOperonTools } from "../operonTools/index.js";
 import { registerOperationCloseTool, registerOperationCockpitTool } from "../operationCockpitTools/index.js";
+import { registerFilesystemRevertTools } from "../operationCockpitTools/revert.js";
 import type { PendingOperationSource } from "../../../services/operationCockpit.js";
 import { mcpSchema } from "../../mcpSchema.js";
 import { config } from "../../../config/index.js";
@@ -102,7 +103,8 @@ export async function registerRuntimeTools(
         externalGeneration: runtimeStatus.externalGeneration,
         obsidianService,
         vaultCacheAvailable: Boolean(vaultCacheService),
-        probes: capabilityProbes,
+        probes: { atomicWrite: governedNoteReplaceRuntime?.isFilesystem
+          ? () => governedNoteReplaceRuntime.filesystemStatus() : undefined, ...capabilityProbes },
         governedRuntimes: {
           note: Boolean(governedNoteReplaceRuntime),
           base: Boolean(governedBaseFormulaRuntime),
@@ -167,10 +169,11 @@ export async function registerRuntimeTools(
   if (governedCanvasRuntime) {
     pendingOperationSources.push(governedCanvasRuntime);
   }
-  registerOperationCockpitTool(server, pendingOperationSources);
-  registerOperationCloseTool(server, governedNoteReplaceRuntime);
+  registerOperationCockpitTool(server, pendingOperationSources, governedNoteReplaceRuntime?.isFilesystem === true);
+  registerOperationCloseTool(server, governedNoteReplaceRuntime?.isFilesystem ? undefined : governedNoteReplaceRuntime);
+  registerFilesystemRevertTools(server, registrationMode === "headless-filesystem" ? governedNoteReplaceRuntime?.filesystemRevert : undefined);
 
-  await registerGovernedNoteReplaceTools(server, governedNoteReplaceRuntime);
+  await registerGovernedNoteReplaceTools(server, registrationMode === "headless-guarded" ? undefined : governedNoteReplaceRuntime);
   registerNativeNoteMoveTools(server, headless ? {
     plan: input => headless.planMove(input),
     apply: (ref, key) => headless.apply("move", ref, key),

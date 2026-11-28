@@ -89,6 +89,7 @@ const GOVERNED_FAMILIES = new Set([
   "obsidian_frontmatter_patch",
   "obsidian_note_replace",
   "obsidian_note_create",
+  "obsidian_operation_revert",
   "obsidian_note_delete",
   "obsidian_note_move",
   "bases_rows_patch",

@@ -77,9 +77,7 @@ const defaultCrossRuntimeNames = new Set(registrationModes.flatMap(registrationM
 const configuredCrossRuntimeNames = new Set(registrationModes.flatMap(registrationMode =>
   compileToolNames({ registrationMode, availableStaticRequirements: ["vault-cache", "asset-policy"] }),
 ));
-assert.equal(cycle.expectedSurface.crossRuntime, defaultCrossRuntimeNames.size,
-  "Cycle surface records the default-off cross-runtime contract");
-assert.equal(TOOL_SURFACE_REGISTRY.length, configuredCrossRuntimeNames.size,
+assert.deepEqual(configuredCrossRuntimeNames, new Set(TOOL_SURFACE_REGISTRY.map(entry => entry.name)),
   "Conditional registry union must remain exhaustively reachable when optional requirements are present");
 assert.deepEqual(
   [...configuredCrossRuntimeNames].filter(name => !defaultCrossRuntimeNames.has(name)).sort(),
@@ -98,13 +96,25 @@ for (const family of cycle.expectedSurface.threeMemberFamilies) {
 }
 const nonLiveModes = ["hybrid-degraded", "headless-readonly", "headless-guarded", "headless-filesystem"];
 const milestoneNames = new Set(cycle.milestones.flatMap(({ tools }) => tools));
-for (const registrationMode of nonLiveModes) {
-  const nonLive = compileToolNames({ registrationMode, availableStaticRequirements: ["vault-cache"] });
-  assert.deepEqual(nonLive.filter((name) => milestoneNames.has(name)),
-    registrationMode === "headless-filesystem" ? [...expectedMilestoneTools.M2, ...expectedMilestoneTools.M3].sort()
-      : registrationMode.startsWith("headless-") ? expectedMilestoneTools.M2 : [], registrationMode);
+for (const registrationMode of ["live", ...nonLiveModes]) {
+  const names = compileToolNames({ registrationMode, availableStaticRequirements: ["vault-cache"] });
+  for (const m of cycle.milestones) {
+    const expected = registrationMode === "live" || (m.id === "M2" && registrationMode.startsWith("headless-")) ||
+      (m.id === "M3" && registrationMode === "headless-filesystem") ||
+      (m.id === "M4" && ["headless-guarded", "headless-filesystem"].includes(registrationMode)) ? m.tools : [];
+    assert.deepEqual(names.filter(name => m.tools.includes(name)).sort(), [...expected].sort(),
+      `${m.id} has an unexpected surface in ${registrationMode}`);
+  }
+  const reverts = names.filter(name => name.startsWith("obsidian_operation_revert_")).sort();
+  assert.deepEqual(reverts, registrationMode === "headless-filesystem"
+    ? [...cycle.expectedSurface.headlessGovernedRevert].sort() : [],
+  `Governed revert has an unexpected surface in ${registrationMode}`);
   const withoutCache = compileToolNames({ registrationMode, availableStaticRequirements: [] });
-  assert.deepEqual(withoutCache.filter((name) => milestoneNames.has(name)), [], `${registrationMode} without cache`);
+  if (registrationMode !== "live") {
+    const writableHeadless = ["headless-guarded", "headless-filesystem"].includes(registrationMode);
+    assert.deepEqual(withoutCache.filter((name) => milestoneNames.has(name)),
+      writableHeadless ? [...expectedMilestoneTools.M4].sort() : [], `${registrationMode} without cache`);
+  }
 }
 assert.deepEqual(json("evals/tool-catalog.v1.json"), buildCatalog(), "Regenerate stale tool catalogue");
 const requiredContracts = [

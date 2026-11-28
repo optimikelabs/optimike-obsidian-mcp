@@ -16,6 +16,7 @@ import { ObsidianNoteReplaceJournal, ObsidianNoteReplaceConcurrencyError, type O
  * Parse YAML, including quoted and merged keys, instead of a regex key scan.
  */
 export function noteCreateFrontmatterKeys(content: string): string[] {
+  content = content.replace(/^\uFEFF/u, "");
   if (!/^---\r?\n/u.test(content)) return [];
   const lines = content.split(/\r?\n/u);
   const end = lines.findIndex((line, i) => i > 0 && line === "---");
@@ -47,8 +48,10 @@ const Result = z.object({ contractVersion: z.literal(1), operationId: z.string()
   outcome: z.enum(["created", "conflict", "outcome_unknown"]), reason: z.string().regex(/^[a-z_]{1,96}$/u) }).strict();
 export interface NoteCreateBackend extends Pick<AtomicWriteBackend, "status" | "inspectFrontmatterFormat"> {
   preflight(path: string): Promise<unknown>;
-  create(request: NoteCreateApply): Promise<unknown>;
+  create(request: NoteCreateApply, plan?: ObsidianNoteReplacePlan): Promise<unknown>;
   inspect(path: string): Promise<unknown>;
+  sealCreate?(path: string, content: string): Promise<{ content: string; policyDigest: string; fields: Array<{ propertyName: string; role: string }> }>;
+  matchesEffect?(plan: ObsidianNoteReplacePlan): Promise<boolean>;
 }
 export type NoteCreatePlanInput = { path: string; content: string; idempotencyKey: string };
 function bad(reason: string): never { throw new McpError(reason === "create_markdown_invalid" || reason === "invalid_create_key" || reason === "invalid_create_reference" ? BaseErrorCode.VALIDATION_ERROR : BaseErrorCode.CONFLICT, "The sealed creation could not be admitted or verified.", { reasonCode: reason }); }
@@ -61,6 +64,7 @@ const absence = (p: Pick<NoteCreatePreflight, "path" | "bindingFingerprint">) =>
 
 /** Durable control is shared with other governed note operations; effects use exclusive create only. */
 export class NoteCreateOperationAdapter {
+  get isFilesystem(): boolean { return Boolean(this.backend.sealCreate); }
   constructor(private readonly backend: NoteCreateBackend, private readonly journal: ObsidianNoteReplaceJournal,
     private readonly now = Date.now,
     private readonly authorize: (phase: "plan" | "apply", path: string, content: string) => void =
@@ -78,9 +82,10 @@ export class NoteCreateOperationAdapter {
     const plan = Preflight.parse(row.projection.proof.preflight);
     nativeNotePath(plan.path); validateCreatePolicy(plan.policy);
     if (createPolicyDigest(plan.policy) !== plan.policyDigest || row.path !== plan.path || row.bindingFingerprint !== plan.bindingFingerprint ||
-        row.idempotencyIdentity !== intent(row.path, row.afterSha256) || row.projection.intentDigest !== row.idempotencyIdentity ||
+        row.idempotencyIdentity !== intent(row.path, row.filesystem?.projectedSha256 ?? row.afterSha256) || row.projection.intentDigest !== row.idempotencyIdentity ||
         row.beforeSha256 !== absence({ path: row.path, bindingFingerprint: row.bindingFingerprint }) ||
         row.requestDigest !== operationDigest({ ...plan, contentSha256: row.afterSha256,
+          ...(row.filesystem ? { filesystemPolicyDigest: row.filesystem.policyDigest } : {}),
           ...(Object.hasOwn(row.projection.proof, "typeWarnings") ? { typeWarnings: row.projection.proof.typeWarnings } : {}) }) ||
         (["planned", "applying", "outcome_unknown"].includes(row.status) && noteCreateHash(row.nextContent) !== row.afterSha256)) bad("create_seal_mismatch");
     return plan;
@@ -102,8 +107,8 @@ export class NoteCreateOperationAdapter {
   }
   async plan(input: NoteCreatePlanInput) {
     assertNewNotePath(input.path);
-    validateNoteCreate(input.path, input.content, { version: 1, utcOffsetMinutes: 0, fields: [] });
-    if (!validateObsidianMarkdown(input.content).ok) bad("create_markdown_invalid");
+    validateNoteCreate(input.path, input.content, { version: 1, utcOffsetMinutes: 0, fields: [] }, this.isFilesystem);
+    if (!validateObsidianMarkdown(this.isFilesystem ? input.content.replace(/^\uFEFF/u, "") : input.content).ok) bad("create_markdown_invalid");
     const key = internalKey(input.idempotencyKey), hash = noteCreateHash(input.content), identity = intent(input.path, hash);
     const winner = () => {
       const row = this.journal.getByIdempotencyKey(key);
@@ -116,24 +121,31 @@ export class NoteCreateOperationAdapter {
     try { plan = WirePreflight.parse(await this.backend.preflight(input.path)); }
     catch (error) { const existing = winner(); if (existing) return this.receipt(existing); throw error; }
     if (plan.path !== input.path || createPolicyDigest(plan.policy) !== plan.policyDigest) bad("create_preflight_identity_mismatch");
-    validateNoteCreate(input.path, input.content, plan.policy);
+    validateNoteCreate(input.path, input.content, plan.policy, this.isFilesystem);
     plan = { ...plan, vaultBindingFingerprint: await this.vaultBindingForCreate(plan.bindingFingerprint) };
     const format = await inspectNativeFrontmatter(this.backend, input.content, plan.vaultBindingFingerprint);
     rejectNonCanonical(format);
     if (plan.policy.fields.length && frontmatterEnvelope(input.content)?.yaml.trim() === "{}")
       throw new McpError(BaseErrorCode.VALIDATION_ERROR, "An empty frontmatter mapping cannot be verified with automatic dates.", { reasonCode: "frontmatter_empty_mapping_date_management" });
     this.authorize("plan", input.path, input.content);
+    const sealed = await this.backend.sealCreate?.(input.path, input.content);
+    const content = sealed?.content ?? input.content;
+    validateNoteCreate(input.path, content, plan.policy, this.isFilesystem);
+    const afterSha256 = noteCreateHash(content);
     const row = this.journal.create({ idempotencyKey: key, idempotencyIdentity: identity, path: input.path,
-      nextContent: input.content, beforeSha256: absence({ path: input.path, bindingFingerprint: plan.bindingFingerprint }), afterSha256: hash,
-      bindingFingerprint: plan.bindingFingerprint, requestDigest: operationDigest({ ...plan, contentSha256: hash, typeWarnings: format.warnings }),
-      projection: { contractVersion: 1, kind: KIND, publicIdempotencyKey: input.idempotencyKey, intentDigest: identity, proof: { preflight: plan, typeWarnings: format.warnings } } });
+      nextContent: content, beforeSha256: absence({ path: input.path, bindingFingerprint: plan.bindingFingerprint }), afterSha256,
+      ...(sealed ? { filesystem: { policyDigest: sealed.policyDigest, projectedSha256: hash } } : {}),
+      bindingFingerprint: plan.bindingFingerprint, requestDigest: operationDigest({ ...plan, contentSha256: afterSha256, typeWarnings: format.warnings,
+        ...(sealed ? { filesystemPolicyDigest: sealed.policyDigest } : {}) }),
+      projection: { contractVersion: 1, kind: KIND, publicIdempotencyKey: input.idempotencyKey, intentDigest: identity,
+        proof: { preflight: plan, typeWarnings: format.warnings, ...(sealed ? { filesystemDateFields: sealed.fields } : {}) } } });
     return this.receipt(row);
   }
   async apply(ref: string, key: string) {
     let row = this.require(ref, key);
     if (row.status !== "planned") return this.status(ref);
     const admitted = this.sealed(row);
-    this.authorize("apply", row.path, row.nextContent);
+    this.authorizeApply(row);
     if (!admitted.vaultBindingFingerprint) bad("create_preflight_identity_mismatch");
     if (await this.vaultBindingForCreate(admitted.bindingFingerprint) !== admitted.vaultBindingFingerprint) bad("create_preflight_identity_mismatch");
     const format = await inspectNativeFrontmatter(this.backend, row.nextContent, admitted.vaultBindingFingerprint);
@@ -144,14 +156,14 @@ export class NoteCreateOperationAdapter {
     let dispatched = false;
     try {
       const plan = this.sealed(row);
-      this.authorize("apply", row.path, row.nextContent);
+      this.authorizeApply(row);
       // Durable effect-fence token before the request exists; a stale owner stops here.
       const fenceEpoch = effectFenceEpoch(await this.backend.status());
       row = this.journal.recordEffectAttempt(row.operationId, attempt, fenceEpoch);
       dispatched = true;
       const result = Result.parse(await this.backend.create({ contractVersion: 1, operationId: row.operationId, path: row.path,
         content: row.nextContent, contentSha256: row.afterSha256, bindingFingerprint: row.bindingFingerprint, policyDigest: plan.policyDigest,
-        ...(fenceEpoch ? { fence: { contractVersion: 1 as const, epoch: fenceEpoch, attemptId: attempt } } : {}) }));
+        ...(fenceEpoch ? { fence: { contractVersion: 1 as const, epoch: fenceEpoch, attemptId: attempt } } : {}) }, row));
       if (result.operationId !== row.operationId || result.path !== row.path || result.bindingFingerprint !== row.bindingFingerprint ||
           result.contentSha256 !== row.afterSha256 || result.policyDigest !== plan.policyDigest) bad("create_result_identity_mismatch");
       if (result.outcome !== "created") {
@@ -168,6 +180,18 @@ export class NoteCreateOperationAdapter {
     if (!["applying", "outcome_unknown", "committed"].includes(row.status)) return this.receipt(row);
     let postflight: "pending" | "verified" | "unverified" = "unverified";
     try {
+      if (row.status !== "committed" && row.filesystem && this.backend.matchesEffect) {
+        const matches = await this.backend.matchesEffect(row);
+        row = this.require(ref);
+        if (!matches) return this.receipt(row, row.status === "applying" ? "pending" : "unverified");
+        if (row.status !== "committed") {
+          row = this.journal.commitAfterVerifiedProof(row.operationId, ["applying", "outcome_unknown"], {
+            kind: "note-create-observed-state", digest: row.filesystem!.stagedSha256!,
+            details: { match: "exact", authorAttribution: "not_proven", observedAt: new Date(this.now()).toISOString() },
+          });
+        }
+        return this.receipt(row, "verified");
+      }
       const plan = this.sealed(row), observation = Inspection.parse(await this.backend.inspect(row.path));
       // The current automatic-date policy is an apply-time fence, not a
       // reconciliation identity. A lost response can be observed after the
@@ -204,14 +228,24 @@ export class NoteCreateOperationAdapter {
     } catch { row = this.require(ref); }
     return this.receipt(row, postflight);
   }
+  private authorizeApply(row: ObsidianNoteReplacePlan) {
+    if (!row.filesystem) return this.authorize("apply", row.path, row.nextContent);
+    // The actual sealed bytes may include server-owned timestamps. Only the
+    // caller's original content is subject to the protected-key input check.
+    assertWriteAllowed({ operation: "obsidian_note_create_apply", action: "apply", target: row.path,
+      targetType: "filePath", contentLength: row.nextContent.length });
+  }
   private receipt(row: ObsidianNoteReplacePlan, postflight: "pending" | "verified" | "unverified" = "unverified") {
     const plan = this.sealed(row);
     return { contractVersion: 1, operationKind: KIND, operationId: row.operationId, planRef: NOTE_CREATE_PREFIX + row.operationId,
       planDigest: row.requestDigest, path: row.path, phase: row.status === "planned" ? "planned" : row.status === "applying" ? "applying" : "terminal",
       outcome: ["planned", "applying"].includes(row.status) ? null : row.status,
+      ...(row.filesystem ? { backend: { kind: "headless-filesystem", bindingFingerprint: row.bindingFingerprint } } : {}),
       beforeProof: { kind: "observed-path-absence", digest: row.beforeSha256 },
       expectedContentSha256: row.afterSha256, effectProof: row.effectProof ?? null, postflight,
-      automaticDateFields: plan.policy.fields.map(field => ({ propertyName: field.propertyName, role: field.role })),
+      ...(row.filesystem && postflight === "verified" ? { postflightSource: "filesystem-reread" } : {}),
+      automaticDateFields: row.projection?.proof.filesystemDateFields ??
+        plan.policy.fields.map(field => ({ propertyName: field.propertyName, role: field.role })),
       typeWarnings: row.projection?.proof.typeWarnings ?? [],
       applyAllowed: row.status === "planned", recoveryAllowed: false,
       nextAction: row.status === "planned" ? "apply" : ["applying", "outcome_unknown"].includes(row.status) ? "status" : "none",

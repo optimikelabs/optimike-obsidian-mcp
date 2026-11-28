@@ -171,7 +171,7 @@ export async function registerGovernedTextPatchTools(
   server.registerTool(
     "obsidian_text_patch_plan",
     {
-      description:
+      description: noteRuntime.isFilesystem ? "Seal one bounded body text patch, optionally with frontmatterOperations, using the on-disk SHA-256 and vault identity. The headless filesystem authority maintains configured dates." :
         "Plan one bounded body text patch, optionally combined with frontmatterOperations, of an existing Markdown note. Noncanonical existing frontmatter is normalized in the sealed plan and announced in frontmatterFormat.normalization; type issues are warnings. After normalization the plan preserves bytes outside authorized body and frontmatter ranges, binds the before proof and vault identity, and does not apply the requested patch. Templates and date-manager-excluded paths are never dated. Otherwise missing creation dates may be prepared by the active vault date manager and any preparation normalization is reported. If preparation is unavailable or fails its preconditions, the plan is refused; ask the vault owner to resolve the missing date. A Bridge that cannot prove the added creation date refuses with date_preparation_bridge_upgrade_required before any change (ask the vault owner to update the Atomic Write Bridge); date_preparation_unverified names the failed check in preparationCheck.",
       inputSchema: mcpSchema(PlanInputSchema),
       annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,

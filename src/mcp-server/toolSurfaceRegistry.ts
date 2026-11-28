@@ -20,7 +20,6 @@ export const TOOL_GROUP_IDS = [
   "canvas.governed",
   "external.move",
   "external.read",
-  "metadata.direct.batch",
   "metadata.direct.frontmatter",
   "metadata.direct.tags",
   "metadata.governed",
@@ -99,7 +98,6 @@ const CANONICAL_UNIQUE_TOOL_NAMES = [
   "obsidian_list_notes",
   "obsidian_global_search",
   "obsidian_manage_tags",
-  "obsidian_batch_frontmatter",
   "list_all_tasks",
   "query_tasks",
   "bases_list",
@@ -145,6 +143,10 @@ const CANONICAL_UNIQUE_TOOL_NAMES = [
 const COMPATIBILITY_HISTORICAL_TOOL_NAMES = ["bases_upsert_config"] as const;
 
 const GOVERNED_OPERATION_TOOL_NAMES = [
+  "obsidian_operation_revert_plan",
+  "obsidian_operation_revert_apply",
+  "obsidian_operation_revert_status",
+  "obsidian_operation_revert_recover",
   "asset_import_plan",
   "asset_import_apply",
   "asset_import_status",
@@ -338,12 +340,13 @@ function governedFamily(
   prefix: string,
   group: ToolGroupId,
   family: string,
+  modes: readonly ToolRegistrationMode[] = LIVE_MODES,
 ): readonly ToolSurfaceEntry[] {
   const headlessFileOperation = family === "note-move" || family === "note-delete";
   const roles = governedLifecycleRoles(family, headlessFileOperation);
   return roles.map((role) =>
     defineTool(`${prefix}_${role}`, group, family,
-      !headlessFileOperation ? LIVE_MODES : role === "recover" ? FILESYSTEM_ONLY : LIVE_OR_FILESYSTEM_MODES, {
+      !headlessFileOperation ? modes : role === "recover" ? FILESYSTEM_ONLY : LIVE_OR_FILESYSTEM_MODES, {
       annotationClass: role === "plan" ? "governed-plan"
         : role === "status" ? "read-only" : "governed-mutation",
       lifecycleRole: role,
@@ -407,7 +410,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "obsidian_update_note",
     "notes.direct.common",
     "notes-core",
-    GUARDED_NOTE_MODES,
+    LIVE_MODES,
     {
       surfaceClass: "direct",
       annotationClass: "destructive",
@@ -418,7 +421,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "obsidian_search_replace",
     "notes.direct.common",
     "notes-core",
-    GUARDED_NOTE_MODES,
+    LIVE_MODES,
     {
       surfaceClass: "direct",
       annotationClass: "destructive",
@@ -447,19 +450,20 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
   ),
 
   ...governedFamily("bases_rows_patch", "bases.governed", "base-rows"),
-  ...governedFamily("obsidian_note_replace", "notes.governed", "note-replace"),
-  ...governedFamily("obsidian_text_patch", "notes.governed", "text-patch"),
+  ...governedFamily("obsidian_note_replace", "notes.governed", "note-replace", LIVE_OR_FILESYSTEM_MODES),
+  ...governedFamily("obsidian_text_patch", "notes.governed", "text-patch", GUARDED_NOTE_MODES),
   ...governedFamily("obsidian_note_move", "notes.governed", "note-move"),
   // Destructive: lives in the admin group so it is exposed only by the `operational`
   // and `full` profiles, never by `standard` or `authoring`.
   ...governedFamily("obsidian_note_delete", "notes.direct.admin", "note-delete"),
-  ...governedFamily("obsidian_note_create", "notes.governed", "note-create"),
+  ...governedFamily("obsidian_note_create", "notes.governed", "note-create", GUARDED_NOTE_MODES),
+  ...governedFamily("obsidian_operation_revert", "notes.governed", "operation-revert", FILESYSTEM_ONLY),
 
   defineTool(
     "obsidian_manage_frontmatter",
     "metadata.direct.frontmatter",
     "frontmatter-direct",
-    GUARDED_NOTE_MODES,
+    LIVE_MODES,
     {
       surfaceClass: "direct",
       annotationClass: "destructive",
@@ -470,14 +474,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "obsidian_manage_tags",
     "metadata.direct.tags",
     "tags",
-    LIVE_OR_FILESYSTEM_MODES,
-    { surfaceClass: "direct", annotationClass: "destructive" },
-  ),
-  defineTool(
-    "obsidian_batch_frontmatter",
-    "metadata.direct.batch",
-    "frontmatter-batch",
-    FILESYSTEM_ONLY,
+    LIVE_MODES,
     { surfaceClass: "direct", annotationClass: "destructive" },
   ),
 
@@ -485,6 +482,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "obsidian_frontmatter_patch",
     "metadata.governed",
     "frontmatter-patch",
+    GUARDED_NOTE_MODES,
   ),
 
   defineTool("bases_list", "bases.read", "bases", LIVE_AND_HEADLESS_MODES, {
@@ -534,7 +532,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "bases_upsert_rows",
     "bases.direct",
     "bases",
-    LIVE_OR_FILESYSTEM_MODES,
+    LIVE_MODES,
     { surfaceClass: "direct", annotationClass: "destructive" },
   ),
 
@@ -589,7 +587,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "obsidian_list_pending_operations",
     "runtime.status",
     "operation-cockpit",
-    LIVE_MODES,
+    GUARDED_NOTE_MODES,
   ),
   defineTool(
     "obsidian_runtime_maintenance",

@@ -18,6 +18,8 @@ export type WriteOperation =
   | "obsidian_canvas_create_plan"
   | "obsidian_canvas_create_apply"
   | "obsidian_operation_close"
+  | "obsidian_operation_revert_plan"
+  | "obsidian_operation_revert_apply"
   | "obsidian_admin_filesystem"
   | "obsidian_manage_canvas"
   | "obsidian_update_note"

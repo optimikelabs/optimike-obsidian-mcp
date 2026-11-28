@@ -18,6 +18,7 @@ import type { RequestContext } from "../utils/index.js";
 import { extractInlineTags } from "./markdownTags.js";
 import { assertNewNotePath, assertNoFoldedSibling } from "./noteNameMcp.js";
 import { assertHeadlessSyncWriteAllowed } from "./upstreamSyncEvidence.js";
+import { prependMarkdownBody } from "./obsidianFrontmatterFormat.js";
 
 export type VaultFileReadResult = {
   path: string;
@@ -476,7 +477,7 @@ export class VaultFileService {
         mode === "append"
           ? `${existing}${content}`
           : mode === "prepend"
-            ? `${content}${existing}`
+            ? prependMarkdownBody(existing, content)
             : content;
       return this.replaceFile(filePath, next, current?.hash, context);
     });

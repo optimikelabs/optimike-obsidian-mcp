@@ -253,6 +253,14 @@ try {
   const moved = await service.moveFile("Notes/Existante.md", "Notes/Déplacée — ok.md", context, { expectedHash: (await service.read("Notes/Existante.md", context)).hash });
   eq(moved.result.path.replaceAll("\\", "/"), "Notes/Déplacée — ok.md");
 
+  await test("direct prepend leaves a BOM and CRLF frontmatter at the start", async () => {
+    const file = "Notes/Frontmatter.md";
+    const envelope = "\uFEFF---\r\nlabel: fixture\r\n---\r\n";
+    await service.writeAtomic(file, envelope + "Body.\r\n", context);
+    await service.updateWholeFile(file, "prepend", "Prepended.\r\n", context);
+    assert.equal((await service.read(file, context)).content, envelope + "Prepended.\r\nBody.\r\n");
+  });
+
   await test("a missing vault root is a path validation error before creation", async () => {
     const missingRoot = path.join(root, "missing-vault");
     await assert.rejects(
