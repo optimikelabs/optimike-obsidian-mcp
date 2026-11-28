@@ -1866,9 +1866,28 @@ export class OperonService {
     operation: string,
     timeoutMs?: number,
   ): Promise<OperonStatus> {
-    const response = await this.getClient().get(`${BRIDGE_PREFIX}/status`, {
-      timeout: timeoutMs,
-    });
+    const client = this.getClient();
+    const timeout = timeoutMs ?? client.defaults.timeout ?? 0;
+    const startedAt = performance.now();
+    const response = await client
+      .get(`${BRIDGE_PREFIX}/status`, { timeout })
+      .catch((error: unknown) => {
+        if (
+          !axios.isAxiosError(error) ||
+          error.response ||
+          (error.code !== "ECONNRESET" && error.message !== "socket hang up")
+        ) {
+          throw error;
+        }
+
+        // Only the read-only status request can be replayed. Keep the
+        // original timeout budget, including for short capability probes.
+        const remaining = timeout - Math.ceil(performance.now() - startedAt);
+        if (timeout > 0 && remaining <= 0) throw error;
+        return client.get(`${BRIDGE_PREFIX}/status`, {
+          timeout: timeout > 0 ? remaining : timeout,
+        });
+      });
     const parsed = OperonStatusSchema.safeParse(response.data);
     if (!parsed.success) {
       throw new McpError(
