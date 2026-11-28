@@ -45,6 +45,8 @@ const beforeSources = new Map([
   [phonePath, before.replace("target1", "phone01")],
   [interruptedPath, before.replace("target1", "crash01")],
   [changedAfterCrashPath, before.replace("target1", "crash02")],
+  ["Changed settings.md", before.replace("target1", "crash03")],
+  ["Changed pins.md", before.replace("target1", "crash04")],
   ["Related.md", before.replace("target1", "rel0001").replace(" {{datetimeCreated", " {{blocking:: target2}} {{datetimeCreated") +
     before.replace("target1", "target2")],
   ["Repeat.md", before.replace("target1", "repeat1").replace(" {{datetimeCreated", " {{repeat:: every week}} {{datetimeCreated")],
@@ -105,6 +107,13 @@ async function start(mode = "headless-filesystem", profile = "tasks", options = 
     ObsidianNoteReplaceJournal.prototype.recordEffectAttempt = function (...args) {
       record.apply(this, args);
       process.exit(91);
+    };`;
+  if (options.atomicUnavailable) bootstrap += `
+    import { GovernedNoteReplaceRuntime } from ${JSON.stringify(runtimeModule)};
+    const filesystemStatus = GovernedNoteReplaceRuntime.prototype.filesystemStatus;
+    GovernedNoteReplaceRuntime.prototype.filesystemStatus = async function () {
+      const status = await filesystemStatus.call(this);
+      return { ...status, backend: { ...status.backend, headlessReplacement: 'unavailable' } };
     };`;
   const startup = path.join(root, `preload-${clients.length}.mjs`);
   await writeFile(startup, bootstrap);
@@ -337,6 +346,10 @@ try {
     assert.equal(refs.length, 1);
     const recoveryInput = { recoveryRef: refs[0].recoveryRef, idempotencyKey: "recover-crash", recovery: { kind: "developer-api" } };
     await rejects(guarded, "operon_recover_mutation", recoveryInput, "FORBIDDEN");
+    const atomicUnavailable = await start("headless-filesystem", "tasks", { atomicUnavailable: true, instant: instant + 120_000 });
+    const unavailable = await rejects(atomicUnavailable, "operon_recover_mutation", recoveryInput, "SERVICE_UNAVAILABLE");
+    assert.equal(unavailable.reason, "headless_atomic_exchange_unavailable");
+    assert.deepEqual((await call(resumed, "operon_list_pending_recoveries")).recoveries, refs);
     await bytes(interruptedPath, beforeSources.get(interruptedPath));
     assert.equal((await call(resumed, "operon_recover_mutation", recoveryInput)).status, "applied");
     assert.equal((await call(resumed, "operon_recover_mutation", recoveryInput)).status, "already-applied");
@@ -361,6 +374,36 @@ try {
     await bytes(changedAfterCrashPath, phoneEdit);
 
     const configPath = ".obsidian/plugins/operon/data.json";
+    const prioritiesChanged = JSON.parse(setup.get(configPath));
+    prioritiesChanged.taxonomy.priorities.priorities.push({ id: "p2", label: "Low" });
+    const pinStatePath = path.join(vault, ".obsidian/plugins/operon/state");
+    await mkdir(pinStatePath, { recursive: true });
+    for (const [kind, id, filename, changeState] of [
+      ["settings", "crash03", "Changed settings.md",
+        () => writeFile(path.join(vault, configPath), JSON.stringify(prioritiesChanged), "utf8")],
+      ["pins", "crash04", "Changed pins.md",
+        () => writeFile(path.join(pinStatePath, "pinned-tasks.json"), JSON.stringify({ itemsById: { target1: { pinned: true } } }), "utf8")],
+    ]) {
+      const interruptedClient = await start("headless-filesystem", "tasks", { crash: true });
+      const interruptedInput = payload(await task(interruptedClient, id), "crash-before-" + kind, { intent: "complete" });
+      await assert.rejects(call(interruptedClient, "operon_transition_task", interruptedInput), /closed/u);
+      const [entry] = (await call(resumed, "operon_list_pending_recoveries")).recoveries;
+      assert.ok(entry);
+      await changeState();
+      const recover = { ...recoveryInput, recoveryRef: entry.recoveryRef, idempotencyKey: "recover-after-" + kind };
+      for (const [name, args] of [
+        ["operon_recover_mutation", recover],
+        ["operon_recover_mutation", recover],
+        ["operon_transition_task", interruptedInput],
+      ]) {
+        const conflict = await rejects(resumed, name, args, "CONFLICT");
+        assert.equal(conflict.reason, "operon_filesystem_recovery_binding_changed");
+        assert.equal(conflict.payload.error.message, "Operon settings or runtime state changed since the plan was sealed.");
+      }
+      assert.deepEqual((await call(resumed, "operon_list_pending_recoveries")).recoveries, []);
+      await bytes(filename, beforeSources.get(filename));
+    }
+    assert.equal((await call(resumed, "operon_recover_mutation", recoveryInput)).status, "already-applied");
     const fileBeforeRouting = await read(filePath);
     const updatedConfig = { ...JSON.parse(setup.get(configPath)),
       ui: { taskCreationProfile: { fileTaskPipelineLocations: [{ pipelineId: "second", folderPath: "Routed" }] } } };

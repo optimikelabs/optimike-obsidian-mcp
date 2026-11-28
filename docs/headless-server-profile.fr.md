@@ -189,7 +189,7 @@ d’un champ absent renvoie `noChange` et un objet `fieldValues` vide. En cas de
 perte de réponse, relire le résultat avec la même requête et sa clé d’application,
 ou réconcilier la référence renvoyée. Si un autre appareil modifie la note
 après une interruption avant la mise en place des octets à publier, la reprise
-enregistre un `CONFLICT` définitif et préserve la modification. La
+enregistre un `CONFLICT` définitif et préserve la modification. Avant la préparation de l’écriture, une modification des réglages ou de l’état d’Operon clôt aussi la reprise en `CONFLICT`, tandis qu’un échange atomique indisponible la laisse en attente. La
 révision issue de la lecture lie les octets de la note et la configuration.
 Une modification concurrente déclenche `CONFLICT`. Les reçus indiquent
 `source: "filesystem"`. Les dates de la tâche utilisent

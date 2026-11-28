@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { FrontmatterAssessment } from "../obsidianFrontmatterFormat.js";
 import { McpError } from "../../types-global/errors.js";
+import type { OPERON_FILESYSTEM_RECOVERY_BINDING_CHANGED } from "../operon/refusalCodes.js";
 
 export const OPERATION_RUNTIME_CONTRACT_VERSION = 1 as const;
 export const HEADLESS_VAULT_LOCK_BUSY = "headless_vault_lock_busy";
@@ -52,7 +53,8 @@ export type OperationReceipt = {
   replacesConcurrentEdit?: ConcurrentEditReplacement;
   postflight: {
     source?: "filesystem-reread";
-    reason?: "modified_time_settlement" | "headless_atomic_exchange_unavailable" | "headless_displaced_edit" | typeof HEADLESS_VAULT_LOCK_BUSY;
+    reason?: "modified_time_settlement" | "headless_atomic_exchange_unavailable" | "headless_displaced_edit"
+      | typeof HEADLESS_VAULT_LOCK_BUSY | typeof OPERON_FILESYSTEM_RECOVERY_BINDING_CHANGED;
     retryable?: true;
     checkAfter?: string;
     status:

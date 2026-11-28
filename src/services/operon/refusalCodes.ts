@@ -7,7 +7,11 @@
  * incompatibility). Codes come from the Operon Bridge HTTP payload
  * (`error.code`) or from the MCP mutation journal; unknown codes stay masked.
  */
+export const OPERON_FILESYSTEM_RECOVERY_BINDING_CHANGED = "operon_filesystem_recovery_binding_changed";
+
 export const OPERON_REFUSAL_MESSAGES = {
+  [OPERON_FILESYSTEM_RECOVERY_BINDING_CHANGED]:
+    "Operon settings or runtime state changed since the plan was sealed.",
   idempotency_key_reused:
     "This call was refused and applied nothing: its idempotencyKey was already used for a different request (the dry-run of this mutation, or an earlier or still running apply). If that earlier request was only the dry-run, run the apply with a new idempotencyKey. Otherwise check its result first (operon_get_task or operon_find_tasks): it may already have created or changed the task.",
   operon_mutation_outcome_uncertain:

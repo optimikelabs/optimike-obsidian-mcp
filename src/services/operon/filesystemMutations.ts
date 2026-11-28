@@ -16,6 +16,7 @@ import {
 import { formatOperonLocalTime, parseOperonMarkdown, type FilesystemConfiguration } from "./filesystemFormat.js";
 import { editTaskSource, renderInlineTask, supportsFilesystemMutationFormat, unsupportedFilesystemMutation, type SimpleTaskEdit } from "./filesystemMutationFormat.js";
 import type { FilesystemOperonService } from "./filesystemService.js";
+import { OPERON_FILESYSTEM_RECOVERY_BINDING_CHANGED, OPERON_REFUSAL_MESSAGES } from "./refusalCodes.js";
 
 const NOTE_REF = "obsidian-note-replace:v1:";
 const RECOVERY_REF = "operon-filesystem:v1:";
@@ -311,7 +312,7 @@ export class FilesystemOperonMutations {
     const receipt = await this.notes.recover(ref, sealed.idempotencyKey, "verified", async () => {
       await this.requireAtomicExchange();
       const view = await this.reader.mutationSnapshot();
-      if (view.mutationBinding !== sealed.projection!.proof.mutationBinding) conflict("Operon settings or runtime state changed since the original plan was sealed.");
+      if (view.mutationBinding !== sealed.projection!.proof.mutationBinding) return OPERON_FILESYSTEM_RECOVERY_BINDING_CHANGED;
       const beforeTask = OperonTaskSchema.safeParse(sealed.projection!.proof.before);
       if (beforeTask.success) ensureStandalone(view, exactTask(view, beforeTask.data.operonId, beforeTask.data.revision));
       else if (view.snapshot.tasks.some(task => task.operonId === sealed.projection!.proof.operonId)) conflict("The new task identity is already in use.");
@@ -334,7 +335,12 @@ export class FilesystemOperonMutations {
         requested, before: projection.proof.before, after: projection.proof.before, noChange: true,
         fieldValues: {}, ...(replayed ? { replayed: true } : {}) };
     }
-    if (receipt.outcome === "conflict") conflict("The note changed before the sealed Operon write could commit.");
+    if (receipt.outcome === "conflict") {
+      if (receipt.postflight.reason === OPERON_FILESYSTEM_RECOVERY_BINDING_CHANGED) {
+        conflict(OPERON_REFUSAL_MESSAGES[OPERON_FILESYSTEM_RECOVERY_BINDING_CHANGED], OPERON_FILESYSTEM_RECOVERY_BINDING_CHANGED);
+      }
+      conflict("The note changed before the sealed Operon write could commit.");
+    }
     if (receipt.postflight.reason === "headless_atomic_exchange_unavailable") throw atomicExchangeUnavailable();
     if (receipt.phase === "planned") return { ...base, ok: true, status: "planned", requested, before: projection.proof.before,
       plan: { path: receipt.target.logicalRef, beforeSha256: receipt.beforeProof.details?.sha256, operonId: projection.proof.operonId }, ...(replayed ? { replayed } : {}) };
