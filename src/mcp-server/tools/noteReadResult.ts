@@ -32,16 +32,24 @@ export async function noteReadResult(
   if (before && after) {
     const refreshing = before.refreshing || after.refreshing ||
       before.generation !== after.generation;
+    const direct = "readPath" in payload && payload.readPath === "direct-filesystem";
+    // An exact disk read has its own observation time. The inventory checkpoint
+    // applies to cached results and incomplete requests.
+    const freshness = direct
+      ? { partial: false }
+      : {
+          lastRefreshAt: after.lastRefreshAt,
+          lastSuccessfulRefreshStartedAt: after.lastSuccessfulRefreshStartedAt,
+          refreshOrigin: after.refreshOrigin,
+          ...(!before.ready || !after.ready || refreshing ? { partial: true } : {}),
+        };
     payload = {
       ...payload,
       provenance: {
         source: "filesystem",
         upstreamSync: "unknown",
-        lastRefreshAt: after.lastRefreshAt,
-        lastSuccessfulRefreshStartedAt: after.lastSuccessfulRefreshStartedAt,
-        refreshOrigin: after.refreshOrigin,
         ...(refreshing ? { refreshing: true } : {}),
-        ...(!before.ready || !after.ready || refreshing ? { partial: true } : {}),
+        ...freshness,
       },
     };
   }

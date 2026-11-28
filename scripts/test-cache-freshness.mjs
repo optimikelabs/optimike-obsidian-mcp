@@ -1,7 +1,7 @@
 import "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -109,7 +109,8 @@ test("headless read reports the start of a cold scan that missed a concurrent ed
     assert.equal(cold.headlessRead.refreshing, false);
     assert.equal(cold.headlessRead.newestFileMtimeMs, null);
 
-    read = client.callTool({ name: "obsidian_read_note", arguments: { filePath: note } });
+    // A case-insensitive lookup uses the inventory even while exact reads can bypass it.
+    read = client.callTool({ name: "obsidian_read_note", arguments: { filePath: note.toLowerCase() } });
     await Promise.race([scanning.promise, read]);
     const duringScan = await status();
     assert.equal(duringScan.headlessRead.refreshing, true);
@@ -276,6 +277,193 @@ test("auto incremental reads select the same filesystem source as a full scan", 
     assert.equal(fetches, before);
   } finally {
     config.obsidianCacheSource = "rest";
+  }
+});
+
+test("an exact headless note read is complete before the cached provenance becomes available", async (t) => {
+  const { processObsidianReadNote } = await import(
+    "../dist/mcp-server/tools/obsidianReadNoteTool/logic.js"
+  );
+  const vault = path.join(root, "startup-vault");
+  const blockedDir = path.join(vault, "Blocked");
+  const saved = {
+    obsidianVaultPath: config.obsidianVaultPath,
+    obsidianSharedCacheDbPath: config.obsidianSharedCacheDbPath,
+    obsidianCacheSource: config.obsidianCacheSource,
+    obsidianCacheConcurrency: config.obsidianCacheConcurrency,
+  };
+  Object.assign(config, {
+    obsidianVaultPath: vault,
+    obsidianSharedCacheDbPath: path.join(root, "startup.sqlite"),
+    obsidianCacheSource: "filesystem",
+    obsidianCacheConcurrency: 1,
+  });
+  mkdirSync(blockedDir, { recursive: true });
+  const notesDir = path.join(vault, "Notes");
+  const privateDir = path.join(vault, "Private");
+  mkdirSync(notesDir);
+  mkdirSync(privateDir);
+  const expected = "# Current content\n";
+  writeFileSync(path.join(notesDir, "Target.md"), expected);
+  writeFileSync(path.join(privateDir, "Excluded.md"), "excluded content");
+  symlinkSync(notesDir, path.join(vault, "Linked"), "junction");
+  const startupCache = new VaultCacheService();
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const directEntered = Promise.withResolvers();
+  const releaseDirect = Promise.withResolvers();
+  let gateDirect = false;
+  const originalReadDir = fs.readdir;
+  fs.readdir = async (directory, options) => {
+    if (directory === blockedDir) {
+      entered.resolve();
+      await release.promise;
+    }
+    if (gateDirect && directory === notesDir) {
+      gateDirect = false;
+      directEntered.resolve();
+      await releaseDirect.promise;
+    }
+    return originalReadDir(directory, options);
+  };
+  const build = startupCache.buildVaultCache();
+  let watchdog;
+  let read;
+  let overflowRead;
+  try {
+    await entered.promise;
+    const readNote = (filePath) => processObsidianReadNote(
+      { filePath, format: "markdown", includeStat: false },
+      context,
+      undefined,
+      startupCache,
+    );
+    const client = await connectReadNote(t, undefined, startupCache);
+    const readByMcp = async () => {
+      const result = await client.callTool({
+        name: "obsidian_read_note",
+        arguments: { filePath: "Notes/Target.md" },
+      });
+      assert.equal(result.isError, false);
+      return JSON.parse(result.content[0].text);
+    };
+    gateDirect = true;
+    read = readByMcp();
+    const timeout = new Promise((_, reject) => {
+      watchdog = setTimeout(
+        () => reject(new Error("note read waited for the unrelated inventory")),
+        5000,
+      );
+    });
+    await Promise.race([directEntered.promise, timeout]);
+    overflowRead = readNote("Notes/Target.md");
+    releaseDirect.resolve();
+    const response = await Promise.race([
+      read,
+      timeout,
+    ]);
+    assert.equal(response.content, expected);
+    assert.equal(response.readPath, "direct-filesystem");
+    assert.equal(new Date(response.observedAt).toISOString(), response.observedAt);
+    assert.deepEqual(response.provenance, {
+      source: "filesystem",
+      upstreamSync: "unknown",
+      refreshing: true,
+      partial: false,
+    });
+    assert.equal(startupCache.isReady(), false);
+    assert.equal(startupCache.getCachedFileCount(), 0);
+    const refusals = Promise.all([
+      assert.rejects(readNote("Private/Excluded.md"), { code: "SERVICE_UNAVAILABLE" }),
+      assert.rejects(readNote("Linked/Target.md"), { code: "SERVICE_UNAVAILABLE" }),
+    ]);
+    release.resolve();
+    await refusals;
+    assert.deepEqual(await overflowRead, { content: expected, stats: undefined });
+    await build;
+    const cached = await readByMcp();
+    const evidence = startupCache.getRefreshEvidence();
+    assert.equal(cached.content, expected);
+    assert.equal(cached.sha256, response.sha256);
+    assert.equal(cached.readPath, undefined);
+    assert.equal(cached.observedAt, undefined);
+    assert.deepEqual(cached.provenance, {
+      source: "filesystem",
+      upstreamSync: "unknown",
+      lastRefreshAt: evidence.lastRefreshAt,
+      lastSuccessfulRefreshStartedAt: evidence.lastSuccessfulRefreshStartedAt,
+      refreshOrigin: "process-refresh",
+    });
+  } finally {
+    clearTimeout(watchdog);
+    releaseDirect.resolve();
+    release.resolve();
+    await build;
+    await read?.catch(() => undefined);
+    await overflowRead?.catch(() => undefined);
+    await startupCache.close();
+    fs.readdir = originalReadDir;
+    Object.assign(config, saved);
+  }
+});
+test("the first ready read preserves content already served during a scan", async () => {
+  const { processObsidianReadNote } = await import(
+    "../dist/mcp-server/tools/obsidianReadNoteTool/logic.js"
+  );
+  const vault = path.join(root, "startup-reconciliation");
+  mkdirSync(vault);
+  const target = path.join(vault, "A.md");
+  const tail = path.join(vault, "Z.md");
+  const mtime = new Date("2026-01-01T00:00:00Z");
+  writeFileSync(target, "v1");
+  utimesSync(target, mtime, mtime);
+  writeFileSync(tail, "tail");
+  const saved = {
+    obsidianVaultPath: config.obsidianVaultPath,
+    obsidianSharedCacheDbPath: config.obsidianSharedCacheDbPath,
+    obsidianCacheSource: config.obsidianCacheSource,
+    obsidianCacheConcurrency: config.obsidianCacheConcurrency,
+  };
+  Object.assign(config, {
+    obsidianVaultPath: vault,
+    obsidianSharedCacheDbPath: path.join(root, "startup-reconciliation.sqlite"),
+    obsidianCacheSource: "filesystem",
+    obsidianCacheConcurrency: 1,
+  });
+  const startupCache = new VaultCacheService();
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const originalOpen = fs.open;
+  fs.open = async (file, ...args) => {
+    if (file === tail) {
+      entered.resolve();
+      await release.promise;
+    }
+    return originalOpen(file, ...args);
+  };
+  const build = startupCache.buildVaultCache();
+  const read = () => processObsidianReadNote(
+    { filePath: "A.md", format: "markdown", includeStat: false },
+    context,
+    undefined,
+    startupCache,
+  );
+  try {
+    await entered.promise;
+    assert.equal((await startupCache.getEntry("/A.md")).content, "v1");
+    writeFileSync(target, "v2");
+    utimesSync(target, mtime, mtime);
+    assert.equal((await read()).content, "v2");
+    release.resolve();
+    await build;
+    assert.equal(startupCache.isReady(), true);
+    assert.deepEqual(await read(), { content: "v2", stats: undefined });
+  } finally {
+    release.resolve();
+    await build;
+    await startupCache.close();
+    fs.open = originalOpen;
+    Object.assign(config, saved);
   }
 });
 test("reconciliation really re-reads same-size same-mtime files", async () => {

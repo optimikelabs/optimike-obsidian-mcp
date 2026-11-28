@@ -113,6 +113,8 @@ export interface ObsidianReadNoteResponse {
    * Included if format='json', or if format='markdown' and includeStat=true.
    */
   stats?: FormattedStat; // Renamed from stat
+  readPath?: "direct-filesystem";
+  observedAt?: string;
 }
 
 // ====================================================================================
@@ -157,24 +159,29 @@ export const processObsidianReadNote = async (
   const shouldRetryNotFound = (err: unknown) =>
     err instanceof McpError && err.code === BaseErrorCode.NOT_FOUND;
 
-  const readFromSharedCache = async (
+  const readFromLocalSource = async (
     requestedPath: string,
   ): Promise<ObsidianReadNoteResponse | null> => {
-    if (!vaultCacheService?.isReady()) {
-      await vaultCacheService?.buildVaultCache();
-      await vaultCacheService?.waitUntilReady();
-    }
+    if (!vaultCacheService) return null;
 
-    if (!vaultCacheService?.isReady()) {
+    const direct = vaultCacheService.isReady()
+      ? undefined
+      : await vaultCacheService.readExactFilesystemNote(requestedPath, context);
+    if (!direct && !vaultCacheService.isReady()) {
+      await vaultCacheService.buildVaultCache();
+      await vaultCacheService.waitUntilReady();
+    }
+    if (!direct && !vaultCacheService.isReady()) {
       return null;
     }
 
-    const matchedPath = vaultCacheService.findMatchingPath(requestedPath);
+    const matchedPath =
+      direct?.path ?? vaultCacheService.findMatchingPath(requestedPath);
     if (!matchedPath) {
       return null;
     }
 
-    const cacheEntry = await vaultCacheService.getEntry(matchedPath);
+    const cacheEntry = direct ?? (await vaultCacheService.getEntry(matchedPath));
     if (!cacheEntry) {
       return null;
     }
@@ -187,21 +194,19 @@ export const processObsidianReadNote = async (
       { ...context, operation: "formatSharedCacheResponse", effectiveFilePath: matchedPath },
     ) : undefined;
 
-    logger.info(`Serving ${matchedPath} from shared cache fallback.`, {
+    const source = direct ? "filesystem" : "shared-cache";
+    logger.info(`Serving ${matchedPath} from ${source}.`, {
       ...context,
-      fallbackMode: "shared-cache",
+      fallbackMode: source,
     });
 
-    if (requestedFormat === "json") {
-      return {
-        content: noteJson,
-        stats: formattedStat ?? undefined,
-      };
-    }
-
     return {
-      content: noteJson.content ?? "",
-      stats: includeStat ? formattedStat ?? undefined : undefined,
+      content: requestedFormat === "json" ? noteJson : (noteJson.content ?? ""),
+      stats: formattedStat ?? undefined,
+      ...(direct && {
+        readPath: "direct-filesystem" as const,
+        observedAt: direct.observedAt,
+      }),
     };
   };
 
@@ -212,7 +217,7 @@ export const processObsidianReadNote = async (
     const readContext = { ...context, operation: "readFileAsJson" };
     try {
       if (!obsidianService) {
-        const cached = await readFromSharedCache(originalFilePath);
+        const cached = await readFromLocalSource(originalFilePath);
         if (cached) {
           return cached;
         }
@@ -253,7 +258,7 @@ export const processObsidianReadNote = async (
         error instanceof McpError &&
         error.code === BaseErrorCode.SERVICE_UNAVAILABLE
       ) {
-        const cached = await readFromSharedCache(originalFilePath);
+        const cached = await readFromLocalSource(originalFilePath);
         if (cached) {
           return cached;
         }

@@ -526,7 +526,11 @@ If Obsidian REST is unavailable but the shared cache is warm, the backend can st
 
 This is meant to keep the MCP useful when Obsidian is temporarily down, while still making the failure mode explicit.
 
-If a first read/search request arrives while the filesystem cache is still building, the tool waits briefly for cache readiness and then returns cache stats if the vault is still unavailable. Use `obsidian_runtime_maintenance` with `refresh_all` as a manual readiness gate on large vaults.
+In `headless-readonly`, `obsidian_read_note` can verify and serve an exact, case-sensitive Markdown path from disk during the initial cache build or a forced rebuild. Responses from disk include `readPath: "direct-filesystem"` and the `observedAt` timestamp for that note. Exclusions and link checks still apply. During periodic refresh, note reads wait for the cache, as do listings, searches, and case-insensitive lookups. Cache readiness describes the full inventory. Use `obsidian_runtime_maintenance` with `refresh_all` as a manual readiness gate on large vaults.
+
+Direct reads report `provenance.partial: false` for the requested note even
+while the inventory is refreshing. Their freshness starts at `observedAt`.
+Cached reads continue to report the inventory checkpoint.
 
 ## Health and Maintenance
 
