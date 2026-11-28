@@ -258,6 +258,10 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "vault_path_alias_ambiguous",
   "base_query_invalid_filter",
   "base_query_filter_bridge_upgrade_required",
+  "headless_link_index_building",
+  "headless_link_cache_refreshing",
+  "headless_link_cache_events_pending",
+  "headless_link_cache_uncertain",
   BASE_FORMULA_ENGINE_REFUSAL,
   "base_query_requires_obsidian",
   "base_query_unsupported_local_input",
@@ -739,6 +743,14 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
     return "Obsidian's Bases engine could not select the requested rows.";
   if (code === BaseErrorCode.NOT_FOUND && reasonCode === "base_view_not_found")
     return "The requested Base view was not found.";
+  if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "headless_link_index_building")
+    return "The headless link index is building. Retry obsidian_note_links later.";
+  if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "headless_link_cache_refreshing")
+    return "The shared note cache is refreshing. Retry obsidian_note_links after the refresh.";
+  if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "headless_link_cache_events_pending")
+    return "The shared note cache is processing pending file events. Retry obsidian_note_links after they settle.";
+  if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "headless_link_cache_uncertain")
+    return "The shared note cache needs a successful refresh. Retry obsidian_note_links after it completes.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_tool_arguments")
     return "Invalid tool arguments. See validationIssues for the field and reason.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === BASE_FORMULA_ENGINE_REFUSAL)

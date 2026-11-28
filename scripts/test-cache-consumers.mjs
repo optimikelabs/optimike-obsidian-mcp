@@ -15,6 +15,7 @@ const { processObsidianReadNote } = await import(
 );
 const {warmSharedTaskCache,processListAllTasks}=await import('../dist/mcp-server/tools/tasksShared/logic.js');
 const {processObsidianNoteLinks}=await import('../dist/mcp-server/tools/obsidianNoteLinksTool/logic.js');
+const {publicMcpToolErrorPayload}=await import('../dist/utils/internal/errorHandler.js');
 const {extractMarkdownLinkReferences}=await import('../dist/services/obsidianRestAPI/vaultCache/markdownLinkReferences.js');
 const context={requestId:'cache-consumer-fixture',timestamp:new Date().toISOString(),operation:'test'};
 config.obsidianVaultPath=root;config.obsidianCacheSource='rest';
@@ -38,6 +39,65 @@ test('dollars in autolinks and wikilinks are literal, and formulas still hide li
   ['$x$ $[[H]]$ [[V]]\n\n$$\n[[Hide me]]\n$$',['V']],
  ];
  for (const [source, expected] of samples) assert.deepEqual(linkTexts(source),expected);
+});
+test('external email autolinks leave adjacent vault references visible',()=>{
+ assert.deepEqual(linkTexts('name+alias@example.com [[V]] <other@example.com> [mail](mailto:name@example.com) [[After]]'),['V','After']);
+});
+test('wikilink aliases keep square brackets and triples resolve the inner target',()=>{
+ const links=extractMarkdownLinkReferences('[[V|a[b]] [[[V]]] [[Other|a]b]]\n[[Broken|a[b\n[[After]]');
+ assert.deepEqual(links.map(({linkPath,displayText})=>[linkPath,displayText]),[
+  ['V','a[b'],['V',undefined],['Other','a]b'],['After',undefined],
+ ]);
+ assert.deepEqual(linkTexts('<span>[[Hidden|</span> [[Visible]]'),['Visible']);
+});
+test('a rejected alias spanning code or HTML does not consume the next wikilink',()=>{
+ for (const source of ['[[A|b `x` [[C]]','[[A|b <i>x</i> [[C]]']) {
+  assert.deepEqual(linkTexts(source),['C']);
+ }
+});
+test('a double bracket opens a new wikilink inside an unfinished alias',()=>{
+ assert.deepEqual(linkTexts('[[A|b [[C]]'),['C']);
+});
+test('wikilink targets and aliases skip comments and retain their original source span',()=>{
+ const source='[[A %% x %% B#Heading|a[b] %% hide %% c]]';
+ const [link]=extractMarkdownLinkReferences(source);
+ assert.deepEqual([link.linkPath,link.subpath,link.displayText,link.original],['A  B','#Heading','a[b]  c',source]);
+ assert.equal(link.position.end.offset,source.length);
+ assert.deepEqual(linkTexts('[[A %% x %% B]] [[%% only a comment %%]]'),['A  B']);
+});
+test('the wikilink shortcut agrees with the Markdown tree on a fixed and generated corpus',()=>{
+ const corpus=[
+  '---\r\nrelated: "[[One|a[b]]"\r\n---\r\n[[One]] and ![[Two#Heading]]',
+  '[[Visible]] (ordinary parentheses) [spaced] : [[Also visible]]',
+  '[ref][id]\n\n[id]: Target.md\n\n[id] : [[Visible]]',
+  '[[A|b `x` [[C]] and [[Open|alias [[Next]]',
+  '[[A %% x %% B|a[b] %% hide %% c]] and %% [[Hide]] %% [[Keep]]',
+  'https://example.test/$part [[Keep]] $[[Math]]$ <i>[[HTML]]</i>',
+  '    [[Indented]]\n\n~~~\n[[Fenced]]\n~~~\n\n[[Visible]]',
+  '[[Note|a\\[[literal]] [[[Triple]]] and \\[[Escaped]]',
+ ];
+ const fragments=[
+  '[[One]]','![[Two#^block]]','[[Folder/Three|a[b]]','[[Open|label [[Inner]]',
+  '[[A %% ignored %% B]]','%% [[Hidden]] %%','[[C|left]right]]','(prose)','[loose] :',
+  '`[[Code]]`','~~~','<i>[[HTML]]</i>','$[[Math]]$','    [[Indent]]','\t[[Tab]]',
+  '[label](Other.md)','[ref][id]','[id]: Target.md','https://example.test/[[URL]]','www.example.test/$x',
+  '\\[[Escaped]]','[[[Triple]]]','**[[Bold]]**','[nested [label]]','%% unclosed',
+ ];
+ let seed=0x2401;
+ const pick=items=>{
+  seed=(Math.imul(seed,1664525)+1013904223)>>>0;
+  return items[(seed>>>16)%items.length];
+ };
+ for (let i=0;i<320;i++) {
+  const choices=i%2===0 ? fragments.slice(0,9) : fragments;
+  const separator=pick([' ','\n','\n\n','\r\n']);
+  const body=Array.from({length:3+(i%9)},()=>pick(choices)).join(separator);
+  corpus.push(i%5===0 ? '---\nrelated: "[[Meta]]"\n---\n'+body : body);
+ }
+ for (const [index,source] of corpus.entries()) {
+  assert.deepEqual(extractMarkdownLinkReferences(source),
+   extractMarkdownLinkReferences(source,{forceMarkdownTree:true}),`corpus case ${index}: ${JSON.stringify(source)}`);
+ }
 });
 test('unpaired inline HTML is scoped to its paragraph',()=>{
  assert.deepEqual(linkTexts('a <span>x\n\n[[P2]]\n\n</span> [[V]]'),['P2','V']);
@@ -83,7 +143,16 @@ test('filesystem links preserve observations and reconcile edits, destination am
  // Populate a cache from before the filesystem link index existed.
  config.obsidianRuntimeMode='hybrid';
  let cache=new VaultCacheService();
- const read=(filePath,limit=200)=>processObsidianNoteLinks({filePath,limit},context,undefined,cache);
+ const readLinks=(filePath,limit=200)=>processObsidianNoteLinks({filePath,limit},context,undefined,cache);
+ const read=async(filePath,limit)=>{
+  try {
+   return await readLinks(filePath,limit);
+  } catch(error) {
+   if (!isIndexPending(error)) throw error;
+   await cache.linkIndexRun;
+   return readLinks(filePath,limit);
+  }
+ };
  try {
   await cache.refreshCache();
   assert.equal(cache.isReady(),true);
@@ -92,6 +161,20 @@ test('filesystem links preserve observations and reconcile edits, destination am
   cache=new VaultCacheService();
   assert.equal(cache.isReady(),false);
   cache.waitUntilReady=()=>{ throw new Error('headless reads must await reconciliation, never a readiness deadline'); };
+  await cache.buildVaultCache();
+  assert.equal(cache.isReady(),true);
+  assert.equal(await cache.readFilesystemNoteContent('Notes/Source.md',context),source);
+  await assert.rejects(readLinks('Notes/People/Ada.md'),(error)=>{
+   assert.ok(isIndexPending(error));
+   const response=publicMcpToolErrorPayload(error,{
+    operation:'test',toolName:'obsidian_note_links',params:{filePath:'Notes/People/Ada.md'},
+   });
+   assert.equal(response.error.code,'SERVICE_UNAVAILABLE');
+   assert.equal(response.error.details.reasonCode,'headless_link_index_building');
+   assert.equal(response.error.details.retryable,true);
+   return true;
+  });
+  await cache.linkIndexRun;
   const result=await read('Notes/Source.md');
   assert.deepEqual((await read('Hidden targets.md')).outgoing.map(({linkText,resolution})=>[linkText,resolution.targetPath ?? null]),[
    ['doc.pdf',null],['allowed.pdf','.included/allowed.pdf'],['other.pdf',null],
@@ -162,6 +245,7 @@ test('filesystem links preserve observations and reconcile edits, destination am
    assert.equal(cache.getStats().refreshSource,'filesystem');
    config.obsidianCacheSource='filesystem';
    assert.deepEqual((await read('Notes/Shared.md')).backlinks,[{sourcePath:'Another.md',count:1},{sourcePath:'Notes/Source.md',count:2}]);
+   assert.equal((await cache.getEntry('/Another.md')).content,restContent);
    config.obsidianCacheSource='rest';
    restContent='Changed through Local REST.';
    assert.deepEqual(await rest.updateFileVerified('Another.md',context),{ok:true,disposition:'updated'});
@@ -169,6 +253,8 @@ test('filesystem links preserve observations and reconcile edits, destination am
    assert.equal(cache.getStats().refreshSource,'filesystem');
    config.obsidianCacheSource='filesystem';
    assert.equal(await cache.readFilesystemNoteContent('Another.md',context),restContent);
+   assert.equal((await cache.getEntry('/Another.md')).content,restContent);
+   await assert.rejects(readLinks('Notes/Shared.md'),isIndexPending);
    assert.deepEqual((await read('Notes/Shared.md')).backlinks,[{sourcePath:'Notes/Source.md',count:2}]);
   } finally {
    await rest.close();
@@ -178,6 +264,115 @@ test('filesystem links preserve observations and reconcile edits, destination am
   Object.assign(config,previous);
  }
 });
+
+async function linkFixture(run) {
+ const vault=fs.mkdtempSync(path.join(root,'link-worker-'));
+ const previous={obsidianVaultPath:config.obsidianVaultPath,obsidianCacheSource:config.obsidianCacheSource,
+  obsidianSharedCacheDbPath:config.obsidianSharedCacheDbPath};
+ Object.assign(config,{obsidianVaultPath:vault,obsidianCacheSource:'filesystem',obsidianSharedCacheDbPath:path.join(vault,'cache.sqlite')});
+ const write=(name,content)=>fs.writeFileSync(path.join(vault,name),content,'utf8');
+ write('A.md','[[Target]]');
+ write('Target.md','# Target');
+ let cache=new VaultCacheService();
+ try {
+  await run({
+   get cache(){return cache;}, write,
+   read:()=>cache.readFilesystemNoteLinks('Target.md',200,context),
+   reopen:async()=>{await cache.close();cache=new VaultCacheService();},
+  });
+ } finally {
+  await cache.close();
+  Object.assign(config,previous);
+ }
+}
+
+test('link refusals expose the shared text cache state from another connection',()=>linkFixture(async f=>{
+ await f.cache.buildVaultCache();
+ await f.cache.linkIndexRun;
+ const writer=new VaultCacheService();
+ try {
+  for (const [state,reason] of [
+   ['building','headless_link_cache_refreshing'],
+   ['pending-events','headless_link_cache_events_pending'],
+   ['uncertain','headless_link_cache_uncertain'],
+  ]) {
+   writer.db.prepare("UPDATE shared_cache_metadata SET value = ? WHERE key = 'refresh_state'").run(state);
+   await assert.rejects(f.read(),error=>{
+    const {error:publicError}=publicMcpToolErrorPayload(error,{
+     operation:'test',toolName:'obsidian_note_links',params:{filePath:'Target.md'},
+    });
+    assert.equal(publicError.code,'SERVICE_UNAVAILABLE');
+    assert.equal(publicError.details.reasonCode,reason);
+    assert.equal(publicError.details.retryable,true);
+    return true;
+   });
+  }
+  writer.db.prepare("UPDATE shared_cache_metadata SET value = 'complete' WHERE key = 'refresh_state'").run();
+  assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1}]);
+ } finally { await writer.close(); }
+}));
+
+function pauseAfterFirstLinkBatch(cache) {
+ const index=cache.markdownLinks;
+ const reconcile=index.reconcileBatch.bind(index);
+ return new Promise(resolve=>{
+  index.reconcileBatch=(afterPath,accept)=>{
+   index.reconcileBatch=reconcile;
+   const result=reconcile(afterPath,file=>file==='/A.md' && accept(file));
+   resolve();
+   return result;
+  };
+ });
+}
+
+function isIndexPending(error) {
+ return error.code==='SERVICE_UNAVAILABLE' &&
+  error.details?.reasonCode==='headless_link_index_building' && error.details.retryable===true;
+}
+
+test('a local update behind the link cursor cannot yield stale backlinks',()=>linkFixture(async f=>{
+ const firstBatch=pauseAfterFirstLinkBatch(f.cache);
+ await f.cache.buildVaultCache();
+ await firstBatch;
+ f.write('A.md','[[Other]]');
+ // Read the fixture synchronously to finish this real cache write before the next index batch.
+ f.cache.readCacheRow=async file=>({path:file,ctime:1,mtime:2,size:9,hash:'local-edit',content:fs.readFileSync(path.join(config.obsidianVaultPath,file.slice(1)),'utf8')});
+ assert.deepEqual(await f.cache.updateFileVerified('A.md',context),{ok:true,disposition:'updated'});
+ await assert.rejects(f.read(),isIndexPending);
+ await f.cache.linkIndexRun;
+ assert.deepEqual((await f.read()).backlinks,[]);
+}));
+
+test('restart resumes a committed partial link index without exposing it',()=>linkFixture(async f=>{
+ f.write('Z.md','[[Target]]');
+ const firstBatch=pauseAfterFirstLinkBatch(f.cache);
+ await f.cache.buildVaultCache();
+ await firstBatch;
+ await f.reopen();
+ const stored=f.cache.db.prepare('SELECT path FROM markdown_link_files ORDER BY path').all();
+ assert.deepEqual(stored.map(row=>row.path),['/A.md']);
+ assert.equal(f.cache.isReady(),true);
+ await assert.rejects(f.read(),isIndexPending);
+ await f.cache.linkIndexRun;
+ assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Z.md',count:1}]);
+}));
+
+test('an indexing error rolls back the batch and a later link request retries it',()=>linkFixture(async f=>{
+ const index=f.cache.markdownLinks;
+ const reconcile=index.reconcileBatch.bind(index);
+ index.reconcileBatch=(...args)=>{
+  index.reconcileBatch=reconcile;
+  reconcile(...args);
+  throw new Error('Synthetic index failure');
+ };
+ await f.cache.buildVaultCache();
+ await f.cache.linkIndexRun;
+ assert.equal(f.cache.db.prepare('SELECT count(*) AS count FROM markdown_link_files').get().count,0);
+ assert.equal(await f.cache.readFilesystemNoteContent('A.md',context),'[[Target]]');
+ await assert.rejects(f.read(),isIndexPending);
+ await f.cache.linkIndexRun;
+ assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1}]);
+}));
 async function readTaskModes(cache){
  const compact=JSON.parse(await processListAllTasks({responseFormat:'json'},context,cache));
  assert.equal(compact.responseMode,'compact');
@@ -194,7 +389,8 @@ async function fixture(body, files = {'One.md':'- [ ] task-one'}){
   getFileContent:async p=>{if(fail)throw new Error('offline');return {path:p,content:files[p.replace(/^\//,'')],stat:{ctime:1,mtime:2,size:14}};}};
  let cache=new VaultCacheService(rest);
  try{await cache.refreshCache(true);await body({get cache(){return cache;},fail:()=>{fail=true;},
-  restart:async()=>{await cache.close();cache=new VaultCacheService(rest);},set:v=>{files=v;}});}
+  restart:async()=>{await cache.close();cache=new VaultCacheService(rest);},
+  openReader:()=>new VaultCacheService(rest),set:v=>{files=v;}});}
  finally{await cache.close();}
 }
 
@@ -261,6 +457,22 @@ test("local Bases match date strings and return the written datetime offset", as
   } finally {
     fs.unlinkSync(basePath);
   }
+});
+
+test('hybrid cache readers see a newer note committed by a separate REST connection',async()=>{
+ const previous=config.obsidianRuntimeMode;
+ config.obsidianRuntimeMode='hybrid';
+ try {
+  await fixture(async f=>{
+   const reader=f.openReader();
+   try {
+    assert.equal((await reader.getEntry('/One.md')).content,'- [ ] task-one');
+    f.set({'One.md':'- [ ] task-two'});
+    assert.deepEqual(await f.cache.updateFileVerified('One.md',context),{ok:true,disposition:'updated'});
+    assert.equal((await reader.getEntry('/One.md')).content,'- [ ] task-two');
+   } finally { await reader.close(); }
+  });
+ } finally { config.obsidianRuntimeMode=previous; }
 });
 
 for(const kind of ['tasks','bases','tasks-without-service'])test(kind+' refuses durable incomplete cache after failed reconciliation',()=>fixture(async f=>{

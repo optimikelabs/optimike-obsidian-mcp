@@ -25,7 +25,7 @@ This branch leaves `main` and the individual pull requests unaffected.
 | [#224](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/224) | `99b2afbc6ba6f9c2b54eb80fa12576fde13af82e` | The producer can bootstrap an external generation from compatible Smart Connections vectors and reproduce the 4.7.2 selection rules |
 | [#238](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/238) | `7a1065bba590fdd2d633bb7ec805c9de9b7d09ab` | Regex search anchors match each line in live and headless modes |
 | [#239](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/239) | `2f42c5da8dacd4e0527e0a699aa9c54d264bafb9` | Bases Bridge 1.3.2 uses native row selection in both live query modes and omits formula columns with `evaluate: false` |
-| [#240](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/240) | `d5c7698b84b5f887f71ecf96f79a674609e6b2a0` | The three headless modes can read a frontmatter key and report outgoing links, backlinks, and unresolved links from a SQLite index |
+| [#240](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/240) | `fa9571a813e899c698aa9a2ea022bb326473dd84` | Headless frontmatter and SQLite note links, background link indexing, cross-process text cache invalidation, and improved wikilink parsing |
 | [#241](https://github.com/optimikelabs/optimike-obsidian-mcp/pull/241) | `0ab243287b173d10da8411be546a64bb5ac97895` | Live compact listings and global search report `diskPath` when a unique physical spelling uses NBSP or narrow NBSP. Search accepts up to 500 result files per page |
 
 Run the read-only profile first. Test filesystem writes on a separate,
@@ -68,13 +68,14 @@ When a cold read bypasses the cache, it reports the exact physical spelling.
 Alias resolution uses the completed inventory.
 
 Headless frontmatter uses the shared CORE-schema parser. Live reads retain
-stale metadata detection. The headless link index and its inventory are
-published with the successful refresh checkpoint. Hidden notes remain
-excluded by default, with explicit reinclusions supported. Link resolution
-uses the filesystem snapshot. Heading and block validation requires Desktop.
-The index skips the GFM bare-email tokenizer, which stalled the replica's
-initial scan on large notes. The graph still indexes vault links and keeps
-bare URL handling for inline math detection.
+stale metadata detection. The text cache becomes ready before the link index.
+While that index builds in the background, note links return
+`headless_link_index_building` with `retryable: true`. Frontmatter remains
+available. SQLite changes invalidate hot note text across processes in both
+headless and hybrid modes. Hidden notes remain excluded by default, with
+explicit reinclusions supported. Heading and block validation requires
+Desktop. The reviewed parser keeps bare URL handling, skips the GFM bare-email
+tokenizer and includes a differentially tested shortcut for plain wikilinks.
 
 ## Add another change
 

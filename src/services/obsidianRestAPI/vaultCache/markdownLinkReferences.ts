@@ -10,20 +10,72 @@ export type MarkdownLinkReference = Pick<
   "kind" | "linkText" | "linkPath" | "subpath" | "original" | "displayText" | "frontmatterKey" | "position"
 >;
 
-const wikiLink = /(?<!\\)(!)?\[\[([^\]\r\n|]+)(?:\|([^\]\r\n]*))?\]\]/gu;
 const scheme = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/iu;
 const htmlTag = /^<(\/?)([a-z][\w:-]*)(?=[\s/>])(?:"[^"]*"|'[^']*'|[^<>"'])*>$/iu;
+const markdownSyntax = gfm();
+// Remove the disabled construct from dispatch as well: GFM normally
+// registers it on every alphanumeric character.
+const inlineConstructs = markdownSyntax.text ?? {};
+for (const [character, constructs] of Object.entries(inlineConstructs)) {
+  if (!constructs) continue;
+  const remaining = (Array.isArray(constructs) ? constructs : [constructs])
+    .filter((construct) => construct.name !== "emailAutolink");
+  if (remaining.length) inlineConstructs[character] = remaining;
+  else delete inlineConstructs[character];
+}
+const [literalAutolinks, ...otherGfmNodes] = gfmFromMarkdown();
+const markdownOptions = {
+  extensions: [markdownSyntax, { disable: { null: ["emailAutolink"] } }],
+  // The fallback literal-autolink transform scans the AST again and emits
+  // links without source positions. This index only uses positioned tokens.
+  mdastExtensions: [{ ...literalAutolinks, transforms: [] }, ...otherGfmNodes],
+};
 
 type Span = { start: number; end: number };
+type LocatedReference = Span & { reference: MarkdownLinkReference };
+type MaskedBody = { source: string; comments: Span[] };
+
+// Markdown links, autolinks and opaque Markdown constructs may take
+// precedence over wikilinks. Plain text with only wikilinks needs no AST.
+const needsMarkdownTree = /[`<$\t]| {4}|~~~|\][(:]|https?:\/\/|www\./iu;
+
+function* wikiLinks(
+  source: string,
+  isBlocked?: (start: number, end: number) => boolean,
+): IterableIterator<Span & { embed: boolean; target: Span; alias?: Span }> {
+  const opener = /(?<!\\)(!)?\[\[([^\[\]\r\n|]+)(\]\]|\|)/gu;
+  const terminator = /(?<!\\)!?\[\[|\]\]|[\r\n]/gu;
+  let match: RegExpExecArray | null;
+  while ((match = opener.exec(source)) !== null) {
+    const start = match.index;
+    if (isBlocked?.(start, start + 1)) continue;
+    const targetStart = start + (match[1] ? 3 : 2);
+    const target = { start: targetStart, end: targetStart + match[2].length };
+    let alias: Span | undefined;
+    let end = opener.lastIndex;
+    if (match[3] === "|") {
+      terminator.lastIndex = end;
+      const close = terminator.exec(source);
+      if (!close) return;
+      if (close[0] !== "]]") {
+        // A new opener abandons the unfinished alias. Resume at that
+        // opener, or just after the line break that ended the candidate.
+        opener.lastIndex = close[0].endsWith("[[") ? close.index : terminator.lastIndex;
+        continue;
+      }
+      alias = { start: end, end: close.index };
+      end = terminator.lastIndex;
+    }
+    if (isBlocked?.(start, end)) continue;
+    opener.lastIndex = end;
+    yield { start, end, embed: !!match[1], target, alias };
+  }
+}
 
 function parseMarkdown(source: string) {
-  // The email tokenizer repeatedly scans long ordinary text runs. Email
-  // addresses are external to the vault graph. Keep URL tokenization so dollar
-  // signs inside bare URLs are not mistaken for math delimiters.
-  return fromMarkdown(source, {
-    extensions: [gfm(), { disable: { null: ["emailAutolink"] } }],
-    mdastExtensions: [gfmFromMarkdown()],
-  });
+  // Bare emails are external to the vault graph. Keep GFM URL tokenization,
+  // which protects dollar signs inside bare URLs.
+  return fromMarkdown(source, markdownOptions);
 }
 
 function* walk(root: Nodes): IterableIterator<{ node: Nodes; parent: Nodes }> {
@@ -74,8 +126,8 @@ function opaqueSpans(root: Nodes, source: string): Span[] {
   }
   const codeOrHtml = spanFilter(spans.sort((a, b) => a.start - b.start));
   if (!source.includes("$")) return spans;
-  for (const match of source.matchAll(wikiLink)) {
-    destinations.push({ start: match.index, end: match.index + match[0].length });
+  for (const { start, end } of wikiLinks(source, spanFilter(spans))) {
+    destinations.push({ start, end });
   }
   const inDestination = spanFilter(destinations.sort((a, b) => a.start - b.start));
   const formulas: Span[] = [];
@@ -115,9 +167,10 @@ function spanFilter(spans: readonly Span[]) {
   };
 }
 
-function maskComments(body: string, opaque: readonly Span[]): string {
+function maskComments(body: string, opaque: readonly Span[]): MaskedBody {
   const blocksOpener = spanFilter(opaque);
   const chunks: string[] = [];
+  const comments: Span[] = [];
   let open: number | undefined;
   let consumed = 0;
   for (const { index } of body.matchAll(/(?<!\\)%%/gu)) {
@@ -138,14 +191,34 @@ function maskComments(body: string, opaque: readonly Span[]): string {
       lines[i] = " ".repeat(lines[i].length);
     }
     chunks.push(body.slice(consumed, open), lines.join(""));
+    comments.push({ start: open, end });
     open = undefined;
     consumed = end;
   }
   if (open !== undefined) {
     chunks.push(body.slice(consumed, open), body.slice(open).replace(/[^\r\n]/g, " "));
-    return chunks.join("");
+    comments.push({ start: open, end: body.length });
+    return { source: chunks.join(""), comments };
   }
-  return consumed ? chunks.join("") + body.slice(consumed) : body;
+  return { source: consumed ? chunks.join("") + body.slice(consumed) : body, comments };
+}
+
+/** Slice sequential link fields from the original body, excluding comments. */
+function uncommentedSlice(body: string, comments: readonly Span[]) {
+  let cursor = 0;
+  return ({ start, end }: Span): string => {
+    while (cursor < comments.length && comments[cursor].end <= start) cursor++;
+    let result = "";
+    let offset = start;
+    while (cursor < comments.length && comments[cursor].start < end) {
+      const comment = comments[cursor];
+      if (comment.start > offset) result += body.slice(offset, comment.start);
+      offset = comment.end;
+      if (offset >= end) break;
+      cursor++;
+    }
+    return result + (offset < end ? body.slice(offset, end) : "");
+  };
 }
 
 function makeReference(
@@ -179,35 +252,26 @@ function displayLabel(node: Nodes): string {
   return "alt" in node ? node.alt ?? "" : "";
 }
 
-export function extractMarkdownLinkReferences(content: string): MarkdownLinkReference[] {
-  const { body, frontmatter } = readMarkdownFrontmatter(content);
-  const references: MarkdownLinkReference[] = [];
-  for (const [key, value] of Object.entries(frontmatter)) {
-    const pending = [value];
-    const seen = new WeakSet<object>();
-    while (pending.length) {
-      const item = pending.pop();
-      if (typeof item === "string") {
-        for (const match of item.matchAll(wikiLink)) {
-          const reference = makeReference("frontmatter", match[2], match[0], match[3]);
-          if (reference) references.push({ ...reference, frontmatterKey: key });
-        }
-      } else if (item && typeof item === "object" && !seen.has(item)) {
-        seen.add(item);
-        const values = Object.values(item);
-        for (let i = values.length - 1; i >= 0; i--) pending.push(values[i]);
-      }
+function collectMarkdownLinks(body: string) {
+  // Only inspect the unmasked tree if a comment delimiter might be inside
+  // code, an HTML element or math. In plain Markdown we can mask before parsing.
+  const needsOpaqueSpans = /[`<$\t]| {4}|~~~/u;
+  const hasComments = body.includes("%%");
+  const inspectBeforeMask = hasComments && needsOpaqueSpans.test(body);
+  let { source, comments } = hasComments && !inspectBeforeMask
+    ? maskComments(body, [])
+    : { source: body, comments: [] as Span[] };
+  let root = parseMarkdown(source);
+  let blocked = needsOpaqueSpans.test(source) ? opaqueSpans(root, source) : [];
+  if (inspectBeforeMask) {
+    ({ source, comments } = maskComments(body, blocked));
+    if (source !== body) {
+      root = parseMarkdown(source);
+      blocked = opaqueSpans(root, source);
     }
   }
-
-  if (!body.includes("[")) return references;
-  const initial = parseMarkdown(body);
-  const initialOpaque = opaqueSpans(initial, body);
-  const source = body.includes("%%") ? maskComments(body, initialOpaque) : body;
-  const root = source === body ? initial : parseMarkdown(source);
-  const blocked = source === body ? initialOpaque : opaqueSpans(root, source);
   const isOpaque = spanFilter(blocked.slice());
-  const located: Array<{ start: number; end: number; reference: MarkdownLinkReference }> = [];
+  const located: LocatedReference[] = [];
   const definitions = new Map<string, Definition>();
   const indirectLinks: Array<Extract<Nodes, { type: "linkReference" | "imageReference" }>> = [];
   for (const { node } of walk(root)) {
@@ -243,13 +307,43 @@ export function extractMarkdownLinkReferences(content: string): MarkdownLinkRefe
       definition.url, body.slice(start, end), displayLabel(node), true);
     if (reference) located.push({ start, end, reference });
   }
+  return { source, comments, blocked, located };
+}
+
+export function extractMarkdownLinkReferences(
+  content: string,
+  { forceMarkdownTree = false } = {},
+): MarkdownLinkReference[] {
+  const { body, frontmatter } = readMarkdownFrontmatter(content);
+  const references: MarkdownLinkReference[] = [];
+  for (const [key, value] of Object.entries(frontmatter)) {
+    const pending = [value];
+    const seen = new WeakSet<object>();
+    while (pending.length) {
+      const item = pending.pop();
+      if (typeof item === "string") {
+        for (const { start, end, target, alias } of wikiLinks(item)) {
+          const reference = makeReference("frontmatter", item.slice(target.start, target.end),
+            item.slice(start, end), alias && item.slice(alias.start, alias.end));
+          if (reference) references.push({ ...reference, frontmatterKey: key });
+        }
+      } else if (item && typeof item === "object" && !seen.has(item)) {
+        seen.add(item);
+        const values = Object.values(item);
+        for (let i = values.length - 1; i >= 0; i--) pending.push(values[i]);
+      }
+    }
+  }
+
+  if (!body.includes("[")) return references;
+  const { source, comments, blocked, located } = forceMarkdownTree || needsMarkdownTree.test(body)
+    ? collectMarkdownLinks(body)
+    : { ...(body.includes("%%") ? maskComments(body, []) : { source: body, comments: [] }), blocked: [], located: [] };
 
   const isBlocked = spanFilter(blocked.sort((a, b) => a.start - b.start));
-  for (const match of source.matchAll(wikiLink)) {
-    const start = match.index;
-    const end = start + match[0].length;
-    if (isBlocked(start, end)) continue;
-    const reference = makeReference(match[1] ? "embed" : "link", match[2], body.slice(start, end), match[3]);
+  const slice = uncommentedSlice(body, comments);
+  for (const { start, end, embed, target, alias } of wikiLinks(source, isBlocked)) {
+    const reference = makeReference(embed ? "embed" : "link", slice(target), body.slice(start, end), alias && slice(alias));
     if (reference) located.push({ start, end, reference });
   }
 
