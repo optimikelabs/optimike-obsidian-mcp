@@ -516,6 +516,9 @@ utilisent le pointeur et l’identifiant de génération pour actualiser le cach
 Un chargement à froid vérifie les deux fichiers de vecteurs, y compris lors
 d’une recherche de notes seules ou du préchauffage.
 
+Le [producteur d’index sémantique autonome](docs/semantic-index-producer.fr.md)
+prépare des générations Smart Environment v3 hors du coffre, sans Obsidian Desktop.
+
 ### Recherche par sections
 
 Le chargement décrit ici s’applique à `SMART_ENV_DIR`.

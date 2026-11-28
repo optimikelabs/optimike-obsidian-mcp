@@ -499,6 +499,9 @@ Optional [external generations](docs/semantic-vector-cache-encoding.md#external-
 use the pointer and generation identity for cache freshness. A cold source
 load validates both vector files, including during notes-only search or prewarm.
 
+The [standalone semantic index producer](docs/semantic-index-producer.md) builds
+Smart Environment v3 generations outside the vault without Obsidian Desktop.
+
 ### Section search
 
 The loading behavior below applies to `SMART_ENV_DIR`.
