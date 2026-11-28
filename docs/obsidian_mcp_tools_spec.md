@@ -312,6 +312,8 @@ fail-closed; no private or Markdown fallback is introduced.
   the matching heading sections and paragraphs (block key, heading path,
   verified line range), or both ranked together. See the
   [README](../README.md#semantic-search).
+  With the optional [external index](semantic-vector-cache-encoding.md#external-smart-env-v3-generations),
+  each successful response includes the pinned `generation_id`.
 
 The former `smart_search` and `smart-search` aliases were physically removed in
 3.0. Existing clients must migrate to `smart_semantic_search`.

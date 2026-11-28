@@ -8,6 +8,11 @@ import { warmSharedTaskCache } from "../mcp-server/tools/tasksShared/logic.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import { RequestContext, requestContextService } from "../utils/index.js";
 import { getSemanticCacheService } from "./semanticCache.js";
+import {
+  externalSemanticGenerationConfigured,
+  resolveExternalSemanticGeneration,
+  type ExternalSemanticGeneration,
+} from "./externalSemanticGeneration.js";
 import { getWritePolicyStatus } from "./writePolicy.js";
 import { attestVaultFilesystemTarget } from "./externalReferences/backendVaultAdapter.js";
 import { inspectAssetPolicy } from "./assets/assetPolicyDiscovery.js";
@@ -289,6 +294,9 @@ type PublicSharedCacheStatus = {
 
 type PublicSemanticCacheStatus = {
   enabled: boolean;
+  source?: "external";
+  generationId?: string;
+  reasonCode?: "semantic_index_unavailable";
   ttlMs?: number;
   manifest: null | {
     sourceFileCount: number;
@@ -474,6 +482,13 @@ function projectPublicSemanticCacheStatus(
 
   return {
     enabled: booleanOr(semanticCache.enabled),
+    ...(semanticCache.source === "external"
+      ? {
+          source: "external" as const,
+          generationId: typeof semanticCache.generationId === "string" ? semanticCache.generationId : undefined,
+          reasonCode: allowedValue(semanticCache.reasonCode, ["semantic_index_unavailable"] as const),
+        }
+      : {}),
     ttlMs: optionalNumber(semanticCache.ttlMs),
     manifest:
       manifestValue && typeof manifestValue === "object"
@@ -556,7 +571,7 @@ export function projectPublicRuntimeStatus(
             }
           : {}),
         vaultConfigured: Boolean(config.obsidianVaultPath),
-        semanticCacheConfigured: Boolean(config.smartEnvDir),
+        semanticCacheConfigured: Boolean(config.smartEnvDir) || externalSemanticGenerationConfigured(),
         queryEmbeddingEnabled: config.enableQueryEmbedding,
         cacheSource: config.obsidianCacheSource,
         writeMode: config.mcpWriteMode,
@@ -647,13 +662,46 @@ export function projectPublicRuntimeMaintenanceResult(
   };
 }
 
+async function collectSemanticCacheStatus(): Promise<{
+  semanticCache: Record<string, unknown>;
+  externalGeneration?: ExternalSemanticGeneration;
+}> {
+  if (!externalSemanticGenerationConfigured()) {
+    return {
+      semanticCache: config.smartEnvDir
+        ? getSemanticCacheService().getStats()
+        : { enabled: false, smartEnvDir: config.smartEnvDir },
+    };
+  }
+  try {
+    const externalGeneration = await resolveExternalSemanticGeneration();
+    if (!externalGeneration) throw new Error("External semantic generation is unavailable");
+    return {
+      externalGeneration,
+      semanticCache: {
+        ...getSemanticCacheService(externalGeneration).getStats(),
+        source: "external",
+        generationId: externalGeneration.id,
+      },
+    };
+  } catch {
+    return {
+      semanticCache: {
+        enabled: true,
+        source: "external",
+        reasonCode: "semantic_index_unavailable",
+      },
+    };
+  }
+}
+
 export async function collectRuntimeStatus(
   vaultCacheService: VaultCacheService | undefined,
   options: RuntimeStatusOptions = {},
-): Promise<Record<string, unknown>> {
+): Promise<Record<string, unknown> & { externalGeneration?: ExternalSemanticGeneration }> {
   const headless = config.obsidianRuntimeMode.startsWith("headless-");
   const refresh = headless ? vaultCacheService?.getRefreshEvidence() : undefined;
-  const semanticCache = config.smartEnvDir ? getSemanticCacheService() : null;
+  const semanticStatus = await collectSemanticCacheStatus();
   const sharedDb = readDbCounts();
   const integrity =
     options.includeIntegrity && vaultCacheService
@@ -683,12 +731,7 @@ export async function collectRuntimeStatus(
       ...sharedDb,
       integrity,
     },
-    semanticCache: semanticCache
-      ? semanticCache.getStats()
-      : {
-          enabled: false,
-          smartEnvDir: config.smartEnvDir,
-        },
+    ...semanticStatus,
     degradedMode: {
       readOnlyWhenRestUnavailable: [
         "obsidian_read_note",
@@ -721,23 +764,31 @@ export async function runRuntimeMaintenance(
     );
   }
 
-  const semanticCache = config.smartEnvDir ? getSemanticCacheService() : null;
+  if (action === "integrity_check")
+    return collectRuntimeStatus(vaultCacheService, { includeIntegrity: true, context });
+
+  const needsSemanticCache = action === "refresh_semantic_cache" || action === "refresh_all";
+  const externalGeneration = needsSemanticCache
+    ? await resolveExternalSemanticGeneration().catch(() => {
+        throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "The external semantic index is unavailable.", {
+          ...context, reasonCode: "semantic_index_unavailable",
+        });
+      })
+    : undefined;
+  const semanticCache = needsSemanticCache && (externalGeneration || config.smartEnvDir)
+    ? getSemanticCacheService(externalGeneration)
+    : null;
+  const semanticStats = () => ({
+    ...(semanticCache?.getStats() ?? { enabled: false }),
+    ...(externalGeneration ? { source: "external", generationId: externalGeneration.id } : {}),
+  });
 
   switch (action) {
-    case "integrity_check":
-      return collectRuntimeStatus(vaultCacheService, {
-        includeIntegrity: true,
-        context,
-      });
     case "run_maintenance":
       return {
         action,
         sharedCache: vaultCacheService?.runMaintenance(),
-        semanticCache: semanticCache
-          ? semanticCache.getStats()
-          : {
-              enabled: false,
-            },
+        semanticCache: (await collectSemanticCacheStatus()).semanticCache,
       };
     case "checkpoint_wal":
       return {
@@ -762,7 +813,7 @@ export async function runRuntimeMaintenance(
       await semanticCache.getSnapshot(context);
       return {
         action,
-        semanticCache: semanticCache.getStats(),
+        semanticCache: semanticStats(),
       };
     case "refresh_tasks_cache":
       return {
@@ -778,11 +829,7 @@ export async function runRuntimeMaintenance(
       return {
         action,
         sharedCache: vaultCacheService!.getStats(),
-        semanticCache: semanticCache
-          ? semanticCache.getStats()
-          : {
-              enabled: false,
-            },
+        semanticCache: semanticStats(),
         tasksCache: await warmSharedTaskCache(vaultCacheService),
       };
     default:

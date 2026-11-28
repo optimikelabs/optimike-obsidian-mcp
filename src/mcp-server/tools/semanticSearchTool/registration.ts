@@ -12,6 +12,10 @@ import { promises as fs } from "fs";
 import path from "path";
 import { type SmartVec } from "../../../services/smartEnv.js";
 import {
+  getExternalQueryEmbedder,
+  resolveExternalSemanticGeneration,
+} from "../../../services/externalSemanticGeneration.js";
+import {
   getSemanticCacheService,
   type SemanticSectionSnapshot,
 } from "../../../services/semanticCache.js";
@@ -66,6 +70,7 @@ const In = z.object({
 const SECTION_SNIPPET_MAX_CHARS = 1200;
 
 const Out = z.object({
+  generation_id: z.string().optional(),
   model: z.string().optional(),
   dim: z.number().optional(),
   query_provider: z.string().optional(),
@@ -375,7 +380,9 @@ async function performSearch(input: InType): Promise<OutType> {
     OBSIDIAN_VAULT,
   } = getEnv();
 
-  if (!SMART_ENV_DIR) {
+  const generation = await semanticStage("semantic_index_unavailable", resolveExternalSemanticGeneration);
+  const indexDirectory = generation?.directory ?? SMART_ENV_DIR;
+  if (!indexDirectory) {
     throw new Error("SMART_ENV_DIR is not set");
   }
 
@@ -385,6 +392,10 @@ async function performSearch(input: InType): Promise<OutType> {
 
   const query = input.query.trim();
   if (!query) {
+    if (generation)
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Semantic query must contain text.", {
+        reasonCode: "invalid_tool_arguments",
+      });
     timings.total = elapsedSince(startedAt);
     return {
       model: undefined,
@@ -400,7 +411,9 @@ async function performSearch(input: InType): Promise<OutType> {
     };
   }
 
-  const semanticCache = getSemanticCacheService();
+  const semanticCache = await semanticStage("semantic_index_unavailable", async () =>
+    getSemanticCacheService(generation),
+  );
   const wantNotes = input.granularity !== "sections";
   let sections: SemanticSectionSnapshot | undefined;
   if (input.granularity !== "notes") {
@@ -448,20 +461,20 @@ async function performSearch(input: InType): Promise<OutType> {
     ? Number(OPENAI_EMBEDDING_DIMENSIONS)
     : undefined;
 
-  const inferredOllamaBaseUrl =
+  const inferredOllamaBaseUrl = generation ? undefined :
     OLLAMA_BASE_URL?.trim() ||
-    (await detectOllamaBaseUrlFromSmartEnv(SMART_ENV_DIR, model));
+    (await detectOllamaBaseUrlFromSmartEnv(indexDirectory, model));
 
   const embedderSetupStartedAt = nowMs();
   const selection = await semanticStage(
     "semantic_embedder_configuration_invalid",
     async () =>
-      getQueryEmbedder({
+      generation ? getExternalQueryEmbedder(generation) : getQueryEmbedder({
         provider: QUERY_EMBEDDER,
         modelHint: QUERY_EMBEDDER_MODEL_HINT,
         model: QUERY_EMBEDDER_MODEL,
         vaultModel: model,
-        vaultProvider: await detectSmartEnvQueryProvider(SMART_ENV_DIR, model),
+        vaultProvider: await detectSmartEnvQueryProvider(indexDirectory, model),
         dimension,
         ollamaBaseUrl: inferredOllamaBaseUrl,
         openaiApiKey: OPENAI_API_KEY,
@@ -478,13 +491,13 @@ async function performSearch(input: InType): Promise<OutType> {
       selection.embed(query),
     );
   } catch (error) {
-    recordSemanticSearch(selection.embed, dimension, false);
+    recordSemanticSearch(selection.embed, dimension, false, undefined, generation?.cacheKey);
     throw error;
   }
   timings.query_embedding = elapsedSince(queryEmbeddingStartedAt);
 
   if (!validQueryVector(queryVector, dimension)) {
-    recordSemanticSearch(selection.embed, dimension, false);
+    recordSemanticSearch(selection.embed, dimension, false, undefined, generation?.cacheKey);
     throw new McpError(
       BaseErrorCode.SERVICE_UNAVAILABLE,
       "Semantic query vector is incompatible.",
@@ -537,12 +550,25 @@ async function performSearch(input: InType): Promise<OutType> {
 
   const results: OutType["results"] = [];
   const noteTexts = new Map<string, Promise<string | undefined>>();
+  const readCurrentNote = async (notePath: string) => {
+    if (!generation)
+      return fs.readFile(resolveNoteAbsolutePath(notePath, OBSIDIAN_VAULT), "utf8");
+    // An external publication supplies paths, not permission to read files.
+    // Even a vault-relative path can cross the vault boundary through a link.
+    const vault = process.env.OBSIDIAN_VAULT;
+    if (!vault) return undefined;
+    const root = await fs.realpath(vault);
+    const target = await fs.realpath(path.resolve(root, notePath));
+    const relative = path.relative(root, target);
+    if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(relative) || path.extname(target).toLowerCase() !== ".md")
+      return undefined;
+    return fs.readFile(target, "utf8");
+  };
   const readNote = (notePath: string) => {
     let text = noteTexts.get(notePath);
     if (!text) {
-      text = fs
-        .readFile(resolveNoteAbsolutePath(notePath, OBSIDIAN_VAULT), "utf-8")
-        .catch(() => undefined);
+      text = readCurrentNote(notePath).catch(() => undefined);
       noteTexts.set(notePath, text);
     }
     return text;
@@ -591,9 +617,10 @@ async function performSearch(input: InType): Promise<OutType> {
   }
   timings.snippets = elapsedSince(snippetsStartedAt);
   timings.total = elapsedSince(startedAt);
-  recordSemanticSearch(selection.embed, dimension, true);
+  recordSemanticSearch(selection.embed, dimension, true, undefined, generation?.cacheKey);
 
   return {
+    generation_id: generation?.id,
     model,
     dim: dimension,
     query_provider: selection.provider,
@@ -616,6 +643,7 @@ async function performSearch(input: InType): Promise<OutType> {
 
 export type SemanticSearchPrewarmResult = {
   ok: boolean;
+  generation_id?: string;
   skipped?: string;
   model?: string;
   dim?: number;
@@ -654,7 +682,9 @@ export async function prewarmSemanticSearch(): Promise<SemanticSearchPrewarmResu
     };
   };
 
-  if (!SMART_ENV_DIR) {
+  const generation = await resolveExternalSemanticGeneration();
+  const indexDirectory = generation?.directory ?? SMART_ENV_DIR;
+  if (!indexDirectory) {
     return skipped("SMART_ENV_DIR is not set");
   }
 
@@ -663,7 +693,7 @@ export async function prewarmSemanticSearch(): Promise<SemanticSearchPrewarmResu
   }
 
   const semanticCacheStartedAt = nowMs();
-  const snapshot = await getSemanticCacheService().getSnapshot();
+  const snapshot = await getSemanticCacheService(generation).getSnapshot();
   timings.semantic_cache = elapsedSince(semanticCacheStartedAt);
 
   if (!snapshot.items.length) {
@@ -683,32 +713,35 @@ export async function prewarmSemanticSearch(): Promise<SemanticSearchPrewarmResu
   const openaiDimensions = Number.isFinite(Number(OPENAI_EMBEDDING_DIMENSIONS))
     ? Number(OPENAI_EMBEDDING_DIMENSIONS)
     : undefined;
-  const inferredOllamaBaseUrl =
+  const inferredOllamaBaseUrl = generation ? undefined :
     OLLAMA_BASE_URL?.trim() ||
-    (await detectOllamaBaseUrlFromSmartEnv(SMART_ENV_DIR, model));
+    (await detectOllamaBaseUrlFromSmartEnv(indexDirectory, model));
 
   const embedderSetupStartedAt = nowMs();
-  const selection = await getQueryEmbedder({
+  const selection = await (generation ? getExternalQueryEmbedder(generation) : getQueryEmbedder({
     provider: QUERY_EMBEDDER,
     modelHint: QUERY_EMBEDDER_MODEL_HINT,
     model: QUERY_EMBEDDER_MODEL,
     vaultModel: model,
-    vaultProvider: await detectSmartEnvQueryProvider(SMART_ENV_DIR, model),
+    vaultProvider: await detectSmartEnvQueryProvider(indexDirectory, model),
     dimension,
     ollamaBaseUrl: inferredOllamaBaseUrl,
     openaiApiKey: OPENAI_API_KEY,
     openaiBaseUrl: OPENAI_BASE_URL,
     openaiDimensions,
-  });
+  }));
   timings.embedder_setup = elapsedSince(embedderSetupStartedAt);
 
   const queryEmbeddingStartedAt = nowMs();
   const warmupVector = await selection.embed(SEMANTIC_SEARCH_PREWARM_TEXT);
+  if (generation && !validQueryVector(warmupVector, dimension))
+    throw new Error("Semantic query vector is incompatible");
   timings.query_embedding = elapsedSince(queryEmbeddingStartedAt);
   timings.total = elapsedSince(startedAt);
 
   return {
     ok: true,
+    generation_id: generation?.id,
     model,
     dim: dimension,
     query_provider: selection.provider,

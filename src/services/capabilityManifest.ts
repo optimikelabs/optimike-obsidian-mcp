@@ -29,6 +29,10 @@ import type {
 } from "./obsidianRestAPI/types.js";
 import { OperonService } from "./operon/service.js";
 import { getSemanticCacheService } from "./semanticCache.js";
+import {
+  getExternalQueryEmbedder,
+  type ExternalSemanticGeneration,
+} from "./externalSemanticGeneration.js";
 import { detectSmartEnvQueryProvider } from "./smartEnvV3.js";
 
 export const CAPABILITY_MANIFEST_CONTRACT_VERSION = 1 as const;
@@ -1341,9 +1345,10 @@ export function resolveToolRegistrationMode(
 async function queryProviderHealth(
   dominantModel: string | undefined,
   dominantDimension: number | undefined,
+  generation?: ExternalSemanticGeneration,
 ): Promise<"verified" | "unverified" | "unusable"> {
   try {
-    const selection = await getQueryEmbedder({
+    const selection = await (generation ? getExternalQueryEmbedder(generation) : getQueryEmbedder({
       provider: config.queryEmbedder,
       modelHint: config.queryEmbedderModelHint,
       model: config.queryEmbedderModel,
@@ -1367,8 +1372,8 @@ async function queryProviderHealth(
       )
         ? Number(config.openaiEmbeddingDimensions)
         : undefined,
-    });
-    const health = semanticSearchHealth(selection.embed, dominantDimension ?? 0);
+    }));
+    const health = semanticSearchHealth(selection.embed, dominantDimension ?? 0, undefined, generation?.cacheKey);
     return health === "verified"
       ? "verified"
       : health === "unverified"
@@ -1383,6 +1388,7 @@ export async function collectCapabilityManifest(options: {
   profile: ToolProfileId;
   registrationMode: ToolRegistrationMode;
   runtimeStatus: unknown;
+  externalGeneration?: ExternalSemanticGeneration;
   obsidianService: ObsidianRestApiService | undefined;
   vaultCacheAvailable: boolean;
   probes?: CapabilityProbeDependencies;
@@ -1410,6 +1416,8 @@ export async function collectCapabilityManifest(options: {
     "semanticCache",
     "enabled",
   );
+  const semanticSourceUnavailable =
+    record(record(options.runtimeStatus).semanticCache).reasonCode === "semantic_index_unavailable";
   const localRestProbe =
     options.probes?.localRest ??
     (options.obsidianService
@@ -1442,14 +1450,16 @@ export async function collectCapabilityManifest(options: {
     (() => operonService.status(false, CAPABILITY_PROBE_TIMEOUT_MS));
   const semanticIndexProbe =
     semanticEnabled &&
+    !semanticSourceUnavailable &&
     config.enableQueryEmbedding &&
     modeToolNames.includes("smart_semantic_search")
       ? (options.probes?.semanticIndex ??
         (async () => {
-          const readiness = await getSemanticCacheService().probeReadiness();
+          const readiness = await getSemanticCacheService(options.externalGeneration).probeReadiness();
           const provider = await queryProviderHealth(
             readiness.dominantModel,
             readiness.dominantDimension,
+            options.externalGeneration,
           );
           return {
             ...readiness,
@@ -1481,7 +1491,7 @@ export async function collectCapabilityManifest(options: {
     try {
       loading = options.probes?.semanticIndex
         ? options.probes.semanticLoading?.()
-        : getSemanticCacheService().loadInProgress();
+        : getSemanticCacheService(options.externalGeneration).loadInProgress();
     } catch {
       loading = undefined;
     }
@@ -1491,7 +1501,8 @@ export async function collectCapabilityManifest(options: {
     ) {
       const checkProvider = options.probes?.semanticIndex
         ? options.probes.semanticQueryProvider
-        : queryProviderHealth;
+        : (model: string | undefined, dimension: number | undefined) =>
+            queryProviderHealth(model, dimension, options.externalGeneration);
       const provider = checkProvider
         ? await probe(() =>
             checkProvider(loading.dominantModel, loading.dominantDimension),
