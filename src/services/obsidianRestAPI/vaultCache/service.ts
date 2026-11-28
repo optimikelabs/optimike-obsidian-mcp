@@ -32,6 +32,7 @@ import { normalizeVaultSlashes, toVaultPath } from "../../../utils/obsidian/obsi
 import type { FilesystemNoteLinksResponse } from "../types.js";
 import { CacheEventSupervisor } from "./eventSupervisor.js";
 import { MarkdownLinkIndex } from "./markdownLinkIndex.js";
+import { MarkdownLinkWorker } from "./markdownLinkWorker.js";
 import {
   applyWalSizeLimit,
   checkpointWal,
@@ -187,6 +188,10 @@ export class VaultCacheService {
   private checkedFilesystemVersion?: number;
   private hotCacheDataVersion?: number;
   private linkIndexRun?: Promise<void>;
+  private linkIndexWorker?: MarkdownLinkWorker;
+  private linkIndexIdleTimer?: ReturnType<typeof setTimeout>;
+  private linkIndexIdleRun?: Promise<void>;
+  private readonly linkExtraction = config.obsidianLinkExtraction;
   private readonly vaultExclusionMatcher = createVaultExclusionMatcher(
     config.obsidianVaultExcludePatterns,
   );
@@ -235,7 +240,7 @@ export class VaultCacheService {
         updated_at = excluded.updated_at
     `);
     if (!obsidianService && config.obsidianRuntimeMode.startsWith("headless-")) {
-      this.markdownLinks = new MarkdownLinkIndex(this.db);
+      this.markdownLinks = new MarkdownLinkIndex(this.db, this.linkExtraction);
       this.filesystemIndexScope = createHash("sha256").update(JSON.stringify([
         "path-targets-v3", getVaultRoot(), config.obsidianVaultExcludePatterns,
       ])).digest("hex");
@@ -708,6 +713,7 @@ export class VaultCacheService {
           backlinks: "filesystem", unresolved: "filesystem",
         },
         ...links.read(matched, limit),
+        indexCoverage: links.readIndexCoverage(matched),
       };
     }, () => this.assertFilesystemLinkCacheReady(context));
   }
@@ -767,8 +773,10 @@ export class VaultCacheService {
     this.linkIndexRun = this.buildFilesystemLinkIndex(this.markdownLinks)
       .catch(() => {
         this.checkedFilesystemVersion = undefined;
-        logger.warning("Headless link indexing was interrupted. The link tool can retry.",
-          requestContextService.createRequestContext({ operation: "buildFilesystemLinkIndex" }));
+        if (!this.closing) {
+          logger.warning("Headless link indexing was interrupted. The link tool can retry.",
+            requestContextService.createRequestContext({ operation: "buildFilesystemLinkIndex" }));
+        }
       })
       .finally(() => { this.linkIndexRun = undefined; });
   }
@@ -777,27 +785,30 @@ export class VaultCacheService {
     await yieldToEventLoop();
     if (this.closing || !this.isReady()) return;
     if (this.verifyFilesystemIndex()) return;
-    let afterPath = "";
-    while (!this.closing) {
-      if (this.refreshRun) await this.refreshRun;
-      if (this.closing || !this.isReady() || !this.hasFilesystemIndexScope() ||
-          this.readMetadataValue("refresh_state") !== "complete") return;
-      const last = this.writeLinkIndexBatch(() => links.reconcileBatch(afterPath, this.acceptFilesystemSource));
-      if (last === undefined && this.verifyFilesystemIndex()) return;
-      afterPath = last ?? "";
-      await yieldToEventLoop();
-    }
-  }
-
-  private writeLinkIndexBatch<T>(work: () => T): T {
-    this.db.exec("BEGIN IMMEDIATE");
+    clearTimeout(this.linkIndexIdleTimer);
+    await this.linkIndexIdleRun;
+    if (this.closing) return;
+    const worker = this.linkIndexWorker ??= new MarkdownLinkWorker(
+      config.obsidianSharedCacheDbPath, this.linkExtraction, links,
+    );
     try {
-      const result = work();
-      this.db.exec("COMMIT");
-      return result;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
+      let afterPath = "";
+      while (!this.closing) {
+        if (this.refreshRun) await this.refreshRun;
+        if (this.closing || !this.isReady() || !this.hasFilesystemIndexScope() ||
+            this.readMetadataValue("refresh_state") !== "complete") return;
+        const last = await links.reconcileBatch(afterPath, this.acceptFilesystemSource, worker.indexPaths);
+        if (last === undefined && this.verifyFilesystemIndex()) return;
+        afterPath = last ?? "";
+        await yieldToEventLoop();
+      }
+    } finally {
+      if (!this.closing) {
+        this.linkIndexIdleTimer = setTimeout(() => {
+          this.linkIndexWorker = undefined;
+          this.linkIndexIdleRun = worker.close().finally(() => { this.linkIndexIdleRun = undefined; });
+        }, 30_000).unref();
+      }
     }
   }
 
@@ -1019,8 +1030,11 @@ export class VaultCacheService {
     if (this.closed) return;
     this.stopPeriodicRefresh();
     this.closing = true;
+    clearTimeout(this.linkIndexIdleTimer);
     await this.eventStop;
     await this.refreshRun?.catch(() => undefined);
+    await this.linkIndexWorker?.close();
+    await this.linkIndexIdleRun;
     await this.linkIndexRun;
     await this.cacheWriteTail;
     if (!this.closed) {

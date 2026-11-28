@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {test, after} from 'node:test';
+import {serve} from '@hono/node-server';
+import {Hono} from 'hono';
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'optimike-cache-consumers-'));
 process.env.OBSIDIAN_RUNTIME_MODE='headless-readonly';process.env.OBSIDIAN_VAULT=root;
 process.env.MCP_LOG_DIR=path.join(root,'logs');
@@ -16,11 +18,37 @@ const { processObsidianReadNote } = await import(
 const {warmSharedTaskCache,processListAllTasks}=await import('../dist/mcp-server/tools/tasksShared/logic.js');
 const {processObsidianNoteLinks}=await import('../dist/mcp-server/tools/obsidianNoteLinksTool/logic.js');
 const {publicMcpToolErrorPayload}=await import('../dist/utils/internal/errorHandler.js');
+const {createHttpObservability}=await import('../dist/mcp-server/transports/httpObservability.js');
 const {extractMarkdownLinkReferences}=await import('../dist/services/obsidianRestAPI/vaultCache/markdownLinkReferences.js');
+const {defaultLinkExtraction,extractBoundedLinkSource}=await import('../dist/services/obsidianRestAPI/vaultCache/boundedLinkReferences.js');
 const context={requestId:'cache-consumer-fixture',timestamp:new Date().toISOString(),operation:'test'};
 config.obsidianVaultPath=root;config.obsidianCacheSource='rest';
 
 const linkTexts=(markdown)=>extractMarkdownLinkReferences(markdown).map(({linkText})=>linkText);
+test('bounded sections preserve list continuations and wikilinks on oversized lines',()=>{
+ const list='- list\r\n'+'    [[Continuation]] and text\r\n'.repeat(3000);
+ const longLine='x'.repeat(70*1024)+' [[LongLine]]\n';
+ const source='Start\n\n'+list+'\r\nBreak\n\n'+longLine+'\n[[After]]';
+ const bounded=extractBoundedLinkSource(source);
+ assert.deepEqual(bounded, {complete:true,references:extractMarkdownLinkReferences(source)});
+ const overLimit='x'.repeat(300*1024)+' [[OverLimit]]\n\n[[After]]';
+ assert.deepEqual(extractBoundedLinkSource(overLimit),
+  {complete:false,references:extractMarkdownLinkReferences(overLimit)});
+});
+test('inline literals and an unmatched dollar pair do not hide later sections',()=>{
+ const tail='\n\nParagraph [[Visible]].'.repeat(250);
+ for (const prefix of ['Use `%%` to comment.','Use `code\n%%\ncode` here.',
+  'Cost $$ in prose.', 'Use `$$` then $[[Hidden]]$.', '$$\n[[Hidden]]\n$$']){
+  const markdown=prefix+tail;
+  const options={...defaultLinkExtraction,sectionBytes:1024};
+  assert.deepEqual(extractBoundedLinkSource(markdown,options),
+   {complete:true,references:extractMarkdownLinkReferences(markdown)});
+ }
+ const opaque='%%\n\n'+('line\n\n'.repeat(1024))+'[[Visible]]';
+ const result=extractBoundedLinkSource(opaque,{...defaultLinkExtraction,sectionBytes:1024});
+ assert.equal(result.complete,false);
+ assert.deepEqual(result.references.map(ref=>ref.linkPath),['Visible']);
+});
 test('comment delimiters in code leave adjacent links visible',()=>{
  assert.deepEqual(linkTexts('Use `%%` to open [[A]]\n\nClose it with `%%`. Also [[B]].\n\n```\na %% b\n```\n[[Visible]]\n%% [[Hidden]] %% [[After]]'),['A','B','Visible','After']);
 });
@@ -265,11 +293,12 @@ test('filesystem links preserve observations and reconcile edits, destination am
  }
 });
 
-async function linkFixture(run) {
+async function linkFixture(run, extraction=defaultLinkExtraction) {
  const vault=fs.mkdtempSync(path.join(root,'link-worker-'));
  const previous={obsidianVaultPath:config.obsidianVaultPath,obsidianCacheSource:config.obsidianCacheSource,
-  obsidianSharedCacheDbPath:config.obsidianSharedCacheDbPath};
- Object.assign(config,{obsidianVaultPath:vault,obsidianCacheSource:'filesystem',obsidianSharedCacheDbPath:path.join(vault,'cache.sqlite')});
+  obsidianSharedCacheDbPath:config.obsidianSharedCacheDbPath,obsidianLinkExtraction:config.obsidianLinkExtraction};
+ Object.assign(config,{obsidianVaultPath:vault,obsidianCacheSource:'filesystem',
+  obsidianSharedCacheDbPath:path.join(vault,'cache.sqlite'),obsidianLinkExtraction:extraction});
  const write=(name,content)=>fs.writeFileSync(path.join(vault,name),content,'utf8');
  write('A.md','[[Target]]');
  write('Target.md','# Target');
@@ -316,9 +345,9 @@ function pauseAfterFirstLinkBatch(cache) {
  const index=cache.markdownLinks;
  const reconcile=index.reconcileBatch.bind(index);
  return new Promise(resolve=>{
-  index.reconcileBatch=(afterPath,accept)=>{
+  index.reconcileBatch=async(afterPath,accept,indexPaths)=>{
    index.reconcileBatch=reconcile;
-   const result=reconcile(afterPath,file=>file==='/A.md' && accept(file));
+   const result=await reconcile(afterPath,file=>file==='/A.md' && accept(file),indexPaths);
    resolve();
    return result;
   };
@@ -357,21 +386,102 @@ test('restart resumes a committed partial link index without exposing it',()=>li
  assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Z.md',count:1}]);
 }));
 
-test('an indexing error rolls back the batch and a later link request retries it',()=>linkFixture(async f=>{
- const index=f.cache.markdownLinks;
- const reconcile=index.reconcileBatch.bind(index);
- index.reconcileBatch=(...args)=>{
-  index.reconcileBatch=reconcile;
-  reconcile(...args);
-  throw new Error('Synthetic index failure');
- };
+test('an indexing error rolls back the whole batch and a later link request retries it',()=>linkFixture(async f=>{
+ f.write('Z.md','[[Target]]');
+ f.cache.db.exec(`
+  CREATE TRIGGER fixture_reject_link BEFORE INSERT ON markdown_link_refs
+  WHEN NEW.source = '/Z.md'
+  BEGIN SELECT RAISE(ABORT,'synthetic index failure'); END
+ `);
  await f.cache.buildVaultCache();
  await f.cache.linkIndexRun;
  assert.equal(f.cache.db.prepare('SELECT count(*) AS count FROM markdown_link_files').get().count,0);
+ f.cache.db.exec('DROP TRIGGER fixture_reject_link');
  assert.equal(await f.cache.readFilesystemNoteContent('A.md',context),'[[Target]]');
  await assert.rejects(f.read(),isIndexPending);
  await f.cache.linkIndexRun;
- assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1}]);
+ assert.deepEqual((await f.read()).backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Z.md',count:1}]);
+}));
+
+test('a note that exhausts its worker is marked limited and later notes still get backlinks',()=>linkFixture(async f=>{
+ f.write('Poison.md','[x](Target.md) '.repeat(40_000));
+ f.write('Z.md','[[Target]]');
+ f.write('Unrelated.md','No links');
+ await f.cache.buildVaultCache();
+ await f.cache.linkIndexRun;
+ const poison=await f.cache.readFilesystemNoteLinks('Poison.md',20,context);
+ assert.equal(poison.indexCoverage.sourceComplete,false);
+ assert.deepEqual(poison.outgoing,[]);
+ const target=await f.read();
+ assert.deepEqual(target.backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Z.md',count:1}]);
+ assert.deepEqual(target.indexCoverage,{reason:'bounded_large_note_extraction',
+  sourceComplete:true,backlinksComplete:false,limitedSourceCount:1});
+ assert.equal((await f.cache.readFilesystemNoteLinks('Unrelated.md',20,context)).indexCoverage,undefined);
+},{...defaultLinkExtraction,largeNoteBytes:1024*1024}));
+
+test('incremental rebuilds reuse the worker while publishing new backlinks',()=>linkFixture(async f=>{
+ await f.cache.buildVaultCache();
+ await f.cache.linkIndexRun;
+ const thread=f.cache.linkIndexWorker.worker.threadId;
+ f.write('A.md','[[Other]]');
+ await f.cache.updateFileVerified('A.md',context);
+ await f.cache.linkIndexRun;
+ assert.deepEqual((await f.read()).backlinks,[]);
+ assert.equal(f.cache.linkIndexWorker.worker.threadId,thread);
+}));
+
+test('configured budgets retain a limited source and scope its backlinks across a restart',()=>linkFixture(async f=>{
+ f.write('A.md',('paragraph '.repeat(50)+'\n\n').repeat(10)+'[[Other]] [[Other]] [[Target]]');
+ f.write('Other.md','Other');
+ f.write('Unrelated.md','Unrelated');
+ await f.cache.buildVaultCache();
+ await f.cache.linkIndexRun;
+ await f.reopen();
+ const source=await f.cache.readFilesystemNoteLinks('A.md',20,context);
+ assert.deepEqual(source.outgoing.map(ref=>ref.linkPath),['Other']);
+ assert.deepEqual(source.indexCoverage,{reason:'bounded_large_note_extraction',
+  sourceComplete:false,backlinksComplete:true,limitedSourceCount:1});
+ const target=await f.read();
+ assert.deepEqual(target.backlinks,[]);
+ assert.deepEqual(target.indexCoverage,{reason:'bounded_large_note_extraction',
+  sourceComplete:true,backlinksComplete:false,limitedSourceCount:1});
+ assert.equal((await f.cache.readFilesystemNoteLinks('Unrelated.md',20,context)).indexCoverage,undefined);
+},{largeNoteBytes:4096,sectionBytes:1024,maxReferences:1,batchBytes:4096}));
+
+test('healthz responds while the worker handles a five MiB note',()=>linkFixture(async f=>{
+ const oversizedCode='hidden [[Target]]\n'.repeat(307_000);
+ f.write('Large.md','```text\n'+oversizedCode+'```\n\n[[Target]]');
+ const app=new Hono();
+ app.get('/healthz',createHttpObservability().livenessHandler);
+ let server;
+ const {port}=await new Promise(resolve=>{
+  server=serve({fetch:app.fetch,port:0,hostname:'127.0.0.1'},resolve);
+ });
+ try {
+  const index=f.cache.markdownLinks;
+  const reconcile=index.reconcileBatch.bind(index);
+  let checkedHealth=false;
+  index.reconcileBatch=(afterPath,accept,indexPaths)=>reconcile(afterPath,accept,async paths=>{
+   if(!paths.includes('/Large.md')) return indexPaths(paths);
+   const probe=fetch('http://127.0.0.1:'+port+'/healthz',{signal:AbortSignal.timeout(2000)})
+    .then(async response=>{
+     assert.equal(response.status,200);
+     assert.equal((await response.json()).state,'live');
+     assert.ok(f.cache.linkIndexRun);
+     checkedHealth=true;
+    });
+   await Promise.all([probe,indexPaths(paths)]);
+  });
+  await f.cache.buildVaultCache();
+  assert.equal(f.cache.isReady(),true);
+  await f.cache.linkIndexRun;
+  assert.equal(checkedHealth,true);
+  const result=await f.read();
+  assert.deepEqual(result.backlinks,[{sourcePath:'A.md',count:1},{sourcePath:'Large.md',count:1}]);
+  assert.equal(result.indexCoverage,undefined);
+ } finally {
+  await new Promise(resolve=>server.close(resolve));
+ }
 }));
 async function readTaskModes(cache){
  const compact=JSON.parse(await processListAllTasks({responseFormat:'json'},context,cache));

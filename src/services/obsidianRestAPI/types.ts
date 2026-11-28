@@ -266,6 +266,12 @@ export type FilesystemNoteLinksResponse = NoteLinksProjection & {
   contractVersion: 1;
   path: string;
   backend: { kind: "filesystem"; bindingFingerprint: string };
+  indexCoverage?: {
+    reason: "bounded_large_note_extraction";
+    sourceComplete: boolean;
+    backlinksComplete: boolean;
+    limitedSourceCount: number;
+  };
   cache: {
     available: true;
     consistency: "best_effort_non_atomic_snapshot";

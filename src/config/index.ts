@@ -157,6 +157,10 @@ const EnvSchema = z
     OBSIDIAN_SYNC_STALL_SECONDS: z.coerce.number().int().positive().safe().default(600),
     OBSIDIAN_SYNC_WRITE_MAX_AGE_SECONDS: z.coerce.number().int().positive().safe().optional(),
     OBSIDIAN_CACHE_CONCURRENCY: z.coerce.number().int().positive().default(8),
+    OBSIDIAN_LINK_LARGE_NOTE_BYTES: z.coerce.number().int().min(4096).max(1024 * 1024).default(256 * 1024),
+    OBSIDIAN_LINK_SECTION_BYTES: z.coerce.number().int().min(1024).max(128 * 1024).default(64 * 1024),
+    OBSIDIAN_LINK_MAX_REFERENCES: z.coerce.number().int().positive().max(32768).default(8192),
+    OBSIDIAN_LINK_BATCH_BYTES: z.coerce.number().int().min(4096).max(1024 * 1024).default(256 * 1024),
     OBSIDIAN_VAULT_EXCLUDE_PATTERNS: z.string().optional(),
     OBSIDIAN_SHARED_CACHE_DB_PATH: z.string().optional(),
     OBSIDIAN_CONTENT_HOT_CACHE_LIMIT: z.coerce
@@ -569,6 +573,12 @@ export const config = {
   upstreamSyncStallSeconds: env.OBSIDIAN_SYNC_STALL_SECONDS,
   upstreamSyncWriteMaxAgeSeconds: env.OBSIDIAN_SYNC_WRITE_MAX_AGE_SECONDS,
   obsidianCacheConcurrency: env.OBSIDIAN_CACHE_CONCURRENCY,
+  obsidianLinkExtraction: {
+    largeNoteBytes: env.OBSIDIAN_LINK_LARGE_NOTE_BYTES,
+    sectionBytes: env.OBSIDIAN_LINK_SECTION_BYTES,
+    maxReferences: env.OBSIDIAN_LINK_MAX_REFERENCES,
+    batchBytes: env.OBSIDIAN_LINK_BATCH_BYTES,
+  },
   obsidianVaultExcludePatterns: parseVaultExcludePatterns(
     env.OBSIDIAN_VAULT_EXCLUDE_PATTERNS,
   ),
