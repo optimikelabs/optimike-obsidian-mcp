@@ -26,6 +26,7 @@ import {
 import { NoteJson, ObsidianRestApiService } from "../index.js";
 import { normalizeVaultSlashes, toVaultPath } from "../../../utils/obsidian/obsidianApiUtils.js";
 import { CacheEventSupervisor } from "./eventSupervisor.js";
+import { LiveSearchMemo } from "./liveSearchMemo.js";
 import {
   applyWalSizeLimit,
   checkpointWal,
@@ -174,6 +175,9 @@ export class VaultCacheService {
   private closed = false;
   private incrementalFailures = 0;
   private uncertaintyGeneration = 0;
+  private liveSearchRevision = 0;
+  private pendingVaultMutations = 0;
+  readonly liveSearchMemo = new LiveSearchMemo();
   private eventWorkPending = false;
   private lastRefreshFailedFiles = 0;
   private eventSupervisor: CacheEventSupervisor | null = null;
@@ -245,6 +249,7 @@ export class VaultCacheService {
   }
 
   public stopPeriodicRefresh(): void {
+    this.liveSearchMemo.clear();
     this.eventStop = this.eventSupervisor?.stop() ?? Promise.resolve();
     const context = requestContextService.createRequestContext({
       operation: "stopPeriodicRefresh",
@@ -269,6 +274,25 @@ export class VaultCacheService {
 
   public isReady(): boolean {
     return this.isPubliclyReady();
+  }
+
+  public getLiveSearchGeneration(service: ObsidianRestApiService): string | undefined {
+    if (service !== this.obsidianService || this.closing || this.closed ||
+        this.pendingVaultMutations || this.queuedCacheWrites || !this.isPubliclyReady()) return undefined;
+    const generation = this.eventSupervisor?.getVaultGeneration();
+    if (generation !== undefined) return `${generation}:${this.liveSearchRevision}`;
+    return undefined;
+  }
+
+  public beginVaultMutation(): () => void {
+    this.pendingVaultMutations++;
+    this.liveSearchRevision++;
+    this.liveSearchMemo.clear();
+    return () => {
+      this.pendingVaultMutations--;
+      this.liveSearchRevision++;
+      this.liveSearchMemo.clear();
+    };
   }
 
   public getIsBuilding(): boolean {
@@ -471,6 +495,7 @@ export class VaultCacheService {
   /** Only finite reason codes are retained; no source path or upstream payload. */
   public markFreshnessUncertain(): void {
     this.uncertaintyGeneration++;
+    this.liveSearchRevision++;
     this.lastRefreshError = "cache_freshness_uncertain";
     if (!this.closed) this.upsertMetadataValue("refresh_state", "uncertain");
   }
@@ -499,6 +524,7 @@ export class VaultCacheService {
     const normalizedPath = normalizedCacheFilePath(filePath);
     if (!normalizedPath) return { ok: false, reason: "invalid_path" };
     if (this.closing || this.closed) return { ok: false, reason: "closed" };
+    this.liveSearchRevision++;
     if (this.queuedCacheWrites >= 1024) {
       this.markFreshnessUncertain();
       return { ok: false, reason: "queue_full" };
@@ -690,6 +716,7 @@ export class VaultCacheService {
 
   public refreshCache(forceContentRead = false): Promise<void> {
     if (this.closing || this.closed) return Promise.resolve();
+    this.liveSearchRevision++;
     this.refreshRequested = true;
     this.forceRefreshRequested ||= forceContentRead;
     if (!this.refreshRun) {
