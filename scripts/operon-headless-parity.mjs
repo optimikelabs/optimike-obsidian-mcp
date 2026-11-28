@@ -29,7 +29,7 @@ export async function withOperonClient({ vault, cache, mode, url, token, profile
       MCP_WRITE_MODE: "readonly",
       OPERON_MUTATIONS_ENABLED: "false",
       OPERON_TIMEZONE: timeZone ?? "",
-      TZ: processTimeZone ?? "",
+      ...(processTimeZone === undefined ? {} : { TZ: processTimeZone }),
       SEMANTIC_SEARCH_PREWARM: "false",
       MCP_LOG_LEVEL: "error",
     },

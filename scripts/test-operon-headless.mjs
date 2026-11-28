@@ -182,6 +182,7 @@ try {
   ]);
   await new Promise((resolve, reject) => live.listen(0, "127.0.0.1", resolve).once("error", reject));
   const url = "http://127.0.0.1:" + live.address().port;
+  // An empty TZ exercises the unavailable server zone on Linux with Node 22.
   const options = { vault, cache: root, timeZone: "", processTimeZone: "" };
   await withOperonClient({ ...options, mode: "live", url, token: "synthetic-fixture" }, async liveClient => {
     const base = await liveClient.listTools();
@@ -212,6 +213,7 @@ try {
           operon_query_saved_filter: { equal: 1, different: 0, unavailable: 3 },
         });
         const health = await callOperon(fs, "operon_status");
+        assert.doesNotThrow(() => new Intl.DateTimeFormat("en", { timeZone: health.timeZone }));
         assert.equal(health.timeZoneSource, timeZone ? "configured" : "server");
         if (timeZone) assert.equal(health.timeZone, timeZone);
         else assert.match(health.timeZoneWarning, /server's time zone/u);
