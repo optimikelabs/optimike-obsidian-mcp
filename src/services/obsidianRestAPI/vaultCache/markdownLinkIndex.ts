@@ -41,7 +41,7 @@ function coverage(total: number, returned: number) {
 
 type LinkCount = { link_path: string; count: number };
 type Target = { path: string; ambiguous?: true };
-const INDEX_REVISION = "v13:";
+const INDEX_REVISION = "v14:";
 const MAX_CANDIDATE_PATHS = 32768;
 export type LinkIndexSource = {
   path: string; hash: string; size: number; attempts: number; bounded?: true;
@@ -468,14 +468,17 @@ export class MarkdownLinkIndex {
       });
     }
 
-    let unresolvedTotal = 0;
+    const unresolvedCounts = new Map<string, number>();
     for (const row of this.db.prepare(`
       SELECT link_path, CASE WHEN link_path = '' THEN link_text ELSE link_path END AS unresolved_key, count(*) AS count
       FROM markdown_link_refs WHERE source = ? GROUP BY link_path, unresolved_key ORDER BY unresolved_key
     `).iterate(filePath) as Iterable<LinkCount & { unresolved_key: string }>) {
       if (this.resolve(filePath, row.link_path)) continue;
-      unresolvedTotal++;
-      if (unresolved.length < limit) unresolved.push({ linkText: row.unresolved_key, count: row.count, ...outgoingConfidence });
+      const linkText = row.link_path ? row.unresolved_key.replace(/\.md$/iu, "") : row.unresolved_key;
+      unresolvedCounts.set(linkText, (unresolvedCounts.get(linkText) ?? 0) + row.count);
+    }
+    for (const linkText of [...unresolvedCounts.keys()].sort().slice(0, limit)) {
+      unresolved.push({ linkText, count: unresolvedCounts.get(linkText)!, ...outgoingConfidence });
     }
 
     let backlinkTotal = 0;
@@ -503,7 +506,7 @@ export class MarkdownLinkIndex {
       outgoing, unresolved, backlinks,
       coverage: {
         outgoing: coverage(total, outgoing.length),
-        unresolved: coverage(unresolvedTotal, unresolved.length),
+        unresolved: coverage(unresolvedCounts.size, unresolved.length),
         backlinks: coverage(backlinkTotal, backlinks.length),
       },
     };

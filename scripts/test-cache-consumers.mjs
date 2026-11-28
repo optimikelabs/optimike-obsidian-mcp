@@ -46,8 +46,8 @@ test('inline literals and an unmatched dollar pair do not hide later sections',(
 });
 test('a long unclosed comment hides its entire tail and preserves earlier positions',()=>{
  for (const opaque of [
-  '[[Visible]] %%\r\n\r\n'+'[[Hidden]] inside a comment\r\n\r\n'.repeat(17_518),
-  'x'.repeat(250*1024)+' [[Visible]] %%\n'+'[[Hidden]] inside a comment\n'.repeat(500),
+  '[[Visible]]\r\n%%\r\n\r\n'+'[[Hidden]] inside a comment\r\n\r\n'.repeat(17_518),
+  'x'.repeat(250*1024)+' [[Visible]]\n%%\n'+'[[Hidden]] inside a comment\n'.repeat(500),
  ]) {
   const result=extractBoundedLinkSource(opaque);
   assert.equal(result.complete,true);
@@ -55,6 +55,33 @@ test('a long unclosed comment hides its entire tail and preserves earlier positi
   assert.deepEqual(result.references,extractMarkdownLinkReferences(opaque));
   assert.deepEqual(result.references.map(ref=>ref.linkPath),['Visible']);
  }
+});
+test('an unmatched inline comment marker does not consume the next block comment',()=>{
+ const source='text %% [[SameLine]]\r\n\r\n[[NextLine]]\r\n\r\n%%\r\n[[Hidden]]\r\n%%\r\n\r\n[[After]]' +
+  '\r\n\r\nParagraph [[Tail]].'.repeat(65);
+ const entire=extractMarkdownLinkReferences(source);
+ assert.deepEqual(entire.slice(0,4).map(ref=>ref.linkPath),['SameLine','NextLine','After','Tail']);
+ assert.equal(entire.some(ref=>ref.linkPath==='Hidden'),false);
+ assert.deepEqual(extractBoundedLinkSource(source,{...defaultLinkExtraction,sectionBytes:128}),
+  {complete:true,references:entire});
+});
+test('a complete wikilink has priority over a trailing Markdown destination',()=>{
+ const source='[[1]](https://example.invalid) [[Other]](Wrong.md) ![[image.png]](Other.png) [plain](Plain.md)';
+ assert.deepEqual(extractMarkdownLinkReferences(source).map(({linkPath,kind,original})=>[linkPath,kind,original]),[
+  ['1','link','[[1]]'],['Other','link','[[Other]]'],['image.png','embed','![[image.png]]'],['Plain.md','link','[plain](Plain.md)'],
+ ]);
+});
+test('frontmatter extracts one property link per scalar and one per YAML list entry',()=>{
+ const yaml='---\ntext: "[[A]], [[B]]"\nitems: ["[[C]]", "[[D|label]]"]\n---\n';
+ assert.deepEqual(extractMarkdownLinkReferences(yaml).map(({linkPath,frontmatterKey,displayText})=>[linkPath,frontmatterKey,displayText]),[
+  ['A]], [[B','text',undefined],['C','items',undefined],['D','items','label'],
+ ]);
+});
+test('embeds in Markdown properties do not appear in the link index',()=>{
+ const yaml='---\nbanner: "![[image.jpg]]"\nitems: ["![[other.png]]", "[[Note]]"]\n---\n\n![[Body.jpg]]';
+ assert.deepEqual(extractMarkdownLinkReferences(yaml).map(({kind,linkPath})=>[kind,linkPath]),[
+  ['frontmatter','Note'],['embed','Body.jpg'],
+ ]);
 });
 test('HTML comment delimiters in a bounded note do not hide subsequent links',()=>{
  const tail='\n\nParagraph [[Tail]] text.'.repeat(400);
@@ -331,6 +358,27 @@ async function linkFixture(run, extraction=defaultLinkExtraction) {
   Object.assign(config,previous);
  }
 }
+
+test('an empty property wikilink resolves back to the source note',()=>linkFixture(async f=>{
+ f.write('Self.md','---\nrelated: "[[]]"\n---\n');
+ await f.cache.buildVaultCache();
+ await f.cache.linkIndexRun;
+ const result=await f.cache.readFilesystemNoteLinks('Self.md',200,context);
+ assert.deepEqual(result.outgoing.map(({kind,linkPath,resolution})=>[kind,linkPath,resolution.targetPath]),
+  [['frontmatter','','Self.md']]);
+ assert.deepEqual(result.backlinks,[{sourcePath:'Self.md',count:1}]);
+ assert.deepEqual(result.unresolved,[]);
+}));
+
+test('unresolved Markdown keys omit the extension and aggregate fragments',()=>linkFixture(async f=>{
+ f.write('MissingLinks.md','[[Missing#a]] [[Missing.md#b]] [first](Missing.md) [[Missing]] [[file.png]]');
+ await f.cache.buildVaultCache();
+ await f.cache.linkIndexRun;
+ const result=await f.cache.readFilesystemNoteLinks('MissingLinks.md',200,context);
+ assert.equal(result.coverage.unresolved.total,2);
+ assert.deepEqual(result.unresolved,[{linkText:'Missing',count:4},{linkText:'file.png',count:1}]);
+ assert.deepEqual(result.outgoing.map(ref=>ref.linkPath),['Missing','Missing.md','Missing.md','Missing','file.png']);
+}));
 
 test('link refusals expose the shared text cache state from another connection',()=>linkFixture(async f=>{
  await f.cache.buildVaultCache();

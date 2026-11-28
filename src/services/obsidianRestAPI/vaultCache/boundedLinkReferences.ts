@@ -1,4 +1,4 @@
-import { extractMarkdownLinkReferences, markdownHtmlSpans, type MarkdownLinkReference } from "./markdownLinkReferences.js";
+import { beginsBlockComment, extractMarkdownLinkReferences, markdownHtmlSpans, type MarkdownLinkReference } from "./markdownLinkReferences.js";
 import type { LinkSourceLimitReason } from "../../headlessLinkCoverage.js";
 
 export type LinkExtractionOptions = {
@@ -206,7 +206,9 @@ function protectedRegions(content: string, hardLimit: number) {
       if (inline && inline[0] <= absolute) continue;
       if (token === "%%") {
         while (htmlToken && htmlToken.end <= absolute) htmlToken = htmlTokens.next().value;
-        if (!marker.inLiteral && (!htmlToken || htmlToken.start > absolute)) comment = { start, offset: absolute };
+        if (!marker.inLiteral && (!htmlToken || htmlToken.start > absolute) && beginsBlockComment(text.slice(0, offset))) {
+          comment = { start, offset: absolute };
+        }
         continue;
       }
       const width = token.length;

@@ -172,15 +172,32 @@ function spanFilter(spans: readonly Span[]) {
   };
 }
 
+export function beginsBlockComment(linePrefix: string): boolean {
+  return /^[ \t]*(?:(?:>|[-+*]|\d{1,9}[.)])[ \t]+)*$/u.test(linePrefix);
+}
+
 function maskComments(body: string, opaque: readonly Span[]): MaskedBody {
   const blocksOpener = spanFilter(opaque);
   const chunks: string[] = [];
   const comments: Span[] = [];
+  const lineBreaks = body.matchAll(/\r\n?|\n/gu);
+  let nextBreak = lineBreaks.next();
+  let lineStart = 0;
   let open: number | undefined;
+  let block = false;
   let consumed = 0;
   for (const { index } of body.matchAll(/(?<!\\)%%/gu)) {
+    while (!nextBreak.done && nextBreak.value.index < index) {
+      lineStart = nextBreak.value.index + nextBreak.value[0].length;
+      nextBreak = lineBreaks.next();
+    }
+    // Reading view and MetadataCache pair inline markers only on one line.
+    if (open !== undefined && !block && open < lineStart) open = undefined;
     if (open === undefined) {
-      if (!blocksOpener(index, index + 2, consumed)) open = index;
+      if (!blocksOpener(index, index + 2, consumed)) {
+        open = index;
+        block = beginsBlockComment(body.slice(lineStart, index));
+      }
       continue;
     }
     const end = index + 2;
@@ -200,7 +217,7 @@ function maskComments(body: string, opaque: readonly Span[]): MaskedBody {
     open = undefined;
     consumed = end;
   }
-  if (open !== undefined) {
+  if (open !== undefined && block) {
     chunks.push(body.slice(consumed, open), body.slice(open).replace(/[^\r\n]/g, " "));
     comments.push({ start: open, end: body.length });
     return { source: chunks.join(""), comments };
@@ -244,7 +261,7 @@ function makeReference(
       return undefined;
     }
   }
-  if (scheme.test(linkPath) || (!linkPath && !subpath)) return undefined;
+  if (scheme.test(linkPath) || (!linkPath && !subpath && kind !== "frontmatter")) return undefined;
   return {
     kind, original, linkText: linkPath + subpath, linkPath, subpath,
     ...(displayText ? { displayText } : {}),
@@ -285,6 +302,15 @@ function collectMarkdownLinks(body: string) {
     if (start !== undefined && end !== undefined) {
       if (node.type === "link" || node.type === "image") {
         if (isOpaque(start, start + 1)) continue;
+        if (source.startsWith("[[", start) || source.startsWith("![[", start)) {
+          const raw = source.slice(start, end);
+          const wiki = wikiLinks(raw).next().value;
+          if (wiki?.start === 0 && raw[wiki.end] === "(") {
+            // Obsidian consumes the wikilink before CommonMark can use it as a label.
+            blocked.push({ start: start + wiki.end, end });
+            continue;
+          }
+        }
         const reference = makeReference(node.type === "image" ? "embed" : "link",
           node.url, body.slice(start, end), displayLabel(node), true);
         if (reference) located.push({ start, end, reference });
@@ -329,11 +355,16 @@ export function extractMarkdownLinkReferences(
     while (pending.length) {
       const item = pending.pop();
       if (typeof item === "string") {
-        for (const { start, end, target, alias } of wikiLinks(item)) {
-          const reference = makeReference("frontmatter", item.slice(target.start, target.end),
-            item.slice(start, end), alias && item.slice(alias.start, alias.end));
-          if (reference) references.push({ ...reference, frontmatterKey: key });
-        }
+        // MetadataCache treats each text value as a single property link.
+        const start = item.indexOf("[[");
+        const end = item.lastIndexOf("]]");
+        if (start < 0 || end < start + 2 || item[start - 1] === "!" || item[start - 1] === "\\") continue;
+        const original = item.slice(start, end + 2);
+        const label = item.slice(start + 2, end);
+        const pipe = label.indexOf("|");
+        const reference = makeReference("frontmatter", pipe < 0 ? label : label.slice(0, pipe),
+          original, pipe < 0 ? undefined : label.slice(pipe + 1));
+        if (reference) references.push({ ...reference, frontmatterKey: key });
       } else if (item && typeof item === "object" && !seen.has(item)) {
         seen.add(item);
         const values = Object.values(item);
