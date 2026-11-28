@@ -57,6 +57,56 @@ window can be reconciled; every other body or frontmatter drift remains
 fail-closed. Cache data is refreshed after an independently established commit
 and is never CAS evidence.
 
+## Import one offline proposal
+
+Capture the vault-relative path, SHA-256 of the exact original note (including
+frontmatter and line endings), and the live Atomic Write binding before going
+offline. The Bridge's authenticated status route
+`GET /extensions/obsidian-atomic-write-bridge/status` reports the binding in
+`backend.bindingFingerprint`. A detailed receipt for an existing governed
+plan also reports its binding and the hash of its sealed before state.
+
+Pass the version 1 JSON directly as the arguments to `obsidian_text_patch_plan`
+when the authority is back. Replace both sample digests with the captured values.
+
+```json
+{
+  "path": "Projects/Example.md",
+  "idempotencyKey": "optimike:proposal:v1:example-01",
+  "operations": [{ "op": "append_body", "text": "Follow up on the draft.\n" }],
+  "proposal": {
+    "version": 1,
+    "bindingFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "baseSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+}
+```
+
+The suffix of the reserved key is the proposal ID (1–64 lowercase ASCII
+letters, digits or hyphens, starting with a letter or digit). Use a fresh ID
+for a different intent, even on another note. Version 1 takes only body
+operations, with the usual task protection and separately announced native
+frontmatter normalization. Import reads the live note and writes only to the
+operation journal. It refuses notes that require creation-date preparation or
+whose active creation-date requirements cannot be verified. A wrong binding
+is refused and can be retried on the original authority.
+
+| Result | What to do |
+| --- | --- |
+| `phase: "planned"` | Review the receipt. Use `obsidian_text_patch_apply` with its `planRef` and the same key when authorized. |
+| `outcome: "conflict"` | The base changed. Re-read it and make a new proposal with a new ID if the patch is still wanted. |
+| `outcome: "committed"` | The same plan already applied. |
+| `phase: "applying"` or `outcome: "outcome_unknown"` | Call `obsidian_text_patch_status`, then use `obsidian_text_patch_recover` on that same reference and key if required. |
+| `reason: "expired_with_trace"` or `"receipt_purged"` | `trace` retains the original plan reference and digest with its terminal outcome. The ID cannot admit another plan. |
+
+Submitting the same proposal after a lost response returns the same plan and
+its current state. A changed patch, base, target or binding under the same ID
+is refused. The same SQLite transaction records the plan and the association.
+The private journal retains the ID, path, binding, hashes, key and outcome
+after plan purge for the lifetime of that journal. The trace does not store
+patch text or act as a full receipt. Use the same journal for import and the
+existing apply, status and recover tools.
+
 ## Optional apply confirmation (elicitation)
 
 Off by default. When it is on, `obsidian_text_patch_apply` asks the MCP client

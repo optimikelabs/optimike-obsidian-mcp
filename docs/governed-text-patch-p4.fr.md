@@ -57,6 +57,59 @@ timestamp de modification valide dans la fenêtre scellée peut être réconcili
 toute autre dérive du corps ou du frontmatter reste fail-closed. Le cache est
 rafraîchi après un commit prouvé et ne décide jamais du CAS.
 
+## Importer une proposition préparée hors ligne
+
+Avant de travailler hors ligne, relever le chemin relatif au coffre, le SHA-256
+de la note originale exacte (frontmatter et fins de ligne compris) et
+l’empreinte Atomic Write live. La route de statut authentifiée du Bridge
+`GET /extensions/obsidian-atomic-write-bridge/status` expose cette empreinte dans
+`backend.bindingFingerprint`. Le reçu détaillé d’un plan gouverné existant
+indique aussi son empreinte et le hash de son état initial scellé.
+
+Au retour de l’autorité, passer le JSON version 1 directement comme arguments
+de `obsidian_text_patch_plan`. Remplacer les deux empreintes d’exemple par les
+valeurs relevées.
+
+```json
+{
+  "path": "Projets/Exemple.md",
+  "idempotencyKey": "optimike:proposal:v1:exemple-01",
+  "operations": [{ "op": "append_body", "text": "Relire le brouillon.\n" }],
+  "proposal": {
+    "version": 1,
+    "bindingFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "baseSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+}
+```
+
+Le suffixe de la clé réservée est l’identifiant de proposition (1 à 64
+minuscules ASCII, chiffres ou tirets, en commençant par une lettre ou un
+chiffre). Utiliser un nouvel identifiant pour une autre intention, même sur une
+autre note. La version 1 accepte les opérations sur le corps, avec la
+protection des tâches habituelle. Le plan annonce séparément toute normalisation
+du frontmatter natif. L’import lit la note live et écrit uniquement dans le
+journal des opérations. Il refuse les notes dont la date de création doit être
+préparée ou dont les exigences de datation de création ne sont pas vérifiables.
+Si l’empreinte diffère, réessayer sur l’autorité d’origine.
+
+| Résultat | Suite |
+| --- | --- |
+| `phase: "planned"` | Relire le reçu. Une fois autorisé, appeler `obsidian_text_patch_apply` avec son `planRef` et la même clé. |
+| `outcome: "conflict"` | La base a changé. La relire et créer une nouvelle proposition avec un nouvel identifiant si le patch est toujours voulu. |
+| `outcome: "committed"` | Le même plan a déjà été appliqué. |
+| `phase: "applying"` ou `outcome: "outcome_unknown"` | Appeler `obsidian_text_patch_status`, puis `obsidian_text_patch_recover` sur la même référence et avec la même clé si nécessaire. |
+| `reason: "expired_with_trace"` ou `"receipt_purged"` | `trace` conserve la référence et le digest d’origine avec l’issue terminale. L’identifiant ne peut plus créer de plan. |
+
+Soumettre la même proposition après une réponse perdue retourne le même plan
+avec son état courant. Une modification du patch, de la base, de la cible ou de
+l’empreinte sous le même identifiant est refusée. Une seule transaction SQLite
+enregistre le plan et son association. Après purge du plan, le journal privé
+conserve l’identifiant, le chemin, l’empreinte, les hashes, la clé et l’issue
+pendant toute sa durée de vie. La trace ne contient pas le texte du patch et
+ne restitue pas le reçu complet. L’import et les outils existants apply,
+status et recover utilisent le même journal.
+
 ## Confirmation facultative de l’apply (élicitation)
 
 Désactivée par défaut. Activée, elle fait demander par `obsidian_text_patch_apply`

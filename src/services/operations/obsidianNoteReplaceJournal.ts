@@ -98,6 +98,29 @@ export type ObsidianNoteReplacePlan = {
   administrativeClosure?: AdministrativeClosureEvidence;
 };
 
+export type TextPatchProposalIdentity = {
+  id: string;
+  intentDigest: string;
+  publicIdempotencyKey: string;
+  path: string;
+  beforeSha256: string;
+  bindingFingerprint: string;
+};
+
+export type TextPatchProposalTrace = TextPatchProposalIdentity & {
+  operationId: string | null;
+  planRef: string | null;
+  planDigest: string | null;
+  terminalStatus: ObsidianNoteReplaceStatus | null;
+};
+
+export type TextPatchProposalSeal = {
+  identity: TextPatchProposalIdentity;
+  reference: (plan: ObsidianNoteReplacePlan) => { planRef: string; planDigest: string };
+};
+
+type NewPlan = Omit<ObsidianNoteReplacePlan, "operationId" | "status" | "createdAt" | "updatedAt">;
+
 export class ObsidianNoteReplaceConcurrencyError extends Error {
   constructor() {
     super("The note replacement state changed concurrently.");
@@ -315,6 +338,30 @@ export class ObsidianNoteReplaceJournal {
           )
         `);
         this.db.exec(`
+          CREATE TABLE IF NOT EXISTS obsidian_text_patch_proposals (
+            id TEXT PRIMARY KEY,
+            intent_digest TEXT NOT NULL,
+            public_key TEXT NOT NULL UNIQUE,
+            path TEXT NOT NULL,
+            before_sha256 TEXT NOT NULL,
+            binding_fingerprint TEXT NOT NULL,
+            operation_id TEXT UNIQUE,
+            plan_ref TEXT,
+            plan_digest TEXT,
+            terminal_status TEXT,
+            CHECK (
+              (operation_id IS NULL AND plan_ref IS NULL AND plan_digest IS NULL AND terminal_status IS 'conflict')
+              OR (operation_id IS NOT NULL AND plan_ref IS NOT NULL AND plan_digest IS NOT NULL)
+            )
+          ) STRICT;
+          CREATE TRIGGER IF NOT EXISTS obsidian_text_patch_proposal_retention
+          BEFORE DELETE ON obsidian_note_replace_plans
+          BEGIN
+            UPDATE obsidian_text_patch_proposals SET terminal_status = OLD.status
+            WHERE operation_id = OLD.operation_id;
+          END;
+        `);
+        this.db.exec(`
           CREATE TABLE IF NOT EXISTS obsidian_note_replace_runtime_leases (
             instance_id TEXT PRIMARY KEY,
             heartbeat_at TEXT NOT NULL,
@@ -440,14 +487,74 @@ export class ObsidianNoteReplaceJournal {
   }
 
   create(
-    input: Omit<
-      ObsidianNoteReplacePlan,
-      "operationId" | "status" | "createdAt" | "updatedAt"
-    >,
+    input: NewPlan,
     maximumActiveProjectionRows?: number,
   ): ObsidianNoteReplacePlan {
     this.maybePurgeTerminalPlans();
     const existing = this.getByIdempotencyKey(input.idempotencyKey);
+    return this.insertPlan(input, existing, maximumActiveProjectionRows);
+  }
+
+  getTextPatchProposal(id: string): TextPatchProposalTrace | undefined {
+    return this.db.prepare(`SELECT id, intent_digest AS intentDigest, public_key AS publicIdempotencyKey,
+      path, before_sha256 AS beforeSha256, binding_fingerprint AS bindingFingerprint,
+      operation_id AS operationId, plan_ref AS planRef, plan_digest AS planDigest,
+      terminal_status AS terminalStatus FROM obsidian_text_patch_proposals WHERE id = ?`)
+      .get(id) as TextPatchProposalTrace | undefined;
+  }
+
+  recordTextPatchProposalConflict(identity: TextPatchProposalIdentity): void {
+    this.insertTextPatchProposal(identity, null, null, "conflict");
+  }
+
+  createTextPatchProposalPlan(input: NewPlan, seal: TextPatchProposalSeal): ObsidianNoteReplacePlan {
+    const { identity } = seal;
+    if (identity.path !== input.path ||
+        identity.beforeSha256 !== input.beforeSha256 ||
+        identity.bindingFingerprint !== input.bindingFingerprint ||
+        input.projection?.kind !== "obsidian.text.patch" ||
+        input.projection.publicIdempotencyKey !== identity.publicIdempotencyKey) {
+      throw new McpError(BaseErrorCode.CONFLICT, "The plan does not match the proposal identity.");
+    }
+    this.maybePurgeTerminalPlans();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      // A proposal conflict or expired trace also owns its ID. Never associate
+      // an existing ordinary plan, even if a caller used this key before import existed.
+      if (this.getTextPatchProposal(identity.id) || this.selectByIdempotencyKey(input.idempotencyKey)) {
+        throw noteReplaceIdempotencyConflict();
+      }
+      const plan = this.insertPlan(input);
+      const reference = seal.reference(plan);
+      this.insertTextPatchProposal(identity, plan.operationId, reference, null);
+      this.db.exec("COMMIT");
+      return plan;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  private insertTextPatchProposal(
+    identity: TextPatchProposalIdentity,
+    operationId: string | null,
+    reference: { planRef: string; planDigest: string } | null,
+    terminalStatus: "conflict" | null,
+  ): void {
+    this.db.prepare(`INSERT INTO obsidian_text_patch_proposals
+      (id, intent_digest, public_key, path, before_sha256, binding_fingerprint,
+       operation_id, plan_ref, plan_digest, terminal_status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`)
+      .run(identity.id, identity.intentDigest, identity.publicIdempotencyKey,
+        identity.path, identity.beforeSha256, identity.bindingFingerprint,
+        operationId, reference?.planRef ?? null, reference?.planDigest ?? null, terminalStatus);
+  }
+
+  private insertPlan(
+    input: NewPlan,
+    existing?: ObsidianNoteReplacePlan,
+    maximumActiveProjectionRows?: number,
+  ): ObsidianNoteReplacePlan {
     if (existing) {
       if (!sameRequestInput(existing, input)) {
         throw noteReplaceIdempotencyConflict();
@@ -499,7 +606,7 @@ export class ObsidianNoteReplaceJournal {
     // Another process won the same-key race after our optimistic lookup.
     // SQLite serializes the conflicting insert; reload its durable winner
     // instead of surfacing a UNIQUE constraint as an MCP INTERNAL_ERROR.
-    const winner = this.getByIdempotencyKey(input.idempotencyKey);
+    const winner = this.selectByIdempotencyKey(input.idempotencyKey);
     if (!winner) {
       if (maximumActiveProjectionRows !== undefined) {
         throw new McpError(
@@ -532,6 +639,10 @@ export class ObsidianNoteReplaceJournal {
   getByIdempotencyKey(key: string): ObsidianNoteReplacePlan | undefined {
     this.maybeMarkInterruptedPlans();
     this.maybePurgeTerminalPlans();
+    return this.selectByIdempotencyKey(key);
+  }
+
+  private selectByIdempotencyKey(key: string): ObsidianNoteReplacePlan | undefined {
     const row = this.db
       .prepare(
         "SELECT payload_json FROM obsidian_note_replace_plans WHERE idempotency_key = ?",

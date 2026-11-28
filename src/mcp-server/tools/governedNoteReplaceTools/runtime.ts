@@ -56,6 +56,7 @@ import {
   type ObsidianNoteReplacePlan,
   type PendingOperationRowsInput,
   type PendingOperationRowsPage,
+  type TextPatchProposalIdentity,
 } from "../../../services/operations/obsidianNoteReplaceJournal.js";
 import { RestAtomicWriteBackend } from "../../../services/operations/restAtomicWriteBackend.js";
 import {
@@ -77,6 +78,7 @@ import { logger, requestContextService } from "../../../utils/index.js";
 
 const PLAN_REF_PREFIX = "obsidian-note-replace:v1:";
 export const PROJECTED_IDEMPOTENCY_KEY_PREFIX = "optimike:projection:v1:";
+type ExpectedSource = { sha256: string; bindingFingerprint: string };
 
 type CallContext =
   | {
@@ -429,11 +431,18 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
     return result;
   }
 
-  async prepareForPlan(path: string, expectedSource?: { sha256: string; bindingFingerprint: string }, requireNativeFormat = false) {
+  async prepareForPlan(path: string, expectedSource?: ExpectedSource & { proposal?: true }, requireNativeFormat = false) {
+    const proposal = expectedSource?.proposal;
     const source = await this.delegate.read({ contractVersion: 1, path });
     if (source.path !== path || source.sha256 !== createHash("sha256").update(source.content, "utf8").digest("hex") ||
         source.size !== Buffer.byteLength(source.content, "utf8"))
       throw new McpError(BaseErrorCode.CONFLICT, "The planning read could not be verified.", { reason: "note_source_proof_invalid" });
+    if (proposal) {
+      if (source.bindingFingerprint !== expectedSource.bindingFingerprint)
+        throw new McpError(BaseErrorCode.CONFLICT, "The proposal belongs to a different Atomic Write authority.", { reason: "proposal_authority_mismatch" });
+      if (source.sha256 !== expectedSource.sha256)
+        throw new McpError(BaseErrorCode.CONFLICT, "The current note differs from the proposal base.", { reason: "proposal_base_changed" });
+    }
     const fenceKey = operationDigest({ domain: "obsidian-date-preparation-v1", path, bindingFingerprint: source.bindingFingerprint });
     const unverified = (check?: DatePreparationCheck) => new McpError(BaseErrorCode.CONFLICT,
       "La préparation des dates a pu modifier ou normaliser la note. Une revue administrative est nécessaire avant reprise : obsidian_operation_close avec datePreparationPaths.",
@@ -441,17 +450,24 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
     // A lock whose attempt provably never reached its effect point is released
     // (and that attempt revoked forever); any other lock needs owner review.
     if (this.journal.hasDatePreparationFence(fenceKey) &&
-        !(await this.releaseUnstartedPreparation(fenceKey, source.bindingFingerprint))) throw unverified();
-    if (expectedSource && (source.sha256 !== expectedSource.sha256 || source.bindingFingerprint !== expectedSource.bindingFingerprint))
+        (proposal || !(await this.releaseUnstartedPreparation(fenceKey, source.bindingFingerprint)))) throw unverified();
+    if (expectedSource && !proposal && (source.sha256 !== expectedSource.sha256 || source.bindingFingerprint !== expectedSource.bindingFingerprint))
       throw new McpError(BaseErrorCode.CONFLICT, "The note changed before date preparation.");
     const originalFormat = requireNativeFormat ? await inspectNativeFrontmatter(this.delegate, source.content, source.bindingFingerprint) : undefined;
     if (source.dateManagement?.managed === false) return { ...source, datePreparation: { kind: "outside-date-management" as const, message: "Note hors gestion des dates." } };
     const status = await this.delegate.status();
+    if (proposal && status.backend.bindingFingerprint !== source.bindingFingerprint)
+      throw new McpError(BaseErrorCode.CONFLICT, "The proposal belongs to a different Atomic Write authority.", { reason: "proposal_authority_mismatch" });
     const protection = effectiveAtomicWriteDateProtection(status);
+    if (proposal && protection.unsupportedIntegrations.some(({ activeRoles }) => activeRoles.includes("created")))
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The proposal target's creation-date requirements cannot be verified.", { reason: "proposal_date_management_unverified" });
     const created = [...new Set([...protection.createdPropertyNames,
       ...(protection.createdPropertyNames.length || !status.datePreparation?.supported ? [] : config.mcpProtectedFrontmatterKeys.filter(key => /^(création|creation|created)$/iu.test(key)))])];
     const fm = parseFrontmatter(source.content);
     if (!created.some(key => entriesForKey(fm, normalizeKey(key)).length === 0)) return source;
+
+    if (proposal)
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The proposal target requires creation-date preparation.", { reason: "proposal_date_preparation_required" });
     if (requireNativeFormat && frontmatterEnvelope(originalFormat!.content)?.yaml.trim() === "{}")
       throw new McpError(BaseErrorCode.VALIDATION_ERROR, "An empty frontmatter mapping cannot be verified with automatic dates.", { reasonCode: "frontmatter_empty_mapping_date_management" });
     assertCurrentWritePolicy("plan", path, source.content);
@@ -902,6 +918,30 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
 
   readForProjection(path: string, requireNativeFormat = false) {
     return this.backend.prepareForPlan ? this.backend.prepareForPlan(path, undefined, requireNativeFormat) : this.backend.read({ contractVersion: 1, path });
+  }
+
+  readForTextPatchProposal(path: string, expectedSource: ExpectedSource) {
+    return this.backend.prepareForPlan(path, { ...expectedSource, proposal: true });
+  }
+
+  async verifyMissingProposalTarget(error: unknown, bindingFingerprint: string): Promise<boolean> {
+    if (!(error instanceof McpError) || error.code !== BaseErrorCode.NOT_FOUND ||
+        error.details?.reasonCode !== "resource_not_found") return false;
+    const status = await this.backend.status();
+    if (status.backend.bindingFingerprint !== bindingFingerprint) {
+      throw new McpError(BaseErrorCode.CONFLICT, "The proposal belongs to a different Atomic Write authority.", {
+        reason: "proposal_authority_mismatch",
+      });
+    }
+    return true;
+  }
+
+  getTextPatchProposal(id: string) {
+    return this.journal.getTextPatchProposal(id);
+  }
+
+  recordTextPatchProposalConflict(identity: TextPatchProposalIdentity) {
+    this.journal.recordTextPatchProposalConflict(identity);
   }
 
   releasePreparation(source: { datePreparation?: OperationReceipt["datePreparation"] }) {
