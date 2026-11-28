@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `bases_query` rejects unsupported request filter nodes before selecting rows and reports their position. A bare string yields `VALIDATION_ERROR`. Bases Bridge 1.3.1 applies property tables with the same operators as the headless scanner. Upgrade the Bridge to use property tables over REST. (#211)
+
 ## [3.23.1] - 2026-11-26
 
 No Bridge change: Atomic Write Bridge 0.10.0, Operon Bridge 0.9.9 and Bases Bridge 1.3.0 ship unchanged in the bundle of this release. See the [English](docs/releases/3.23.1.md) and [French](docs/releases/3.23.1.fr.md) release notes.

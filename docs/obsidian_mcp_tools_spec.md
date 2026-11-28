@@ -332,6 +332,16 @@ semantic manifest/vector metadata are cached locally for faster warm refreshes.
   `formula_filter_not_evaluated:too_many_rows:<rows>:1000`). Without it, or when the engine is
   unavailable, `source: "fallback"` returns no formula value; when `evaluate`
   was requested and the engine is unavailable, one warning per formula says so.
+- The optional `bases_query.filter` is a JSON object. A property table such as
+  `{"status":"open","priority":{"gte":2}}` requires all its conditions.
+  Values can be scalars, scalar arrays (any match), or operator objects with
+  `eq`, `ne`, `in`, `contains`, `gt`, `gte`, `lt` and `lte`.
+  Use `and` and `or` arrays or a single `not` node to combine tables and
+  expressions, for example `{"and":["status == \"open\""]}`. A bare string
+  or unsupported node returns `VALIDATION_ERROR` with its location in
+  `error.details.filterNode`. The Bridge REST route returns HTTP 400
+  `INVALID_PARAMS` with `error.node`. Property tables use the same comparison
+  rules in both modes and require Bases Bridge 1.3.1 or later over REST.
 - `bases_functions`: live only; the Bases formula functions of the installed
   Obsidian, grouped by receiver type, or the signatures of one type (`on`).
 - `bases_check`: live only; formula health of one Base or of every Base as

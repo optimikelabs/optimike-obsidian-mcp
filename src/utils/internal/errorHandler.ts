@@ -10,6 +10,7 @@ import { generateUUID, sanitizeInputForLogging } from "../index.js"; // Import f
 import { logger } from "./logger.js";
 import { isPublicToolInputIssues, type PublicToolInputIssues } from "./toolInputValidation.js";
 import { BASE_FORMULA_ENGINE_REFUSAL, isPublicFormulaCheck, type PublicFormulaCheck } from "../../services/basesEngineContract.js";
+import { BASE_QUERY_FILTER_ERROR, isBaseQueryFilterNode } from "../../services/baseQueryFilter.js";
 import {
   NOTE_NAME_REASON_CODES, checkNoteName, isNoteNameHint, isNoteNameReasonCode,
 } from "../../services/noteNameRules.js";
@@ -228,6 +229,7 @@ const SAFE_ERROR_DETAIL_FIELDS = new Set([
   "recoveryRef",
   "reasonCode",
   "validationIssues",
+  "filterNode",
   // Bases engine refusal: bounded, schema-checked formula diagnosis.
   "formulaCheck",
   // Note-name refusal (shared rule): closed hint and a validated suggestion.
@@ -252,6 +254,8 @@ const CALLER_DERIVED_PUBLIC_FIELDS = new Set(["suggestedPath", "suggestedName"])
 
 const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "invalid_tool_arguments",
+  "base_query_invalid_filter",
+  "base_query_filter_bridge_upgrade_required",
   BASE_FORMULA_ENGINE_REFUSAL,
   ...NOTE_NAME_REASON_CODES,
   ...NATIVE_MOVE_PUBLIC_REASON_CODES,
@@ -626,6 +630,7 @@ function isSafeDiagnosticString(field: string, value: string): boolean {
   if (field === "planDigest") return /^[a-f0-9]{64}$/u.test(value);
   if (field === "preparationCheck") return isDatePreparationCheck(value);
   if (field === "reasonCode") return SAFE_PUBLIC_REASON_CODES.has(value);
+  if (field === "filterNode") return isBaseQueryFilterNode(value);
   if (field === "hint") return isNoteNameHint(value) || isNativeMoveHint(value);
   // A suggestion is only released if it satisfies the shared name rule itself.
   if (CALLER_DERIVED_PUBLIC_FIELDS.has(field)) return checkNoteName(value, { extensions: null }).ok;
@@ -704,6 +709,10 @@ function safeDiagnosticFields(
 }
 
 function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
+  if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "base_query_invalid_filter")
+    return BASE_QUERY_FILTER_ERROR;
+  if (code === BaseErrorCode.SERVICE_UNAVAILABLE && reasonCode === "base_query_filter_bridge_upgrade_required")
+    return "Property-table filters require Bases Bridge 1.3.1 or later. Update the Bridge bundle and retry.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_tool_arguments")
     return "Invalid tool arguments. See validationIssues for the field and reason.";
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === BASE_FORMULA_ENGINE_REFUSAL)
